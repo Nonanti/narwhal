@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/narwhal-core",
+    "crates/narwhal-config",
+    "crates/narwhal-driver-postgres",
+    "crates/narwhal-driver-sqlite",
+    "crates/narwhal-vim",
+    "crates/narwhal-tui",
+    "crates/narwhal-app",
+    "narwhal",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Berkant"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/berkant/narwhal"
+description = "A TUI database client — DataGrip in your terminal"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Serialization & config
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# TUI
+ratatui = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Database drivers
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+
+# Utilities
+directories = "5.0"
+keyring = "3.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+unicode-width = "0.2"
+
+# Internal crates
+narwhal-core = { path = "crates/narwhal-core" }
+narwhal-config = { path = "crates/narwhal-config" }
+narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
+narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
+narwhal-vim = { path = "crates/narwhal-vim" }
+narwhal-tui = { path = "crates/narwhal-tui" }
+narwhal-app = { path = "crates/narwhal-app" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true

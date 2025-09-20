@@ -1,0 +1,25 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+narwhal.log*
+
+# Local config / secrets
+.env
+.env.local
+narwhal.local.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# direnv
+.direnv/

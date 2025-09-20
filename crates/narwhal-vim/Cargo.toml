@@ -1,0 +1,10 @@
+[package]
+name = "narwhal-vim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Vim-mode state machine for narwhal"
+
+[dependencies]
+serde.workspace = true

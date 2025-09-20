@@ -1,0 +1,14 @@
+[package]
+name = "narwhal-driver-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SQLite driver for narwhal"
+
+[dependencies]
+narwhal-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+tracing.workspace = true

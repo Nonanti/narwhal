@@ -1,0 +1,22 @@
+[package]
+name = "narwhal-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Event loop, state management, glue code for narwhal"
+
+[dependencies]
+narwhal-core.workspace = true
+narwhal-config.workspace = true
+narwhal-vim.workspace = true
+narwhal-tui.workspace = true
+narwhal-driver-postgres.workspace = true
+narwhal-driver-sqlite.workspace = true
+
+tokio.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

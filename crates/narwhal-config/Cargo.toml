@@ -1,0 +1,17 @@
+[package]
+name = "narwhal-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Config loader & credential storage for narwhal"
+
+[dependencies]
+narwhal-core.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+keyring.workspace = true
+tracing.workspace = true
+uuid.workspace = true

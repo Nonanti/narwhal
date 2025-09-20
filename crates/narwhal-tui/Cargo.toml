@@ -1,0 +1,15 @@
+[package]
+name = "narwhal-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Ratatui-based UI layer for narwhal"
+
+[dependencies]
+narwhal-core.workspace = true
+narwhal-vim.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
+tracing.workspace = true
