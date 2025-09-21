@@ -2,18 +2,25 @@
 
 #![forbid(unsafe_code)]
 
+mod types;
+
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use narwhal_core::{
-    CancelHandle, Capabilities, Connection, ConnectionConfig, DatabaseDriver, Error,
-    IsolationLevel, QueryResult, Result, Schema, Table, TableSchema, Value,
+    CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
+    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, Schema, Table, TableKind,
+    TableSchema, Value,
 };
+use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
 
-/// PostgreSQL driver. Currently uses `NoTls`; TLS support will be added once
-/// the configuration surface for certificates is finalised.
+use crate::types::{column_to_value, Param};
+
+/// PostgreSQL driver. The current implementation uses `NoTls`; configurable
+/// TLS support is planned and tracked separately.
 #[derive(Debug, Default)]
 pub struct PostgresDriver;
 
@@ -116,12 +123,72 @@ pub struct PostgresConnection {
     client: Arc<tokio_postgres::Client>,
 }
 
+impl PostgresConnection {
+    /// Prepare the statement, then route to `query` or `execute` based on
+    /// whether the statement returns rows.
+    async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
+        let started = Instant::now();
+        let statement = self
+            .client
+            .prepare(sql)
+            .await
+            .map_err(|e| Error::Query(e.to_string()))?;
+
+        let bindings: Vec<Param<'_>> = params.iter().map(Param).collect();
+        let param_refs: Vec<&(dyn ToSql + Sync)> =
+            bindings.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+
+        if statement.columns().is_empty() {
+            let affected = self
+                .client
+                .execute(&statement, &param_refs[..])
+                .await
+                .map_err(|e| Error::Query(e.to_string()))?;
+            Ok(QueryResult {
+                columns: Vec::new(),
+                rows: Vec::new(),
+                rows_affected: Some(affected),
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            })
+        } else {
+            let rows = self
+                .client
+                .query(&statement, &param_refs[..])
+                .await
+                .map_err(|e| Error::Query(e.to_string()))?;
+
+            let columns: Vec<ColumnHeader> = statement
+                .columns()
+                .iter()
+                .map(|c| ColumnHeader {
+                    name: c.name().to_owned(),
+                    data_type: c.type_().name().to_owned(),
+                })
+                .collect();
+
+            let mut mapped = Vec::with_capacity(rows.len());
+            for row in &rows {
+                let mut values = Vec::with_capacity(row.len());
+                for (idx, col) in row.columns().iter().enumerate() {
+                    values.push(column_to_value(row, idx, col.type_())?);
+                }
+                mapped.push(CoreRow(values));
+            }
+
+            Ok(QueryResult {
+                columns,
+                rows: mapped,
+                rows_affected: None,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            })
+        }
+    }
+}
+
 #[async_trait]
 impl Connection for PostgresConnection {
-    async fn execute(&mut self, _sql: &str, _params: &[Value]) -> Result<QueryResult> {
-        Err(Error::unsupported(
-            "postgres execute: result mapping pending implementation",
-        ))
+    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> {
+        self.run(sql, params).await
     }
 
     async fn begin(&mut self) -> Result<()> {
@@ -160,21 +227,138 @@ impl Connection for PostgresConnection {
     }
 
     async fn list_schemas(&mut self) -> Result<Vec<Schema>> {
-        Err(Error::unsupported(
-            "postgres list_schemas pending implementation",
-        ))
+        const SQL: &str = "
+            SELECT nspname
+            FROM pg_catalog.pg_namespace
+            WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND nspname NOT LIKE 'pg_temp_%'
+              AND nspname NOT LIKE 'pg_toast_temp_%'
+            ORDER BY nspname";
+        let result = self.run(SQL, &[]).await?;
+        Ok(result
+            .rows
+            .into_iter()
+            .filter_map(|row| match row.0.into_iter().next() {
+                Some(Value::String(name)) => Some(Schema { name }),
+                _ => None,
+            })
+            .collect())
     }
 
-    async fn list_tables(&mut self, _schema: &str) -> Result<Vec<Table>> {
-        Err(Error::unsupported(
-            "postgres list_tables pending implementation",
-        ))
+    async fn list_tables(&mut self, schema: &str) -> Result<Vec<Table>> {
+        const SQL: &str = "
+            SELECT c.relname, c.relkind::text
+            FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+            ORDER BY c.relname";
+        let result = self.run(SQL, &[Value::String(schema.to_owned())]).await?;
+
+        let mut out = Vec::with_capacity(result.rows.len());
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) => match s.as_str() {
+                    "r" | "p" => TableKind::Table,
+                    "v" => TableKind::View,
+                    "m" => TableKind::MaterializedView,
+                    "f" => TableKind::Table,
+                    _ => TableKind::Table,
+                },
+                _ => TableKind::Table,
+            };
+            out.push(Table {
+                schema: schema.to_owned(),
+                name,
+                kind,
+            });
+        }
+        Ok(out)
     }
 
-    async fn describe_table(&mut self, _schema: &str, _name: &str) -> Result<TableSchema> {
-        Err(Error::unsupported(
-            "postgres describe_table pending implementation",
-        ))
+    async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
+        const SQL: &str = "
+            SELECT
+                a.attname,
+                pg_catalog.format_type(a.atttypid, a.atttypmod),
+                NOT a.attnotnull,
+                COALESCE(i.indisprimary, false),
+                pg_catalog.pg_get_expr(d.adbin, d.adrelid),
+                c.relkind::text
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_catalog.pg_attrdef d
+                ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+            LEFT JOIN pg_catalog.pg_index i
+                ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) AND i.indisprimary
+            WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum";
+
+        let result = self
+            .run(
+                SQL,
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(name.to_owned()),
+                ],
+            )
+            .await?;
+
+        if result.rows.is_empty() {
+            return Err(Error::Schema(format!("table {schema}.{name} not found")));
+        }
+
+        let mut columns = Vec::with_capacity(result.rows.len());
+        let mut kind = TableKind::Table;
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let col_name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let data_type = match iter.next() {
+                Some(Value::String(s)) => s,
+                Some(Value::Unknown(s)) => s,
+                _ => "unknown".into(),
+            };
+            let nullable = matches!(iter.next(), Some(Value::Bool(true)));
+            let primary_key = matches!(iter.next(), Some(Value::Bool(true)));
+            let default = match iter.next() {
+                Some(Value::String(s)) => Some(s),
+                Some(Value::Unknown(s)) => Some(s),
+                _ => None,
+            };
+            if let Some(Value::String(relkind)) = iter.next() {
+                kind = match relkind.as_str() {
+                    "v" => TableKind::View,
+                    "m" => TableKind::MaterializedView,
+                    _ => TableKind::Table,
+                };
+            }
+
+            columns.push(Column {
+                name: col_name,
+                data_type,
+                nullable,
+                primary_key,
+                default,
+            });
+        }
+
+        Ok(TableSchema {
+            table: Table {
+                schema: schema.to_owned(),
+                name: name.to_owned(),
+                kind,
+            },
+            columns,
+        })
     }
 
     async fn ping(&mut self) -> Result<()> {
@@ -214,3 +398,56 @@ impl CancelHandle for PostgresCancelHandle {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use narwhal_core::ConnectionParams;
+    use uuid::Uuid;
+
+    fn config(params: ConnectionParams) -> ConnectionConfig {
+        ConnectionConfig {
+            id: Uuid::nil(),
+            name: "test".into(),
+            driver: PostgresDriver::NAME.into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn validate_reports_missing_fields() {
+        let driver = PostgresDriver::new();
+        let errors = driver.validate(&config(ConnectionParams::default()));
+        assert_eq!(errors.len(), 3);
+    }
+
+    #[test]
+    fn connection_string_includes_password_and_options() {
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("sslmode".into(), "require".into());
+        let params = ConnectionParams {
+            host: Some("db.local".into()),
+            port: Some(6543),
+            database: Some("analytics".into()),
+            username: Some("reader".into()),
+            options,
+            ..Default::default()
+        };
+        let cfg = config(params);
+        let cs = build_connection_string(&cfg, Some("hunter2")).unwrap();
+        assert!(cs.contains("host=db.local"));
+        assert!(cs.contains("port=6543"));
+        assert!(cs.contains("dbname=analytics"));
+        assert!(cs.contains("user=reader"));
+        assert!(cs.contains("password=hunter2"));
+        assert!(cs.contains("sslmode=require"));
+    }
+
+    #[test]
+    fn capabilities_match_engine() {
+        let caps = PostgresDriver::capabilities();
+        assert!(caps.transactions);
+        assert!(caps.cancellation);
+        assert!(caps.multiple_schemas);
+        assert!(caps.prepared_statements);
+    }
+}

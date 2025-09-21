@@ -45,8 +45,8 @@ ratatui = "0.28"
 crossterm = { version = "0.28", features = ["event-stream"] }
 
 # Database drivers
-tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
-rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "column_decltype"] }
 
 # Utilities
 directories = "5.0"

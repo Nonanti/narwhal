@@ -830,8 +830,10 @@ name = "narwhal-driver-postgres"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
  "narwhal-core",
+ "serde_json",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -847,6 +849,7 @@ dependencies = [
  "rusqlite",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1016,6 +1019,8 @@ dependencies = [
  "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
  "uuid",
 ]
 
