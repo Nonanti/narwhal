@@ -8,12 +8,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use futures::stream::StreamExt;
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, Schema, Table, TableKind,
-    TableSchema, Value,
+    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
+    TableKind, TableSchema, Value,
 };
-use tokio_postgres::types::ToSql;
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
 
@@ -189,6 +190,43 @@ impl PostgresConnection {
 impl Connection for PostgresConnection {
     async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         self.run(sql, params).await
+    }
+
+    async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
+        let statement = self
+            .client
+            .prepare(sql)
+            .await
+            .map_err(|e| Error::Query(e.to_string()))?;
+
+        let columns: Vec<ColumnHeader> = statement
+            .columns()
+            .iter()
+            .map(|c| ColumnHeader {
+                name: c.name().to_owned(),
+                data_type: c.type_().name().to_owned(),
+            })
+            .collect();
+        let column_types: Vec<Type> = statement
+            .columns()
+            .iter()
+            .map(|c| c.type_().clone())
+            .collect();
+
+        let owned_params: Vec<Value> = params.to_vec();
+        let bindings: Vec<Param<'_>> = owned_params.iter().map(Param).collect();
+        let inner = self
+            .client
+            .query_raw(&statement, bindings.iter())
+            .await
+            .map_err(|e| Error::Query(e.to_string()))?;
+
+        Ok(Box::new(PostgresRowStream {
+            columns,
+            column_types,
+            inner: Box::pin(inner),
+            _params: owned_params,
+        }))
     }
 
     async fn begin(&mut self) -> Result<()> {
@@ -380,6 +418,39 @@ impl Connection for PostgresConnection {
     }
 
     async fn close(self: Box<Self>) -> Result<()> {
+        Ok(())
+    }
+}
+
+struct PostgresRowStream {
+    columns: Vec<ColumnHeader>,
+    column_types: Vec<Type>,
+    inner: std::pin::Pin<Box<tokio_postgres::RowStream>>,
+    _params: Vec<Value>,
+}
+
+#[async_trait]
+impl RowStream for PostgresRowStream {
+    fn columns(&self) -> &[ColumnHeader] {
+        &self.columns
+    }
+
+    async fn next_row(&mut self) -> Result<Option<CoreRow>> {
+        match self.inner.next().await {
+            Some(Ok(row)) => {
+                let mut values = Vec::with_capacity(self.column_types.len());
+                for (idx, ty) in self.column_types.iter().enumerate() {
+                    values.push(column_to_value(&row, idx, ty)?);
+                }
+                Ok(Some(CoreRow(values)))
+            }
+            Some(Err(error)) => Err(Error::Query(error.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    async fn close(self: Box<Self>) -> Result<()> {
+        // The portal is released when the underlying `RowStream` is dropped.
         Ok(())
     }
 }

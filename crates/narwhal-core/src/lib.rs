@@ -12,6 +12,7 @@ pub mod connection;
 pub mod driver;
 pub mod error;
 pub mod schema;
+pub mod stream;
 pub mod value;
 
 pub use cancel::CancelHandle;
@@ -20,4 +21,5 @@ pub use connection::{Connection, ConnectionConfig, ConnectionParams, IsolationLe
 pub use driver::DatabaseDriver;
 pub use error::{Error, Result};
 pub use schema::{Column, ColumnHeader, QueryResult, Row, Schema, Table, TableKind, TableSchema};
+pub use stream::RowStream;
 pub use value::Value;

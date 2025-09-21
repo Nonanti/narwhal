@@ -1,0 +1,22 @@
+[package]
+name = "narwhal-pool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Connection pooling primitives for narwhal drivers"
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+narwhal-driver-sqlite.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+uuid = { workspace = true }
