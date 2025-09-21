@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-/// Logical key event consumed by the vim state machine.
+/// Logical key event consumed by the state machine.
 ///
-/// The TUI layer is responsible for translating raw `crossterm` events into
-/// this type. Keeping it ratatui-free lets us test the FSM in isolation.
+/// Terminal back-ends translate their native event types into this
+/// representation. Keeping the type free of back-end specifics keeps the
+/// state machine portable and unit-testable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Key {
     pub code: KeyCode,

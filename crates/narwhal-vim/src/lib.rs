@@ -1,19 +1,11 @@
-//! narwhal-vim — modal-editor state machine.
+//! Modal keystroke processor.
 //!
-//! This crate is intentionally UI-agnostic: it does not know about ratatui
-//! or crossterm. It accepts logical [`Key`] events and emits [`Action`]s.
-//! The TUI layer translates raw key events into [`Key`] and applies actions
-//! to the editor buffer.
-//!
-//! Design goals
-//! ============
-//! * Pure state machine, fully unit-testable.
-//! * Counts (`5j`), operators (`d`, `y`, `c`), and motions composed together.
-//! * Sub-modes: Normal, Insert, Visual (char + line), Command-line.
-//!
-//! The first cut here only implements the minimum needed for the skeleton
-//! to compile and to show "we picked the right shape". Motions/operators
-//! are stubbed and will grow in follow-up commits.
+//! [`Vim`] consumes logical [`Key`] events and emits [`Action`]s describing
+//! the buffer mutations the editor should perform. The state machine is
+//! intentionally independent of any terminal back-end so it can be exercised
+//! with plain unit tests.
+
+#![forbid(unsafe_code)]
 
 pub mod action;
 pub mod key;

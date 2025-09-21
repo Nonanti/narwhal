@@ -11,6 +11,9 @@ repository.workspace = true
 name = "narwhal"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 narwhal-app.workspace = true
 narwhal-config.workspace = true

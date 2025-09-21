@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
-/// Minimal palette. We'll grow this into proper theme loading later.
+/// Colour palette used when rendering the interface.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub background: Color,
@@ -31,7 +31,9 @@ impl Theme {
     }
 
     pub fn sidebar_title(&self) -> Style {
-        Style::default().fg(self.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
     }
 }
 

@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Event loop, state management, glue code for narwhal"
 
+[lints]
+workspace = true
+
 [dependencies]
 narwhal-core.workspace = true
 narwhal-config.workspace = true

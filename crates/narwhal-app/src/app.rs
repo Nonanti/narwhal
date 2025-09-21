@@ -1,5 +1,3 @@
-//! Top-level application state and event loop.
-
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
@@ -10,12 +8,13 @@ use tracing::{debug, info};
 use crate::registry::DriverRegistry;
 use crate::terminal::TerminalGuard;
 
+/// Top-level application state.
 pub struct App {
-    pub registry: DriverRegistry,
-    pub vim: Vim,
-    pub theme: Theme,
-    pub status_message: String,
-    pub should_quit: bool,
+    registry: DriverRegistry,
+    vim: Vim,
+    theme: Theme,
+    status_message: String,
+    should_quit: bool,
 }
 
 impl App {
@@ -29,21 +28,27 @@ impl App {
         }
     }
 
+    pub fn registry(&self) -> &DriverRegistry {
+        &self.registry
+    }
+
+    /// Run the event loop until the user requests an exit.
     pub async fn run(mut self) -> Result<()> {
         let mut guard = TerminalGuard::enter()?;
         let mut events = EventStream::new();
 
-        info!(target: "narwhal::app", "starting event loop");
+        info!(target: "narwhal::app", "event loop started");
         self.draw(&mut guard)?;
 
         while !self.should_quit {
-            let Some(ev) = events.next().await else { break };
-            let ev = ev?;
-            self.handle_event(ev);
+            let Some(event) = events.next().await else {
+                break;
+            };
+            self.handle_event(event?);
             self.draw(&mut guard)?;
         }
 
-        info!(target: "narwhal::app", "event loop exited");
+        info!(target: "narwhal::app", "event loop terminated");
         Ok(())
     }
 
@@ -63,11 +68,10 @@ impl App {
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                let Some(logical) = translate_key_event(key) else {
-                    return;
-                };
-                let action = self.vim.handle(logical);
-                self.apply_action(action);
+                if let Some(logical) = translate_key_event(key) {
+                    let action = self.vim.handle(logical);
+                    self.apply_action(action);
+                }
             }
             Event::Resize(_, _) => {
                 debug!(target: "narwhal::app", "terminal resized");
@@ -88,26 +92,20 @@ impl App {
             Action::EnterMode(Mode::Command) => {
                 self.status_message = ":".into();
             }
-            Action::Pending => {
-                if self.vim.mode() == Mode::Command {
-                    self.status_message = format!(":{}", self.vim.command_buffer());
-                }
+            Action::Pending if self.vim.mode() == Mode::Command => {
+                self.status_message = format!(":{}", self.vim.command_buffer());
             }
-            other => {
-                debug!(target: "narwhal::app", ?other, "action (not yet applied)");
+            action => {
+                debug!(target: "narwhal::app", ?action, "action received");
             }
         }
     }
 
-    fn execute_command(&mut self, cmd: &str) {
-        match cmd.trim() {
-            "q" | "quit" | "exit" => {
-                self.should_quit = true;
-            }
+    fn execute_command(&mut self, command: &str) {
+        match command.trim() {
             "" => {}
-            other => {
-                self.status_message = format!("unknown command: {}", other);
-            }
+            "q" | "quit" | "exit" => self.should_quit = true,
+            other => self.status_message = format!("unknown command: {other}"),
         }
     }
 }

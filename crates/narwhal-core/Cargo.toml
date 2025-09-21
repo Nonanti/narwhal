@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Core traits and types for narwhal"
 
+[lints]
+workspace = true
+
 [dependencies]
 async-trait.workspace = true
 thiserror.workspace = true

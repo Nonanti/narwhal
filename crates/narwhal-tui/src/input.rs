@@ -1,10 +1,11 @@
-//! Translation: crossterm KeyEvent → narwhal-vim Key.
+//! Translate `crossterm` key events into the back-end-agnostic
+//! representation consumed by [`narwhal_vim`].
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_vim::{Key, KeyCode, KeyMod};
 
-pub fn translate_key_event(ev: KeyEvent) -> Option<Key> {
-    let code = match ev.code {
+pub fn translate_key_event(event: KeyEvent) -> Option<Key> {
+    let code = match event.code {
         CtKey::Char(c) => KeyCode::Char(c),
         CtKey::Enter => KeyCode::Enter,
         CtKey::Esc => KeyCode::Esc,
@@ -22,13 +23,13 @@ pub fn translate_key_event(ev: KeyEvent) -> Option<Key> {
     };
 
     let mut mods = KeyMod::NONE;
-    if ev.modifiers.contains(KeyModifiers::CONTROL) {
+    if event.modifiers.contains(KeyModifiers::CONTROL) {
         mods = mods.with(KeyMod::CTRL);
     }
-    if ev.modifiers.contains(KeyModifiers::ALT) {
+    if event.modifiers.contains(KeyModifiers::ALT) {
         mods = mods.with(KeyMod::ALT);
     }
-    if ev.modifiers.contains(KeyModifiers::SHIFT) {
+    if event.modifiers.contains(KeyModifiers::SHIFT) {
         mods = mods.with(KeyMod::SHIFT);
     }
     Some(Key { code, mods })

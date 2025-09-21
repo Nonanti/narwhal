@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::mode::Mode;
 
-/// High-level effect the state machine wants the editor buffer to perform.
+/// Effect produced by the state machine.
 ///
-/// The buffer applies these — the FSM never mutates text directly.
+/// The buffer applies actions; the state machine never mutates text directly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
-    /// Move the cursor according to a motion, optionally repeated.
+    /// Move the cursor along a motion, optionally repeated.
     Move { motion: Motion, count: usize },
     /// Apply an operator over a motion (`d3w`, `yy`, …).
     Operate {
@@ -15,16 +15,16 @@ pub enum Action {
         motion: Motion,
         count: usize,
     },
-    /// Insert literal text at the cursor (typing in insert mode).
+    /// Insert literal text at the cursor.
     InsertText(String),
-    /// Delete one character (backspace in insert / `x` in normal).
+    /// Delete one character.
     DeleteChar,
-    /// Mode transition. The FSM emits this so the UI can update the status line.
+    /// Mode transition.
     EnterMode(Mode),
-    /// Submit the current `:` command-line buffer.
+    /// Submit the current command-line buffer.
     SubmitCommand(String),
-    /// No-op: key was consumed by the FSM but produced no editor effect
-    /// (e.g. partially typed operator).
+    /// The key was consumed but produced no observable effect (for example, a
+    /// partially typed count or operator).
     Pending,
 }
 

@@ -64,6 +64,26 @@ narwhal-vim = { path = "crates/narwhal-vim" }
 narwhal-tui = { path = "crates/narwhal-tui" }
 narwhal-app = { path = "crates/narwhal-app" }
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+unused_must_use = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+checked_conversions = "warn"
+default_trait_access = "warn"
+explicit_iter_loop = "warn"
+filter_map_next = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+match_wild_err_arm = "warn"
+needless_continue = "warn"
+single_match_else = "warn"
+unnested_or_patterns = "warn"
+unreadable_literal = "warn"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

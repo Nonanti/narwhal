@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use narwhal_core::{DatabaseDriver, Error, Result};
 
-/// Lookup table for available [`DatabaseDriver`] implementations.
-///
-/// New drivers register themselves at startup via [`DriverRegistry::register`].
+/// Lookup table of registered [`DatabaseDriver`] implementations.
 #[derive(Default, Clone)]
 pub struct DriverRegistry {
     drivers: HashMap<&'static str, Arc<dyn DatabaseDriver>>,
@@ -17,8 +15,7 @@ impl DriverRegistry {
     }
 
     pub fn register<D: DatabaseDriver + 'static>(&mut self, driver: D) {
-        let name = driver.name();
-        self.drivers.insert(name, Arc::new(driver));
+        self.drivers.insert(driver.name(), Arc::new(driver));
     }
 
     pub fn get(&self, name: &str) -> Result<Arc<dyn DatabaseDriver>> {
@@ -28,15 +25,19 @@ impl DriverRegistry {
             .ok_or_else(|| Error::UnknownDriver(name.into()))
     }
 
+    pub fn contains(&self, name: &str) -> bool {
+        self.drivers.contains_key(name)
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &&'static str> {
         self.drivers.keys()
     }
 
-    /// Convenience: register all drivers that ship with narwhal by default.
+    /// Registry preloaded with every driver bundled with narwhal.
     pub fn with_defaults() -> Self {
-        let mut me = Self::new();
-        me.register(narwhal_driver_postgres::PostgresDriver::new());
-        me.register(narwhal_driver_sqlite::SqliteDriver::new());
-        me
+        let mut registry = Self::new();
+        registry.register(narwhal_driver_postgres::PostgresDriver::new());
+        registry.register(narwhal_driver_sqlite::SqliteDriver::new());
+        registry
     }
 }

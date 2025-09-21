@@ -7,7 +7,7 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 
-/// Stateless view-model passed in by the application each frame.
+/// Read-only view model rendered by [`render_root`].
 pub struct RootLayout<'a> {
     pub mode: Mode,
     pub connection_label: &'a str,
@@ -34,8 +34,8 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(" 🐋 narwhal ", view.theme.sidebar_title()));
-    let placeholder = Paragraph::new(vec![
+        .title(Span::styled(" narwhal ", view.theme.sidebar_title()));
+    let body = Paragraph::new(vec![
         Line::from(""),
         Line::from(Span::styled(
             "  no connection",
@@ -43,32 +43,25 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  press :open to add one",
+            "  :open to attach one",
             Style::default().fg(view.theme.muted),
         )),
     ])
     .block(block);
-    frame.render_widget(placeholder, area);
+    frame.render_widget(body, area);
 }
 
 fn render_main(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" editor ");
-    let placeholder = Paragraph::new(vec![
+    let block = Block::default().borders(Borders::ALL).title(" editor ");
+    let body = Paragraph::new(vec![
         Line::from(""),
         Line::from(Span::styled(
-            "  -- skeleton --",
-            Style::default().fg(view.theme.muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  i = insert, Esc = normal, :q = quit",
+            "  press i to insert, Esc to leave insert, :q to quit",
             Style::default().fg(view.theme.muted),
         )),
     ])
     .block(block);
-    frame.render_widget(placeholder, area);
+    frame.render_widget(body, area);
 }
 
 fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
@@ -82,13 +75,16 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         .split(area);
 
     let mode_label = format!(" {} ", view.mode.short_label());
-    let mode = Paragraph::new(mode_label).style(view.theme.mode_indicator());
-    frame.render_widget(mode, parts[0]);
+    frame.render_widget(
+        Paragraph::new(mode_label).style(view.theme.mode_indicator()),
+        parts[0],
+    );
 
-    let sep = Paragraph::new(" ").style(view.theme.status_bar());
-    frame.render_widget(sep, parts[1]);
+    frame.render_widget(Paragraph::new(" ").style(view.theme.status_bar()), parts[1]);
 
     let text = format!(" {} │ {}", view.connection_label, view.status_message);
-    let status = Paragraph::new(text).style(view.theme.status_bar());
-    frame.render_widget(status, parts[2]);
+    frame.render_widget(
+        Paragraph::new(text).style(view.theme.status_bar()),
+        parts[2],
+    );
 }

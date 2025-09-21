@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::value::Value;
 
-/// A logical schema/namespace inside a database (e.g. `public` for PostgreSQL).
-/// For SQLite this is a synthetic single-entry list ("main").
+/// Logical schema or namespace inside a database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
     pub name: String,
@@ -27,7 +26,7 @@ pub struct Table {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
-    /// Database-native type, e.g. `int4`, `text`, `varchar(255)`.
+    /// Native type name as reported by the engine (e.g. `int4`, `varchar(255)`).
     pub data_type: String,
     pub nullable: bool,
     pub primary_key: bool,
@@ -40,7 +39,6 @@ pub struct TableSchema {
     pub columns: Vec<Column>,
 }
 
-/// One row in a [`QueryResult`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row(pub Vec<Value>);
 
@@ -58,15 +56,15 @@ impl Row {
     }
 }
 
-/// Result of an executed query.
+/// Materialised result of an executed statement.
 ///
-/// For DDL/DML without a result set, `columns` is empty and `rows_affected` is set.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// For non-`SELECT` statements `columns` and `rows` are empty and
+/// `rows_affected` carries the engine-reported count when available.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryResult {
     pub columns: Vec<ColumnHeader>,
     pub rows: Vec<Row>,
     pub rows_affected: Option<u64>,
-    /// Total execution time in milliseconds (driver-reported, best-effort).
     pub elapsed_ms: u64,
 }
 

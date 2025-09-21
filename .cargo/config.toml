@@ -1,0 +1,9 @@
+[build]
+# Workspace-wide build flags. Individual crates may override locally.
+
+[net]
+git-fetch-with-cli = true
+
+[term]
+verbose = false
+color = "auto"

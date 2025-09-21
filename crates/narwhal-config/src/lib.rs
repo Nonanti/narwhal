@@ -1,9 +1,13 @@
-//! narwhal-config — TOML configuration and OS-keychain credential storage.
+//! Persistent configuration and credential storage.
+
+#![forbid(unsafe_code)]
 
 pub mod credentials;
 pub mod paths;
 pub mod settings;
 
-pub use credentials::{CredentialStore, KeyringStore};
-pub use paths::ConfigPaths;
-pub use settings::{Settings, Theme};
+pub use credentials::{CredentialError, CredentialStore, KeyringStore};
+pub use paths::{ConfigPaths, PathsError};
+pub use settings::{
+    ConfigError, ConnectionsFile, EditorSettings, KeybindingSettings, Settings, Theme,
+};

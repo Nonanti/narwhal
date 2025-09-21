@@ -10,15 +10,19 @@ pub enum CredentialError {
 }
 
 impl From<keyring::Error> for CredentialError {
-    fn from(e: keyring::Error) -> Self {
-        match e {
-            keyring::Error::NoEntry => CredentialError::NotFound,
-            other => CredentialError::Keyring(other.to_string()),
+    fn from(error: keyring::Error) -> Self {
+        match error {
+            keyring::Error::NoEntry => Self::NotFound,
+            other => Self::Keyring(other.to_string()),
         }
     }
 }
 
-/// Trait so tests / SSH-less environments can swap in an in-memory store.
+/// Storage abstraction for connection secrets.
+///
+/// Concrete implementations include [`KeyringStore`], which delegates to the
+/// operating-system credential service, and lightweight in-memory variants
+/// used in tests.
 pub trait CredentialStore: Send + Sync {
     fn get(&self, connection_id: Uuid) -> Result<Option<String>, CredentialError>;
     fn set(&self, connection_id: Uuid, secret: &str) -> Result<(), CredentialError>;
@@ -27,6 +31,8 @@ pub trait CredentialStore: Send + Sync {
 
 const SERVICE: &str = "narwhal";
 
+/// Credential store backed by the operating-system keyring.
+#[derive(Debug, Default)]
 pub struct KeyringStore;
 
 impl KeyringStore {
@@ -35,23 +41,17 @@ impl KeyringStore {
     }
 
     fn entry(connection_id: Uuid) -> Result<keyring::Entry, CredentialError> {
-        let user = connection_id.to_string();
-        keyring::Entry::new(SERVICE, &user).map_err(Into::into)
-    }
-}
-
-impl Default for KeyringStore {
-    fn default() -> Self {
-        Self::new()
+        let account = connection_id.to_string();
+        keyring::Entry::new(SERVICE, &account).map_err(Into::into)
     }
 }
 
 impl CredentialStore for KeyringStore {
     fn get(&self, connection_id: Uuid) -> Result<Option<String>, CredentialError> {
         match Self::entry(connection_id)?.get_password() {
-            Ok(p) => Ok(Some(p)),
+            Ok(secret) => Ok(Some(secret)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -62,9 +62,8 @@ impl CredentialStore for KeyringStore {
 
     fn delete(&self, connection_id: Uuid) -> Result<(), CredentialError> {
         match Self::entry(connection_id)?.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.into()),
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.into()),
         }
     }
 }

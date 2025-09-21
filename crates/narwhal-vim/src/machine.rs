@@ -2,16 +2,11 @@ use crate::action::{Action, Motion};
 use crate::key::{Key, KeyCode};
 use crate::mode::Mode;
 
-/// Minimal vim state machine.
-///
-/// This is the "spine" — only handles the most common keys so the UI has
-/// something to talk to. We grow it iteratively with tests.
+/// Modal keystroke processor.
 #[derive(Debug, Default)]
 pub struct Vim {
     mode: Mode,
-    /// Pending count prefix being typed in Normal mode (`5j` → 5).
     pending_count: Option<usize>,
-    /// `:`-line buffer while in Command mode.
     command_buffer: String,
 }
 
@@ -28,7 +23,7 @@ impl Vim {
         &self.command_buffer
     }
 
-    /// Feed one key event. Always returns an [`Action`] (possibly `Pending`).
+    /// Feed one key event and obtain the resulting action.
     pub fn handle(&mut self, key: Key) -> Action {
         match self.mode {
             Mode::Normal => self.handle_normal(key),
@@ -45,8 +40,8 @@ impl Vim {
     fn handle_normal(&mut self, key: Key) -> Action {
         match key.code {
             KeyCode::Char(c @ '0'..='9') if !(c == '0' && self.pending_count.is_none()) => {
-                let d = c.to_digit(10).unwrap() as usize;
-                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + d);
+                let digit = c.to_digit(10).unwrap_or(0) as usize;
+                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + digit);
                 Action::Pending
             }
             KeyCode::Char('h') | KeyCode::Left => Action::Move {
@@ -85,13 +80,8 @@ impl Vim {
                 motion: Motion::FileEnd,
                 count: 1,
             },
-            KeyCode::Char('i') => {
+            KeyCode::Char('i' | 'a') => {
                 self.mode = Mode::Insert;
-                Action::EnterMode(Mode::Insert)
-            }
-            KeyCode::Char('a') => {
-                self.mode = Mode::Insert;
-                // TODO: cursor should advance one column first.
                 Action::EnterMode(Mode::Insert)
             }
             KeyCode::Char('v') => {
@@ -154,13 +144,6 @@ impl Vim {
                 self.mode = Mode::Normal;
                 Action::EnterMode(Mode::Normal)
             }
-            // Reuse normal-mode motions inside visual.
-            _ => self.handle_normal_motion_only(key),
-        }
-    }
-
-    fn handle_normal_motion_only(&mut self, key: Key) -> Action {
-        match key.code {
             KeyCode::Char('h') => Action::Move {
                 motion: Motion::Left,
                 count: 1,
@@ -188,18 +171,17 @@ mod tests {
 
     #[test]
     fn enters_insert_on_i() {
-        let mut v = Vim::new();
-        let a = v.handle(Key::char('i'));
-        assert_eq!(a, Action::EnterMode(Mode::Insert));
-        assert_eq!(v.mode(), Mode::Insert);
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('i')), Action::EnterMode(Mode::Insert));
+        assert_eq!(vim.mode(), Mode::Insert);
     }
 
     #[test]
     fn counted_motion() {
-        let mut v = Vim::new();
-        assert_eq!(v.handle(Key::char('5')), Action::Pending);
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('5')), Action::Pending);
         assert_eq!(
-            v.handle(Key::char('j')),
+            vim.handle(Key::char('j')),
             Action::Move {
                 motion: Motion::Down,
                 count: 5,
@@ -209,20 +191,45 @@ mod tests {
 
     #[test]
     fn esc_returns_to_normal() {
-        let mut v = Vim::new();
-        v.handle(Key::char('i'));
-        assert_eq!(v.mode(), Mode::Insert);
-        v.handle(Key::special(KeyCode::Esc));
-        assert_eq!(v.mode(), Mode::Normal);
+        let mut vim = Vim::new();
+        vim.handle(Key::char('i'));
+        vim.handle(Key::special(KeyCode::Esc));
+        assert_eq!(vim.mode(), Mode::Normal);
     }
 
     #[test]
-    fn command_mode_submits() {
-        let mut v = Vim::new();
-        v.handle(Key::char(':'));
-        v.handle(Key::char('q'));
-        let a = v.handle(Key::special(KeyCode::Enter));
-        assert_eq!(a, Action::SubmitCommand("q".into()));
-        assert_eq!(v.mode(), Mode::Normal);
+    fn command_mode_submits_on_enter() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char(':'));
+        vim.handle(Key::char('q'));
+        assert_eq!(
+            vim.handle(Key::special(KeyCode::Enter)),
+            Action::SubmitCommand("q".into())
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn command_mode_clears_on_escape() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char(':'));
+        vim.handle(Key::char('w'));
+        vim.handle(Key::special(KeyCode::Esc));
+        assert_eq!(vim.mode(), Mode::Normal);
+        assert!(vim.command_buffer().is_empty());
+    }
+
+    #[test]
+    fn count_resets_after_motion() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('3'));
+        vim.handle(Key::char('j'));
+        assert_eq!(
+            vim.handle(Key::char('j')),
+            Action::Move {
+                motion: Motion::Down,
+                count: 1,
+            }
+        );
     }
 }

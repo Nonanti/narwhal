@@ -3,7 +3,19 @@ use std::path::Path;
 use narwhal_core::ConnectionConfig;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("toml parse: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("toml serialize: {0}")]
+    TomlSer(#[from] toml::ser::Error),
+}
+
+use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Theme {
     #[default]
@@ -12,8 +24,8 @@ pub enum Theme {
     HighContrast,
 }
 
-/// User-facing configuration (`config.toml`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// User-facing settings persisted to `config.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub theme: Theme,
@@ -42,7 +54,6 @@ impl Default for EditorSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeybindingSettings {
-    /// Start every editor pane in Normal mode.
     pub vim_mode: bool,
 }
 
@@ -52,7 +63,8 @@ impl Default for KeybindingSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Container for the persisted connection list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConnectionsFile {
     #[serde(rename = "connection", default)]
     pub connections: Vec<ConnectionConfig>,
@@ -64,7 +76,7 @@ impl Settings {
             return Ok(Self::default());
         }
         let text = std::fs::read_to_string(path)?;
-        let settings = toml::from_str(&text).map_err(ConfigError::Toml)?;
+        let settings = toml::from_str(&text)?;
         Ok(settings)
     }
 
@@ -72,7 +84,7 @@ impl Settings {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = toml::to_string_pretty(self).map_err(ConfigError::TomlSer)?;
+        let text = toml::to_string_pretty(self)?;
         std::fs::write(path, text)?;
         Ok(())
     }
@@ -84,25 +96,15 @@ impl ConnectionsFile {
             return Ok(Self::default());
         }
         let text = std::fs::read_to_string(path)?;
-        toml::from_str(&text).map_err(ConfigError::Toml)
+        Ok(toml::from_str(&text)?)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = toml::to_string_pretty(self).map_err(ConfigError::TomlSer)?;
+        let text = toml::to_string_pretty(self)?;
         std::fs::write(path, text)?;
         Ok(())
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("toml parse: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("toml serialize: {0}")]
-    TomlSer(#[from] toml::ser::Error),
 }

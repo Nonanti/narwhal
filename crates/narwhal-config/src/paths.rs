@@ -5,16 +5,15 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PathsError {
-    #[error("could not determine user config directories")]
+    #[error("could not determine user directories")]
     NoUserDirs,
 }
 
-/// Resolved on-disk paths used by narwhal.
+/// On-disk locations used by narwhal.
 ///
-/// On Linux this looks like:
-///   config:  ~/.config/narwhal/
-///   data:    ~/.local/share/narwhal/
-///   cache:   ~/.cache/narwhal/
+/// On Linux this resolves to `~/.config/narwhal`, `~/.local/share/narwhal`
+/// and `~/.cache/narwhal`. The macOS and Windows resolutions follow
+/// platform conventions and are delegated to `directories`.
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
     pub config_dir: PathBuf,
@@ -48,7 +47,7 @@ impl ConfigPaths {
         self.cache_dir.join("logs")
     }
 
-    /// Create all required directories on disk.
+    /// Create every directory referenced by this struct.
     pub fn ensure(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config_dir)?;
         std::fs::create_dir_all(&self.data_dir)?;

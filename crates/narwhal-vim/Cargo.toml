@@ -6,5 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 description = "Vim-mode state machine for narwhal"
 
+[lints]
+workspace = true
+
 [dependencies]
 serde.workspace = true

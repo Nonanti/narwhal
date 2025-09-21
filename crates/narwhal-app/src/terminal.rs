@@ -1,6 +1,3 @@
-//! Terminal setup/teardown — RAII guard so we always restore the terminal,
-//! even on panic.
-
 use std::io::{self, Stdout};
 
 use anyhow::Result;
@@ -13,6 +10,9 @@ use ratatui::Terminal;
 
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
+/// RAII guard that enters the alternate screen and enables raw mode on
+/// construction, and restores the terminal on drop. Restoration runs even
+/// when the host process panics.
 pub struct TerminalGuard {
     pub terminal: Tui,
 }

@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "PostgreSQL driver for narwhal"
 
+[lints]
+workspace = true
+
 [dependencies]
 narwhal-core.workspace = true
 async-trait.workspace = true

@@ -1,10 +1,12 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Database-agnostic value representation.
+/// Engine-agnostic representation of a database value.
 ///
-/// Drivers convert their native types into [`Value`] when returning rows,
-/// and convert [`Value`] back into native types when binding parameters.
+/// Drivers convert their native types into [`Value`] when reading rows and
+/// in the opposite direction when binding parameters. Values that cannot be
+/// expressed in one of the structured variants are preserved in
+/// [`Value::Unknown`] as their textual rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     Null,
@@ -19,7 +21,6 @@ pub enum Value {
     Timestamp(DateTime<Utc>),
     Uuid(uuid::Uuid),
     Json(serde_json::Value),
-    /// Fallback: driver couldn't map the value; this is the database's textual rendering.
     Unknown(String),
 }
 
@@ -28,7 +29,7 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// Render the value as a plain string suitable for table cells.
+    /// Render the value as a plain string suitable for display in a grid.
     pub fn render(&self) -> String {
         match self {
             Value::Null => "NULL".into(),
