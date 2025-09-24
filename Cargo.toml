@@ -5,6 +5,7 @@ members = [
     "crates/narwhal-config",
     "crates/narwhal-sql",
     "crates/narwhal-pool",
+    "crates/narwhal-history",
     "crates/narwhal-driver-postgres",
     "crates/narwhal-driver-sqlite",
     "crates/narwhal-vim",
@@ -62,6 +63,7 @@ narwhal-core = { path = "crates/narwhal-core" }
 narwhal-config = { path = "crates/narwhal-config" }
 narwhal-sql = { path = "crates/narwhal-sql" }
 narwhal-pool = { path = "crates/narwhal-pool" }
+narwhal-history = { path = "crates/narwhal-history" }
 narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
 narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
 narwhal-vim = { path = "crates/narwhal-vim" }

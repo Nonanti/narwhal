@@ -7,8 +7,10 @@
 //! cargo test -p narwhal-driver-postgres -- --ignored
 //! ```
 
+use std::time::Duration;
+
 use narwhal_core::{
-    Connection, ConnectionConfig, ConnectionParams, DatabaseDriver, IsolationLevel, Value,
+    Connection, ConnectionConfig, ConnectionParams, DatabaseDriver, Error, IsolationLevel, Value,
 };
 use narwhal_driver_postgres::PostgresDriver;
 use testcontainers::runners::AsyncRunner;
@@ -154,6 +156,54 @@ async fn transaction_rollback_discards_changes() {
         .await
         .unwrap();
     assert_eq!(select.rows[0].get(0).map(Value::render), Some("0".into()));
+}
+
+#[tokio::test]
+#[ignore = "requires docker"]
+async fn savepoint_partial_rollback() {
+    let h = Harness::start().await;
+    let mut conn = h.connect().await;
+
+    conn.execute("CREATE TABLE t (n INT)", &[]).await.unwrap();
+    conn.begin().await.unwrap();
+    conn.execute("INSERT INTO t VALUES (1)", &[]).await.unwrap();
+    conn.savepoint("sp1").await.unwrap();
+    conn.execute("INSERT INTO t VALUES (2)", &[]).await.unwrap();
+    conn.rollback_to_savepoint("sp1").await.unwrap();
+    conn.release_savepoint("sp1").await.unwrap();
+    conn.commit().await.unwrap();
+
+    let result = conn
+        .execute("SELECT n FROM t ORDER BY n", &[])
+        .await
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].get(0).map(Value::render), Some("1".into()));
+}
+
+#[tokio::test]
+#[ignore = "requires docker"]
+async fn cancel_in_flight_query() {
+    let h = Harness::start().await;
+    let conn = h.connect().await;
+
+    let cancel = conn.cancel_handle().expect("postgres exposes cancel");
+
+    let task: tokio::task::JoinHandle<Result<_, Error>> = tokio::spawn(async move {
+        let mut conn = conn;
+        conn.execute("SELECT pg_sleep(30)", &[]).await
+    });
+
+    // Give the server time to begin executing the sleep.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    cancel.cancel().await.expect("cancel succeeds");
+
+    let result = task.await.expect("join cancel task");
+    match result {
+        Err(Error::Cancelled) => {}
+        Err(other) => panic!("expected Cancelled, got {other:?}"),
+        Ok(_) => panic!("query was not cancelled"),
+    }
 }
 
 #[tokio::test]

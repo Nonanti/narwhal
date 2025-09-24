@@ -147,6 +147,34 @@ impl Pool {
     }
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Async cleanup at drop time: if a Tokio runtime is still live,
+        // schedule each idle connection's async `close` on it. When called
+        // outside any runtime the connections are dropped synchronously,
+        // which is the same behaviour the underlying drivers exhibit when
+        // their handles fall out of scope.
+        let connections: Vec<Box<dyn Connection>> =
+            self.idle.get_mut().map(std::mem::take).unwrap_or_default();
+        if connections.is_empty() {
+            return;
+        }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            for conn in connections {
+                handle.spawn(async move {
+                    if let Err(error) = conn.close().await {
+                        warn!(
+                            target: "narwhal::pool",
+                            error = %error,
+                            "background close failed"
+                        );
+                    }
+                });
+            }
+        }
+    }
+}
+
 /// RAII guard that returns its [`Connection`] to the pool on drop.
 pub struct PooledConnection {
     connection: Option<Box<dyn Connection>>,

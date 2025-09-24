@@ -78,6 +78,28 @@ pub trait Connection: Send + Sync {
     /// Roll back the current transaction.
     async fn rollback(&mut self) -> Result<()>;
 
+    /// Establish a savepoint inside the current transaction.
+    ///
+    /// The default implementation reports the feature as unsupported;
+    /// drivers whose [`Capabilities::savepoints`] is `true` override it.
+    async fn savepoint(&mut self, name: &str) -> Result<()> {
+        let _ = name;
+        Err(crate::Error::unsupported("savepoints"))
+    }
+
+    /// Release a previously created savepoint.
+    async fn release_savepoint(&mut self, name: &str) -> Result<()> {
+        let _ = name;
+        Err(crate::Error::unsupported("savepoints"))
+    }
+
+    /// Roll back to a previously created savepoint without ending the
+    /// surrounding transaction.
+    async fn rollback_to_savepoint(&mut self, name: &str) -> Result<()> {
+        let _ = name;
+        Err(crate::Error::unsupported("savepoints"))
+    }
+
     /// List logical schemas/namespaces visible to the session.
     async fn list_schemas(&mut self) -> Result<Vec<Schema>>;
 

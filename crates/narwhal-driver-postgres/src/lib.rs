@@ -14,6 +14,7 @@ use narwhal_core::{
     Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
     TableKind, TableSchema, Value,
 };
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
@@ -124,16 +125,25 @@ pub struct PostgresConnection {
     client: Arc<tokio_postgres::Client>,
 }
 
+fn map_pg_error(error: tokio_postgres::Error) -> Error {
+    if let Some(db) = error.as_db_error() {
+        if db.code() == &SqlState::QUERY_CANCELED {
+            return Error::Cancelled;
+        }
+    }
+    Error::Query(error.to_string())
+}
+
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 impl PostgresConnection {
     /// Prepare the statement, then route to `query` or `execute` based on
     /// whether the statement returns rows.
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let started = Instant::now();
-        let statement = self
-            .client
-            .prepare(sql)
-            .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
 
         let bindings: Vec<Param<'_>> = params.iter().map(Param).collect();
         let param_refs: Vec<&(dyn ToSql + Sync)> =
@@ -144,7 +154,7 @@ impl PostgresConnection {
                 .client
                 .execute(&statement, &param_refs[..])
                 .await
-                .map_err(|e| Error::Query(e.to_string()))?;
+                .map_err(map_pg_error)?;
             Ok(QueryResult {
                 columns: Vec::new(),
                 rows: Vec::new(),
@@ -156,7 +166,7 @@ impl PostgresConnection {
                 .client
                 .query(&statement, &param_refs[..])
                 .await
-                .map_err(|e| Error::Query(e.to_string()))?;
+                .map_err(map_pg_error)?;
 
             let columns: Vec<ColumnHeader> = statement
                 .columns()
@@ -193,11 +203,7 @@ impl Connection for PostgresConnection {
     }
 
     async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
-        let statement = self
-            .client
-            .prepare(sql)
-            .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
 
         let columns: Vec<ColumnHeader> = statement
             .columns()
@@ -219,7 +225,7 @@ impl Connection for PostgresConnection {
             .client
             .query_raw(&statement, bindings.iter())
             .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(map_pg_error)?;
 
         Ok(Box::new(PostgresRowStream {
             columns,
@@ -233,7 +239,7 @@ impl Connection for PostgresConnection {
         self.client
             .batch_execute("BEGIN")
             .await
-            .map_err(|e| Error::Query(e.to_string()))
+            .map_err(map_pg_error)
     }
 
     async fn begin_with(&mut self, isolation: IsolationLevel) -> Result<()> {
@@ -244,24 +250,36 @@ impl Connection for PostgresConnection {
             IsolationLevel::Serializable => "SERIALIZABLE",
         };
         let stmt = format!("BEGIN ISOLATION LEVEL {level}");
-        self.client
-            .batch_execute(&stmt)
-            .await
-            .map_err(|e| Error::Query(e.to_string()))
+        self.client.batch_execute(&stmt).await.map_err(map_pg_error)
     }
 
     async fn commit(&mut self) -> Result<()> {
         self.client
             .batch_execute("COMMIT")
             .await
-            .map_err(|e| Error::Query(e.to_string()))
+            .map_err(map_pg_error)
     }
 
     async fn rollback(&mut self) -> Result<()> {
         self.client
             .batch_execute("ROLLBACK")
             .await
-            .map_err(|e| Error::Query(e.to_string()))
+            .map_err(map_pg_error)
+    }
+
+    async fn savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("SAVEPOINT {}", quote_ident(name));
+        self.client.batch_execute(&stmt).await.map_err(map_pg_error)
+    }
+
+    async fn release_savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("RELEASE SAVEPOINT {}", quote_ident(name));
+        self.client.batch_execute(&stmt).await.map_err(map_pg_error)
+    }
+
+    async fn rollback_to_savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("ROLLBACK TO SAVEPOINT {}", quote_ident(name));
+        self.client.batch_execute(&stmt).await.map_err(map_pg_error)
     }
 
     async fn list_schemas(&mut self) -> Result<Vec<Schema>> {
@@ -444,7 +462,7 @@ impl RowStream for PostgresRowStream {
                 }
                 Ok(Some(CoreRow(values)))
             }
-            Some(Err(error)) => Err(Error::Query(error.to_string())),
+            Some(Err(error)) => Err(map_pg_error(error)),
             None => Ok(None),
         }
     }

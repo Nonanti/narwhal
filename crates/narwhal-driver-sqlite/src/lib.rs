@@ -26,6 +26,10 @@ use tracing::{debug, info};
 
 use crate::types::{value_from_ref, value_to_sql};
 
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 #[derive(Debug, Default)]
 pub struct SqliteDriver;
 
@@ -289,6 +293,21 @@ impl Connection for SqliteConnection {
         self.execute_batch("ROLLBACK").await
     }
 
+    async fn savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("SAVEPOINT {}", quote_ident(name));
+        self.run(&stmt, &[]).await.map(|_| ())
+    }
+
+    async fn release_savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("RELEASE SAVEPOINT {}", quote_ident(name));
+        self.run(&stmt, &[]).await.map(|_| ())
+    }
+
+    async fn rollback_to_savepoint(&mut self, name: &str) -> Result<()> {
+        let stmt = format!("ROLLBACK TO SAVEPOINT {}", quote_ident(name));
+        self.run(&stmt, &[]).await.map(|_| ())
+    }
+
     async fn list_schemas(&mut self) -> Result<Vec<Schema>> {
         Ok(vec![Schema {
             name: "main".into(),
@@ -487,6 +506,28 @@ mod tests {
             select.rows[0].get(0).map(Value::render),
             Some("berkant".into())
         );
+    }
+
+    #[tokio::test]
+    async fn savepoint_partial_rollback() {
+        let mut conn = open().await;
+        conn.execute("CREATE TABLE t (n INTEGER)", &[])
+            .await
+            .unwrap();
+        conn.begin().await.unwrap();
+        conn.execute("INSERT INTO t VALUES (1)", &[]).await.unwrap();
+        conn.savepoint("sp1").await.unwrap();
+        conn.execute("INSERT INTO t VALUES (2)", &[]).await.unwrap();
+        conn.rollback_to_savepoint("sp1").await.unwrap();
+        conn.release_savepoint("sp1").await.unwrap();
+        conn.commit().await.unwrap();
+
+        let result = conn
+            .execute("SELECT n FROM t ORDER BY n", &[])
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0].get(0).map(Value::render), Some("1".into()));
     }
 
     #[tokio::test]
