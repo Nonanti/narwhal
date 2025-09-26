@@ -16,6 +16,7 @@ narwhal-vim.workspace = true
 narwhal-tui.workspace = true
 narwhal-driver-postgres.workspace = true
 narwhal-driver-sqlite.workspace = true
+narwhal-driver-mysql.workspace = true
 
 tokio.workspace = true
 crossterm.workspace = true

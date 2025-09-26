@@ -38,6 +38,7 @@ impl DriverRegistry {
         let mut registry = Self::new();
         registry.register(narwhal_driver_postgres::PostgresDriver::new());
         registry.register(narwhal_driver_sqlite::SqliteDriver::new());
+        registry.register(narwhal_driver_mysql::MysqlDriver::new());
         registry
     }
 }

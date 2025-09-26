@@ -8,6 +8,7 @@ members = [
     "crates/narwhal-history",
     "crates/narwhal-driver-postgres",
     "crates/narwhal-driver-sqlite",
+    "crates/narwhal-driver-mysql",
     "crates/narwhal-vim",
     "crates/narwhal-tui",
     "crates/narwhal-app",
@@ -50,6 +51,8 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 # Database drivers
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "column_decltype"] }
+mysql_async = { version = "0.34", default-features = false, features = ["minimal-rust"] }
+mysql_common = { version = "0.32", default-features = false, features = ["chrono", "bigdecimal"] }
 
 # Utilities
 directories = "5.0"
@@ -66,6 +69,7 @@ narwhal-pool = { path = "crates/narwhal-pool" }
 narwhal-history = { path = "crates/narwhal-history" }
 narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
 narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
+narwhal-driver-mysql = { path = "crates/narwhal-driver-mysql" }
 narwhal-vim = { path = "crates/narwhal-vim" }
 narwhal-tui = { path = "crates/narwhal-tui" }
 narwhal-app = { path = "crates/narwhal-app" }
