@@ -1523,6 +1523,7 @@ dependencies = [
  "anyhow",
  "narwhal-app",
  "narwhal-config",
+ "narwhal-history",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -1541,11 +1542,15 @@ dependencies = [
  "narwhal-driver-mysql",
  "narwhal-driver-postgres",
  "narwhal-driver-sqlite",
+ "narwhal-history",
+ "narwhal-pool",
+ "narwhal-sql",
  "narwhal-tui",
  "narwhal-vim",
  "ratatui",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1662,10 +1667,12 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "narwhal-core",
+ "narwhal-sql",
  "narwhal-vim",
  "ratatui",
  "tracing",
  "unicode-width 0.2.2",
+ "uuid",
 ]
 
 [[package]]

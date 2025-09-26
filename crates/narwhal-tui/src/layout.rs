@@ -1,21 +1,57 @@
+use narwhal_core::QueryResult;
 use narwhal_vim::Mode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::theme::Theme;
+use crate::widgets::{
+    render_editor, render_results, render_sidebar, EditorBuffer, ResultView, SidebarView,
+};
 
-/// Read-only view model rendered by [`render_root`].
-pub struct RootLayout<'a> {
-    pub mode: Mode,
-    pub connection_label: &'a str,
-    pub status_message: &'a str,
-    pub theme: &'a Theme,
+/// Indicates which pane currently owns keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Sidebar,
+    Editor,
+    Results,
 }
 
-pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
+impl Pane {
+    pub fn cycle(self) -> Self {
+        match self {
+            Pane::Sidebar => Pane::Editor,
+            Pane::Editor => Pane::Results,
+            Pane::Results => Pane::Sidebar,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Pane::Sidebar => "sidebar",
+            Pane::Editor => "editor",
+            Pane::Results => "results",
+        }
+    }
+}
+
+pub struct RootLayout<'a> {
+    pub mode: Mode,
+    pub focus: Pane,
+    pub connection_label: &'a str,
+    pub status_message: &'a str,
+    pub running: bool,
+    pub theme: &'a Theme,
+    pub sidebar: SidebarView<'a>,
+    pub editor: &'a mut EditorBuffer,
+    pub editor_title: &'a str,
+    pub result_view: &'a mut ResultView,
+    pub result: Option<&'a QueryResult>,
+    pub result_error: Option<&'a str>,
+}
+
+pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -23,45 +59,36 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(28), Constraint::Min(1)])
+        .constraints([Constraint::Length(34), Constraint::Min(1)])
         .split(outer[0]);
 
-    render_sidebar(frame, body[0], view);
-    render_main(frame, body[1], view);
+    render_sidebar(frame, body[0], &view.sidebar, view.theme);
+
+    let main = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(body[1]);
+
+    render_editor(
+        frame,
+        main[0],
+        view.editor,
+        view.theme,
+        view.focus == Pane::Editor,
+        view.editor_title,
+    );
+
+    render_results(
+        frame,
+        main[1],
+        view.result,
+        view.result_error,
+        view.result_view,
+        view.theme,
+        view.focus == Pane::Results,
+    );
+
     render_status_bar(frame, outer[1], view);
-}
-
-fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(" narwhal ", view.theme.sidebar_title()));
-    let body = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            "  no connection",
-            Style::default().fg(view.theme.muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  :open to attach one",
-            Style::default().fg(view.theme.muted),
-        )),
-    ])
-    .block(block);
-    frame.render_widget(body, area);
-}
-
-fn render_main(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
-    let block = Block::default().borders(Borders::ALL).title(" editor ");
-    let body = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            "  press i to insert, Esc to leave insert, :q to quit",
-            Style::default().fg(view.theme.muted),
-        )),
-    ])
-    .block(block);
-    frame.render_widget(body, area);
 }
 
 fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
@@ -82,9 +109,16 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
 
     frame.render_widget(Paragraph::new(" ").style(view.theme.status_bar()), parts[1]);
 
-    let text = format!(" {} │ {}", view.connection_label, view.status_message);
+    let running_indicator = if view.running { "⏳ " } else { "" };
+    let body = Line::from(vec![Span::raw(format!(
+        " {} │ {} │ {}{} ",
+        view.focus.label(),
+        view.connection_label,
+        running_indicator,
+        view.status_message
+    ))]);
     frame.render_widget(
-        Paragraph::new(text).style(view.theme.status_bar()),
+        Paragraph::new(body).style(view.theme.status_bar()),
         parts[2],
     );
 }

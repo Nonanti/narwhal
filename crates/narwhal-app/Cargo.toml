@@ -17,6 +17,9 @@ narwhal-tui.workspace = true
 narwhal-driver-postgres.workspace = true
 narwhal-driver-sqlite.workspace = true
 narwhal-driver-mysql.workspace = true
+narwhal-pool.workspace = true
+narwhal-history.workspace = true
+narwhal-sql.workspace = true
 
 tokio.workspace = true
 crossterm.workspace = true
@@ -24,3 +27,4 @@ ratatui.workspace = true
 futures.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+uuid.workspace = true

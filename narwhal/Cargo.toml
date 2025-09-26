@@ -17,6 +17,7 @@ workspace = true
 [dependencies]
 narwhal-app.workspace = true
 narwhal-config.workspace = true
+narwhal-history.workspace = true
 
 tokio.workspace = true
 anyhow.workspace = true

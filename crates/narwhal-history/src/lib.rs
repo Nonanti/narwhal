@@ -9,4 +9,4 @@
 
 pub mod journal;
 
-pub use journal::{HistoryEntry, HistoryError, Journal, JournalReader};
+pub use journal::{HistoryEntry, HistoryError, Journal, JournalReader, Outcome};

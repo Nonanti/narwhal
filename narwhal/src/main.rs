@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use narwhal_app::{App, DriverRegistry};
-use narwhal_config::ConfigPaths;
+use narwhal_config::{ConfigPaths, ConnectionsFile, Settings};
+use narwhal_history::Journal;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
@@ -25,8 +28,18 @@ async fn main() -> Result<()> {
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting narwhal");
 
+    let _settings = Settings::load(&paths.settings_file()).unwrap_or_default();
+    let connections = ConnectionsFile::load(&paths.connections_file()).unwrap_or_default();
+    let history = match Journal::open(paths.history_file()).await {
+        Ok(j) => Some(Arc::new(j)),
+        Err(error) => {
+            tracing::warn!(error = %error, "history journal disabled");
+            None
+        }
+    };
+
     let registry = DriverRegistry::with_defaults();
-    let app = App::new(registry);
+    let app = App::new(registry, connections, history);
 
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");

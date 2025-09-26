@@ -8,5 +8,9 @@ pub mod theme;
 pub mod widgets;
 
 pub use input::translate_key_event;
-pub use layout::{render_root, RootLayout};
+pub use layout::{render_root, Pane, RootLayout};
 pub use theme::Theme;
+pub use widgets::{
+    render_editor, render_results, render_sidebar, EditorBuffer, ResultView, SchemaListing,
+    SidebarView,
+};
