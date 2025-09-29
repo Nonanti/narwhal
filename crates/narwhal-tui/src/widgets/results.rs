@@ -1,10 +1,10 @@
 //! Tabular result viewer.
 
-use narwhal_core::QueryResult;
+use narwhal_core::{ColumnHeader, Row};
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Span;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState};
 use ratatui::Frame;
 
 use crate::theme::Theme;
@@ -42,11 +42,46 @@ impl ResultView {
     }
 }
 
+/// View model passed to [`render_results`] each frame.
+///
+/// `Display::Empty` is shown before the first run, `Running` while a
+/// statement is in flight (rows may already be filling in for streamed
+/// queries), `Affected` for non-SELECT completions, `Rows` for completed
+/// SELECT-like queries (streamed or materialised), and `Error` when the
+/// engine returned a failure.
+pub enum ResultDisplay<'a> {
+    Empty,
+    Running {
+        sql: &'a str,
+        index: usize,
+        total: usize,
+        columns: &'a [ColumnHeader],
+        rows: &'a [Row],
+    },
+    Affected {
+        rows: u64,
+        elapsed_ms: u64,
+        index: usize,
+        total: usize,
+    },
+    Rows {
+        columns: &'a [ColumnHeader],
+        rows: &'a [Row],
+        elapsed_ms: u64,
+        streamed: bool,
+        index: usize,
+        total: usize,
+    },
+    Error {
+        message: &'a str,
+        elapsed_ms: u64,
+    },
+}
+
 pub fn render_results(
     frame: &mut Frame<'_>,
     area: Rect,
-    result: Option<&QueryResult>,
-    error: Option<&str>,
+    display: &ResultDisplay<'_>,
     view: &mut ResultView,
     theme: &Theme,
     focused: bool,
@@ -56,46 +91,102 @@ pub fn render_results(
     } else {
         Style::default().fg(theme.muted)
     };
+    let title = build_title(display);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .title(" results ");
+        .title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if let Some(err) = error {
-        let p = Paragraph::new(Span::styled(
-            format!("  error: {err}"),
-            Style::default().fg(theme.error),
-        ));
-        frame.render_widget(p, inner);
-        return;
+    match display {
+        ResultDisplay::Empty => {
+            let p = Paragraph::new(Span::styled(
+                "  no results yet — Ctrl-; to run, :run-all for whole buffer",
+                Style::default().fg(theme.muted),
+            ));
+            frame.render_widget(p, inner);
+        }
+        ResultDisplay::Running {
+            sql, columns, rows, ..
+        } => {
+            if columns.is_empty() {
+                let p = Paragraph::new(vec![Line::from(Span::styled(
+                    format!("  ⏳ running: {sql}"),
+                    Style::default().fg(theme.muted),
+                ))]);
+                frame.render_widget(p, inner);
+            } else {
+                draw_table(frame, inner, columns, rows, theme, view);
+            }
+        }
+        ResultDisplay::Affected {
+            rows, elapsed_ms, ..
+        } => {
+            let msg = format!(
+                "  {} row{} affected · {} ms",
+                rows,
+                if *rows == 1 { "" } else { "s" },
+                elapsed_ms
+            );
+            let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.foreground)));
+            frame.render_widget(p, inner);
+        }
+        ResultDisplay::Rows { columns, rows, .. } => {
+            draw_table(frame, inner, columns, rows, theme, view);
+        }
+        ResultDisplay::Error {
+            message,
+            elapsed_ms,
+        } => {
+            let p = Paragraph::new(vec![Line::from(Span::styled(
+                format!("  error ({elapsed_ms} ms): {message}"),
+                Style::default().fg(theme.error),
+            ))]);
+            frame.render_widget(p, inner);
+        }
     }
+}
 
-    let Some(result) = result else {
-        let p = Paragraph::new(Span::styled(
-            "  no results yet — press Ctrl-Enter to run",
-            Style::default().fg(theme.muted),
-        ));
-        frame.render_widget(p, inner);
-        return;
-    };
-
-    if result.columns.is_empty() {
-        let affected = result.rows_affected.unwrap_or(0);
-        let msg = format!(
-            "  {} row{} affected · {} ms",
-            affected,
-            if affected == 1 { "" } else { "s" },
-            result.elapsed_ms
-        );
-        let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.foreground)));
-        frame.render_widget(p, inner);
-        return;
+fn build_title(display: &ResultDisplay<'_>) -> String {
+    match display {
+        ResultDisplay::Empty => " results ".into(),
+        ResultDisplay::Running {
+            index, total, rows, ..
+        } => format!(" results · running {index}/{total} · {} rows ", rows.len()),
+        ResultDisplay::Affected {
+            index,
+            total,
+            elapsed_ms,
+            ..
+        } => format!(" results · {index}/{total} · {elapsed_ms} ms "),
+        ResultDisplay::Rows {
+            index,
+            total,
+            rows,
+            elapsed_ms,
+            streamed,
+            ..
+        } => {
+            let badge = if *streamed { "stream" } else { "exec" };
+            format!(
+                " results · {index}/{total} · {} rows · {elapsed_ms} ms · {badge} ",
+                rows.len()
+            )
+        }
+        ResultDisplay::Error { elapsed_ms, .. } => format!(" results · error · {elapsed_ms} ms "),
     }
+}
 
-    let header_cells: Vec<Cell<'_>> = result
-        .columns
+fn draw_table(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    columns: &[ColumnHeader],
+    rows: &[Row],
+    theme: &Theme,
+    view: &mut ResultView,
+) {
+    let header_cells: Vec<Cell<'_>> = columns
         .iter()
         .map(|c| {
             let label = format!("{} ({})", c.name, c.data_type);
@@ -106,23 +197,15 @@ pub fn render_results(
             )
         })
         .collect();
-    let header = Row::new(header_cells).bottom_margin(1);
-
-    let widths: Vec<Constraint> = result
-        .columns
+    let header = TableRow::new(header_cells).bottom_margin(1);
+    let widths: Vec<Constraint> = columns.iter().map(|_| Constraint::Length(18)).collect();
+    let body_rows: Vec<TableRow<'_>> = rows
         .iter()
-        .map(|_| Constraint::Length(18))
+        .map(|row| TableRow::new(row.0.iter().map(|v| Cell::from(v.render()))))
         .collect();
-
-    let rows: Vec<Row<'_>> = result
-        .rows
-        .iter()
-        .map(|row| Row::new(row.0.iter().map(|v| Cell::from(v.render()))))
-        .collect();
-
-    let table = Table::new(rows, widths)
+    let table = Table::new(body_rows, widths)
         .header(header)
         .highlight_style(Style::default().bg(theme.muted))
         .column_spacing(1);
-    frame.render_stateful_widget(table, inner, &mut view.state);
+    frame.render_stateful_widget(table, area, &mut view.state);
 }

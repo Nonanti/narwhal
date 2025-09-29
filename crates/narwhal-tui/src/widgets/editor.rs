@@ -57,6 +57,14 @@ impl EditorBuffer {
         self.lines.join("\n")
     }
 
+    /// Reset the buffer to a single empty line.
+    pub fn clear(&mut self) {
+        self.lines = vec![String::new()];
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.scroll = 0;
+    }
+
     pub fn insert_str(&mut self, text: &str) {
         for ch in text.chars() {
             if ch == '\n' {
@@ -113,6 +121,19 @@ impl EditorBuffer {
                 }
             }
         }
+    }
+
+    /// Return every statement in the buffer, trimmed of surrounding
+    /// whitespace and of any trailing semicolon.
+    pub fn all_statements(&self, dialect: Dialect) -> Vec<String> {
+        let text = self.entire_text();
+        split_with(&text, dialect)
+            .into_iter()
+            .filter_map(|s| {
+                let cleaned = s.text.trim().trim_end_matches(';').trim().to_owned();
+                (!cleaned.is_empty()).then_some(cleaned)
+            })
+            .collect()
     }
 
     /// Extract the statement under the cursor.

@@ -1,4 +1,3 @@
-use narwhal_core::QueryResult;
 use narwhal_vim::Mode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
@@ -7,7 +6,8 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::{
-    render_editor, render_results, render_sidebar, EditorBuffer, ResultView, SidebarView,
+    render_editor, render_results, render_sidebar, EditorBuffer, ResultDisplay, ResultView,
+    SidebarView,
 };
 
 /// Indicates which pane currently owns keyboard focus.
@@ -47,8 +47,7 @@ pub struct RootLayout<'a> {
     pub editor: &'a mut EditorBuffer,
     pub editor_title: &'a str,
     pub result_view: &'a mut ResultView,
-    pub result: Option<&'a QueryResult>,
-    pub result_error: Option<&'a str>,
+    pub result: ResultDisplay<'a>,
 }
 
 pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) {
@@ -81,8 +80,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
     render_results(
         frame,
         main[1],
-        view.result,
-        view.result_error,
+        &view.result,
         view.result_view,
         view.theme,
         view.focus == Pane::Results,

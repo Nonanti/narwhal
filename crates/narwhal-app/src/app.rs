@@ -6,24 +6,57 @@ use crossterm::event::{
 };
 use futures::StreamExt;
 use narwhal_config::ConnectionsFile;
-use narwhal_core::ConnectionConfig;
+use narwhal_core::{ColumnHeader, ConnectionConfig, Row};
 use narwhal_history::Journal;
-use narwhal_sql::Dialect;
 use narwhal_tui::{
-    render_root, translate_key_event, EditorBuffer, Pane, ResultView, RootLayout, SidebarView,
-    Theme,
+    render_root, translate_key_event, EditorBuffer, Pane, ResultDisplay, ResultView, RootLayout,
+    SidebarView, Theme,
 };
-use narwhal_vim::{Action, Mode, Motion, Vim};
+use narwhal_vim::{Action, Mode, Vim};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
 
 use crate::commands::{parse, Command};
+use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
-use crate::run::{spawn_query, ActiveCancel, RunContext, RunResult};
+use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunUpdate};
 use crate::session::Session;
 use crate::terminal::TerminalGuard;
 
-const RUN_CHANNEL_CAPACITY: usize = 16;
+const RUN_CHANNEL_CAPACITY: usize = 128;
+
+/// What the result pane is currently showing.
+#[derive(Debug, Default)]
+pub enum ResultState {
+    #[default]
+    Empty,
+    Running {
+        sql: String,
+        index: usize,
+        total: usize,
+        columns: Vec<ColumnHeader>,
+        rows: Vec<Row>,
+        streaming: bool,
+    },
+    Affected {
+        rows: u64,
+        elapsed_ms: u64,
+        index: usize,
+        total: usize,
+    },
+    Rows {
+        columns: Vec<ColumnHeader>,
+        rows: Vec<Row>,
+        elapsed_ms: u64,
+        streamed: bool,
+        index: usize,
+        total: usize,
+    },
+    Error {
+        message: String,
+        elapsed_ms: u64,
+    },
+}
 
 pub struct App {
     registry: DriverRegistry,
@@ -31,8 +64,7 @@ pub struct App {
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     editor: EditorBuffer,
-    result: Option<narwhal_core::QueryResult>,
-    result_error: Option<String>,
+    result: ResultState,
     result_view: ResultView,
     vim: Vim,
     theme: Theme,
@@ -42,8 +74,8 @@ pub struct App {
     running: bool,
     cancel_slot: ActiveCancel,
     should_quit: bool,
-    run_tx: mpsc::Sender<RunResult>,
-    run_rx: mpsc::Receiver<RunResult>,
+    run_tx: mpsc::Sender<RunUpdate>,
+    run_rx: mpsc::Receiver<RunUpdate>,
 }
 
 impl App {
@@ -59,8 +91,7 @@ impl App {
             history,
             session: None,
             editor: EditorBuffer::new(),
-            result: None,
-            result_error: None,
+            result: ResultState::Empty,
             result_view: ResultView::new(),
             vim: Vim::new(),
             theme: Theme::default(),
@@ -94,8 +125,8 @@ impl App {
                         None => break,
                     }
                 }
-                Some(result) = self.run_rx.recv() => {
-                    self.handle_run_result(result);
+                Some(update) = self.run_rx.recv() => {
+                    self.handle_run_update(update);
                 }
             }
             self.draw(&mut guard)?;
@@ -133,7 +164,7 @@ impl App {
         let status = self.status_message.clone();
         let running = self.running;
         let theme = self.theme;
-        let result_error = self.result_error.clone();
+        let result_display = display_from_state(&self.result);
 
         guard.terminal.draw(|frame| {
             let mut layout = RootLayout {
@@ -147,8 +178,7 @@ impl App {
                 editor: &mut self.editor,
                 editor_title: &editor_title,
                 result_view: &mut self.result_view,
-                result: self.result.as_ref(),
-                result_error: result_error.as_deref(),
+                result: result_display,
             };
             render_root(frame, frame.area(), &mut layout);
         })?;
@@ -187,7 +217,11 @@ impl App {
                     return true;
                 }
                 CtKey::Char(';') => {
-                    self.run_current_statement();
+                    self.dispatch_current_statement(RunMode::Execute);
+                    return true;
+                }
+                CtKey::Char('s') => {
+                    self.dispatch_current_statement(RunMode::Stream);
                     return true;
                 }
                 _ => {}
@@ -228,7 +262,10 @@ impl App {
     }
 
     fn handle_results_key(&mut self, key: KeyEvent) {
-        let row_count = self.result.as_ref().map(|r| r.rows.len()).unwrap_or(0);
+        let row_count = match &self.result {
+            ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows.len(),
+            _ => 0,
+        };
         match key.code {
             CtKey::Char('j') | CtKey::Down => self.result_view.move_down(row_count),
             CtKey::Char('k') | CtKey::Up => self.result_view.move_up(),
@@ -266,9 +303,7 @@ impl App {
                     self.status_message = format!(":{}", self.vim.command_buffer());
                 }
             }
-            Action::Operate { .. } => {
-                // Operator+motion combinations are not yet wired to the buffer.
-            }
+            Action::Operate { .. } => {}
         }
     }
 
@@ -278,11 +313,22 @@ impl App {
             Command::Open(name) => self.open_named(&name),
             Command::Close => self.close_session(),
             Command::Refresh => self.refresh_schema(),
-            Command::Run => self.run_current_statement(),
+            Command::Run => self.dispatch_current_statement(RunMode::Execute),
+            Command::RunAll => self.dispatch_all_statements(RunMode::Execute),
+            Command::Stream => self.dispatch_current_statement(RunMode::Stream),
+            Command::StreamAll => self.dispatch_all_statements(RunMode::Stream),
             Command::Cancel => self.spawn_cancel(),
+            Command::Clear => {
+                self.editor.clear();
+                self.result = ResultState::Empty;
+                self.result_view.reset();
+                self.status_message = "buffer cleared".into();
+            }
+            Command::Export { format, path } => self.export_results(&format, &path),
             Command::Help => {
                 self.status_message =
-                    "commands: open <name>, close, refresh, run, cancel, quit".into();
+                    "open <name> · close · refresh · run · run-all · stream · stream-all · export <csv|json> <path> · cancel · quit"
+                        .into();
             }
             Command::Empty => {}
             Command::Unknown(text) => {
@@ -310,17 +356,10 @@ impl App {
             self.status_message = format!("driver not registered: {}", config.driver);
             return;
         };
-        let registry = self.registry.clone();
-        let _ = registry;
         let label = config.name.clone();
         self.status_message = format!("connecting to {label}…");
 
         let driver = driver.clone();
-        // Connection establishment is run on the runtime synchronously here,
-        // because the UI does not yet expose an "opening" state distinct from
-        // "ready". For sub-second connections this is unnoticeable; longer
-        // handshakes will be moved off the UI thread when the dial-up UI
-        // gains its own state machine.
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async { Session::open(driver, config, None).await })
@@ -366,25 +405,44 @@ impl App {
         }
     }
 
-    fn run_current_statement(&mut self) {
+    fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.as_ref() else {
             self.status_message = "no active connection".into();
             return;
         };
-        if self.running {
-            self.status_message = "a query is already running".into();
-            return;
-        }
         let Some(sql) = self.editor.statement_at_cursor(session.dialect()) else {
             self.status_message = "no statement under cursor".into();
             return;
         };
-        let trimmed = sql.trim_end_matches(';').trim().to_owned();
+        let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
         if trimmed.is_empty() {
             self.status_message = "no statement under cursor".into();
             return;
         }
+        self.dispatch_batch(vec![trimmed], mode);
+    }
 
+    fn dispatch_all_statements(&mut self, mode: RunMode) {
+        let Some(session) = self.session.as_ref() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let statements = self.editor.all_statements(session.dialect());
+        if statements.is_empty() {
+            self.status_message = "buffer contains no statements".into();
+            return;
+        }
+        self.dispatch_batch(statements, mode);
+    }
+
+    fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
+        if self.running {
+            self.status_message = "a query is already running".into();
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
         let ctx = RunContext {
             pool: session.pool.clone(),
             history: self.history.clone(),
@@ -392,10 +450,53 @@ impl App {
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
         };
+        let request = RunRequest { statements, mode };
         self.running = true;
-        self.result_error = None;
-        self.status_message = "running…".into();
-        spawn_query(ctx, trimmed, self.cancel_slot.clone(), self.run_tx.clone());
+        self.result_view.reset();
+        self.result = ResultState::Running {
+            sql: String::new(),
+            index: 0,
+            total: request.statements.len(),
+            columns: Vec::new(),
+            rows: Vec::new(),
+            streaming: matches!(mode, RunMode::Stream),
+        };
+        self.status_message = match mode {
+            RunMode::Execute => "executing…".into(),
+            RunMode::Stream => "streaming…".into(),
+        };
+        spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
+    }
+
+    fn export_results(&mut self, format: &str, path: &str) {
+        let Some(format) = ExportFormat::from_token(format) else {
+            self.status_message = format!("unknown export format: {format} (csv|json)");
+            return;
+        };
+        let (columns, rows) = match &self.result {
+            ResultState::Rows { columns, rows, .. } => (columns.as_slice(), rows.as_slice()),
+            ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
+                (columns.as_slice(), rows.as_slice())
+            }
+            _ => {
+                self.status_message = "no tabular result to export".into();
+                return;
+            }
+        };
+        let path = std::path::PathBuf::from(path);
+        match export_rows(columns, rows, format, &path) {
+            Ok(()) => {
+                self.status_message = format!(
+                    "exported {} rows to {} ({})",
+                    rows.len(),
+                    path.display(),
+                    format.default_extension()
+                );
+            }
+            Err(error) => {
+                self.status_message = format!("export failed: {error}");
+            }
+        }
     }
 
     fn spawn_cancel(&mut self) {
@@ -411,39 +512,171 @@ impl App {
         self.status_message = "cancellation requested".into();
     }
 
-    fn handle_run_result(&mut self, result: RunResult) {
-        self.running = false;
-        match result.outcome {
-            Ok(qr) => {
-                let row_count = qr.rows.len();
-                let affected = qr.rows_affected;
-                self.result_view.reset();
-                self.result_error = None;
-                self.result = Some(qr);
-                self.status_message = match affected {
-                    Some(n) => format!("ok · {n} affected"),
-                    None => format!("ok · {row_count} rows"),
+    fn handle_run_update(&mut self, update: RunUpdate) {
+        match update {
+            RunUpdate::StatementStarted { index, total, sql } => {
+                let streaming = matches!(
+                    &self.result,
+                    ResultState::Running {
+                        streaming: true,
+                        ..
+                    }
+                );
+                self.result = ResultState::Running {
+                    sql: sql.clone(),
+                    index,
+                    total,
+                    columns: Vec::new(),
+                    rows: Vec::new(),
+                    streaming,
                 };
+                self.result_view.reset();
+                self.status_message = format!("running {index}/{total}: {}", truncate(&sql, 60));
             }
-            Err(narwhal_core::Error::Cancelled) => {
-                self.result_error = Some("cancelled".into());
-                self.status_message = "cancelled".into();
+            RunUpdate::HeaderReady { columns: cols } => {
+                if let ResultState::Running { columns, .. } = &mut self.result {
+                    *columns = cols;
+                }
             }
-            Err(error) => {
-                self.result_error = Some(error.to_string());
-                self.status_message = format!("error: {error}");
+            RunUpdate::RowsAppended { rows: new_rows } => {
+                if let ResultState::Running { rows, .. } = &mut self.result {
+                    rows.extend(new_rows);
+                }
+            }
+            RunUpdate::StatementFinished {
+                elapsed_ms,
+                rows_returned,
+                rows_affected,
+                streamed,
+            } => {
+                self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
+            }
+            RunUpdate::Failed { error, elapsed_ms } => {
+                self.result = ResultState::Error {
+                    message: error,
+                    elapsed_ms,
+                };
+                self.result_view.reset();
+            }
+            RunUpdate::AllDone {
+                successes,
+                failures,
+            } => {
+                self.running = false;
+                self.status_message = if failures == 0 {
+                    format!("done · {successes} statement(s)")
+                } else {
+                    format!("done · {successes} ok · {failures} failed")
+                };
             }
         }
     }
+
+    fn finalize_statement(
+        &mut self,
+        elapsed_ms: u64,
+        rows_returned: usize,
+        rows_affected: Option<u64>,
+        streamed: bool,
+    ) {
+        let (columns, rows, index, total) = match std::mem::take(&mut self.result) {
+            ResultState::Running {
+                columns,
+                rows,
+                index,
+                total,
+                ..
+            } => (columns, rows, index, total),
+            other => {
+                self.result = other;
+                return;
+            }
+        };
+        if columns.is_empty() {
+            self.result = ResultState::Affected {
+                rows: rows_affected.unwrap_or(0),
+                elapsed_ms,
+                index,
+                total,
+            };
+        } else {
+            self.result = ResultState::Rows {
+                columns,
+                rows,
+                elapsed_ms,
+                streamed,
+                index,
+                total,
+            };
+        }
+        self.status_message = match rows_affected {
+            Some(n) => format!("ok {index}/{total} · {n} affected · {elapsed_ms} ms"),
+            None => format!("ok {index}/{total} · {rows_returned} rows · {elapsed_ms} ms"),
+        };
+    }
 }
 
-// Keep these in scope so the surrounding code can rely on intra-doc links.
-#[allow(dead_code)]
-fn _dialect_hint() -> Dialect {
-    Dialect::default()
+fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
+    match state {
+        ResultState::Empty => ResultDisplay::Empty,
+        ResultState::Running {
+            sql,
+            index,
+            total,
+            columns,
+            rows,
+            ..
+        } => ResultDisplay::Running {
+            sql,
+            index: *index,
+            total: *total,
+            columns,
+            rows,
+        },
+        ResultState::Affected {
+            rows,
+            elapsed_ms,
+            index,
+            total,
+        } => ResultDisplay::Affected {
+            rows: *rows,
+            elapsed_ms: *elapsed_ms,
+            index: *index,
+            total: *total,
+        },
+        ResultState::Rows {
+            columns,
+            rows,
+            elapsed_ms,
+            streamed,
+            index,
+            total,
+        } => ResultDisplay::Rows {
+            columns,
+            rows,
+            elapsed_ms: *elapsed_ms,
+            streamed: *streamed,
+            index: *index,
+            total: *total,
+        },
+        ResultState::Error {
+            message,
+            elapsed_ms,
+        } => ResultDisplay::Error {
+            message,
+            elapsed_ms: *elapsed_ms,
+        },
+    }
 }
 
-#[allow(dead_code)]
-fn _motion_hint() -> Motion {
-    Motion::Left
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_owned()
+    } else {
+        let mut end = max.saturating_sub(1);
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
+    }
 }
