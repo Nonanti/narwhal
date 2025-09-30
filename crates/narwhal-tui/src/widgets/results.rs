@@ -72,10 +72,23 @@ pub enum ResultDisplay<'a> {
         index: usize,
         total: usize,
     },
+    Explain {
+        lines: &'a [ExplainPlanLine],
+        planning_time_ms: Option<f64>,
+        execution_time_ms: Option<f64>,
+    },
     Error {
         message: &'a str,
         elapsed_ms: u64,
     },
+}
+
+/// One rendered line of a query plan. Independent of the parser so the
+/// widget crate does not need a dependency on `serde_json`.
+#[derive(Debug, Clone)]
+pub struct ExplainPlanLine {
+    pub depth: usize,
+    pub text: String,
 }
 
 pub fn render_results(
@@ -135,6 +148,20 @@ pub fn render_results(
         ResultDisplay::Rows { columns, rows, .. } => {
             draw_table(frame, inner, columns, rows, theme, view);
         }
+        ResultDisplay::Explain {
+            lines,
+            planning_time_ms,
+            execution_time_ms,
+        } => {
+            draw_explain(
+                frame,
+                inner,
+                lines,
+                *planning_time_ms,
+                *execution_time_ms,
+                theme,
+            );
+        }
         ResultDisplay::Error {
             message,
             elapsed_ms,
@@ -174,8 +201,49 @@ fn build_title(display: &ResultDisplay<'_>) -> String {
                 rows.len()
             )
         }
+        ResultDisplay::Explain {
+            execution_time_ms, ..
+        } => match execution_time_ms {
+            Some(ms) => format!(" results · explain · {ms:.3} ms "),
+            None => " results · explain ".to_owned(),
+        },
         ResultDisplay::Error { elapsed_ms, .. } => format!(" results · error · {elapsed_ms} ms "),
     }
+}
+
+fn draw_explain(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    lines: &[ExplainPlanLine],
+    planning_time_ms: Option<f64>,
+    execution_time_ms: Option<f64>,
+    theme: &Theme,
+) {
+    let mut rendered: Vec<Line<'_>> = Vec::with_capacity(lines.len() + 2);
+    if let (Some(p), Some(e)) = (planning_time_ms, execution_time_ms) {
+        rendered.push(Line::from(Span::styled(
+            format!("  planning {p:.3} ms · execution {e:.3} ms"),
+            Style::default().fg(theme.muted),
+        )));
+        rendered.push(Line::from(""));
+    }
+    for line in lines {
+        let indent = "  ".repeat(line.depth);
+        let glyph = if line.depth == 0 { "▸" } else { "└" };
+        let style = if line.depth == 0 {
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.foreground)
+        };
+        rendered.push(Line::from(vec![
+            Span::raw(format!("  {indent}{glyph} ")),
+            Span::styled(line.text.clone(), style),
+        ]));
+    }
+    let paragraph = Paragraph::new(rendered);
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_table(

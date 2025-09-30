@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod commands;
+pub mod explain;
 pub mod export;
 pub mod registry;
 pub mod run;

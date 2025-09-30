@@ -1548,6 +1548,7 @@ dependencies = [
  "narwhal-tui",
  "narwhal-vim",
  "ratatui",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
