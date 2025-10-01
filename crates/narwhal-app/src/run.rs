@@ -38,7 +38,7 @@ pub struct RunContext {
 
 /// Incremental updates produced by the worker.
 ///
-/// The UI consumes these to build a [`crate::app::ResultState`] without
+/// The UI consumes these to build a [`crate::core::ResultState`] without
 /// stalling the event loop.
 #[derive(Debug)]
 pub enum RunUpdate {
