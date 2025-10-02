@@ -35,3 +35,6 @@ serde_json.workspace = true
 tempfile = "3.13"
 rusqlite = "0.32"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+insta = "1.40"
+ratatui = { workspace = true, default-features = false }
+regex-lite = "0.1"
