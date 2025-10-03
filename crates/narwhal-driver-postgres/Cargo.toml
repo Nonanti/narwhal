@@ -20,6 +20,9 @@ uuid.workspace = true
 serde_json.workspace = true
 bytes = "1.7"
 futures = { workspace = true }
+rustls = "0.23"
+tokio-postgres-rustls = "0.13"
+rustls-native-certs = "0.8"
 
 [dev-dependencies]
 uuid = { workspace = true }

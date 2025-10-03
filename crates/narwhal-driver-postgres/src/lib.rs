@@ -1,7 +1,18 @@
 //! PostgreSQL driver backed by `tokio-postgres`.
+//!
+//! Transport security is configured via the `sslmode` option in the
+//! connection parameters. Supported values mirror libpq:
+//!
+//! - `disable` (default): no TLS.
+//! - `require`: TLS is required; the server certificate is accepted without
+//!   verification (suitable for trusted networks where confidentiality is
+//!   the goal but a CA chain is not deployed).
+//! - `verify-ca` / `verify-full`: TLS with hostname and chain verification
+//!   against the operating system's trust store.
 
 #![forbid(unsafe_code)]
 
+mod tls;
 mod types;
 
 use std::sync::Arc;
@@ -19,6 +30,7 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
 
+use crate::tls::{make_tls_connector, SslMode};
 use crate::types::{column_to_value, Param};
 
 /// PostgreSQL driver. The current implementation uses `NoTls`; configurable
@@ -74,23 +86,44 @@ impl DatabaseDriver for PostgresDriver {
         password: Option<&str>,
     ) -> Result<Box<dyn Connection>> {
         let connection_string = build_connection_string(config, password)?;
-        debug!(target: "narwhal::postgres", "establishing connection");
+        let sslmode = SslMode::from_options(&config.params.options)?;
+        debug!(target: "narwhal::postgres", sslmode = %sslmode.as_str(), "establishing connection");
 
-        let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
-            .await
-            .map_err(|e| Error::Connection(e.to_string()))?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!(target: "narwhal::postgres", error = %e, "connection task terminated");
+        let client = match sslmode {
+            SslMode::Disable => {
+                let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+                    .await
+                    .map_err(|e| Error::Connection(e.to_string()))?;
+                spawn_connection(connection);
+                client
             }
-        });
+            other => {
+                let connector = make_tls_connector(other)?;
+                let (client, connection) = tokio_postgres::connect(&connection_string, connector)
+                    .await
+                    .map_err(|e| Error::Connection(e.to_string()))?;
+                spawn_connection(connection);
+                client
+            }
+        };
 
         info!(target: "narwhal::postgres", "connection established");
         Ok(Box::new(PostgresConnection {
             client: Arc::new(client),
         }))
     }
+}
+
+fn spawn_connection<S, T>(connection: tokio_postgres::Connection<S, T>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            error!(target: "narwhal::postgres", error = %e, "connection task terminated");
+        }
+    });
 }
 
 fn build_connection_string(config: &ConnectionConfig, password: Option<&str>) -> Result<String> {
