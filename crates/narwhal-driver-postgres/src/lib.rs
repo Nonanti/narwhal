@@ -22,8 +22,8 @@ use async_trait::async_trait;
 use futures::stream::StreamExt;
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
-    TableKind, TableSchema, Value,
+    Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
+    Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
 };
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{ToSql, Type};
@@ -169,6 +169,191 @@ fn map_pg_error(error: tokio_postgres::Error) -> Error {
 
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn parse_action(token: &str) -> Option<ReferentialAction> {
+    // Postgres returns single-character codes for ON UPDATE / ON DELETE:
+    // a=NO ACTION, r=RESTRICT, c=CASCADE, n=SET NULL, d=SET DEFAULT.
+    match token {
+        "a" => Some(ReferentialAction::NoAction),
+        "r" => Some(ReferentialAction::Restrict),
+        "c" => Some(ReferentialAction::Cascade),
+        "n" => Some(ReferentialAction::SetNull),
+        "d" => Some(ReferentialAction::SetDefault),
+        _ => None,
+    }
+}
+
+impl PostgresConnection {
+    async fn list_indexes(&self, schema: &str, table: &str) -> Result<Vec<Index>> {
+        const SQL: &str = "
+            SELECT i.relname,
+                   ix.indisunique,
+                   ix.indisprimary,
+                   pg_catalog.pg_get_indexdef(ix.indexrelid, k + 1, true)
+            FROM pg_catalog.pg_class t
+            JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            JOIN pg_catalog.pg_index ix ON ix.indrelid = t.oid
+            JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+            CROSS JOIN LATERAL generate_series(0, array_length(ix.indkey, 1) - 1) AS k
+            WHERE n.nspname = $1 AND t.relname = $2
+            ORDER BY i.relname, k";
+        let rows = self
+            .run(
+                SQL,
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(table.to_owned()),
+                ],
+            )
+            .await?;
+        let mut by_name: std::collections::BTreeMap<String, Index> =
+            std::collections::BTreeMap::new();
+        for row in rows.rows {
+            let name = match row.0.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let unique = matches!(row.0.get(1), Some(Value::Bool(true)));
+            let primary = matches!(row.0.get(2), Some(Value::Bool(true)));
+            let column_expr = match row.0.get(3) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let entry = by_name.entry(name.clone()).or_insert(Index {
+                name,
+                columns: Vec::new(),
+                unique,
+                primary,
+            });
+            entry.columns.push(column_expr);
+        }
+        Ok(by_name.into_values().collect())
+    }
+
+    async fn list_foreign_keys(&self, schema: &str, table: &str) -> Result<Vec<ForeignKey>> {
+        const SQL: &str = "
+            SELECT con.conname,
+                   con.conkey,
+                   nf.nspname,
+                   cf.relname,
+                   con.confkey,
+                   con.confupdtype::text,
+                   con.confdeltype::text,
+                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                    FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
+                    JOIN pg_catalog.pg_attribute a
+                      ON a.attrelid = con.conrelid AND a.attnum = k.num) AS cols,
+                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                    FROM unnest(con.confkey) WITH ORDINALITY AS k(num, ord)
+                    JOIN pg_catalog.pg_attribute a
+                      ON a.attrelid = con.confrelid AND a.attnum = k.num) AS refcols
+            FROM pg_catalog.pg_constraint con
+            JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_catalog.pg_class cf ON cf.oid = con.confrelid
+            JOIN pg_catalog.pg_namespace nf ON nf.oid = cf.relnamespace
+            WHERE con.contype = 'f' AND n.nspname = $1 AND c.relname = $2
+            ORDER BY con.conname";
+        let rows = self
+            .run(
+                SQL,
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(table.to_owned()),
+                ],
+            )
+            .await?;
+        let mut out = Vec::with_capacity(rows.rows.len());
+        for row in rows.rows {
+            let name = match row.0.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let ref_schema = match row.0.get(2) {
+                Some(Value::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            let ref_table = match row.0.get(3) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let on_update = row.0.get(5).and_then(|v| match v {
+                Value::String(s) => parse_action(s),
+                _ => None,
+            });
+            let on_delete = row.0.get(6).and_then(|v| match v {
+                Value::String(s) => parse_action(s),
+                _ => None,
+            });
+            let columns = extract_csv(row.0.get(7));
+            let referenced_columns = extract_csv(row.0.get(8));
+            out.push(ForeignKey {
+                name,
+                columns,
+                referenced_schema: ref_schema,
+                referenced_table: ref_table,
+                referenced_columns,
+                on_update,
+                on_delete,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn list_unique_constraints(
+        &self,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<UniqueConstraint>> {
+        const SQL: &str = "
+            SELECT con.conname,
+                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                    FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
+                    JOIN pg_catalog.pg_attribute a
+                      ON a.attrelid = con.conrelid AND a.attnum = k.num)
+            FROM pg_catalog.pg_constraint con
+            JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE con.contype = 'u' AND n.nspname = $1 AND c.relname = $2
+            ORDER BY con.conname";
+        let rows = self
+            .run(
+                SQL,
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(table.to_owned()),
+                ],
+            )
+            .await?;
+        let mut out = Vec::with_capacity(rows.rows.len());
+        for row in rows.rows {
+            let name = match row.0.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let columns = extract_csv(row.0.get(1));
+            if !columns.is_empty() {
+                out.push(UniqueConstraint { name, columns });
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn extract_csv(value: Option<&Value>) -> Vec<String> {
+    // The schema queries above use `string_agg(..., ',')` to flatten
+    // multi-column constraints into a plain text value, so we just split on
+    // commas here. Identifiers cannot contain a comma without quoting, and
+    // the engine catalogue never exposes the quoted form.
+    let raw = match value {
+        Some(Value::String(s) | Value::Unknown(s)) => s,
+        _ => return Vec::new(),
+    };
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.split(',').map(|s| s.to_owned()).collect()
 }
 
 impl PostgresConnection {
@@ -440,6 +625,16 @@ impl Connection for PostgresConnection {
             });
         }
 
+        let indexes = self.list_indexes(schema, name).await.unwrap_or_default();
+        let foreign_keys = self
+            .list_foreign_keys(schema, name)
+            .await
+            .unwrap_or_default();
+        let unique_constraints = self
+            .list_unique_constraints(schema, name)
+            .await
+            .unwrap_or_default();
+
         Ok(TableSchema {
             table: Table {
                 schema: schema.to_owned(),
@@ -447,6 +642,9 @@ impl Connection for PostgresConnection {
                 kind,
             },
             columns,
+            indexes,
+            foreign_keys,
+            unique_constraints,
         })
     }
 

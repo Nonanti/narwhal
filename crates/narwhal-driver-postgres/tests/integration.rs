@@ -238,3 +238,56 @@ async fn schema_introspection() {
         .expect("id column");
     assert!(id.primary_key);
 }
+
+#[tokio::test]
+#[ignore]
+async fn describe_table_reports_indexes_and_foreign_keys() {
+    let harness = Harness::start().await;
+    let mut conn = harness.connect().await;
+
+    conn.execute(
+        "CREATE TABLE customers (id SERIAL PRIMARY KEY, email TEXT NOT NULL UNIQUE)",
+        &[],
+    )
+    .await
+    .unwrap();
+    conn.execute(
+        "CREATE TABLE orders (
+            id SERIAL PRIMARY KEY,
+            customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            placed_at TIMESTAMP NOT NULL,
+            CONSTRAINT uniq_orders UNIQUE (customer_id, placed_at)
+         )",
+        &[],
+    )
+    .await
+    .unwrap();
+    conn.execute(
+        "CREATE INDEX idx_orders_placed_at ON orders(placed_at)",
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let schema = conn.describe_table("public", "orders").await.unwrap();
+    assert!(schema
+        .indexes
+        .iter()
+        .any(|i| i.name == "idx_orders_placed_at" && !i.unique && !i.primary));
+    assert!(schema.indexes.iter().any(|i| i.primary));
+
+    let fks = &schema.foreign_keys;
+    assert_eq!(fks.len(), 1);
+    assert_eq!(fks[0].columns, vec!["customer_id"]);
+    assert_eq!(fks[0].referenced_table, "customers");
+    assert_eq!(fks[0].referenced_columns, vec!["id"]);
+    assert_eq!(
+        fks[0].on_delete,
+        Some(narwhal_core::ReferentialAction::Cascade)
+    );
+
+    assert!(schema
+        .unique_constraints
+        .iter()
+        .any(|u| u.name == "uniq_orders" && u.columns == vec!["customer_id", "placed_at"]));
+}
