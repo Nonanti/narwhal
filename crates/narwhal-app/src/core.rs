@@ -349,21 +349,40 @@ impl AppCore {
 
     // ----- session management -----
 
-    fn open_named(&mut self, name: &str) {
+    fn open_named(&mut self, target: &str) {
+        if target.contains("://") || target.starts_with("sqlite:") {
+            match narwhal_config::parse_url(target) {
+                Ok(parsed) => {
+                    self.open_connection_with_password(parsed.config, parsed.password);
+                }
+                Err(error) => {
+                    self.status_message = format!("invalid url: {error}");
+                }
+            }
+            return;
+        }
         let Some(config) = self
             .connections
             .connections
             .iter()
-            .find(|c| c.name == name)
+            .find(|c| c.name == target)
             .cloned()
         else {
-            self.status_message = format!("connection not found: {name}");
+            self.status_message = format!("connection not found: {target}");
             return;
         };
         self.open_connection(config);
     }
 
     fn open_connection(&mut self, config: ConnectionConfig) {
+        self.open_connection_with_password(config, None);
+    }
+
+    fn open_connection_with_password(
+        &mut self,
+        config: ConnectionConfig,
+        password: Option<String>,
+    ) {
         let Ok(driver) = self.registry.get(&config.driver) else {
             self.status_message = format!("driver not registered: {}", config.driver);
             return;
@@ -372,9 +391,10 @@ impl AppCore {
         self.status_message = format!("connecting to {label}…");
 
         let driver = driver.clone();
+        let password_for_open = password.clone();
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(async { Session::open(driver, config, None).await })
+                .block_on(async { Session::open(driver, config, password_for_open).await })
         });
         match result {
             Ok(mut session) => {
