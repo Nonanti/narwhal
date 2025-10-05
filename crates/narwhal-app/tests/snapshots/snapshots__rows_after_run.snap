@@ -4,8 +4,8 @@ expression: rendered
 ---
 ┌ narwhal ───────────────────────┐┌ editor · SQLite ───────────────────────────────────────────────────────────────────┐
 │   ● demo (sqlite)              ││  1 │ SELECT id, label FROM items ORDER BY id                                       │
-│       main                     ││                                                                                    │
-│         ▢ items                ││                                                                                    │
+│     ▾ main                     ││                                                                                    │
+│       ▢ items                  ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │

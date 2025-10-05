@@ -9,17 +9,18 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_config::ConnectionsFile;
-use narwhal_core::{ColumnHeader, ConnectionConfig, Row};
+use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
     render_root, translate_key_event, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay,
-    ResultView, RootLayout, SidebarView, Theme,
+    ResultView, RootLayout, SidebarRow, SidebarRowKind, SidebarView, Theme,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
+use uuid::Uuid;
 
 use crate::commands::{parse, Command};
 use crate::explain::{parse as parse_plan, wrap_explain};
@@ -62,9 +63,32 @@ pub enum ResultState {
         planning_time_ms: Option<f64>,
         execution_time_ms: Option<f64>,
     },
+    TableDetail {
+        schema: TableSchema,
+    },
     Error {
         message: String,
         elapsed_ms: u64,
+    },
+}
+
+/// Internal entry in the rendered sidebar list.
+#[derive(Debug, Clone)]
+enum SidebarItem {
+    Connection {
+        #[allow(dead_code)]
+        id: Uuid,
+        name: String,
+        driver: String,
+        active: bool,
+    },
+    Schema {
+        name: String,
+    },
+    Table {
+        schema: String,
+        name: String,
+        kind: TableKind,
     },
 }
 
@@ -80,6 +104,7 @@ pub struct AppCore {
     vim: Vim,
     theme: Theme,
     focus: Pane,
+    sidebar_items: Vec<SidebarItem>,
     sidebar_index: usize,
     status_message: String,
     running: bool,
@@ -96,6 +121,18 @@ impl AppCore {
         history: Option<Arc<Journal>>,
     ) -> Self {
         let (run_tx, run_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
+        let mut this = Self::new_inner(registry, connections, history, run_tx, run_rx);
+        this.rebuild_sidebar();
+        this
+    }
+
+    fn new_inner(
+        registry: DriverRegistry,
+        connections: ConnectionsFile,
+        history: Option<Arc<Journal>>,
+        run_tx: mpsc::Sender<RunUpdate>,
+        run_rx: mpsc::Receiver<RunUpdate>,
+    ) -> Self {
         Self {
             registry,
             connections,
@@ -107,6 +144,7 @@ impl AppCore {
             vim: Vim::new(),
             theme: Theme::default(),
             focus: Pane::Editor,
+            sidebar_items: Vec::new(),
             sidebar_index: 0,
             status_message: "ready".into(),
             running: false,
@@ -114,6 +152,42 @@ impl AppCore {
             should_quit: false,
             run_tx,
             run_rx,
+        }
+    }
+
+    fn rebuild_sidebar(&mut self) {
+        let mut items = Vec::new();
+        let active_id = self.session.as_ref().map(|s| s.config.id);
+        for conn in &self.connections.connections {
+            let active = Some(conn.id) == active_id;
+            items.push(SidebarItem::Connection {
+                id: conn.id,
+                name: conn.name.clone(),
+                driver: conn.driver.clone(),
+                active,
+            });
+            if active {
+                if let Some(session) = self.session.as_ref() {
+                    for (schema, tables) in &session.schemas {
+                        if !schema.name.is_empty() {
+                            items.push(SidebarItem::Schema {
+                                name: schema.name.clone(),
+                            });
+                        }
+                        for table in tables {
+                            items.push(SidebarItem::Table {
+                                schema: table.schema.clone(),
+                                name: table.name.clone(),
+                                kind: table.kind,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        self.sidebar_items = items;
+        if self.sidebar_index >= self.sidebar_items.len() {
+            self.sidebar_index = self.sidebar_items.len().saturating_sub(1);
         }
     }
 
@@ -154,14 +228,19 @@ impl AppCore {
     // ----- render -----
 
     pub fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let labels: Vec<String> = self.sidebar_items.iter().map(sidebar_label).collect();
+        let rows: Vec<SidebarRow<'_>> = self
+            .sidebar_items
+            .iter()
+            .zip(labels.iter())
+            .map(|(item, label)| SidebarRow {
+                depth: sidebar_depth(item),
+                kind: sidebar_kind(item),
+                label: label.as_str(),
+            })
+            .collect();
         let sidebar_view = SidebarView {
-            connections: &self.connections.connections,
-            active_connection: self.session.as_ref().map(|s| s.config.id),
-            schemas: self
-                .session
-                .as_ref()
-                .map(|s| s.schemas.as_slice())
-                .unwrap_or(&[]),
+            items: &rows,
             selected_index: self.sidebar_index,
             focused: self.focus == Pane::Sidebar,
         };
@@ -241,24 +320,64 @@ impl AppCore {
 
     fn handle_sidebar_key(&mut self, key: KeyEvent) {
         match key.code {
-            CtKey::Char('j') | CtKey::Down if !self.connections.connections.is_empty() => {
-                self.sidebar_index = (self.sidebar_index + 1) % self.connections.connections.len();
+            CtKey::Char('j') | CtKey::Down if !self.sidebar_items.is_empty() => {
+                self.sidebar_index = (self.sidebar_index + 1) % self.sidebar_items.len();
             }
-            CtKey::Char('k') | CtKey::Up if !self.connections.connections.is_empty() => {
-                let len = self.connections.connections.len();
+            CtKey::Char('k') | CtKey::Up if !self.sidebar_items.is_empty() => {
+                let len = self.sidebar_items.len();
                 self.sidebar_index = (self.sidebar_index + len - 1) % len;
             }
-            CtKey::Enter => {
-                if let Some(conn) = self
-                    .connections
-                    .connections
-                    .get(self.sidebar_index)
-                    .cloned()
-                {
-                    self.open_connection(conn);
-                }
-            }
+            CtKey::Enter => self.activate_sidebar_selection(),
             _ => {}
+        }
+    }
+
+    fn activate_sidebar_selection(&mut self) {
+        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+            return;
+        };
+        match item {
+            SidebarItem::Connection { name, .. } => self.open_named(&name),
+            SidebarItem::Schema { .. } => {}
+            SidebarItem::Table { schema, name, .. } => {
+                self.describe_table_into_result(&schema, &name);
+            }
+        }
+    }
+
+    fn describe_table_into_result(&mut self, schema: &str, name: &str) {
+        let Some(session) = self.session.as_ref() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let pool = session.pool.clone();
+        let schema_owned = schema.to_owned();
+        let name_owned = name.to_owned();
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                let mut conn = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                conn.describe_table(&schema_owned, &name_owned).await
+            })
+        });
+        match result {
+            Ok(ts) => {
+                self.result_view.reset();
+                self.status_message = format!(
+                    "{}.{}: {} cols·{} idx·{} fk",
+                    ts.table.schema,
+                    ts.table.name,
+                    ts.columns.len(),
+                    ts.indexes.len(),
+                    ts.foreign_keys.len()
+                );
+                self.result = ResultState::TableDetail { schema: ts };
+            }
+            Err(error) => {
+                self.status_message = format!("describe failed: {error}");
+            }
         }
     }
 
@@ -409,6 +528,7 @@ impl AppCore {
                     session.driver.name()
                 );
                 self.session = Some(session);
+                self.rebuild_sidebar();
                 self.focus = Pane::Editor;
             }
             Err(error) => {
@@ -420,6 +540,7 @@ impl AppCore {
     fn close_session(&mut self) {
         if self.session.take().is_some() {
             self.status_message = "connection closed".into();
+            self.rebuild_sidebar();
         }
     }
 
@@ -432,7 +553,10 @@ impl AppCore {
             tokio::runtime::Handle::current().block_on(session.refresh_schemas())
         });
         match result {
-            Ok(()) => self.status_message = "schema refreshed".into(),
+            Ok(()) => {
+                self.status_message = "schema refreshed".into();
+                self.rebuild_sidebar();
+            }
             Err(error) => self.status_message = format!("refresh failed: {error}"),
         }
     }
@@ -788,12 +912,43 @@ fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
             planning_time_ms: *planning_time_ms,
             execution_time_ms: *execution_time_ms,
         },
+        ResultState::TableDetail { schema } => ResultDisplay::TableDetail { schema },
         ResultState::Error {
             message,
             elapsed_ms,
         } => ResultDisplay::Error {
             message,
             elapsed_ms: *elapsed_ms,
+        },
+    }
+}
+
+fn sidebar_label(item: &SidebarItem) -> String {
+    match item {
+        SidebarItem::Connection { name, driver, .. } => format!("{name} ({driver})"),
+        SidebarItem::Schema { name } => name.clone(),
+        SidebarItem::Table { name, .. } => name.clone(),
+    }
+}
+
+fn sidebar_depth(item: &SidebarItem) -> u8 {
+    match item {
+        SidebarItem::Connection { .. } => 0,
+        SidebarItem::Schema { .. } => 1,
+        SidebarItem::Table { .. } => 2,
+    }
+}
+
+fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
+    match item {
+        SidebarItem::Connection { active: true, .. } => SidebarRowKind::ActiveConnection,
+        SidebarItem::Connection { .. } => SidebarRowKind::Connection,
+        SidebarItem::Schema { .. } => SidebarRowKind::Schema,
+        SidebarItem::Table { kind, .. } => match kind {
+            TableKind::Table => SidebarRowKind::Table,
+            TableKind::View => SidebarRowKind::View,
+            TableKind::MaterializedView => SidebarRowKind::MaterializedView,
+            TableKind::SystemTable => SidebarRowKind::SystemTable,
         },
     }
 }

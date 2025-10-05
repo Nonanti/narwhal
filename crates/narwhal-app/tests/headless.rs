@@ -5,10 +5,12 @@
 
 use std::path::PathBuf;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use narwhal_app::core::{AppCore, ResultState};
 use narwhal_app::DriverRegistry;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
+use narwhal_tui::Pane;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -98,6 +100,66 @@ async fn unknown_connection_emits_status_only() {
     core.execute_command("open does-not-exist");
     assert!(core.session().is_none());
     assert!(core.status_message().contains("connection not found"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sidebar_enter_opens_table_detail() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("detail.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE);
+             CREATE TABLE orders (
+                 id INTEGER PRIMARY KEY,
+                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                 placed_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+    }
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+    core.execute_command("open headless");
+
+    // Switch focus to the sidebar (Ctrl-W cycles editor->results->sidebar).
+    let ctrl_w = KeyEvent {
+        code: KeyCode::Char('w'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    while core.focus() != Pane::Sidebar {
+        core.handle_key(ctrl_w);
+    }
+    // Step down to the `orders` row: connection (0) -> main (1) ->
+    // customers (2) -> orders (3).
+    let j = KeyEvent {
+        code: KeyCode::Char('j'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    for _ in 0..3 {
+        core.handle_key(j);
+    }
+    let enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(enter);
+
+    match core.result() {
+        ResultState::TableDetail { schema } => {
+            assert_eq!(schema.table.name, "orders");
+            assert_eq!(schema.columns.len(), 3);
+            assert_eq!(schema.foreign_keys.len(), 1);
+            assert_eq!(schema.foreign_keys[0].referenced_table, "customers");
+        }
+        other => panic!("expected TableDetail, got {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

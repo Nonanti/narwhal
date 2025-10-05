@@ -1,23 +1,56 @@
 //! Connection / schema browser shown in the sidebar.
+//!
+//! The browser receives a flat list of [`SidebarRow`]s so the consumer
+//! controls exactly which entries are interactive and at which depth they
+//! are rendered. This keeps key handling simple — a single `selected_index`
+//! into a homogeneous slice — and makes it easy to add new row kinds.
 
-use narwhal_core::{ConnectionConfig, Schema, Table};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
-use uuid::Uuid;
 
 use crate::theme::Theme;
 
-/// Pair of a schema with the tables it contains.
-pub type SchemaListing = (Schema, Vec<Table>);
+/// Backwards-compatible alias kept so existing callers can keep building
+/// schema listings the way they did before the sidebar refactor.
+pub type SchemaListing = (narwhal_core::Schema, Vec<narwhal_core::Table>);
 
-/// View model passed to [`render_sidebar`] each frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarRowKind {
+    Connection,
+    ActiveConnection,
+    Schema,
+    Table,
+    View,
+    MaterializedView,
+    SystemTable,
+}
+
+impl SidebarRowKind {
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Connection => "○",
+            Self::ActiveConnection => "●",
+            Self::Schema => "▾",
+            Self::Table => "▢",
+            Self::View => "▤",
+            Self::MaterializedView => "▥",
+            Self::SystemTable => "▣",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SidebarRow<'a> {
+    pub depth: u8,
+    pub kind: SidebarRowKind,
+    pub label: &'a str,
+}
+
 pub struct SidebarView<'a> {
-    pub connections: &'a [ConnectionConfig],
-    pub active_connection: Option<Uuid>,
-    pub schemas: &'a [SchemaListing],
+    pub items: &'a [SidebarRow<'a>],
     pub selected_index: usize,
     pub focused: bool,
 }
@@ -35,7 +68,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &SidebarView<'_>,
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if view.connections.is_empty() {
+    if view.items.is_empty() {
         let p = Paragraph::new(vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -52,37 +85,33 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &SidebarView<'_>,
         return;
     }
 
-    let mut lines: Vec<Line<'_>> = Vec::with_capacity(view.connections.len() * 3);
-    for (idx, conn) in view.connections.iter().enumerate() {
-        let active = Some(conn.id) == view.active_connection;
-        let selected = idx == view.selected_index;
-        let marker = if active { "●" } else { "○" };
-        let cursor = if selected && view.focused { "▶" } else { " " };
-        let mut style = Style::default().fg(theme.foreground);
-        if active {
-            style = style.add_modifier(Modifier::BOLD).fg(theme.accent);
-        }
-        let label = format!(" {cursor} {marker} {} ({}) ", conn.name, conn.driver);
-        lines.push(Line::from(Span::styled(label, style)));
-
-        if active && !view.schemas.is_empty() {
-            for (schema, tables) in view.schemas {
-                lines.push(Line::from(Span::styled(
-                    format!("       {}", schema.name),
-                    Style::default().fg(theme.muted),
-                )));
-                for table in tables {
-                    let kind_glyph = match table.kind {
-                        narwhal_core::TableKind::Table => "▢",
-                        narwhal_core::TableKind::View => "▤",
-                        narwhal_core::TableKind::MaterializedView => "▥",
-                        narwhal_core::TableKind::SystemTable => "▣",
-                    };
-                    lines.push(Line::from(format!("         {kind_glyph} {}", table.name)));
+    let lines: Vec<Line<'_>> = view
+        .items
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| {
+            let selected = idx == view.selected_index;
+            let cursor = if selected && view.focused { "▶" } else { " " };
+            let indent = "  ".repeat(row.depth as usize);
+            let glyph = row.kind.glyph();
+            let mut style = Style::default().fg(theme.foreground);
+            match row.kind {
+                SidebarRowKind::ActiveConnection => {
+                    style = style.fg(theme.accent).add_modifier(Modifier::BOLD);
                 }
+                SidebarRowKind::Schema => {
+                    style = style.fg(theme.muted);
+                }
+                _ => {}
             }
-        }
-    }
+            Line::from(vec![
+                Span::raw(format!(" {cursor} ")),
+                Span::raw(indent),
+                Span::raw(format!("{glyph} ")),
+                Span::styled(row.label.to_owned(), style),
+            ])
+        })
+        .collect();
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
