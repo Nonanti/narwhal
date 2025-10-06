@@ -12,8 +12,8 @@ use narwhal_config::ConnectionsFile;
 use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
-    render_root, translate_key_event, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay,
-    ResultView, RootLayout, SidebarRow, SidebarRowKind, SidebarView, Theme,
+    render_root, translate_key_event, CellPopup, EditorBuffer, ExplainPlanLine, Pane,
+    ResultDisplay, ResultView, RootLayout, SidebarRow, SidebarRowKind, SidebarView, Theme,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -402,19 +402,57 @@ impl AppCore {
     }
 
     fn handle_results_key(&mut self, key: KeyEvent) {
-        let row_count = match &self.result {
-            ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows.len(),
-            _ => 0,
+        if self.result_view.popup.is_some() {
+            if matches!(key.code, CtKey::Esc | CtKey::Char('q') | CtKey::Enter) {
+                self.result_view.popup = None;
+            }
+            return;
+        }
+        let (row_count, col_count) = match &self.result {
+            ResultState::Rows { rows, columns, .. }
+            | ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
+            _ => (0, 0),
         };
         match key.code {
             CtKey::Char('j') | CtKey::Down => self.result_view.move_down(row_count),
             CtKey::Char('k') | CtKey::Up => self.result_view.move_up(),
+            CtKey::Char('h') | CtKey::Left => self.result_view.move_left(),
+            CtKey::Char('l') | CtKey::Right => self.result_view.move_right(col_count),
             CtKey::Char('g') => self.result_view.state.select(Some(0)),
             CtKey::Char('G') if row_count > 0 => {
                 self.result_view.state.select(Some(row_count - 1));
             }
+            CtKey::Enter => self.open_cell_popup(),
             _ => {}
         }
+    }
+
+    fn open_cell_popup(&mut self) {
+        let Some(row_index) = self.result_view.state.selected() else {
+            self.status_message = "select a row first (j/k)".into();
+            return;
+        };
+        let col_index = self.result_view.column_index;
+        let (columns, rows) = match &self.result {
+            ResultState::Rows { rows, columns, .. } => (columns, rows),
+            ResultState::Running { rows, columns, .. } => (columns, rows),
+            _ => return,
+        };
+        let Some(column) = columns.get(col_index) else {
+            return;
+        };
+        let Some(row) = rows.get(row_index) else {
+            return;
+        };
+        let Some(value) = row.0.get(col_index) else {
+            return;
+        };
+        self.result_view.popup = Some(CellPopup {
+            column_name: column.name.clone(),
+            column_type: column.data_type.clone(),
+            value_text: value.render(),
+            row_index,
+        });
     }
 
     fn apply_action(&mut self, action: Action) {
