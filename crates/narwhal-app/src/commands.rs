@@ -1,3 +1,14 @@
+/// Selector for [`Command::DumpSchema`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DumpTarget {
+    /// Dump the table currently shown in the result pane (TableDetail).
+    Current,
+    /// Dump every table the active session knows about.
+    All,
+    /// Dump the named table (resolved through the active session).
+    Named(String),
+}
+
 /// Top-level `:`-line commands accepted by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -13,6 +24,7 @@ pub enum Command {
     Clear,
     Explain,
     Export { format: String, path: String },
+    DumpSchema { target: DumpTarget },
     Help,
     Unknown(String),
     Empty,
@@ -39,9 +51,20 @@ pub fn parse(input: &str) -> Command {
         "clear" => Command::Clear,
         "explain" => Command::Explain,
         "export" => parse_export(arg),
+        "dump-schema" | "dumpschema" => parse_dump(arg),
         "help" | "h" => Command::Help,
         _ => Command::Unknown(trimmed.to_owned()),
     }
+}
+
+fn parse_dump(arg: &str) -> Command {
+    let trimmed = arg.trim();
+    let target = match trimmed {
+        "" => DumpTarget::Current,
+        "*" | "all" => DumpTarget::All,
+        name => DumpTarget::Named(name.to_owned()),
+    };
+    Command::DumpSchema { target }
 }
 
 fn parse_export(arg: &str) -> Command {
@@ -81,6 +104,24 @@ mod tests {
             Command::Export {
                 format: "csv".into(),
                 path: "/tmp/out.csv".into(),
+            }
+        );
+        assert_eq!(
+            parse("dump-schema"),
+            Command::DumpSchema {
+                target: DumpTarget::Current
+            }
+        );
+        assert_eq!(
+            parse("dump-schema all"),
+            Command::DumpSchema {
+                target: DumpTarget::All
+            }
+        );
+        assert_eq!(
+            parse("dump-schema orders"),
+            Command::DumpSchema {
+                target: DumpTarget::Named("orders".into())
             }
         );
         match parse("export") {
