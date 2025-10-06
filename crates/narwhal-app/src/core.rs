@@ -329,8 +329,27 @@ impl AppCore {
                 self.sidebar_index = (self.sidebar_index + len - 1) % len;
             }
             CtKey::Enter => self.activate_sidebar_selection(),
+            CtKey::Char('o') => self.preview_sidebar_selection(),
             _ => {}
         }
+    }
+
+    fn preview_sidebar_selection(&mut self) {
+        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+            return;
+        };
+        let SidebarItem::Table { schema, name, .. } = item else {
+            self.status_message = "select a table to preview".into();
+            return;
+        };
+        let Some(session) = self.session.as_ref() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let dialect = session.dialect();
+        let sql = crate::ddl::preview_query(&schema, &name, 100, dialect);
+        self.dispatch_batch(vec![sql], RunMode::Execute);
+        self.focus = Pane::Results;
     }
 
     fn activate_sidebar_selection(&mut self) {

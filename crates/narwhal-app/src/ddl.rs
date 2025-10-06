@@ -86,6 +86,13 @@ pub fn build_table_ddl(table: &TableSchema, dialect: Dialect) -> String {
     out
 }
 
+/// Build a `SELECT * FROM <table> LIMIT <n>` query targetting the engine's
+/// quoting style. Used by the sidebar quick-preview action.
+pub fn preview_query(schema: &str, table: &str, limit: usize, dialect: Dialect) -> String {
+    let qualified = quote_qualified(schema, table, dialect);
+    format!("SELECT * FROM {qualified} LIMIT {limit}")
+}
+
 /// Render multiple tables sequentially, separated by blank lines.
 pub fn build_dump(tables: &[TableSchema], dialect: Dialect) -> String {
     let mut out = String::new();
@@ -240,6 +247,18 @@ mod tests {
         assert!(ddl.starts_with("CREATE TABLE `public`.`orders` ("));
         assert!(ddl.contains("`customer_id`"));
         assert!(ddl.contains("CREATE INDEX `idx_orders_placed_at`"));
+    }
+
+    #[test]
+    fn preview_query_quotes_per_dialect() {
+        assert_eq!(
+            preview_query("public", "orders", 50, Dialect::Postgres),
+            r#"SELECT * FROM "public"."orders" LIMIT 50"#
+        );
+        assert_eq!(
+            preview_query("", "orders", 25, Dialect::MySql),
+            "SELECT * FROM `orders` LIMIT 25"
+        );
     }
 
     #[test]
