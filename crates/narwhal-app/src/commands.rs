@@ -25,6 +25,10 @@ pub enum Command {
     Explain,
     Export { format: String, path: String },
     DumpSchema { target: DumpTarget },
+    NewTab,
+    CloseTab,
+    NextTab,
+    PrevTab,
     Help,
     Unknown(String),
     Empty,
@@ -52,6 +56,10 @@ pub fn parse(input: &str) -> Command {
         "explain" => Command::Explain,
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
+        "new" | "tabnew" => Command::NewTab,
+        "tabclose" | "tc" => Command::CloseTab,
+        "tabnext" | "tn" => Command::NextTab,
+        "tabprev" | "tp" | "tabprevious" => Command::PrevTab,
         "help" | "h" => Command::Help,
         _ => Command::Unknown(trimmed.to_owned()),
     }
@@ -124,6 +132,11 @@ mod tests {
                 target: DumpTarget::Named("orders".into())
             }
         );
+        assert_eq!(parse("new"), Command::NewTab);
+        assert_eq!(parse("tabnew"), Command::NewTab);
+        assert_eq!(parse("tabclose"), Command::CloseTab);
+        assert_eq!(parse("tabnext"), Command::NextTab);
+        assert_eq!(parse("tabprev"), Command::PrevTab);
         match parse("export") {
             Command::Unknown(msg) => assert!(msg.contains("format required")),
             other => panic!("expected Unknown, got {other:?}"),

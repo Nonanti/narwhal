@@ -73,6 +73,25 @@ pub enum ResultState {
     },
 }
 
+/// One editor tab: a buffer + the most recent result it produced.
+pub struct Tab {
+    pub name: String,
+    pub editor: EditorBuffer,
+    pub result: ResultState,
+    pub result_view: ResultView,
+}
+
+impl Tab {
+    fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            editor: EditorBuffer::new(),
+            result: ResultState::Empty,
+            result_view: ResultView::new(),
+        }
+    }
+}
+
 /// Internal entry in the rendered sidebar list.
 #[derive(Debug, Clone)]
 enum SidebarItem {
@@ -99,9 +118,9 @@ pub struct AppCore {
     connections: ConnectionsFile,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
-    editor: EditorBuffer,
-    result: ResultState,
-    result_view: ResultView,
+    tabs: Vec<Tab>,
+    active_tab: usize,
+    next_tab_id: usize,
     vim: Vim,
     theme: Theme,
     focus: Pane,
@@ -139,9 +158,9 @@ impl AppCore {
             connections,
             history,
             session: None,
-            editor: EditorBuffer::new(),
-            result: ResultState::Empty,
-            result_view: ResultView::new(),
+            tabs: vec![Tab::new("untitled")],
+            active_tab: 0,
+            next_tab_id: 2,
             vim: Vim::new(),
             theme: Theme::default(),
             focus: Pane::Editor,
@@ -199,11 +218,28 @@ impl AppCore {
     }
 
     pub fn result(&self) -> &ResultState {
-        &self.result
+        &self.tab().result
     }
 
     pub fn editor(&self) -> &EditorBuffer {
-        &self.editor
+        &self.tab().editor
+    }
+
+    pub fn tabs(&self) -> &[Tab] {
+        &self.tabs
+    }
+
+    pub fn active_tab(&self) -> usize {
+        self.active_tab
+    }
+
+    fn tab(&self) -> &Tab {
+        &self.tabs[self.active_tab]
+    }
+
+    #[allow(dead_code)]
+    fn tab_mut(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active_tab]
     }
 
     pub fn session(&self) -> Option<&Session> {
@@ -228,6 +264,30 @@ impl AppCore {
 
     // ----- render -----
 
+    fn editor_title_with_tabs(&self) -> String {
+        let driver = self.session.as_ref().map(|s| s.driver.display_name());
+        let base = match driver {
+            Some(d) => format!("editor · {d}"),
+            None => "editor".to_owned(),
+        };
+        if self.tabs.len() == 1 {
+            return base;
+        }
+        let labels: Vec<String> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                if i == self.active_tab {
+                    format!("[{}*] {}", i + 1, t.name)
+                } else {
+                    format!("[{}] {}", i + 1, t.name)
+                }
+            })
+            .collect();
+        format!("{base} · {}", labels.join("  "))
+    }
+
     pub fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let labels: Vec<String> = self.sidebar_items.iter().map(sidebar_label).collect();
         let rows: Vec<SidebarRow<'_>> = self
@@ -250,12 +310,10 @@ impl AppCore {
             .as_ref()
             .map(|s| s.config.name.clone())
             .unwrap_or_else(|| "(no connection)".into());
-        let editor_title = self
-            .session
-            .as_ref()
-            .map(|s| format!("editor · {}", s.driver.display_name()))
-            .unwrap_or_else(|| "editor".into());
+        let editor_title = self.editor_title_with_tabs();
 
+        let tab = &mut self.tabs[self.active_tab];
+        let result_display = display_from_state(&tab.result);
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
@@ -264,10 +322,10 @@ impl AppCore {
             running: self.running,
             theme: &self.theme,
             sidebar: sidebar_view,
-            editor: &mut self.editor,
+            editor: &mut tab.editor,
             editor_title: &editor_title,
-            result_view: &mut self.result_view,
-            result: display_from_state(&self.result),
+            result_view: &mut tab.result_view,
+            result: result_display,
         };
         render_root(frame, area, &mut layout);
     }
@@ -303,6 +361,18 @@ impl AppCore {
                 }
                 CtKey::Char('s') => {
                     self.dispatch_current_statement(RunMode::Stream);
+                    return true;
+                }
+                CtKey::Tab => {
+                    self.cycle_tab(1);
+                    return true;
+                }
+                CtKey::BackTab => {
+                    self.cycle_tab(-1);
+                    return true;
+                }
+                CtKey::Char('t') => {
+                    self.new_tab();
                     return true;
                 }
                 _ => {}
@@ -384,7 +454,7 @@ impl AppCore {
         });
         match result {
             Ok(ts) => {
-                self.result_view.reset();
+                self.tabs[self.active_tab].result_view.reset();
                 self.status_message = format!(
                     "{}.{}: {} cols·{} idx·{} fk",
                     ts.table.schema,
@@ -393,7 +463,7 @@ impl AppCore {
                     ts.indexes.len(),
                     ts.foreign_keys.len()
                 );
-                self.result = ResultState::TableDetail { schema: ts };
+                self.tabs[self.active_tab].result = ResultState::TableDetail { schema: ts };
             }
             Err(error) => {
                 self.status_message = format!("describe failed: {error}");
@@ -402,25 +472,32 @@ impl AppCore {
     }
 
     fn handle_results_key(&mut self, key: KeyEvent) {
-        if self.result_view.popup.is_some() {
+        if self.tabs[self.active_tab].result_view.popup.is_some() {
             if matches!(key.code, CtKey::Esc | CtKey::Char('q') | CtKey::Enter) {
-                self.result_view.popup = None;
+                self.tabs[self.active_tab].result_view.popup = None;
             }
             return;
         }
-        let (row_count, col_count) = match &self.result {
+        let (row_count, col_count) = match &self.tabs[self.active_tab].result {
             ResultState::Rows { rows, columns, .. }
             | ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
             _ => (0, 0),
         };
         match key.code {
-            CtKey::Char('j') | CtKey::Down => self.result_view.move_down(row_count),
-            CtKey::Char('k') | CtKey::Up => self.result_view.move_up(),
-            CtKey::Char('h') | CtKey::Left => self.result_view.move_left(),
-            CtKey::Char('l') | CtKey::Right => self.result_view.move_right(col_count),
-            CtKey::Char('g') => self.result_view.state.select(Some(0)),
+            CtKey::Char('j') | CtKey::Down => {
+                self.tabs[self.active_tab].result_view.move_down(row_count)
+            }
+            CtKey::Char('k') | CtKey::Up => self.tabs[self.active_tab].result_view.move_up(),
+            CtKey::Char('h') | CtKey::Left => self.tabs[self.active_tab].result_view.move_left(),
+            CtKey::Char('l') | CtKey::Right => {
+                self.tabs[self.active_tab].result_view.move_right(col_count)
+            }
+            CtKey::Char('g') => self.tabs[self.active_tab].result_view.state.select(Some(0)),
             CtKey::Char('G') if row_count > 0 => {
-                self.result_view.state.select(Some(row_count - 1));
+                self.tabs[self.active_tab]
+                    .result_view
+                    .state
+                    .select(Some(row_count - 1));
             }
             CtKey::Enter => self.open_cell_popup(),
             _ => {}
@@ -428,12 +505,12 @@ impl AppCore {
     }
 
     fn open_cell_popup(&mut self) {
-        let Some(row_index) = self.result_view.state.selected() else {
+        let Some(row_index) = self.tabs[self.active_tab].result_view.state.selected() else {
             self.status_message = "select a row first (j/k)".into();
             return;
         };
-        let col_index = self.result_view.column_index;
-        let (columns, rows) = match &self.result {
+        let col_index = self.tabs[self.active_tab].result_view.column_index;
+        let (columns, rows) = match &self.tabs[self.active_tab].result {
             ResultState::Rows { rows, columns, .. } => (columns, rows),
             ResultState::Running { rows, columns, .. } => (columns, rows),
             _ => return,
@@ -447,7 +524,7 @@ impl AppCore {
         let Some(value) = row.0.get(col_index) else {
             return;
         };
-        self.result_view.popup = Some(CellPopup {
+        self.tabs[self.active_tab].result_view.popup = Some(CellPopup {
             column_name: column.name.clone(),
             column_type: column.data_type.clone(),
             value_text: value.render(),
@@ -458,13 +535,15 @@ impl AppCore {
     fn apply_action(&mut self, action: Action) {
         match action {
             Action::Move { motion, count } => {
-                self.editor.apply_motion(motion, count);
+                self.tabs[self.active_tab]
+                    .editor
+                    .apply_motion(motion, count);
             }
             Action::InsertText(text) => {
-                self.editor.insert_str(&text);
+                self.tabs[self.active_tab].editor.insert_str(&text);
             }
             Action::DeleteChar => {
-                self.editor.delete_char();
+                self.tabs[self.active_tab].editor.delete_char();
             }
             Action::EnterMode(mode) => {
                 self.status_message = match mode {
@@ -499,14 +578,18 @@ impl AppCore {
             Command::StreamAll => self.dispatch_all_statements(RunMode::Stream),
             Command::Cancel => self.spawn_cancel(),
             Command::Clear => {
-                self.editor.clear();
-                self.result = ResultState::Empty;
-                self.result_view.reset();
+                self.tabs[self.active_tab].editor.clear();
+                self.tabs[self.active_tab].result = ResultState::Empty;
+                self.tabs[self.active_tab].result_view.reset();
                 self.status_message = "buffer cleared".into();
             }
             Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
+            Command::NewTab => self.new_tab(),
+            Command::CloseTab => self.close_tab(),
+            Command::NextTab => self.cycle_tab(1),
+            Command::PrevTab => self.cycle_tab(-1),
             Command::Help => {
                 self.status_message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
@@ -522,7 +605,7 @@ impl AppCore {
     /// Insert raw text into the editor buffer. Used by tests to seed
     /// statements without simulating individual key presses.
     pub fn insert_into_editor(&mut self, text: &str) {
-        self.editor.insert_str(text);
+        self.tabs[self.active_tab].editor.insert_str(text);
     }
 
     // ----- session management -----
@@ -627,7 +710,10 @@ impl AppCore {
             self.status_message = "no active connection".into();
             return;
         };
-        let Some(sql) = self.editor.statement_at_cursor(session.dialect()) else {
+        let Some(sql) = self.tabs[self.active_tab]
+            .editor
+            .statement_at_cursor(session.dialect())
+        else {
             self.status_message = "no statement under cursor".into();
             return;
         };
@@ -644,7 +730,9 @@ impl AppCore {
             self.status_message = "no active connection".into();
             return;
         };
-        let statements = self.editor.all_statements(session.dialect());
+        let statements = self.tabs[self.active_tab]
+            .editor
+            .all_statements(session.dialect());
         if statements.is_empty() {
             self.status_message = "buffer contains no statements".into();
             return;
@@ -669,8 +757,8 @@ impl AppCore {
         };
         let request = RunRequest { statements, mode };
         self.running = true;
-        self.result_view.reset();
-        self.result = ResultState::Running {
+        self.tabs[self.active_tab].result_view.reset();
+        self.tabs[self.active_tab].result = ResultState::Running {
             sql: String::new(),
             index: 0,
             total: request.statements.len(),
@@ -683,6 +771,42 @@ impl AppCore {
             RunMode::Stream => "streaming…".into(),
         };
         spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
+    }
+
+    fn new_tab(&mut self) {
+        let name = format!("untitled-{}", self.next_tab_id);
+        self.next_tab_id += 1;
+        self.tabs.push(Tab::new(name));
+        self.active_tab = self.tabs.len() - 1;
+        self.status_message = format!("tab {} opened", self.active_tab + 1);
+        self.focus = Pane::Editor;
+    }
+
+    fn close_tab(&mut self) {
+        if self.tabs.len() == 1 {
+            self.status_message = "last tab; use :q to quit".into();
+            return;
+        }
+        self.tabs.remove(self.active_tab);
+        if self.active_tab >= self.tabs.len() {
+            self.active_tab = self.tabs.len() - 1;
+        }
+        self.status_message = format!("tab closed; now on {}", self.active_tab + 1);
+    }
+
+    fn cycle_tab(&mut self, delta: i32) {
+        if self.tabs.len() <= 1 {
+            return;
+        }
+        let len = self.tabs.len() as i32;
+        let next = ((self.active_tab as i32) + delta).rem_euclid(len) as usize;
+        self.active_tab = next;
+        self.status_message = format!(
+            "tab {} of {} · {}",
+            self.active_tab + 1,
+            self.tabs.len(),
+            self.tabs[self.active_tab].name
+        );
     }
 
     fn dump_schema(&mut self, target: DumpTarget) {
@@ -704,7 +828,7 @@ impl AppCore {
 
         let names: Vec<(String, String)> = match target {
             DumpTarget::Current => {
-                if let ResultState::TableDetail { schema } = &self.result {
+                if let ResultState::TableDetail { schema } = &self.tabs[self.active_tab].result {
                     vec![(schema.table.schema.clone(), schema.table.name.clone())]
                 } else {
                     self.status_message =
@@ -749,8 +873,8 @@ impl AppCore {
                 } else {
                     build_dump(&tables, dialect)
                 };
-                self.editor.clear();
-                self.editor.insert_str(&ddl);
+                self.tabs[self.active_tab].editor.clear();
+                self.tabs[self.active_tab].editor.insert_str(&ddl);
                 self.status_message = format!(
                     "dump-schema: wrote {} table(s) into the editor buffer",
                     tables.len()
@@ -772,7 +896,10 @@ impl AppCore {
             self.status_message = "explain is only supported on postgres for now".into();
             return;
         }
-        let Some(sql) = self.editor.statement_at_cursor(session.dialect()) else {
+        let Some(sql) = self.tabs[self.active_tab]
+            .editor
+            .statement_at_cursor(session.dialect())
+        else {
             self.status_message = "no statement under cursor".into();
             return;
         };
@@ -790,7 +917,7 @@ impl AppCore {
             self.status_message = format!("unknown export format: {format} (csv|json)");
             return;
         };
-        let (columns, rows) = match &self.result {
+        let (columns, rows) = match &self.tabs[self.active_tab].result {
             ResultState::Rows { columns, rows, .. } => (columns.as_slice(), rows.as_slice()),
             ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
                 (columns.as_slice(), rows.as_slice())
@@ -840,13 +967,13 @@ impl AppCore {
         match update {
             RunUpdate::StatementStarted { index, total, sql } => {
                 let streaming = matches!(
-                    &self.result,
+                    &self.tabs[self.active_tab].result,
                     ResultState::Running {
                         streaming: true,
                         ..
                     }
                 );
-                self.result = ResultState::Running {
+                self.tabs[self.active_tab].result = ResultState::Running {
                     sql: sql.clone(),
                     index,
                     total,
@@ -854,16 +981,17 @@ impl AppCore {
                     rows: Vec::new(),
                     streaming,
                 };
-                self.result_view.reset();
+                self.tabs[self.active_tab].result_view.reset();
                 self.status_message = format!("running {index}/{total}: {}", truncate(&sql, 60));
             }
             RunUpdate::HeaderReady { columns: cols } => {
-                if let ResultState::Running { columns, .. } = &mut self.result {
+                if let ResultState::Running { columns, .. } = &mut self.tabs[self.active_tab].result
+                {
                     *columns = cols;
                 }
             }
             RunUpdate::RowsAppended { rows: new_rows } => {
-                if let ResultState::Running { rows, .. } = &mut self.result {
+                if let ResultState::Running { rows, .. } = &mut self.tabs[self.active_tab].result {
                     rows.extend(new_rows);
                 }
             }
@@ -876,11 +1004,11 @@ impl AppCore {
                 self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
             }
             RunUpdate::Failed { error, elapsed_ms } => {
-                self.result = ResultState::Error {
+                self.tabs[self.active_tab].result = ResultState::Error {
                     message: error,
                     elapsed_ms,
                 };
-                self.result_view.reset();
+                self.tabs[self.active_tab].result_view.reset();
             }
             RunUpdate::AllDone {
                 successes,
@@ -914,21 +1042,22 @@ impl AppCore {
         rows_affected: Option<u64>,
         streamed: bool,
     ) {
-        let (columns, rows, index, total) = match std::mem::take(&mut self.result) {
-            ResultState::Running {
-                columns,
-                rows,
-                index,
-                total,
-                ..
-            } => (columns, rows, index, total),
-            other => {
-                self.result = other;
-                return;
-            }
-        };
+        let (columns, rows, index, total) =
+            match std::mem::take(&mut self.tabs[self.active_tab].result) {
+                ResultState::Running {
+                    columns,
+                    rows,
+                    index,
+                    total,
+                    ..
+                } => (columns, rows, index, total),
+                other => {
+                    self.tabs[self.active_tab].result = other;
+                    return;
+                }
+            };
         if columns.is_empty() {
-            self.result = ResultState::Affected {
+            self.tabs[self.active_tab].result = ResultState::Affected {
                 rows: rows_affected.unwrap_or(0),
                 elapsed_ms,
                 index,
@@ -937,7 +1066,7 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    self.result = ResultState::Explain {
+                    self.tabs[self.active_tab].result = ResultState::Explain {
                         lines: plan
                             .lines
                             .into_iter()
@@ -953,7 +1082,7 @@ impl AppCore {
                     return;
                 }
                 Err(error) => {
-                    self.result = ResultState::Error {
+                    self.tabs[self.active_tab].result = ResultState::Error {
                         message: format!("explain parse failed: {error}"),
                         elapsed_ms,
                     };
@@ -961,7 +1090,7 @@ impl AppCore {
                 }
             }
         } else {
-            self.result = ResultState::Rows {
+            self.tabs[self.active_tab].result = ResultState::Rows {
                 columns,
                 rows,
                 elapsed_ms,
