@@ -8,7 +8,7 @@
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
-use narwhal_config::ConnectionsFile;
+use narwhal_config::{ConnectionsFile, CredentialStore};
 use narwhal_history::Journal;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -29,6 +29,20 @@ impl App {
     ) -> Self {
         Self {
             core: AppCore::new(registry, connections, history),
+        }
+    }
+
+    /// Construct an [`App`] that uses the supplied credential store. The
+    /// binary passes a [`narwhal_config::KeyringStore`]; tests may pass an
+    /// in-memory store.
+    pub fn with_credentials(
+        registry: DriverRegistry,
+        connections: ConnectionsFile,
+        history: Option<Arc<Journal>>,
+        credentials: Arc<dyn CredentialStore>,
+    ) -> Self {
+        Self {
+            core: AppCore::with_credentials(registry, connections, history, credentials),
         }
     }
 

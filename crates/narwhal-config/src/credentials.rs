@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -65,5 +68,68 @@ impl CredentialStore for KeyringStore {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+}
+
+/// In-memory credential store. Used by tests and as a transparent fallback
+/// when no OS keyring is available (e.g. headless CI).
+#[derive(Debug, Default)]
+pub struct InMemoryStore {
+    secrets: Mutex<HashMap<Uuid, String>>,
+}
+
+impl InMemoryStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl CredentialStore for InMemoryStore {
+    fn get(&self, connection_id: Uuid) -> Result<Option<String>, CredentialError> {
+        let guard = self
+            .secrets
+            .lock()
+            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        Ok(guard.get(&connection_id).cloned())
+    }
+
+    fn set(&self, connection_id: Uuid, secret: &str) -> Result<(), CredentialError> {
+        let mut guard = self
+            .secrets
+            .lock()
+            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        guard.insert(connection_id, secret.to_owned());
+        Ok(())
+    }
+
+    fn delete(&self, connection_id: Uuid) -> Result<(), CredentialError> {
+        let mut guard = self
+            .secrets
+            .lock()
+            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        guard.remove(&connection_id);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_memory_round_trip() {
+        let store = InMemoryStore::new();
+        let id = Uuid::new_v4();
+        assert!(store.get(id).unwrap().is_none());
+        store.set(id, "s3cret").unwrap();
+        assert_eq!(store.get(id).unwrap().as_deref(), Some("s3cret"));
+        store.delete(id).unwrap();
+        assert!(store.get(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn in_memory_delete_missing_is_ok() {
+        let store = InMemoryStore::new();
+        store.delete(Uuid::new_v4()).unwrap();
     }
 }

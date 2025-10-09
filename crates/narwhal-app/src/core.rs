@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_config::ConnectionsFile;
+use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
@@ -131,6 +131,7 @@ pub struct AppCore {
     registry: DriverRegistry,
     connections: ConnectionsFile,
     connections_path: Option<std::path::PathBuf>,
+    credentials: Arc<dyn CredentialStore>,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -157,8 +158,25 @@ impl AppCore {
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
     ) -> Self {
+        Self::with_credentials(
+            registry,
+            connections,
+            history,
+            Arc::new(InMemoryStore::new()),
+        )
+    }
+
+    /// Same as [`Self::new`] but lets the caller inject a credential store.
+    /// Production builds pass a [`narwhal_config::KeyringStore`]; tests use
+    /// [`InMemoryStore`].
+    pub fn with_credentials(
+        registry: DriverRegistry,
+        connections: ConnectionsFile,
+        history: Option<Arc<Journal>>,
+        credentials: Arc<dyn CredentialStore>,
+    ) -> Self {
         let (run_tx, run_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
-        let mut this = Self::new_inner(registry, connections, history, run_tx, run_rx);
+        let mut this = Self::new_inner(registry, connections, history, credentials, run_tx, run_rx);
         this.rebuild_sidebar();
         this
     }
@@ -167,6 +185,7 @@ impl AppCore {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
+        credentials: Arc<dyn CredentialStore>,
         run_tx: mpsc::Sender<RunUpdate>,
         run_rx: mpsc::Receiver<RunUpdate>,
     ) -> Self {
@@ -174,6 +193,7 @@ impl AppCore {
             registry,
             connections,
             connections_path: None,
+            credentials,
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -756,6 +776,8 @@ impl AppCore {
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
             Command::Add => self.start_wizard(),
+            Command::Remove(name) => self.remove_connection(&name),
+            Command::Forget(name) => self.forget_password(&name),
             Command::NewTab => self.new_tab(),
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
@@ -806,7 +828,14 @@ impl AppCore {
     }
 
     fn open_connection(&mut self, config: ConnectionConfig) {
-        self.open_connection_with_password(config, None);
+        let password = match self.credentials.get(config.id) {
+            Ok(secret) => secret,
+            Err(error) => {
+                debug!(target: "narwhal::app", error = %error, "keyring lookup failed; continuing without password");
+                None
+            }
+        };
+        self.open_connection_with_password(config, password);
     }
 
     fn open_connection_with_password(
@@ -949,6 +978,52 @@ impl AppCore {
         self.status_message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
     }
 
+    fn remove_connection(&mut self, name: &str) {
+        let Some(pos) = self
+            .connections
+            .connections
+            .iter()
+            .position(|c| c.name == name)
+        else {
+            self.status_message = format!("remove: no connection named '{name}'");
+            return;
+        };
+        let removed = self.connections.connections.remove(pos);
+        if let Some(path) = self.connections_path.as_ref() {
+            if let Err(error) = self.connections.save(path) {
+                // Restore in-memory state so we don't drift from disk.
+                self.connections.connections.insert(pos, removed);
+                self.status_message = format!("remove failed: {error}");
+                return;
+            }
+        }
+        if let Err(error) = self.credentials.delete(removed.id) {
+            debug!(target: "narwhal::app", error = %error, "keyring delete failed during remove");
+        }
+        if let Some(session) = self.session.as_ref() {
+            if session.config.id == removed.id {
+                self.session = None;
+            }
+        }
+        self.rebuild_sidebar();
+        self.status_message = format!("removed connection '{name}'");
+    }
+
+    fn forget_password(&mut self, name: &str) {
+        let Some(config) = self.connections.connections.iter().find(|c| c.name == name) else {
+            self.status_message = format!("forget: no connection named '{name}'");
+            return;
+        };
+        match self.credentials.delete(config.id) {
+            Ok(()) => {
+                self.status_message = format!("forgot password for '{name}'");
+            }
+            Err(error) => {
+                self.status_message = format!("forget failed: {error}");
+            }
+        }
+    }
+
     fn cancel_wizard(&mut self) {
         if self.wizard.take().is_some() {
             self.wizard_error = None;
@@ -977,6 +1052,8 @@ impl AppCore {
                     ));
                     return;
                 }
+                let connection_id = built.config.id;
+                let secret = built.password.clone();
                 self.connections.connections.push(built.config.clone());
                 if let Some(path) = self.connections_path.as_ref() {
                     if let Err(error) = self.connections.save(path) {
@@ -985,6 +1062,15 @@ impl AppCore {
                         // remains the source of truth.
                         self.connections.connections.pop();
                         return;
+                    }
+                }
+                if let Some(secret) = secret {
+                    if let Err(error) = self.credentials.set(connection_id, &secret) {
+                        // The connection is still saved; just warn the user
+                        // that the secret didn't make it to the keyring.
+                        self.wizard_error = Some(format!(
+                            "saved, but storing the password in the keyring failed: {error}"
+                        ));
                     }
                 }
                 self.wizard = None;

@@ -23,13 +23,23 @@ pub enum Command {
     Cancel,
     Clear,
     Explain,
-    Export { format: String, path: String },
-    DumpSchema { target: DumpTarget },
+    Export {
+        format: String,
+        path: String,
+    },
+    DumpSchema {
+        target: DumpTarget,
+    },
     NewTab,
     CloseTab,
     NextTab,
     PrevTab,
     Add,
+    /// Remove a saved connection by name (also clears its keyring entry).
+    Remove(String),
+    /// Forget the keyring password for a saved connection by name; the
+    /// connection itself stays in `connections.toml`.
+    Forget(String),
     Help,
     Unknown(String),
     Empty,
@@ -58,6 +68,20 @@ pub fn parse(input: &str) -> Command {
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
         "add" => Command::Add,
+        "remove" | "rm" => {
+            if arg.is_empty() {
+                Command::Unknown("remove: connection name required".into())
+            } else {
+                Command::Remove(arg.to_owned())
+            }
+        }
+        "forget" => {
+            if arg.is_empty() {
+                Command::Unknown("forget: connection name required".into())
+            } else {
+                Command::Forget(arg.to_owned())
+            }
+        }
         "new" | "tabnew" => Command::NewTab,
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,
@@ -139,6 +163,13 @@ mod tests {
         assert_eq!(parse("tabclose"), Command::CloseTab);
         assert_eq!(parse("tabnext"), Command::NextTab);
         assert_eq!(parse("tabprev"), Command::PrevTab);
+        assert_eq!(parse("remove dev"), Command::Remove("dev".into()));
+        assert_eq!(parse("rm  prod "), Command::Remove("prod".into()));
+        assert_eq!(parse("forget dev"), Command::Forget("dev".into()));
+        match parse("remove") {
+            Command::Unknown(msg) => assert!(msg.contains("connection name")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
         match parse("export") {
             Command::Unknown(msg) => assert!(msg.contains("format required")),
             other => panic!("expected Unknown, got {other:?}"),
