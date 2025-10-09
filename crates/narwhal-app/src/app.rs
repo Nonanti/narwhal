@@ -32,6 +32,13 @@ impl App {
         }
     }
 
+    /// Override the persistence location for connections produced via the
+    /// `:add` wizard. Should be called immediately after [`Self::new`].
+    pub fn with_connections_path(mut self, path: std::path::PathBuf) -> Self {
+        self.core.set_connections_path(path);
+        self
+    }
+
     pub async fn run(mut self) -> Result<()> {
         let mut guard = TerminalGuard::enter()?;
         let mut events = EventStream::new();
