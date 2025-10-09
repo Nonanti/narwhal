@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use narwhal_core::{CancelHandle, ColumnHeader, Row};
+use narwhal_core::{CancelHandle, ColumnHeader, Connection, Row};
 use narwhal_history::{HistoryEntry, Journal};
-use narwhal_pool::Pool;
+use narwhal_pool::{Pool, PooledConnection};
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 use uuid::Uuid;
@@ -26,10 +26,20 @@ pub struct RunRequest {
     pub mode: RunMode,
 }
 
+/// Where the worker should source the connection from.
+#[derive(Clone)]
+pub enum RunTarget {
+    /// Acquire a fresh connection from the pool and return it on completion.
+    Pool(Pool),
+    /// Reuse a connection pinned to an open transaction. The worker locks
+    /// the mutex for the duration of the batch.
+    Pinned(Arc<Mutex<PooledConnection>>),
+}
+
 /// Context shared across dispatches.
 #[derive(Clone)]
 pub struct RunContext {
-    pub pool: Pool,
+    pub target: RunTarget,
     pub history: Option<Arc<Journal>>,
     pub connection_id: Uuid,
     pub connection_name: String,
@@ -89,23 +99,45 @@ pub fn spawn_run(
             return;
         }
 
-        let mut conn = match ctx.pool.acquire().await {
-            Ok(c) => c,
-            Err(error) => {
-                let _ = tx
-                    .send(RunUpdate::Failed {
-                        error: error.to_string(),
-                        elapsed_ms: 0,
-                    })
-                    .await;
-                let _ = tx
-                    .send(RunUpdate::AllDone {
-                        successes: 0,
-                        failures: total,
-                    })
-                    .await;
-                return;
+        // Source the connection. Pool target -> a fresh PooledConnection;
+        // Pinned target -> a tokio OwnedMutexGuard locked for the whole
+        // batch so nothing else can interleave statements onto the same
+        // transaction.
+        enum Holder {
+            Owned(PooledConnection),
+            Pinned(tokio::sync::OwnedMutexGuard<PooledConnection>),
+        }
+        impl Holder {
+            fn conn(&mut self) -> &mut dyn Connection {
+                // The match bindings are `&mut PooledConnection` and
+                // `&mut OwnedMutexGuard<PooledConnection>`, so we need an
+                // extra deref step in each arm to reach `dyn Connection`.
+                match self {
+                    Holder::Owned(c) => &mut **c,
+                    Holder::Pinned(g) => &mut ***g,
+                }
             }
+        }
+        let mut holder = match &ctx.target {
+            RunTarget::Pool(pool) => match pool.acquire().await {
+                Ok(c) => Holder::Owned(c),
+                Err(error) => {
+                    let _ = tx
+                        .send(RunUpdate::Failed {
+                            error: error.to_string(),
+                            elapsed_ms: 0,
+                        })
+                        .await;
+                    let _ = tx
+                        .send(RunUpdate::AllDone {
+                            successes: 0,
+                            failures: total,
+                        })
+                        .await;
+                    return;
+                }
+            },
+            RunTarget::Pinned(handle) => Holder::Pinned(Arc::clone(handle).lock_owned().await),
         };
 
         let mut successes = 0;
@@ -120,13 +152,13 @@ pub fn spawn_run(
                 })
                 .await;
 
-            if let Some(handle) = conn.cancel_handle() {
+            if let Some(handle) = holder.conn().cancel_handle() {
                 *cancel_slot.lock().await = Some(handle);
             }
 
             let outcome = match request.mode {
-                RunMode::Execute => run_execute(&mut *conn, sql, &tx).await,
-                RunMode::Stream => run_stream(&mut *conn, sql, &tx).await,
+                RunMode::Execute => run_execute(holder.conn(), sql, &tx).await,
+                RunMode::Stream => run_stream(holder.conn(), sql, &tx).await,
             };
 
             *cancel_slot.lock().await = None;
@@ -141,6 +173,7 @@ pub fn spawn_run(
                 }
             }
         }
+        drop(holder);
 
         let _ = tx
             .send(RunUpdate::AllDone {

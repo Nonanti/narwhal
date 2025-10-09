@@ -1,9 +1,24 @@
 use std::sync::Arc;
 
-use narwhal_core::{ConnectionConfig, DatabaseDriver, Error, Result, Schema, Table};
-use narwhal_pool::{Pool, PoolConfig};
+use narwhal_core::{
+    ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema, Table,
+};
+use narwhal_pool::{Pool, PoolConfig, PooledConnection};
 use narwhal_sql::Dialect;
 use narwhal_tui::SchemaListing;
+use tokio::sync::Mutex;
+
+/// Pinned connection plus auxiliary transaction state. Created by
+/// [`Session::begin`] and consumed by [`Session::end_transaction`].
+pub struct TxnHandle {
+    /// Connection checked out of the pool for the duration of the
+    /// transaction. Wrapped in a tokio mutex so the run worker and command
+    /// dispatcher can share it.
+    pub conn: Arc<Mutex<PooledConnection>>,
+    /// Active savepoint names, outermost first.
+    pub savepoints: Vec<String>,
+    pub isolation: Option<IsolationLevel>,
+}
 
 /// Open connection plus its driver capabilities and cached metadata.
 pub struct Session {
@@ -11,6 +26,7 @@ pub struct Session {
     pub driver: Arc<dyn DatabaseDriver>,
     pub pool: Pool,
     pub schemas: Vec<SchemaListing>,
+    pub transaction: Option<TxnHandle>,
 }
 
 impl Session {
@@ -35,7 +51,13 @@ impl Session {
             driver,
             pool,
             schemas: Vec::new(),
+            transaction: None,
         })
+    }
+
+    /// True while a transaction is open.
+    pub fn in_transaction(&self) -> bool {
+        self.transaction.is_some()
     }
 
     /// Refresh the cached schema listing.

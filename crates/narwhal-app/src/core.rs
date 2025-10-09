@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
-use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
+use narwhal_core::{ColumnHeader, ConnectionConfig, IsolationLevel, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
     render_root, render_wizard, translate_key_event, CellPopup, EditorBuffer, ExplainPlanLine,
@@ -23,12 +23,12 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::commands::{parse, Command, DumpTarget};
+use crate::commands::{parse, Command, DumpTarget, IsolationArg};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
-use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunUpdate};
+use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
 use crate::wizard::{ConnectionWizard, DRIVERS};
 
@@ -356,6 +356,14 @@ impl AppCore {
             .as_ref()
             .map(|s| s.config.name.clone())
             .unwrap_or_else(|| "(no connection)".into());
+        let transaction_badge = self.session.as_ref().and_then(|s| {
+            let txn = s.transaction.as_ref()?;
+            Some(if txn.savepoints.is_empty() {
+                "TX".to_owned()
+            } else {
+                format!("TX·sp:{}", txn.savepoints.len())
+            })
+        });
         let editor_title = self.editor_title_with_tabs();
 
         let tab = &mut self.tabs[self.active_tab];
@@ -370,6 +378,7 @@ impl AppCore {
             connection_label: &connection_label,
             status_message: &self.status_message,
             running: self.running,
+            transaction_badge: transaction_badge.as_deref(),
             theme: &self.theme,
             sidebar: sidebar_view,
             editor: &mut tab.editor,
@@ -776,6 +785,12 @@ impl AppCore {
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
             Command::Add => self.start_wizard(),
+            Command::Begin(iso) => self.begin_transaction(iso),
+            Command::Commit => self.commit_transaction(),
+            Command::Rollback => self.rollback_transaction(),
+            Command::Savepoint(name) => self.savepoint(&name),
+            Command::Release(name) => self.release_savepoint(&name),
+            Command::RollbackTo(name) => self.rollback_to_savepoint(&name),
             Command::Remove(name) => self.remove_connection(&name),
             Command::Forget(name) => self.forget_password(&name),
             Command::NewTab => self.new_tab(),
@@ -947,8 +962,12 @@ impl AppCore {
         let Some(session) = self.session.as_ref() else {
             return;
         };
+        let target = match session.transaction.as_ref() {
+            Some(txn) => RunTarget::Pinned(txn.conn.clone()),
+            None => RunTarget::Pool(session.pool.clone()),
+        };
         let ctx = RunContext {
-            pool: session.pool.clone(),
+            target,
             history: self.history.clone(),
             connection_id: session.config.id,
             connection_name: session.config.name.clone(),
@@ -976,6 +995,223 @@ impl AppCore {
         self.wizard = Some(ConnectionWizard::new());
         self.wizard_error = None;
         self.status_message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
+    }
+
+    // ----- transactions -----
+
+    fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
+        if self.running {
+            self.status_message = "a query is already running".into();
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        if session.transaction.is_some() {
+            self.status_message = "a transaction is already open".into();
+            return;
+        }
+        let iso = isolation.map(map_isolation);
+        let pool = session.pool.clone();
+        let result: std::result::Result<narwhal_pool::PooledConnection, narwhal_core::Error> =
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    let mut conn = pool
+                        .acquire()
+                        .await
+                        .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                    match iso {
+                        Some(level) => conn.begin_with(level).await?,
+                        None => conn.begin().await?,
+                    }
+                    Ok(conn)
+                })
+            });
+        match result {
+            Ok(conn) => {
+                session.transaction = Some(crate::session::TxnHandle {
+                    conn: Arc::new(tokio::sync::Mutex::new(conn)),
+                    savepoints: Vec::new(),
+                    isolation: iso,
+                });
+                self.status_message = match iso {
+                    Some(level) => format!("transaction started ({})", isolation_label(level)),
+                    None => "transaction started".into(),
+                };
+            }
+            Err(error) => {
+                self.status_message = format!("begin failed: {error}");
+            }
+        }
+    }
+
+    fn commit_transaction(&mut self) {
+        self.end_transaction(true);
+    }
+
+    fn rollback_transaction(&mut self) {
+        self.end_transaction(false);
+    }
+
+    /// Finish an open transaction. `commit == true` invokes `commit()`,
+    /// otherwise `rollback()`. Either way the pinned connection is
+    /// returned to the pool.
+    fn end_transaction(&mut self, commit: bool) {
+        if self.running {
+            self.status_message = "a query is already running".into();
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let Some(txn) = session.transaction.take() else {
+            self.status_message = "no open transaction".into();
+            return;
+        };
+        let conn_arc = txn.conn;
+        let outcome = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                // Reclaim the pinned connection. If callers held extra Arc
+                // clones we error out rather than silently leak state.
+                let mutex = match Arc::try_unwrap(conn_arc) {
+                    Ok(m) => m,
+                    Err(arc) => {
+                        // A run worker is still holding the lock; wait for
+                        // it to drop and try again. In practice
+                        // dispatch_batch only locks while running.
+                        drop(arc);
+                        return Err(narwhal_core::Error::Connection(
+                            "transaction connection still in use".into(),
+                        ));
+                    }
+                };
+                let mut conn = mutex.into_inner();
+                if commit {
+                    conn.commit().await?;
+                } else {
+                    conn.rollback().await?;
+                }
+                Ok::<(), narwhal_core::Error>(())
+            })
+        });
+        match outcome {
+            Ok(()) => {
+                self.status_message = if commit {
+                    "transaction committed".into()
+                } else {
+                    "transaction rolled back".into()
+                };
+            }
+            Err(error) => {
+                self.status_message = if commit {
+                    format!("commit failed: {error}")
+                } else {
+                    format!("rollback failed: {error}")
+                };
+            }
+        }
+    }
+
+    fn savepoint(&mut self, name: &str) {
+        self.with_txn_conn(
+            |conn, name| Box::pin(async move { conn.savepoint(name).await }),
+            name,
+            |session, name| {
+                if let Some(txn) = session.transaction.as_mut() {
+                    txn.savepoints.push(name.to_owned());
+                }
+            },
+            |name| format!("savepoint '{name}' established"),
+            |name, error| format!("savepoint '{name}' failed: {error}"),
+        );
+    }
+
+    fn release_savepoint(&mut self, name: &str) {
+        self.with_txn_conn(
+            |conn, name| Box::pin(async move { conn.release_savepoint(name).await }),
+            name,
+            |session, name| {
+                if let Some(txn) = session.transaction.as_mut() {
+                    if let Some(pos) = txn.savepoints.iter().position(|s| s == name) {
+                        txn.savepoints.truncate(pos);
+                    }
+                }
+            },
+            |name| format!("savepoint '{name}' released"),
+            |name, error| format!("release '{name}' failed: {error}"),
+        );
+    }
+
+    fn rollback_to_savepoint(&mut self, name: &str) {
+        self.with_txn_conn(
+            |conn, name| Box::pin(async move { conn.rollback_to_savepoint(name).await }),
+            name,
+            |session, name| {
+                if let Some(txn) = session.transaction.as_mut() {
+                    if let Some(pos) = txn.savepoints.iter().position(|s| s == name) {
+                        // Everything after the savepoint is unwound.
+                        txn.savepoints.truncate(pos + 1);
+                    }
+                }
+            },
+            |name| format!("rolled back to savepoint '{name}'"),
+            |name, error| format!("rollback-to '{name}' failed: {error}"),
+        );
+    }
+
+    /// Lock the pinned transaction connection and run `op` on it. Used by
+    /// `:savepoint`, `:release` and `:rollback-to` which all need the same
+    /// guarding boilerplate. Statement execution (`:run`/`:run-all`) goes
+    /// through `dispatch_batch` instead since that path streams updates
+    /// back through `RunUpdate`.
+    fn with_txn_conn<F, S, OkF, ErrF>(
+        &mut self,
+        op: F,
+        name: &str,
+        on_success: S,
+        ok_msg: OkF,
+        err_msg: ErrF,
+    ) where
+        F: for<'a> FnOnce(
+            &'a mut dyn narwhal_core::Connection,
+            &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = narwhal_core::Result<()>> + Send + 'a>,
+        >,
+        S: FnOnce(&mut Session, &str),
+        OkF: FnOnce(&str) -> String,
+        ErrF: FnOnce(&str, &narwhal_core::Error) -> String,
+    {
+        if self.running {
+            self.status_message = "a query is already running".into();
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let Some(txn) = session.transaction.as_ref() else {
+            self.status_message = "no open transaction".into();
+            return;
+        };
+        let conn_arc = txn.conn.clone();
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                let mut guard = conn_arc.lock().await;
+                op(&mut **guard, name).await
+            })
+        });
+        match result {
+            Ok(()) => {
+                on_success(session, name);
+                self.status_message = ok_msg(name);
+            }
+            Err(error) => {
+                self.status_message = err_msg(name, &error);
+            }
+        }
     }
 
     fn remove_connection(&mut self, name: &str) {
@@ -1563,6 +1799,24 @@ fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
             TableKind::MaterializedView => SidebarRowKind::MaterializedView,
             TableKind::SystemTable => SidebarRowKind::SystemTable,
         },
+    }
+}
+
+fn map_isolation(arg: IsolationArg) -> IsolationLevel {
+    match arg {
+        IsolationArg::ReadUncommitted => IsolationLevel::ReadUncommitted,
+        IsolationArg::ReadCommitted => IsolationLevel::ReadCommitted,
+        IsolationArg::RepeatableRead => IsolationLevel::RepeatableRead,
+        IsolationArg::Serializable => IsolationLevel::Serializable,
+    }
+}
+
+fn isolation_label(level: IsolationLevel) -> &'static str {
+    match level {
+        IsolationLevel::ReadUncommitted => "read-uncommitted",
+        IsolationLevel::ReadCommitted => "read-committed",
+        IsolationLevel::RepeatableRead => "repeatable-read",
+        IsolationLevel::Serializable => "serializable",
     }
 }
 

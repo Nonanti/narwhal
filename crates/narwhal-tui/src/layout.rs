@@ -42,6 +42,9 @@ pub struct RootLayout<'a> {
     pub connection_label: &'a str,
     pub status_message: &'a str,
     pub running: bool,
+    /// `Some` when a transaction is open; the inner str is a short tag
+    /// such as "TX" or "TX·sp:2" that the status bar renders verbatim.
+    pub transaction_badge: Option<&'a str>,
     pub theme: &'a Theme,
     pub sidebar: SidebarView<'a>,
     pub editor: &'a mut EditorBuffer,
@@ -108,10 +111,15 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     frame.render_widget(Paragraph::new(" ").style(view.theme.status_bar()), parts[1]);
 
     let running_indicator = if view.running { "⏳ " } else { "" };
+    let txn = match view.transaction_badge {
+        Some(tag) => format!("│ {tag} "),
+        None => String::new(),
+    };
     let body = Line::from(vec![Span::raw(format!(
-        " {} │ {} │ {}{} ",
+        " {} │ {} {}│ {}{} ",
         view.focus.label(),
         view.connection_label,
+        txn,
         running_indicator,
         view.status_message
     ))]);

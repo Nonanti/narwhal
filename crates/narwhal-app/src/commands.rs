@@ -9,6 +9,31 @@ pub enum DumpTarget {
     Named(String),
 }
 
+/// Isolation levels accepted by `:begin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationArg {
+    ReadUncommitted,
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+impl IsolationArg {
+    pub fn parse(token: &str) -> Option<Self> {
+        match token
+            .to_ascii_lowercase()
+            .replace([' ', '_', '-'], "")
+            .as_str()
+        {
+            "readuncommitted" | "uncommitted" | "ru" => Some(Self::ReadUncommitted),
+            "readcommitted" | "committed" | "rc" => Some(Self::ReadCommitted),
+            "repeatableread" | "repeatable" | "rr" => Some(Self::RepeatableRead),
+            "serializable" | "s" => Some(Self::Serializable),
+            _ => None,
+        }
+    }
+}
+
 /// Top-level `:`-line commands accepted by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -35,6 +60,12 @@ pub enum Command {
     NextTab,
     PrevTab,
     Add,
+    Begin(Option<IsolationArg>),
+    Commit,
+    Rollback,
+    Savepoint(String),
+    Release(String),
+    RollbackTo(String),
     /// Remove a saved connection by name (also clears its keyring entry).
     Remove(String),
     /// Forget the keyring password for a saved connection by name; the
@@ -68,6 +99,45 @@ pub fn parse(input: &str) -> Command {
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
         "add" => Command::Add,
+        "begin" | "start" => {
+            if arg.is_empty() {
+                Command::Begin(None)
+            } else {
+                match IsolationArg::parse(arg) {
+                    Some(iso) => Command::Begin(Some(iso)),
+                    None => Command::Unknown(format!("begin: unknown isolation '{arg}'")),
+                }
+            }
+        }
+        "commit" => Command::Commit,
+        "rollback" | "abort" => {
+            if arg.is_empty() {
+                Command::Rollback
+            } else {
+                Command::RollbackTo(arg.to_owned())
+            }
+        }
+        "savepoint" | "sp" => {
+            if arg.is_empty() {
+                Command::Unknown("savepoint: name required".into())
+            } else {
+                Command::Savepoint(arg.to_owned())
+            }
+        }
+        "release" => {
+            if arg.is_empty() {
+                Command::Unknown("release: savepoint name required".into())
+            } else {
+                Command::Release(arg.to_owned())
+            }
+        }
+        "rollback-to" | "rollbackto" => {
+            if arg.is_empty() {
+                Command::Unknown("rollback-to: savepoint name required".into())
+            } else {
+                Command::RollbackTo(arg.to_owned())
+            }
+        }
         "remove" | "rm" => {
             if arg.is_empty() {
                 Command::Unknown("remove: connection name required".into())
@@ -163,6 +233,26 @@ mod tests {
         assert_eq!(parse("tabclose"), Command::CloseTab);
         assert_eq!(parse("tabnext"), Command::NextTab);
         assert_eq!(parse("tabprev"), Command::PrevTab);
+        assert_eq!(parse("begin"), Command::Begin(None));
+        assert_eq!(
+            parse("begin serializable"),
+            Command::Begin(Some(IsolationArg::Serializable))
+        );
+        assert_eq!(
+            parse("begin read-committed"),
+            Command::Begin(Some(IsolationArg::ReadCommitted))
+        );
+        assert_eq!(parse("commit"), Command::Commit);
+        assert_eq!(parse("rollback"), Command::Rollback);
+        assert_eq!(parse("rollback sp1"), Command::RollbackTo("sp1".into()));
+        assert_eq!(parse("savepoint sp1"), Command::Savepoint("sp1".into()));
+        assert_eq!(parse("sp sp2"), Command::Savepoint("sp2".into()));
+        assert_eq!(parse("release sp1"), Command::Release("sp1".into()));
+        assert_eq!(parse("rollback-to sp1"), Command::RollbackTo("sp1".into()));
+        match parse("begin bogus") {
+            Command::Unknown(msg) => assert!(msg.contains("isolation")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
         assert_eq!(parse("remove dev"), Command::Remove("dev".into()));
         assert_eq!(parse("rm  prod "), Command::Remove("prod".into()));
         assert_eq!(parse("forget dev"), Command::Forget("dev".into()));
