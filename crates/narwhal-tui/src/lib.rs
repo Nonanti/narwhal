@@ -12,5 +12,6 @@ pub use layout::{render_root, Pane, RootLayout};
 pub use theme::Theme;
 pub use widgets::{
     render_editor, render_results, render_sidebar, CellPopup, EditorBuffer, ExplainPlanLine,
-    ResultDisplay, ResultView, SchemaListing, SidebarRow, SidebarRowKind, SidebarView,
+    ResultDisplay, ResultView, SchemaListing, SearchHighlight, SidebarRow, SidebarRowKind,
+    SidebarView,
 };

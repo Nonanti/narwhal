@@ -19,6 +19,12 @@ pub struct ResultView {
     pub popup: Option<CellPopup>,
 }
 
+/// Highlight information for [`ResultDisplay::Rows`] when search is active.
+pub struct SearchHighlight<'a> {
+    pub matches: &'a [usize],
+    pub current: Option<usize>,
+}
+
 /// Modal description of one cell, shown over the result grid when the user
 /// requests detail with Enter.
 #[derive(Debug, Clone)]
@@ -99,6 +105,7 @@ pub enum ResultDisplay<'a> {
         streamed: bool,
         index: usize,
         total: usize,
+        search: Option<&'a SearchHighlight<'a>>,
     },
     Explain {
         lines: &'a [ExplainPlanLine],
@@ -161,7 +168,7 @@ pub fn render_results(
                 ))]);
                 frame.render_widget(p, inner);
             } else {
-                draw_table(frame, inner, columns, rows, theme, view);
+                draw_table(frame, inner, columns, rows, None, theme, view);
             }
         }
         ResultDisplay::Affected {
@@ -176,8 +183,13 @@ pub fn render_results(
             let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.foreground)));
             frame.render_widget(p, inner);
         }
-        ResultDisplay::Rows { columns, rows, .. } => {
-            draw_table(frame, inner, columns, rows, theme, view);
+        ResultDisplay::Rows {
+            columns,
+            rows,
+            search,
+            ..
+        } => {
+            draw_table(frame, inner, columns, rows, *search, theme, view);
         }
         ResultDisplay::TableDetail { schema } => {
             draw_table_detail(frame, inner, schema, theme);
@@ -469,6 +481,7 @@ fn draw_table(
     area: Rect,
     columns: &[ColumnHeader],
     rows: &[Row],
+    search: Option<&SearchHighlight<'_>>,
     theme: &Theme,
     view: &mut ResultView,
 ) {
@@ -494,7 +507,24 @@ fn draw_table(
         .collect();
     let body_rows: Vec<TableRow<'_>> = rows
         .iter()
-        .map(|row| TableRow::new(row.0.iter().map(|v| Cell::from(v.render()))))
+        .enumerate()
+        .map(|(idx, row)| {
+            let cells = row.0.iter().map(|v| Cell::from(v.render()));
+            let mut r = TableRow::new(cells);
+            if let Some(search) = search {
+                if search.matches.contains(&idx) {
+                    let is_current =
+                        search.current.and_then(|c| search.matches.get(c)) == Some(&idx);
+                    let bg = if is_current {
+                        theme.accent
+                    } else {
+                        theme.muted
+                    };
+                    r = r.style(Style::default().bg(bg));
+                }
+            }
+            r
+        })
         .collect();
     let table = Table::new(body_rows, constraints)
         .header(header)

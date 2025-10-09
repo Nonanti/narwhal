@@ -13,7 +13,8 @@ use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
     render_root, translate_key_event, CellPopup, EditorBuffer, ExplainPlanLine, Pane,
-    ResultDisplay, ResultView, RootLayout, SidebarRow, SidebarRowKind, SidebarView, Theme,
+    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
+    SidebarView, Theme,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -73,12 +74,23 @@ pub enum ResultState {
     },
 }
 
+/// Search state attached to a result pane.
+#[derive(Debug, Default)]
+pub struct ResultSearch {
+    pub query: String,
+    pub matches: Vec<usize>,
+    pub current: Option<usize>,
+    /// `true` while the user is typing the pattern; `false` after Enter.
+    pub editing: bool,
+}
+
 /// One editor tab: a buffer + the most recent result it produced.
 pub struct Tab {
     pub name: String,
     pub editor: EditorBuffer,
     pub result: ResultState,
     pub result_view: ResultView,
+    pub search: Option<ResultSearch>,
 }
 
 impl Tab {
@@ -88,6 +100,7 @@ impl Tab {
             editor: EditorBuffer::new(),
             result: ResultState::Empty,
             result_view: ResultView::new(),
+            search: None,
         }
     }
 }
@@ -313,7 +326,11 @@ impl AppCore {
         let editor_title = self.editor_title_with_tabs();
 
         let tab = &mut self.tabs[self.active_tab];
-        let result_display = display_from_state(&tab.result);
+        let search_view = tab.search.as_ref().map(|s| SearchHighlight {
+            matches: &s.matches,
+            current: s.current,
+        });
+        let result_display = display_from_state(&tab.result, search_view.as_ref());
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
@@ -478,6 +495,31 @@ impl AppCore {
             }
             return;
         }
+        if let Some(search) = self.tabs[self.active_tab].search.as_mut() {
+            if search.editing {
+                match key.code {
+                    CtKey::Esc => {
+                        self.tabs[self.active_tab].search = None;
+                        self.status_message = "search cancelled".into();
+                    }
+                    CtKey::Enter => {
+                        search.editing = false;
+                        self.refresh_search_matches();
+                        self.jump_to_current_match();
+                    }
+                    CtKey::Backspace => {
+                        search.query.pop();
+                        self.refresh_search_matches();
+                    }
+                    CtKey::Char(c) => {
+                        search.query.push(c);
+                        self.refresh_search_matches();
+                    }
+                    _ => {}
+                }
+                return;
+            }
+        }
         let (row_count, col_count) = match &self.tabs[self.active_tab].result {
             ResultState::Rows { rows, columns, .. }
             | ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
@@ -499,9 +541,100 @@ impl AppCore {
                     .state
                     .select(Some(row_count - 1));
             }
+            CtKey::Char('/') => self.start_search(),
+            CtKey::Char('n') => self.advance_search(1),
+            CtKey::Char('N') => self.advance_search(-1),
+            CtKey::Esc if self.tabs[self.active_tab].search.take().is_some() => {
+                self.status_message = "search cleared".into();
+            }
             CtKey::Enter => self.open_cell_popup(),
             _ => {}
         }
+    }
+
+    fn start_search(&mut self) {
+        if !matches!(
+            self.tabs[self.active_tab].result,
+            ResultState::Rows { .. } | ResultState::Running { .. }
+        ) {
+            self.status_message = "no result to search".into();
+            return;
+        }
+        self.tabs[self.active_tab].search = Some(ResultSearch {
+            query: String::new(),
+            matches: Vec::new(),
+            current: None,
+            editing: true,
+        });
+        self.status_message = "search: ".into();
+    }
+
+    fn refresh_search_matches(&mut self) {
+        let needle = match self.tabs[self.active_tab].search.as_ref() {
+            Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
+            Some(_) => {
+                if let Some(s) = self.tabs[self.active_tab].search.as_mut() {
+                    s.matches.clear();
+                    s.current = None;
+                }
+                self.status_message = "search: ".into();
+                return;
+            }
+            None => return,
+        };
+        let matches = match &self.tabs[self.active_tab].result {
+            ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| {
+                    row.0
+                        .iter()
+                        .any(|v| v.render().to_lowercase().contains(&needle))
+                        .then_some(i)
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let total = matches.len();
+        let search = self.tabs[self.active_tab].search.as_mut().unwrap();
+        let query = search.query.clone();
+        search.matches = matches;
+        search.current = if total == 0 { None } else { Some(0) };
+        self.status_message = if total == 0 {
+            format!("search: {query} · no matches")
+        } else {
+            format!("search: {query} · 1/{total}")
+        };
+    }
+
+    fn advance_search(&mut self, delta: i32) {
+        let Some(search) = self.tabs[self.active_tab].search.as_mut() else {
+            return;
+        };
+        if search.matches.is_empty() {
+            return;
+        }
+        let len = search.matches.len() as i32;
+        let current = search.current.unwrap_or(0) as i32;
+        let next = (current + delta).rem_euclid(len) as usize;
+        search.current = Some(next);
+        let total = search.matches.len();
+        let query = search.query.clone();
+        self.status_message = format!("search: {query} · {}/{}", next + 1, total);
+        self.jump_to_current_match();
+    }
+
+    fn jump_to_current_match(&mut self) {
+        let Some(search) = self.tabs[self.active_tab].search.as_ref() else {
+            return;
+        };
+        let Some(idx) = search.current.and_then(|c| search.matches.get(c).copied()) else {
+            return;
+        };
+        self.tabs[self.active_tab]
+            .result_view
+            .state
+            .select(Some(idx));
     }
 
     fn open_cell_popup(&mut self) {
@@ -1126,7 +1259,10 @@ fn extract_explain_plan(rows: &[Row]) -> Result<crate::explain::ExplainPlan, Str
     parse_plan(&json_text)
 }
 
-fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
+fn display_from_state<'a>(
+    state: &'a ResultState,
+    search: Option<&'a SearchHighlight<'a>>,
+) -> ResultDisplay<'a> {
     match state {
         ResultState::Empty => ResultDisplay::Empty,
         ResultState::Running {
@@ -1168,6 +1304,7 @@ fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
             streamed: *streamed,
             index: *index,
             total: *total,
+            search,
         },
         ResultState::Explain {
             lines,
