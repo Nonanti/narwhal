@@ -17,6 +17,23 @@ pub struct ResultView {
     pub state: TableState,
     pub column_index: usize,
     pub popup: Option<CellPopup>,
+    /// When `Some`, the cell editor is drawn on top of the result grid in
+    /// place of the read-only popup. Only one of `popup` and `edit` is
+    /// rendered at a time; the host app enforces this.
+    pub edit: Option<CellEditView>,
+}
+
+/// Editor-style popup used by inline cell edits.
+#[derive(Debug, Clone)]
+pub struct CellEditView {
+    pub column_name: String,
+    pub column_type: String,
+    pub row_index: usize,
+    /// Current buffer the user is editing.
+    pub buffer: String,
+    /// Optional error message rendered below the input (e.g. UPDATE
+    /// rejected by the engine).
+    pub error: Option<String>,
 }
 
 /// Highlight information for [`ResultDisplay::Rows`] when search is active.
@@ -399,6 +416,57 @@ fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
         .collect()
 }
 
+fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
+    let width = area.width.saturating_sub(8).min(80);
+    let height = area.height.saturating_sub(4).min(12);
+    if width < 20 || height < 5 {
+        return;
+    }
+    let popup_area = centred_rect(area, width, height);
+    frame.render_widget(Clear, popup_area);
+    let title = format!(
+        " edit cell · row {} · {} ({}) · Enter saves · Esc cancels ",
+        edit.row_index + 1,
+        edit.column_name,
+        edit.column_type
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    // Render the editable buffer with a trailing block cursor so the user
+    // can see where the next keystroke goes.
+    lines.push(Line::from(vec![
+        Span::raw(edit.buffer.clone()),
+        Span::styled("▏", Style::default().fg(theme.accent)),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  type NULL (any case) to set the cell to NULL",
+        Style::default().fg(theme.muted),
+    )));
+    if let Some(error) = &edit.error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  error: {error}"),
+            Style::default().fg(theme.error),
+        )));
+    }
+    let paragraph = Paragraph::new(lines)
+        .style(Style::default().fg(theme.foreground))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+}
+
 fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: &Theme) {
     let width = area.width.saturating_sub(8).min(80);
     let height = area.height.saturating_sub(4).min(20);
@@ -534,5 +602,8 @@ fn draw_table(
 
     if let Some(popup) = view.popup.as_ref() {
         draw_cell_popup(frame, area, popup, theme);
+    }
+    if let Some(edit) = view.edit.as_ref() {
+        draw_cell_edit(frame, area, edit, theme);
     }
 }
