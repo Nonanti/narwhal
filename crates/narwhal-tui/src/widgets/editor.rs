@@ -17,6 +17,29 @@ use crate::theme::Theme;
 
 const GUTTER_WIDTH: usize = 6; // "NNN │ "
 
+/// One entry in [`CompletionPopupView::items`]. The host app builds these
+/// from [`narwhal_app::completion::Completion`] so the renderer stays
+/// allocation-free.
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionItemView<'a> {
+    pub text: &'a str,
+    /// Single-character glyph that hints at the kind: K (keyword),
+    /// T (table), C (column).
+    pub kind_glyph: &'a str,
+    pub detail: Option<&'a str>,
+}
+
+/// Modal completion list rendered on top of the editor pane.
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionPopupView<'a> {
+    pub items: &'a [CompletionItemView<'a>],
+    pub selected: usize,
+    /// Cursor position inside the editor's *outer* area in absolute screen
+    /// coordinates. The popup is anchored just below it (or above when
+    /// there's no room below).
+    pub anchor: (u16, u16),
+}
+
 #[derive(Debug, Clone)]
 pub struct EditorBuffer {
     lines: Vec<String>,
@@ -155,6 +178,38 @@ impl EditorBuffer {
         // Cursor is past the last statement end (trailing whitespace);
         // return the last statement encountered.
         statements.last().map(|s| s.text.to_owned())
+    }
+
+    /// The identifier-like prefix immediately to the left of the cursor.
+    /// Used by the completion engine. Returns an empty string when the
+    /// cursor isn't sitting at the end of a word.
+    pub fn current_word_prefix(&self) -> String {
+        let line = self.current_line();
+        let mut end = self.cursor_col.min(line.len());
+        while !line.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        let bytes = line.as_bytes();
+        let mut start = end;
+        while start > 0 {
+            let prev = start - 1;
+            if !is_word_char(bytes[prev]) {
+                break;
+            }
+            start = prev;
+        }
+        line[start..end].to_owned()
+    }
+
+    /// Replace the identifier prefix to the left of the cursor with
+    /// `replacement` and reposition the cursor at its end.
+    pub fn replace_current_word_with(&mut self, replacement: &str) {
+        let end = self.cursor_col;
+        let prefix_len = self.current_word_prefix().len();
+        let start = end.saturating_sub(prefix_len);
+        let line = self.current_line_mut();
+        line.replace_range(start..end, replacement);
+        self.cursor_col = start + replacement.len();
     }
 
     /// Bring the cursor row into view inside `height` visible rows.
@@ -339,6 +394,106 @@ pub fn render_editor(
     }
 }
 
+/// Helper that turns the editor's outer rect plus the cursor offset into
+/// an absolute screen coordinate the host app can pass as
+/// [`CompletionPopupView::anchor`]. Mirrors the layout done inside
+/// [`render_editor`].
+pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
+    let inner_x = area.x + 1;
+    let inner_y = area.y + 1;
+    let cursor_x = inner_x + (GUTTER_WIDTH + buffer.cursor_col) as u16;
+    let cursor_y = if buffer.cursor_row >= buffer.scroll {
+        inner_y + (buffer.cursor_row - buffer.scroll) as u16
+    } else {
+        inner_y
+    };
+    (cursor_x, cursor_y)
+}
+
+/// Render the completion popup overlay. Should be called *after*
+/// [`render_editor`] so it draws on top.
+pub fn render_completion_popup(
+    frame: &mut Frame<'_>,
+    screen: Rect,
+    view: &CompletionPopupView<'_>,
+    theme: &Theme,
+) {
+    use ratatui::layout::Constraint;
+    use ratatui::style::Modifier;
+    use ratatui::widgets::{Cell, Clear, Row as TableRow, Table};
+
+    if view.items.is_empty() {
+        return;
+    }
+    // Size: widest item + 8 (glyph, padding, detail) capped at 60. Height:
+    // items + 2 borders capped at 10.
+    let max_text = view
+        .items
+        .iter()
+        .map(|i| i.text.len() + i.detail.map(|d| d.len() + 3).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let width = (max_text as u16 + 6).clamp(16, 60);
+    let height = (view.items.len() as u16 + 2).min(10);
+
+    let (ax, ay) = view.anchor;
+    let below_y = ay.saturating_add(1);
+    let x = ax.min(screen.x + screen.width.saturating_sub(width));
+    let y = if below_y + height <= screen.y + screen.height {
+        below_y
+    } else {
+        ay.saturating_sub(height)
+    };
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " completions ",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let visible = (inner.height as usize).min(view.items.len());
+    // Naively window around the selection.
+    let start = view.selected.saturating_sub(visible.saturating_sub(1));
+    let end = (start + visible).min(view.items.len());
+    let rows = view.items[start..end].iter().enumerate().map(|(i, item)| {
+        let global = start + i;
+        let style = if global == view.selected {
+            Style::default()
+                .fg(theme.background)
+                .bg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.foreground)
+        };
+        let detail = item.detail.unwrap_or("");
+        TableRow::new(vec![
+            Cell::from(format!(" {}", item.kind_glyph)).style(style),
+            Cell::from(item.text.to_owned()).style(style),
+            Cell::from(detail.to_owned()).style(style),
+        ])
+    });
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Min(8),
+        Constraint::Length(16),
+    ];
+    let table = Table::new(rows, widths);
+    frame.render_widget(table, inner);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +534,21 @@ mod tests {
         }
         let second = buf.statement_at_cursor(Dialect::Generic).unwrap();
         assert!(second.contains("SELECT 2"));
+    }
+
+    #[test]
+    fn current_word_prefix_and_replace_round_trip() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("SELECT * FROM ord");
+        assert_eq!(buf.current_word_prefix(), "ord");
+        buf.replace_current_word_with("orders");
+        assert_eq!(buf.lines(), &["SELECT * FROM orders"]);
+        assert_eq!(buf.cursor(), (0, 20));
+
+        // With the cursor placed right after a space, the prefix is empty.
+        let mut buf2 = EditorBuffer::new();
+        buf2.insert_str("foo ");
+        assert_eq!(buf2.current_word_prefix(), "");
     }
 
     #[test]

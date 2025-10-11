@@ -14,9 +14,10 @@ use narwhal_core::{
 };
 use narwhal_history::Journal;
 use narwhal_tui::{
-    render_root, render_wizard, translate_key_event, CellEditView, CellPopup, EditorBuffer,
-    ExplainPlanLine, Pane, ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow,
-    SidebarRowKind, SidebarView, Theme, WizardFieldView, WizardView,
+    render_root, render_wizard, translate_key_event, CellEditView, CellPopup, CompletionItemView,
+    CompletionPopupView, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay, ResultView,
+    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, Theme, WizardFieldView,
+    WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -26,6 +27,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::commands::{parse, Command, DumpTarget, IsolationArg};
+use crate::completion::{gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
@@ -91,6 +93,18 @@ pub struct RowSource {
     pub columns: Vec<Column>,
 }
 
+/// In-flight completion popup.
+#[derive(Debug, Clone)]
+pub struct CompletionState {
+    /// Candidate list, already filtered and sorted.
+    pub items: Vec<Completion>,
+    /// Currently highlighted index.
+    pub selected: usize,
+    /// The prefix that produced [`items`]. Used to detect when the user
+    /// keeps typing and the popup needs to refilter.
+    pub prefix: String,
+}
+
 /// In-flight cell edit. `buffer` is what the user is currently typing;
 /// `original` is the cell's textual representation when the edit opened
 /// (used for the cancel path and as the default in the popup).
@@ -122,6 +136,7 @@ pub struct Tab {
     pub result_view: ResultView,
     pub search: Option<ResultSearch>,
     pub editing: Option<CellEdit>,
+    pub completion: Option<CompletionState>,
     /// Pending row source to attach to the next `Rows` result. Populated
     /// by `preview_sidebar_selection` and consumed in `finish_run`.
     pub pending_source: Option<RowSource>,
@@ -136,6 +151,7 @@ impl Tab {
             result_view: ResultView::new(),
             search: None,
             editing: None,
+            completion: None,
             pending_source: None,
         }
     }
@@ -407,6 +423,29 @@ impl AppCore {
             current: s.current,
         });
         let result_display = display_from_state(&tab.result, search_view.as_ref());
+        let completion_item_views: Vec<CompletionItemView<'_>> = tab
+            .completion
+            .as_ref()
+            .map(|s| {
+                s.items
+                    .iter()
+                    .map(|c| CompletionItemView {
+                        text: c.text.as_str(),
+                        kind_glyph: match c.kind {
+                            CompletionKind::Keyword => "K",
+                            CompletionKind::Table => "T",
+                            CompletionKind::Column => "C",
+                        },
+                        detail: c.detail.as_deref(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let completion_view = tab.completion.as_ref().map(|s| CompletionPopupView {
+            items: &completion_item_views,
+            selected: s.selected,
+            anchor: (0, 0), // overwritten by render_root once it knows the editor rect
+        });
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
@@ -420,6 +459,7 @@ impl AppCore {
             editor_title: &editor_title,
             result_view: &mut tab.result_view,
             result: result_display,
+            completion: completion_view,
         };
         render_root(frame, area, &mut layout);
 
@@ -499,11 +539,105 @@ impl AppCore {
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
+        // The completion popup is modal while it's open.
+        if self.tabs[self.active_tab].completion.is_some() && self.handle_completion_key(key) {
+            return;
+        }
+        // In insert mode, intercept a plain Tab so it triggers completion
+        // instead of being forwarded to the vim layer.
+        if self.vim.mode() == Mode::Insert && key.code == CtKey::Tab && key.modifiers.is_empty() {
+            self.trigger_completion();
+            return;
+        }
         let Some(logical) = translate_key_event(key) else {
             return;
         };
         let action = self.vim.handle(logical);
         self.apply_action(action);
+    }
+
+    // ----- completion -----
+
+    fn trigger_completion(&mut self) {
+        let prefix = self.tabs[self.active_tab].editor.current_word_prefix();
+        if prefix.is_empty() {
+            // Empty prefix: behave like a plain insert (4 spaces).
+            self.tabs[self.active_tab].editor.insert_str("    ");
+            return;
+        }
+        let schemas = self
+            .session
+            .as_ref()
+            .map(|s| s.schemas.as_slice())
+            .unwrap_or(&[]);
+        let items = gather_completions(&prefix, schemas, 50);
+        if items.is_empty() {
+            self.status_message = format!("no completions for '{prefix}'");
+            return;
+        }
+        if items.len() == 1 {
+            // Exactly one match: insert it without showing the popup.
+            let only = items[0].text.clone();
+            self.tabs[self.active_tab]
+                .editor
+                .replace_current_word_with(&only);
+            self.status_message = format!("completed: {only}");
+            return;
+        }
+        self.tabs[self.active_tab].completion = Some(CompletionState {
+            items,
+            selected: 0,
+            prefix,
+        });
+        self.status_message =
+            "completion: Tab/Shift-Tab cycles · Enter selects · Esc cancels".into();
+    }
+
+    /// Returns `true` when the key was consumed by the completion popup.
+    fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
+        let Some(state) = self.tabs[self.active_tab].completion.as_mut() else {
+            return false;
+        };
+        match key.code {
+            CtKey::Esc => {
+                self.tabs[self.active_tab].completion = None;
+                self.status_message = "completion cancelled".into();
+                true
+            }
+            CtKey::Enter => {
+                let choice = state.items[state.selected].text.clone();
+                self.tabs[self.active_tab]
+                    .editor
+                    .replace_current_word_with(&choice);
+                self.tabs[self.active_tab].completion = None;
+                self.status_message = format!("completed: {choice}");
+                true
+            }
+            CtKey::Tab => {
+                state.selected = (state.selected + 1) % state.items.len();
+                true
+            }
+            CtKey::BackTab => {
+                let len = state.items.len();
+                state.selected = (state.selected + len - 1) % len;
+                true
+            }
+            CtKey::Up => {
+                let len = state.items.len();
+                state.selected = (state.selected + len - 1) % len;
+                true
+            }
+            CtKey::Down => {
+                state.selected = (state.selected + 1) % state.items.len();
+                true
+            }
+            // Any other key dismisses the popup and falls through to the
+            // editor so the keystroke takes effect.
+            _ => {
+                self.tabs[self.active_tab].completion = None;
+                false
+            }
+        }
     }
 
     fn handle_sidebar_key(&mut self, key: KeyEvent) {
