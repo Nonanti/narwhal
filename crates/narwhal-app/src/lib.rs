@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod clipboard;
 pub mod commands;
 pub mod completion;
 pub mod core;

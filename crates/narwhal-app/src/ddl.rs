@@ -89,8 +89,23 @@ pub fn build_table_ddl(table: &TableSchema, dialect: Dialect) -> String {
 /// Build a `SELECT * FROM <table> LIMIT <n>` query targetting the engine's
 /// quoting style. Used by the sidebar quick-preview action.
 pub fn preview_query(schema: &str, table: &str, limit: usize, dialect: Dialect) -> String {
+    preview_query_paged(schema, table, limit, 0, dialect)
+}
+
+/// Same as [`preview_query`] but with an explicit offset for pagination.
+pub fn preview_query_paged(
+    schema: &str,
+    table: &str,
+    limit: usize,
+    offset: usize,
+    dialect: Dialect,
+) -> String {
     let qualified = quote_qualified(schema, table, dialect);
-    format!("SELECT * FROM {qualified} LIMIT {limit}")
+    if offset == 0 {
+        format!("SELECT * FROM {qualified} LIMIT {limit}")
+    } else {
+        format!("SELECT * FROM {qualified} LIMIT {limit} OFFSET {offset}")
+    }
 }
 
 /// Render multiple tables sequentially, separated by blank lines.

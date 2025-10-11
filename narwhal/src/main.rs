@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use narwhal_app::clipboard::{ArboardClipboard, Clipboard};
 use narwhal_app::{App, DriverRegistry};
 use narwhal_config::{ConfigPaths, ConnectionsFile, KeyringStore, Settings};
 use narwhal_history::Journal;
@@ -40,7 +41,8 @@ async fn main() -> Result<()> {
 
     let registry = DriverRegistry::with_defaults();
     let credentials: Arc<dyn narwhal_config::CredentialStore> = Arc::new(KeyringStore::new());
-    let app = App::with_credentials(registry, connections, history, credentials)
+    let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
+    let app = App::with_services(registry, connections, history, credentials, clipboard)
         .with_connections_path(paths.connections_file());
 
     if let Err(error) = app.run().await {

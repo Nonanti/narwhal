@@ -30,6 +30,7 @@ tracing.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 serde_json.workspace = true
+arboard.workspace = true
 
 [dev-dependencies]
 tempfile = "3.13"

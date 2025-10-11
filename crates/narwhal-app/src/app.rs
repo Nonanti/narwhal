@@ -9,6 +9,8 @@ use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use narwhal_config::{ConnectionsFile, CredentialStore};
+
+use crate::clipboard::Clipboard;
 use narwhal_history::Journal;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -43,6 +45,20 @@ impl App {
     ) -> Self {
         Self {
             core: AppCore::with_credentials(registry, connections, history, credentials),
+        }
+    }
+
+    /// Inject every replaceable runtime service in one call. See
+    /// [`AppCore::with_services`].
+    pub fn with_services(
+        registry: DriverRegistry,
+        connections: ConnectionsFile,
+        history: Option<Arc<Journal>>,
+        credentials: Arc<dyn CredentialStore>,
+        clipboard: Arc<dyn Clipboard>,
+    ) -> Self {
+        Self {
+            core: AppCore::with_services(registry, connections, history, credentials, clipboard),
         }
     }
 

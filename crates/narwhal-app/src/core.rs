@@ -26,6 +26,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::clipboard::{Clipboard, InMemoryClipboard};
 use crate::commands::{parse, Command, DumpTarget, IsolationArg};
 use crate::completion::{gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
@@ -91,6 +92,12 @@ pub struct RowSource {
     pub schema: String,
     pub table: String,
     pub columns: Vec<Column>,
+    /// Offset of the first row in this page, relative to the unbounded
+    /// `SELECT * FROM <table>`. Used by `:next` / `:prev`.
+    pub offset: usize,
+    /// Page size that produced this page. `:page-size` updates this for
+    /// subsequent previews.
+    pub limit: usize,
 }
 
 /// In-flight completion popup.
@@ -137,6 +144,9 @@ pub struct Tab {
     pub search: Option<ResultSearch>,
     pub editing: Option<CellEdit>,
     pub completion: Option<CompletionState>,
+    /// Page size used by the next sidebar preview. Stored per-tab so a
+    /// user paging through one table doesn't disturb another tab.
+    pub page_size: usize,
     /// Pending row source to attach to the next `Rows` result. Populated
     /// by `preview_sidebar_selection` and consumed in `finish_run`.
     pub pending_source: Option<RowSource>,
@@ -152,6 +162,7 @@ impl Tab {
             search: None,
             editing: None,
             completion: None,
+            page_size: 100,
             pending_source: None,
         }
     }
@@ -183,6 +194,7 @@ pub struct AppCore {
     connections: ConnectionsFile,
     connections_path: Option<std::path::PathBuf>,
     credentials: Arc<dyn CredentialStore>,
+    clipboard: Arc<dyn Clipboard>,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -226,17 +238,53 @@ impl AppCore {
         history: Option<Arc<Journal>>,
         credentials: Arc<dyn CredentialStore>,
     ) -> Self {
+        Self::with_services(
+            registry,
+            connections,
+            history,
+            credentials,
+            Arc::new(InMemoryClipboard::new()),
+        )
+    }
+
+    /// Inject every replaceable runtime service in one call. The binary
+    /// passes [`narwhal_config::KeyringStore`] and
+    /// [`crate::clipboard::ArboardClipboard`]; tests pass the in-memory
+    /// variants.
+    pub fn with_services(
+        registry: DriverRegistry,
+        connections: ConnectionsFile,
+        history: Option<Arc<Journal>>,
+        credentials: Arc<dyn CredentialStore>,
+        clipboard: Arc<dyn Clipboard>,
+    ) -> Self {
         let (run_tx, run_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
-        let mut this = Self::new_inner(registry, connections, history, credentials, run_tx, run_rx);
+        let mut this = Self::new_inner(
+            registry,
+            connections,
+            history,
+            credentials,
+            clipboard,
+            run_tx,
+            run_rx,
+        );
         this.rebuild_sidebar();
         this
     }
 
+    /// Read-only accessor for the active clipboard. Mostly useful for
+    /// tests that want to assert what was just yanked.
+    pub fn clipboard(&self) -> Arc<dyn Clipboard> {
+        Arc::clone(&self.clipboard)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn new_inner(
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
         credentials: Arc<dyn CredentialStore>,
+        clipboard: Arc<dyn Clipboard>,
         run_tx: mpsc::Sender<RunUpdate>,
         run_rx: mpsc::Receiver<RunUpdate>,
     ) -> Self {
@@ -245,6 +293,7 @@ impl AppCore {
             connections,
             connections_path: None,
             credentials,
+            clipboard,
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -663,16 +712,22 @@ impl AppCore {
             self.status_message = "select a table to preview".into();
             return;
         };
+        self.run_preview(&schema, &name, 0);
+    }
+
+    /// Dispatch a `SELECT * FROM schema.table LIMIT n OFFSET k` and attach
+    /// the table's schema as the result's row source so cell edits and
+    /// pagination work.
+    fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
         let Some(session) = self.session.as_ref() else {
             self.status_message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
-        // Fetch the table schema synchronously so we know the PK/columns
-        // before the rows arrive; this is what enables inline cell edits.
+        let limit = self.tabs[self.active_tab].page_size;
         let pool = session.pool.clone();
-        let schema_owned = schema.clone();
-        let name_owned = name.clone();
+        let schema_owned = schema.to_owned();
+        let name_owned = table.to_owned();
         let described = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 let mut conn = pool
@@ -684,19 +739,58 @@ impl AppCore {
         });
         let source = match described {
             Ok(ts) => Some(RowSource {
-                schema: schema.clone(),
-                table: name.clone(),
+                schema: schema.to_owned(),
+                table: table.to_owned(),
                 columns: ts.columns,
+                offset,
+                limit,
             }),
             Err(error) => {
                 debug!(target: "narwhal::app", error = %error, "describe_table for preview failed; rows will be read-only");
                 None
             }
         };
-        let sql = crate::ddl::preview_query(&schema, &name, 100, dialect);
+        let sql = crate::ddl::preview_query_paged(schema, table, limit, offset, dialect);
         self.tabs[self.active_tab].pending_source = source;
         self.dispatch_batch(vec![sql], RunMode::Execute);
         self.focus = Pane::Results;
+    }
+
+    fn next_page(&mut self) {
+        let Some((schema, table, offset)) = self.current_preview_target() else {
+            self.status_message = "no preview to paginate; select a table first".into();
+            return;
+        };
+        let limit = self.tabs[self.active_tab].page_size;
+        self.run_preview(&schema, &table, offset + limit);
+    }
+
+    fn prev_page(&mut self) {
+        let Some((schema, table, offset)) = self.current_preview_target() else {
+            self.status_message = "no preview to paginate; select a table first".into();
+            return;
+        };
+        if offset == 0 {
+            self.status_message = "already on the first page".into();
+            return;
+        }
+        let limit = self.tabs[self.active_tab].page_size;
+        let new_offset = offset.saturating_sub(limit);
+        self.run_preview(&schema, &table, new_offset);
+    }
+
+    fn set_page_size(&mut self, size: usize) {
+        self.tabs[self.active_tab].page_size = size;
+        self.status_message = format!("page size set to {size}");
+    }
+
+    fn current_preview_target(&self) -> Option<(String, String, usize)> {
+        match &self.tabs[self.active_tab].result {
+            ResultState::Rows {
+                source: Some(s), ..
+            } => Some((s.schema.clone(), s.table.clone(), s.offset)),
+            _ => None,
+        }
     }
 
     fn activate_sidebar_selection(&mut self) {
@@ -813,7 +907,74 @@ impl AppCore {
             }
             CtKey::Enter => self.open_cell_popup(),
             CtKey::Char('e') => self.start_cell_edit(),
+            CtKey::Char('y') => self.yank_cell(),
+            CtKey::Char('Y') => self.yank_row(),
             _ => {}
+        }
+    }
+
+    // ----- yank -----
+
+    fn yank_cell(&mut self) {
+        let tab = &self.tabs[self.active_tab];
+        let (rows, _columns) = match &tab.result {
+            ResultState::Rows { rows, columns, .. }
+            | ResultState::Running { rows, columns, .. } => (rows, columns),
+            _ => {
+                self.status_message = "no cell to yank".into();
+                return;
+            }
+        };
+        let row_idx = tab.result_view.state.selected().unwrap_or(0);
+        let col_idx = tab.result_view.column_index;
+        let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
+            self.status_message = "no cell selected".into();
+            return;
+        };
+        let text = match value {
+            narwhal_core::Value::Null => String::new(),
+            other => other.render(),
+        };
+        match self.clipboard.set_text(&text) {
+            Ok(()) => {
+                self.status_message = format!("yanked {} char(s) to clipboard", text.len());
+            }
+            Err(error) => {
+                self.status_message = format!("yank failed: {error}");
+            }
+        }
+    }
+
+    fn yank_row(&mut self) {
+        let tab = &self.tabs[self.active_tab];
+        let rows = match &tab.result {
+            ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
+            _ => {
+                self.status_message = "no row to yank".into();
+                return;
+            }
+        };
+        let row_idx = tab.result_view.state.selected().unwrap_or(0);
+        let Some(row) = rows.get(row_idx) else {
+            self.status_message = "no row selected".into();
+            return;
+        };
+        let text = row
+            .0
+            .iter()
+            .map(|v| match v {
+                narwhal_core::Value::Null => String::new(),
+                other => other.render(),
+            })
+            .collect::<Vec<_>>()
+            .join("\t");
+        match self.clipboard.set_text(&text) {
+            Ok(()) => {
+                self.status_message = format!("yanked row ({} cell(s)) to clipboard", row.0.len());
+            }
+            Err(error) => {
+                self.status_message = format!("yank failed: {error}");
+            }
         }
     }
 
@@ -1197,6 +1358,9 @@ impl AppCore {
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
             Command::Add => self.start_wizard(),
+            Command::NextPage => self.next_page(),
+            Command::PrevPage => self.prev_page(),
+            Command::PageSize(n) => self.set_page_size(n),
             Command::Begin(iso) => self.begin_transaction(iso),
             Command::Commit => self.commit_transaction(),
             Command::Rollback => self.rollback_transaction(),

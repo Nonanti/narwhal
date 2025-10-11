@@ -61,6 +61,13 @@ pub enum Command {
     PrevTab,
     Add,
     Begin(Option<IsolationArg>),
+    /// Re-run the most recent table preview with the next page of rows.
+    NextPage,
+    /// Re-run the most recent table preview with the previous page.
+    PrevPage,
+    /// Set the page size used by [`Command::NextPage`] / [`Command::PrevPage`]
+    /// and the initial sidebar preview.
+    PageSize(usize),
     Commit,
     Rollback,
     Savepoint(String),
@@ -99,6 +106,12 @@ pub fn parse(input: &str) -> Command {
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
         "add" => Command::Add,
+        "next" | "next-page" | "npage" => Command::NextPage,
+        "prev" | "prev-page" | "ppage" => Command::PrevPage,
+        "page-size" | "pagesize" => match arg.parse::<usize>() {
+            Ok(n) if n > 0 => Command::PageSize(n),
+            _ => Command::Unknown("page-size: expected a positive integer".into()),
+        },
         "begin" | "start" => {
             if arg.is_empty() {
                 Command::Begin(None)
@@ -233,6 +246,13 @@ mod tests {
         assert_eq!(parse("tabclose"), Command::CloseTab);
         assert_eq!(parse("tabnext"), Command::NextTab);
         assert_eq!(parse("tabprev"), Command::PrevTab);
+        assert_eq!(parse("next"), Command::NextPage);
+        assert_eq!(parse("prev-page"), Command::PrevPage);
+        assert_eq!(parse("page-size 50"), Command::PageSize(50));
+        match parse("page-size 0") {
+            Command::Unknown(msg) => assert!(msg.contains("positive")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
         assert_eq!(parse("begin"), Command::Begin(None));
         assert_eq!(
             parse("begin serializable"),
