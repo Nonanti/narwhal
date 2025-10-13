@@ -36,6 +36,11 @@ use crate::registry::DriverRegistry;
 use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
 use crate::wizard::{ConnectionWizard, DRIVERS};
+use narwhal_plugin::{
+    CommandContext as PluginCommandContext, CommandOutcome as PluginCommandOutcome, Plugin,
+    PluginError, PluginRegistry,
+};
+use narwhal_plugin_lua::LuaPlugin;
 
 const RUN_CHANNEL_CAPACITY: usize = 128;
 
@@ -195,6 +200,7 @@ pub struct AppCore {
     connections_path: Option<std::path::PathBuf>,
     credentials: Arc<dyn CredentialStore>,
     clipboard: Arc<dyn Clipboard>,
+    plugins: PluginRegistry,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -294,6 +300,7 @@ impl AppCore {
             connections_path: None,
             credentials,
             clipboard,
+            plugins: PluginRegistry::new(),
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -1369,6 +1376,8 @@ impl AppCore {
             Command::RollbackTo(name) => self.rollback_to_savepoint(&name),
             Command::Remove(name) => self.remove_connection(&name),
             Command::Forget(name) => self.forget_password(&name),
+            Command::PluginLoad(path) => self.load_plugin(&path),
+            Command::PluginList => self.list_plugins(),
             Command::NewTab => self.new_tab(),
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
@@ -1380,7 +1389,95 @@ impl AppCore {
             }
             Command::Empty => {}
             Command::Unknown(text) => {
-                self.status_message = format!("unknown command: {text}");
+                // Before reporting the command as unknown, give the
+                // plugin registry a chance to claim it. The first whitespace
+                // token is the command name; everything after is passed to
+                // the handler verbatim.
+                let (head, arg) = split_head_arg(&text);
+                if self.plugins.plugin_for(head).is_some() {
+                    self.dispatch_plugin(head, arg);
+                } else {
+                    self.status_message = format!("unknown command: {text}");
+                }
+            }
+        }
+    }
+
+    // ----- plugins -----
+
+    /// Read-only handle to the plugin registry, useful for tests.
+    pub fn plugins(&self) -> &PluginRegistry {
+        &self.plugins
+    }
+
+    /// Mutable handle so callers (binary or tests) can register plugins
+    /// without going through the `:plug-load` command path.
+    pub fn plugins_mut(&mut self) -> &mut PluginRegistry {
+        &mut self.plugins
+    }
+
+    fn load_plugin(&mut self, path: &str) {
+        let plugin = match LuaPlugin::from_path(path) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status_message = format!("plug-load failed: {e}");
+                return;
+            }
+        };
+        let name = plugin.name().to_owned();
+        let cmd_count = plugin.commands().len();
+        match self.plugins.register(plugin) {
+            Ok(_) => {
+                self.status_message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
+            }
+            Err(e) => {
+                self.status_message = format!("plug-load failed: {e}");
+            }
+        }
+    }
+
+    fn list_plugins(&mut self) {
+        let catalogue = self.plugins.catalogue();
+        if catalogue.is_empty() {
+            self.status_message = "no plugins loaded; use :plug-load <file.lua>".into();
+            return;
+        }
+        let summary = catalogue
+            .iter()
+            .map(|(plugin, cmd)| format!("{}:{} — {}", plugin, cmd.name, cmd.description))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        self.status_message = summary;
+    }
+
+    fn dispatch_plugin(&mut self, command: &str, argument: &str) {
+        let ctx = PluginCommandContext::new(argument);
+        let plugins = self.plugins.clone();
+        let command_owned = command.to_owned();
+        // Plugin dispatch is async by trait definition; bridge to the
+        // synchronous command handler via block_in_place + the current
+        // Tokio handle, the same pattern used elsewhere in AppCore.
+        let outcome = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async move { plugins.dispatch(&command_owned, ctx).await })
+        });
+        match outcome {
+            Ok(PluginCommandOutcome::Status { message }) => {
+                self.status_message = message;
+            }
+            Ok(PluginCommandOutcome::InsertSql { sql, append }) => {
+                if !append {
+                    self.tabs[self.active_tab].editor.clear();
+                }
+                self.tabs[self.active_tab].editor.insert_str(&sql);
+                self.status_message = format!("plugin inserted {} char(s) of SQL", sql.len());
+            }
+            Ok(PluginCommandOutcome::Silent) => {}
+            Err(PluginError::Unknown(name)) => {
+                self.status_message = format!("unknown command: {name}");
+            }
+            Err(error) => {
+                self.status_message = format!("plugin error: {error}");
             }
         }
     }
@@ -2399,6 +2496,19 @@ fn isolation_label(level: IsolationLevel) -> &'static str {
         IsolationLevel::ReadCommitted => "read-committed",
         IsolationLevel::RepeatableRead => "repeatable-read",
         IsolationLevel::Serializable => "serializable",
+    }
+}
+
+/// Split a `:`-line command's raw text into `(head, rest)` where `head`
+/// is the first whitespace-delimited token and `rest` is everything after
+/// it (with leading whitespace stripped). Mirrors the parser's tokeniser
+/// but stays available for the plugin dispatch path which receives the
+/// already-rejected `Command::Unknown` payload.
+fn split_head_arg(text: &str) -> (&str, &str) {
+    let trimmed = text.trim_start();
+    match trimmed.find(char::is_whitespace) {
+        Some(idx) => (&trimmed[..idx], trimmed[idx..].trim_start()),
+        None => (trimmed, ""),
     }
 }
 

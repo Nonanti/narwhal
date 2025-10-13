@@ -1,0 +1,23 @@
+[package]
+name = "narwhal-plugin-lua"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Lua scripting runtime for narwhal plugins"
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-core.workspace = true
+narwhal-plugin.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+mlua.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile = "3.13"

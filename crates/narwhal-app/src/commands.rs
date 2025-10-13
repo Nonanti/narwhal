@@ -78,6 +78,10 @@ pub enum Command {
     /// Forget the keyring password for a saved connection by name; the
     /// connection itself stays in `connections.toml`.
     Forget(String),
+    /// Load a Lua plugin from disk (`:plug-load path/to/foo.lua`).
+    PluginLoad(String),
+    /// List loaded plugins and the commands they expose.
+    PluginList,
     Help,
     Unknown(String),
     Empty,
@@ -165,6 +169,14 @@ pub fn parse(input: &str) -> Command {
                 Command::Forget(arg.to_owned())
             }
         }
+        "plug-load" | "plugload" | "plug" => {
+            if arg.is_empty() {
+                Command::Unknown("plug-load: path to .lua file required".into())
+            } else {
+                Command::PluginLoad(arg.to_owned())
+            }
+        }
+        "plug-list" | "pluglist" | "plugins" => Command::PluginList,
         "new" | "tabnew" => Command::NewTab,
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,
