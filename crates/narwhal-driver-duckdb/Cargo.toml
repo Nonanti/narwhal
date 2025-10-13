@@ -1,0 +1,21 @@
+[package]
+name = "narwhal-driver-duckdb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "DuckDB driver for narwhal"
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+duckdb.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+uuid = { workspace = true }

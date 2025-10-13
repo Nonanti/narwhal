@@ -9,6 +9,8 @@ members = [
     "crates/narwhal-driver-postgres",
     "crates/narwhal-driver-sqlite",
     "crates/narwhal-driver-mysql",
+    "crates/narwhal-driver-duckdb",
+    "crates/narwhal-plugin",
     "crates/narwhal-vim",
     "crates/narwhal-tui",
     "crates/narwhal-app",
@@ -51,6 +53,7 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 # Database drivers
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "column_decltype"] }
+duckdb = { version = "1.1", features = ["bundled", "chrono"] }
 mysql_async = { version = "0.34", default-features = false, features = ["minimal-rust"] }
 mysql_common = { version = "0.32", default-features = false, features = ["chrono", "bigdecimal"] }
 
@@ -71,6 +74,8 @@ narwhal-history = { path = "crates/narwhal-history" }
 narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
 narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
 narwhal-driver-mysql = { path = "crates/narwhal-driver-mysql" }
+narwhal-driver-duckdb = { path = "crates/narwhal-driver-duckdb" }
+narwhal-plugin = { path = "crates/narwhal-plugin" }
 narwhal-vim = { path = "crates/narwhal-vim" }
 narwhal-tui = { path = "crates/narwhal-tui" }
 narwhal-app = { path = "crates/narwhal-app" }

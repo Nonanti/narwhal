@@ -28,7 +28,13 @@
             postgresql.lib
             # For keyring on Linux:
             dbus
+            # For duckdb-rs bundled build (C++ sources):
+            cmake
+            clang
+            libcxx
           ];
+          # Required by duckdb-rs build.rs (bindgen).
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
           # tokio-postgres / openssl need this:
           PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
