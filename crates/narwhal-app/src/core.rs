@@ -212,6 +212,10 @@ pub struct AppCore {
     sidebar_items: Vec<SidebarItem>,
     sidebar_index: usize,
     status_message: String,
+    /// One-shot warning carried over from a plugin (transform or command
+    /// hook) so that the final 'done · N statement(s)' AllDone message
+    /// doesn't overwrite it silently. Cleared after it bubbles up.
+    plugin_warning: Option<String>,
     running: bool,
     cancel_slot: ActiveCancel,
     should_quit: bool,
@@ -312,6 +316,7 @@ impl AppCore {
             sidebar_items: Vec::new(),
             sidebar_index: 0,
             status_message: "ready".into(),
+            plugin_warning: None,
             running: false,
             cancel_slot: Arc::new(Mutex::new(None)),
             should_quit: false,
@@ -2267,10 +2272,14 @@ impl AppCore {
                 failures,
             } => {
                 self.running = false;
-                self.status_message = if failures == 0 {
+                let base = if failures == 0 {
                     format!("done · {successes} statement(s)")
                 } else {
                     format!("done · {successes} ok · {failures} failed")
+                };
+                self.status_message = match self.plugin_warning.take() {
+                    Some(warning) => format!("{base} · {warning}"),
+                    None => base,
                 };
             }
         }
@@ -2285,6 +2294,44 @@ impl AppCore {
                 None => break,
             }
         }
+    }
+
+    /// Run every loaded plugin's `transform_result` hook over the rows
+    /// just produced by a row-returning statement. EXPLAIN output and
+    /// `Affected`-only results skip this path because mutating them
+    /// would defeat the purpose of those views.
+    ///
+    /// Failures from a transform are reported to the status bar but the
+    /// original (untransformed) rows are still surfaced — a misbehaving
+    /// plugin shouldn't be able to hide query data from the user.
+    fn apply_plugin_transforms(
+        &mut self,
+        columns: Vec<ColumnHeader>,
+        rows: Vec<Row>,
+        elapsed_ms: u64,
+    ) -> (Vec<ColumnHeader>, Vec<Row>) {
+        if self.plugins.plugins().is_empty() {
+            return (columns, rows);
+        }
+        let plugins = self.plugins.clone();
+        let mut qr = narwhal_core::QueryResult {
+            columns,
+            rows,
+            rows_affected: None,
+            elapsed_ms,
+        };
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { plugins.transform_result(&mut qr).await })
+        });
+        if let Err(error) = result {
+            // Surface the error but keep whatever the transforms managed
+            // to mutate before failing — partial output is still useful.
+            // Stash the warning so the subsequent AllDone message doesn't
+            // overwrite it (see [`Self::handle_run_update`]).
+            self.plugin_warning = Some(format!("plugin transform failed: {error}"));
+        }
+        (qr.columns, qr.rows)
     }
 
     fn finalize_statement(
@@ -2346,6 +2393,7 @@ impl AppCore {
             // and attach it to the result so cell edits can target the
             // originating table.
             let source = self.tabs[self.active_tab].pending_source.take();
+            let (columns, rows) = self.apply_plugin_transforms(columns, rows, elapsed_ms);
             self.tabs[self.active_tab].result = ResultState::Rows {
                 columns,
                 rows,

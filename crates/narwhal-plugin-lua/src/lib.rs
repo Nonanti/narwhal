@@ -145,26 +145,25 @@ impl Plugin for LuaPlugin {
     }
 
     async fn transform_result(&self, result: &mut QueryResult) -> PluginResult<()> {
-        if self.descriptors.is_empty() {
-            // Fast path: a plugin that only registered commands doesn't
-            // need to round-trip through the VM. (Plugins that registered
-            // transforms always also have at least one transform; the
-            // empty-descriptor case is just a hint, not a guarantee. We
-            // still call into Lua below to honour any transforms.)
-        }
         let lua = self.lua.clone();
         let transforms_key = self.transforms_key.clone();
         // Move the result out so we can hand it across the thread
-        // boundary, then move the (possibly rewritten) value back.
+        // boundary, then move the (possibly rewritten) value back. Even
+        // when a transform errors we still want to restore whatever the
+        // earlier transforms produced — callers shouldn't lose rows
+        // because a later transform raised.
         let owned = std::mem::take(result);
-        let updated = task::spawn_blocking(move || {
+        let (updated, err) = task::spawn_blocking(move || {
             let guard = lua.blocking_lock();
             invoke_transforms(&guard, &transforms_key, owned)
         })
         .await
-        .map_err(|e| PluginError::Runtime(format!("join: {e}")))??;
+        .map_err(|e| PluginError::Runtime(format!("join: {e}")))?;
         *result = updated;
-        Ok(())
+        match err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
 
@@ -256,30 +255,41 @@ fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, Stri
 
 // ---- result transforms ----
 
+/// Run every registered transform in order over `result`. Returns the
+/// (possibly partially transformed) `QueryResult` alongside the first
+/// error encountered, if any. The partial result is intentional: a
+/// failing transform shouldn't be able to swallow earlier transforms'
+/// work or the original rows.
 fn invoke_transforms(
     lua: &Lua,
     transforms_key: &RegistryKey,
     mut result: QueryResult,
-) -> PluginResult<QueryResult> {
-    let transforms: Table = lua
-        .registry_value(transforms_key)
-        .map_err(|e| PluginError::Runtime(e.to_string()))?;
+) -> (QueryResult, Option<PluginError>) {
+    let transforms: Table = match lua.registry_value(transforms_key) {
+        Ok(t) => t,
+        Err(e) => return (result, Some(PluginError::Runtime(e.to_string()))),
+    };
     if transforms.len().map(|n| n == 0).unwrap_or(true) {
-        return Ok(result);
+        return (result, None);
     }
     for handler in transforms.sequence_values::<Function>() {
-        let handler = handler.map_err(|e| PluginError::Runtime(e.to_string()))?;
-        let table = result_to_lua(lua, &result)
-            .map_err(|e| PluginError::Runtime(format!("encode: {e}")))?;
-        // The script mutates the same table reference; we read the result
-        // back from it after the call returns.
-        let _: LuaValue = handler
-            .call(table.clone())
-            .map_err(|e| PluginError::Handler(e.to_string()))?;
-        result =
-            result_from_lua(table).map_err(|e| PluginError::Runtime(format!("decode: {e}")))?;
+        let handler = match handler {
+            Ok(h) => h,
+            Err(e) => return (result, Some(PluginError::Runtime(e.to_string()))),
+        };
+        let table = match result_to_lua(lua, &result) {
+            Ok(t) => t,
+            Err(e) => return (result, Some(PluginError::Runtime(format!("encode: {e}")))),
+        };
+        if let Err(e) = handler.call::<LuaValue>(table.clone()) {
+            return (result, Some(PluginError::Handler(e.to_string())));
+        }
+        match result_from_lua(table) {
+            Ok(r) => result = r,
+            Err(e) => return (result, Some(PluginError::Runtime(format!("decode: {e}")))),
+        }
     }
-    Ok(result)
+    (result, None)
 }
 
 fn result_to_lua(lua: &Lua, result: &QueryResult) -> LuaResult<Table> {
