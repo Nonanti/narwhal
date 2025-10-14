@@ -40,9 +40,9 @@ use async_trait::async_trait;
 use mlua::{Function, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue, Variadic};
 use narwhal_plugin::{
     ColumnHeader, CommandContext, CommandDescriptor, CommandOutcome, Plugin, PluginError,
-    PluginResult, QueryResult, Row, Value,
+    PluginResult, QueryResult, Row, SqlExecutor, Value,
 };
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use tokio::task;
 
 /// Lua-backed plugin. Wraps a single Lua VM together with the metadata
@@ -103,6 +103,55 @@ impl LuaPlugin {
         })
     }
 
+    /// Wire `executor` into this plugin's Lua VM, exposing
+    /// `narwhal.sql_run(sql)` to scripts. Returns the resulting query
+    /// as a Lua table of the same shape produced by
+    /// [`Plugin::transform_result`] — `{columns = {...}, rows = {...},
+    /// rows_affected = number|nil, elapsed_ms = number}`.
+    ///
+    /// Calling this twice replaces the previously-installed executor.
+    /// The host calls it exactly once, right after loading the plugin.
+    pub fn install_executor(&self, executor: Arc<dyn SqlExecutor>) -> PluginResult<()> {
+        // Lua is single-threaded; grab the mutex while we touch globals.
+        let lua = self
+            .lua
+            .lock()
+            .map_err(|e| PluginError::Runtime(format!("lua mutex poisoned: {e}")))?;
+        let narwhal: Table = lua
+            .globals()
+            .get("narwhal")
+            .map_err(|e| PluginError::Runtime(format!("missing narwhal global: {e}")))?;
+        let exec = executor.clone();
+        // The Lua function bridges the call back into Rust via the
+        // current Tokio runtime. We are *already* inside a
+        // `spawn_blocking` task whenever a script runs (see
+        // [`Self::dispatch`] / [`Self::transform_result`]), so it is
+        // safe to call `Handle::current().block_on(...)` here.
+        let sql_run = lua
+            .create_function(move |lua, sql: String| {
+                let exec = exec.clone();
+                let handle = match tokio::runtime::Handle::try_current() {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return Err(mlua::Error::external(format!(
+                            "narwhal.sql_run requires a tokio runtime: {e}"
+                        )));
+                    }
+                };
+                let outcome = tokio::task::block_in_place(|| handle.block_on(exec.run(&sql)));
+                match outcome {
+                    Ok(qr) => result_to_lua(lua, &qr)
+                        .map_err(|e| mlua::Error::external(format!("encode result: {e}"))),
+                    Err(e) => Err(mlua::Error::external(e.to_string())),
+                }
+            })
+            .map_err(|e| PluginError::Runtime(format!("create sql_run: {e}")))?;
+        narwhal
+            .set("sql_run", sql_run)
+            .map_err(|e| PluginError::Runtime(format!("install sql_run: {e}")))?;
+        Ok(())
+    }
+
     /// Convenience: read a script from disk and call [`Self::from_script`].
     pub fn from_path(path: impl AsRef<Path>) -> PluginResult<Self> {
         let path = path.as_ref();
@@ -137,7 +186,10 @@ impl Plugin for LuaPlugin {
         // call. The work itself is CPU-bound, so spawn_blocking is the
         // right shape.
         task::spawn_blocking(move || {
-            let guard = lua.blocking_lock();
+            let guard = match lua.lock() {
+                Ok(g) => g,
+                Err(e) => return Err(PluginError::Runtime(format!("lua mutex poisoned: {e}"))),
+            };
             invoke_command(&guard, &commands_key, &name, &argument)
         })
         .await
@@ -153,9 +205,12 @@ impl Plugin for LuaPlugin {
         // earlier transforms produced — callers shouldn't lose rows
         // because a later transform raised.
         let owned = std::mem::take(result);
-        let (updated, err) = task::spawn_blocking(move || {
-            let guard = lua.blocking_lock();
-            invoke_transforms(&guard, &transforms_key, owned)
+        let (updated, err) = task::spawn_blocking(move || match lua.lock() {
+            Ok(guard) => invoke_transforms(&guard, &transforms_key, owned),
+            Err(e) => (
+                owned,
+                Some(PluginError::Runtime(format!("lua mutex poisoned: {e}"))),
+            ),
         })
         .await
         .map_err(|e| PluginError::Runtime(format!("join: {e}")))?;
@@ -556,6 +611,122 @@ mod tests {
             Err(e) => e,
         };
         assert!(matches!(err, PluginError::Runtime(_)));
+    }
+
+    /// Mock executor used by the sql_run tests. Captures every SQL it
+    /// receives and replays a canned [`QueryResult`] back.
+    struct MockExecutor {
+        seen: std::sync::Mutex<Vec<String>>,
+        reply: QueryResult,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl SqlExecutor for MockExecutor {
+        async fn run(&self, sql: &str) -> PluginResult<QueryResult> {
+            self.seen.lock().unwrap().push(sql.to_owned());
+            if self.fail {
+                Err(PluginError::Runtime("boom".into()))
+            } else {
+                Ok(self.reply.clone())
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sql_run_calls_executor_and_returns_rows_to_lua() {
+        let plugin = LuaPlugin::from_script(
+            "runner",
+            r#"
+            narwhal.register_command("count", "count rows", function(_)
+                local result = narwhal.sql_run("SELECT 1")
+                return tostring(#result.rows)
+            end)
+            "#,
+        )
+        .unwrap();
+
+        let executor = Arc::new(MockExecutor {
+            seen: std::sync::Mutex::new(Vec::new()),
+            reply: QueryResult {
+                columns: vec![ColumnHeader {
+                    name: "n".into(),
+                    data_type: "INTEGER".into(),
+                }],
+                rows: vec![
+                    Row(vec![Value::Int(1)]),
+                    Row(vec![Value::Int(2)]),
+                    Row(vec![Value::Int(3)]),
+                ],
+                rows_affected: None,
+                elapsed_ms: 0,
+            },
+            fail: false,
+        });
+        plugin.install_executor(executor.clone()).unwrap();
+
+        let outcome = plugin
+            .dispatch("count", CommandContext::default())
+            .await
+            .unwrap();
+        match outcome {
+            CommandOutcome::Status { message } => assert_eq!(message, "3"),
+            other => panic!("unexpected: {other:?}"),
+        }
+        assert_eq!(executor.seen.lock().unwrap().as_slice(), &["SELECT 1"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sql_run_executor_error_surfaces_to_lua_as_handler_error() {
+        let plugin = LuaPlugin::from_script(
+            "runner",
+            r#"
+            narwhal.register_command("go", "", function(_)
+                narwhal.sql_run("SELECT bad")
+                return "never"
+            end)
+            "#,
+        )
+        .unwrap();
+        plugin
+            .install_executor(Arc::new(MockExecutor {
+                seen: std::sync::Mutex::new(Vec::new()),
+                reply: QueryResult::default(),
+                fail: true,
+            }))
+            .unwrap();
+
+        let err = plugin
+            .dispatch("go", CommandContext::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PluginError::Handler(_)));
+        let msg = format!("{err}");
+        assert!(msg.contains("boom"), "got: {msg}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sql_run_without_executor_raises_in_lua() {
+        let plugin = LuaPlugin::from_script(
+            "runner",
+            r#"
+            narwhal.register_command("go", "", function(_)
+                narwhal.sql_run("SELECT 1")
+                return "never"
+            end)
+            "#,
+        )
+        .unwrap();
+        // Note: no install_executor.
+
+        let err = plugin
+            .dispatch("go", CommandContext::default())
+            .await
+            .unwrap_err();
+        // Without an executor installed, `narwhal.sql_run` simply isn't
+        // defined, so Lua raises an 'attempt to call a nil value' style
+        // error which we surface as a Handler error.
+        assert!(matches!(err, PluginError::Handler(_)));
     }
 
     #[tokio::test]

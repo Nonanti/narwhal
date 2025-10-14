@@ -20,6 +20,7 @@ narwhal-driver-mysql.workspace = true
 narwhal-driver-duckdb.workspace = true
 narwhal-plugin.workspace = true
 narwhal-plugin-lua.workspace = true
+async-trait.workspace = true
 narwhal-pool.workspace = true
 narwhal-history.workspace = true
 narwhal-sql.workspace = true

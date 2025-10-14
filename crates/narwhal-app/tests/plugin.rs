@@ -150,7 +150,7 @@ async fn lua_command_returning_table_injects_sql_into_editor() {
     .unwrap();
 
     let mut core = empty_core();
-    core.plugins_mut().register(plugin).unwrap();
+    core.register_lua_plugin(plugin).unwrap();
 
     core.execute_command("count users");
     assert_eq!(core.editor().entire_text(), "SELECT COUNT(*) FROM users");
@@ -250,7 +250,7 @@ async fn transform_hook_runs_after_query_and_rewrites_rows() {
     .unwrap();
 
     let (mut core, _dir) = core_with_items().await;
-    core.plugins_mut().register(plugin).unwrap();
+    core.register_lua_plugin(plugin).unwrap();
 
     core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
     core.execute_command("run");
@@ -283,7 +283,7 @@ async fn transform_hook_can_add_synthetic_columns() {
     .unwrap();
 
     let (mut core, _dir) = core_with_items().await;
-    core.plugins_mut().register(plugin).unwrap();
+    core.register_lua_plugin(plugin).unwrap();
 
     core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
     core.execute_command("run");
@@ -313,7 +313,7 @@ async fn transform_failure_surfaces_in_status_but_keeps_rows() {
     .unwrap();
 
     let (mut core, _dir) = core_with_items().await;
-    core.plugins_mut().register(plugin).unwrap();
+    core.register_lua_plugin(plugin).unwrap();
 
     core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
     core.execute_command("run");
@@ -332,6 +332,53 @@ async fn transform_failure_surfaces_in_status_but_keeps_rows() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sql_run_from_lua_hits_active_session() {
+    // Script counts rows in 'items' via narwhal.sql_run and returns it.
+    let plugin = LuaPlugin::from_script(
+        "counter",
+        r#"
+        narwhal.register_command("howmany", "count items", function(_)
+            local r = narwhal.sql_run("SELECT COUNT(*) FROM items")
+            return "items=" .. tostring(r.rows[1][1])
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let (mut core, _dir) = core_with_items().await;
+    core.register_lua_plugin(plugin).unwrap();
+
+    core.execute_command("howmany");
+    assert_eq!(core.status_message(), "items=3");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sql_run_without_active_session_reports_error() {
+    // Same plugin but no open connection — the executor should refuse
+    // and the Lua call surfaces as a plugin handler error.
+    let plugin = LuaPlugin::from_script(
+        "counter",
+        r#"
+        narwhal.register_command("go", "", function(_)
+            narwhal.sql_run("SELECT 1")
+            return "never"
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let mut core = empty_core();
+    core.register_lua_plugin(plugin).unwrap();
+
+    core.execute_command("go");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("plugin error") && msg.contains("no active connection"),
+        "got: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lua_handler_runtime_error_surfaces_as_plugin_error() {
     let plugin = LuaPlugin::from_script(
         "boom",
@@ -344,7 +391,7 @@ async fn lua_handler_runtime_error_surfaces_as_plugin_error() {
     .unwrap();
 
     let mut core = empty_core();
-    core.plugins_mut().register(plugin).unwrap();
+    core.register_lua_plugin(plugin).unwrap();
 
     core.execute_command("boom");
     let msg = core.status_message();

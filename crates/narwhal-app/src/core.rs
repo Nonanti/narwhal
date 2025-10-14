@@ -38,7 +38,7 @@ use crate::session::Session;
 use crate::wizard::{ConnectionWizard, DRIVERS};
 use narwhal_plugin::{
     CommandContext as PluginCommandContext, CommandOutcome as PluginCommandOutcome, Plugin,
-    PluginError, PluginRegistry,
+    PluginError, PluginRegistry, PluginResult, SqlExecutor,
 };
 use narwhal_plugin_lua::LuaPlugin;
 
@@ -201,6 +201,11 @@ pub struct AppCore {
     credentials: Arc<dyn CredentialStore>,
     clipboard: Arc<dyn Clipboard>,
     plugins: PluginRegistry,
+    /// Shared handle the plugin SQL executor reads on every
+    /// `narwhal.sql_run` call. Updated whenever a session opens or
+    /// closes so scripts always target the currently-active
+    /// connection.
+    plugin_pool: Arc<std::sync::Mutex<Option<narwhal_pool::Pool>>>,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -305,6 +310,7 @@ impl AppCore {
             credentials,
             clipboard,
             plugins: PluginRegistry::new(),
+            plugin_pool: Arc::new(std::sync::Mutex::new(None)),
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -1421,6 +1427,19 @@ impl AppCore {
         &mut self.plugins
     }
 
+    /// Register a freshly-built [`LuaPlugin`], wiring it into the SQL
+    /// executor first so `narwhal.sql_run` works from inside the script.
+    /// All host-driven registration paths (`:plug-load`,
+    /// `auto_load_plugins`, integration tests) funnel through this so
+    /// the executor injection is impossible to forget.
+    pub fn register_lua_plugin(&mut self, plugin: LuaPlugin) -> PluginResult<usize> {
+        let executor: Arc<dyn SqlExecutor> = Arc::new(AppPluginExecutor {
+            pool: self.plugin_pool.clone(),
+        });
+        plugin.install_executor(executor)?;
+        self.plugins.register(plugin)
+    }
+
     /// Scan `dir` for top-level `*.lua` files and register each as a
     /// plugin. Returns the number of plugins that loaded successfully.
     /// Failures are accumulated into the status bar so the user notices
@@ -1450,7 +1469,7 @@ impl AppCore {
         let mut failures: Vec<String> = Vec::new();
         for path in &paths {
             match LuaPlugin::from_path(path) {
-                Ok(plugin) => match self.plugins.register(plugin) {
+                Ok(plugin) => match self.register_lua_plugin(plugin) {
                     Ok(_) => loaded += 1,
                     Err(e) => failures.push(format!("{}: {e}", path.display())),
                 },
@@ -1483,7 +1502,7 @@ impl AppCore {
         };
         let name = plugin.name().to_owned();
         let cmd_count = plugin.commands().len();
-        match self.plugins.register(plugin) {
+        match self.register_lua_plugin(plugin) {
             Ok(_) => {
                 self.status_message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
             }
@@ -1613,6 +1632,10 @@ impl AppCore {
                     session.config.name,
                     session.driver.name()
                 );
+                // Publish the new pool to the plugin executor so any
+                // `narwhal.sql_run` calls hit the freshly-opened
+                // connection.
+                *self.plugin_pool.lock().unwrap() = Some(session.pool.clone());
                 self.session = Some(session);
                 self.rebuild_sidebar();
                 self.focus = Pane::Editor;
@@ -1625,6 +1648,7 @@ impl AppCore {
 
     fn close_session(&mut self) {
         if self.session.take().is_some() {
+            *self.plugin_pool.lock().unwrap() = None;
             self.status_message = "connection closed".into();
             self.rebuild_sidebar();
         }
@@ -1969,6 +1993,7 @@ impl AppCore {
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
+                *self.plugin_pool.lock().unwrap() = None;
             }
         }
         self.rebuild_sidebar();
@@ -2596,6 +2621,40 @@ fn isolation_label(level: IsolationLevel) -> &'static str {
         IsolationLevel::ReadCommitted => "read-committed",
         IsolationLevel::RepeatableRead => "repeatable-read",
         IsolationLevel::Serializable => "serializable",
+    }
+}
+
+/// SQL executor injected into every Lua plugin loaded by AppCore. The
+/// pool handle is shared with [`AppCore`] so opening/closing a session
+/// transparently retargets `narwhal.sql_run` to whatever connection is
+/// currently active.
+///
+/// Scripts run sequentially against the pool — nothing serialises
+/// concurrent calls beyond the underlying pool's own queue — and the
+/// host-side transaction state is intentionally invisible. A script
+/// hitting `narwhal.sql_run` while a `:begin` transaction is active
+/// gets a *new* pool connection, not the pinned one. That mirrors how
+/// every other read in narwhal behaves (sidebar refresh, completion).
+struct AppPluginExecutor {
+    pool: Arc<std::sync::Mutex<Option<narwhal_pool::Pool>>>,
+}
+
+#[async_trait::async_trait]
+impl SqlExecutor for AppPluginExecutor {
+    async fn run(&self, sql: &str) -> PluginResult<narwhal_core::QueryResult> {
+        let pool = self
+            .pool
+            .lock()
+            .map_err(|e| PluginError::Runtime(format!("plugin pool poisoned: {e}")))?
+            .clone()
+            .ok_or_else(|| PluginError::Runtime("no active connection".into()))?;
+        let mut conn = pool
+            .acquire()
+            .await
+            .map_err(|e| PluginError::Runtime(format!("acquire: {e}")))?;
+        conn.execute(sql, &[])
+            .await
+            .map_err(|e| PluginError::Runtime(format!("execute: {e}")))
     }
 }
 

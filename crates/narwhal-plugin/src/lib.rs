@@ -89,6 +89,22 @@ impl CommandContext {
     }
 }
 
+/// Bridge that lets a plugin run SQL against narwhal's active
+/// connection. The host implements this on top of its connection pool
+/// and injects an `Arc<dyn SqlExecutor>` into each plugin runtime that
+/// supports user-driven SQL execution (today only [`narwhal-plugin-lua`]).
+///
+/// The trait is async because the underlying driver API is async. Plugin
+/// runtimes that need a sync surface (e.g. Lua) bridge the call with
+/// `tokio::task::block_in_place + Handle::current().block_on(...)`.
+#[async_trait]
+pub trait SqlExecutor: Send + Sync {
+    /// Execute `sql` against whatever connection the host considers
+    /// active. Returns the materialised [`QueryResult`] or a runtime
+    /// error suitable for surfacing to the script.
+    async fn run(&self, sql: &str) -> PluginResult<QueryResult>;
+}
+
 /// Public surface every plugin runtime implements. The trait is
 /// intentionally tiny — additions go through default methods so older
 /// plugins continue to compile.
