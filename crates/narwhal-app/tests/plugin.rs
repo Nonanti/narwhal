@@ -162,6 +162,67 @@ async fn lua_command_returning_table_injects_sql_into_editor() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_load_picks_up_every_lua_file_in_a_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    write_script(
+        &dir,
+        "a.lua",
+        r#"narwhal.register_command("a", "alpha", function(_) return "A" end)"#,
+    );
+    write_script(
+        &dir,
+        "b.lua",
+        r#"narwhal.register_command("b", "beta", function(_) return "B" end)"#,
+    );
+    // Decoy file: wrong extension, should be ignored.
+    std::fs::write(dir.path().join("ignore.txt"), "not a plugin").unwrap();
+
+    let mut core = empty_core();
+    let loaded = core.auto_load_plugins(dir.path());
+    assert_eq!(loaded, 2);
+    assert!(core.status_message().contains("auto-loaded 2"));
+
+    core.execute_command("a");
+    assert_eq!(core.status_message(), "A");
+    core.execute_command("b");
+    assert_eq!(core.status_message(), "B");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_load_records_failing_scripts_without_aborting() {
+    let dir = tempfile::tempdir().unwrap();
+    write_script(
+        &dir,
+        "good.lua",
+        r#"narwhal.register_command("good", "ok", function(_) return "good" end)"#,
+    );
+    write_script(&dir, "broken.lua", "this is not lua )");
+
+    let mut core = empty_core();
+    let loaded = core.auto_load_plugins(dir.path());
+    assert_eq!(loaded, 1);
+
+    // The good plugin works.
+    core.execute_command("good");
+    assert_eq!(core.status_message(), "good");
+
+    // And the failure was recorded as a plugin warning that bubbles up
+    // on the next AllDone-style status overwrite. We can't easily
+    // observe that without a real query, so instead reach into the
+    // registry to confirm exactly one plugin made it through.
+    assert_eq!(core.plugins().plugins().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_load_missing_dir_is_silently_skipped() {
+    let mut core = empty_core();
+    let loaded = core.auto_load_plugins(std::path::Path::new("/definitely/does/not/exist"));
+    assert_eq!(loaded, 0);
+    // Status untouched (still 'ready').
+    assert_eq!(core.status_message(), "ready");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unknown_command_path_still_reports_unknown_when_no_plugin_claims_it() {
     let mut core = empty_core();
     core.execute_command("this-name-does-not-exist arg");

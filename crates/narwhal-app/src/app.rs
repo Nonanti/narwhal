@@ -69,6 +69,13 @@ impl App {
         self
     }
 
+    /// Auto-load every `*.lua` file in `dir`. See
+    /// [`AppCore::auto_load_plugins`] for details.
+    pub fn with_plugins_dir(mut self, dir: &std::path::Path) -> Self {
+        self.core.auto_load_plugins(dir);
+        self
+    }
+
     pub async fn run(mut self) -> Result<()> {
         let mut guard = TerminalGuard::enter()?;
         let mut events = EventStream::new();
