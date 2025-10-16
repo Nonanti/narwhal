@@ -332,6 +332,42 @@ async fn transform_failure_surfaces_in_status_but_keeps_rows() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shipped_example_plugins_load_and_work() {
+    // Walks examples/plugins/, registers every .lua file, and exercises
+    // the commands that don't depend on a real connection. Catches
+    // regressions where the script API drifts away from what the docs
+    // ship to users.
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let plugins_dir = manifest
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples/plugins");
+    assert!(
+        plugins_dir.is_dir(),
+        "examples/plugins not found at {}",
+        plugins_dir.display()
+    );
+
+    let (mut core, _dir) = core_with_items().await;
+    let loaded = core.auto_load_plugins(&plugins_dir);
+    assert!(loaded >= 4, "expected ≥4 plugins, got {loaded}");
+
+    // :top exercises the snippet plugin (sql injection outcome).
+    core.execute_command("top items");
+    assert!(
+        core.editor().entire_text().contains("SELECT * FROM items LIMIT 10"),
+        "editor missing snippet, got: {:?}",
+        core.editor().entire_text()
+    );
+
+    // :rc exercises the sql_run plugin against the active sqlite.
+    core.execute_command("rc items");
+    assert_eq!(core.status_message(), "items: 3 row(s)");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sql_run_from_lua_hits_active_session() {
     // Script counts rows in 'items' via narwhal.sql_run and returns it.
     let plugin = LuaPlugin::from_script(
