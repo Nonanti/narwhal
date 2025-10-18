@@ -7,9 +7,9 @@ with Lua, single binary.
 
 Alpha. The four bundled drivers connect, execute, stream, and introspect
 schemas. Every command surfaced by the TUI is unit- or integration-tested
-(155 tests across the workspace at the time of writing) and `cargo clippy
---all-targets -- -D warnings` is clean. There is no release pipeline yet
-— installation is via `cargo install --path narwhal` or `nix build`.
+(160+ tests across the workspace) and `cargo clippy --all-targets --
+-D warnings` is clean. There is no release pipeline yet — installation is
+via `cargo install --path narwhal` or `nix build`.
 
 ## What's in the box
 
@@ -70,6 +70,35 @@ count, `:top <table>` snippet).
 
 Load manually with `:plug-load /path/to/file.lua`, list everything with
 `:plug-list`.
+
+#### ⚠️ Security model
+
+Plugins are **trusted code that runs with your privileges**. Anything
+you drop into the auto-load directory can:
+
+- run arbitrary SQL on every connection you open (via `narwhal.sql_run`);
+- inject SQL into the editor;
+- read every result row before it reaches you.
+
+Only install scripts from sources you trust as much as you'd trust
+running their code as a shell script. There is no sandbox. Auditing a
+Lua plugin is just reading the `.lua` file — they're short and
+dependency-free on purpose.
+
+Plugins are *also* refused at load time if they try to register a
+command name that the built-in parser already claims (`run`, `open`,
+`begin`, …) so an override never silently does nothing. And during a
+`:begin` transaction `narwhal.sql_run` is refused entirely — a fresh
+pool connection wouldn't see the pinned transaction's writes.
+
+#### Limits worth knowing
+
+- `narwhal.sql_run` materialises the whole result set in memory before
+  returning to Lua. If your script needs to scan a big table, pass it
+  through `LIMIT` or paginate manually — streaming from Lua is a
+  future addition, not a current capability.
+- Plugin runtimes share a tokio thread pool with everything else.
+  A misbehaving plugin can hog a worker but can't deadlock the TUI.
 
 ### Safety
 
