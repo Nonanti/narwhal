@@ -35,13 +35,9 @@ use narwhal_core::{
 };
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::types::{value_from_ref, value_to_sql};
-
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
 
 #[derive(Debug, Default)]
 pub struct DuckdbDriver;
@@ -143,27 +139,22 @@ impl DuckdbConnection {
         .await
         .map_err(|e| Error::Other(e.to_string()))?
     }
-
-    async fn execute_owned(&self, sql: String) -> Result<()> {
-        let inner = self.inner.clone();
-        task::spawn_blocking(move || {
-            inner
-                .blocking_lock()
-                .execute_batch(&sql)
-                .map_err(|e| Error::Query(e.to_string()))
-        })
-        .await
-        .map_err(|e| Error::Other(e.to_string()))?
-    }
 }
 
 /// Best-effort: does `sql` likely return a result set?
 ///
 /// DuckDB's prepared-statement API requires us to commit to either
 /// [`Statement::execute`] or [`Statement::query`] *before* it knows the
-/// statement shape, so we infer from the leading keyword. The list
-/// covers DuckDB's row-returning forms; everything else falls through
-/// to `execute` and reports rows-affected.
+/// statement shape, so we infer from:
+///
+/// 1. the leading keyword — SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/VALUES/
+///    FROM/PRAGMA/TABLE/SUMMARIZE all return rows;
+/// 2. the presence of a `RETURNING` clause on DML statements —
+///    `INSERT … RETURNING`, `UPDATE … RETURNING`, `DELETE … RETURNING`,
+///    `MERGE … RETURNING` all stream rows back. Before this we were
+///    silently swallowing those rows and only reporting rows-affected.
+///
+/// Statements that match neither fall through to `execute`.
 fn statement_returns_rows(sql: &str) -> bool {
     let lead = sql
         .trim_start()
@@ -171,7 +162,7 @@ fn statement_returns_rows(sql: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_ascii_uppercase();
-    matches!(
+    let lead_returns = matches!(
         lead.as_str(),
         "SELECT"
             | "WITH"
@@ -183,7 +174,103 @@ fn statement_returns_rows(sql: &str) -> bool {
             | "PRAGMA"
             | "TABLE"
             | "SUMMARIZE"
-    )
+    );
+    if lead_returns {
+        return true;
+    }
+    matches!(
+        lead.as_str(),
+        "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "REPLACE"
+    ) && has_returning_clause(sql)
+}
+
+/// Case-insensitive search for a `RETURNING` keyword outside of any
+/// single- or double-quoted string literal. Word-boundary aware so an
+/// identifier like `customer_returning` doesn't trigger a false positive.
+fn has_returning_clause(sql: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    let mut quote: Option<u8> = None;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if let Some(q) = quote {
+            if c == q {
+                // Doubled quote = escaped literal quote.
+                if i + 1 < bytes.len() && bytes[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'\'' || c == b'"' {
+            quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if (c == b'R' || c == b'r')
+            && i + 9 <= bytes.len()
+            && sql[i..i + 9].eq_ignore_ascii_case("RETURNING")
+            && is_word_boundary(bytes, i, i + 9)
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn is_word_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
+    let before =
+        start == 0 || !bytes[start - 1].is_ascii_alphanumeric() && bytes[start - 1] != b'_';
+    let after = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric() && bytes[end] != b'_';
+    before && after
+}
+
+/// Render a [`duckdb::types::Type`] as the human-readable SQL type name
+/// matching DuckDB's documentation. The default `Debug` formatting
+/// produces variant names like `Int` rather than the engine's own
+/// `INTEGER`; composite types are rendered recursively. Keeps the
+/// result-pane legend on parity with the other drivers.
+fn format_column_type(ty: &duckdb::types::Type) -> String {
+    use duckdb::types::Type;
+    match ty {
+        Type::Null => "NULL".into(),
+        Type::Boolean => "BOOLEAN".into(),
+        Type::TinyInt => "TINYINT".into(),
+        Type::SmallInt => "SMALLINT".into(),
+        Type::Int => "INTEGER".into(),
+        Type::BigInt => "BIGINT".into(),
+        Type::HugeInt => "HUGEINT".into(),
+        Type::UTinyInt => "UTINYINT".into(),
+        Type::USmallInt => "USMALLINT".into(),
+        Type::UInt => "UINTEGER".into(),
+        Type::UBigInt => "UBIGINT".into(),
+        Type::Float => "FLOAT".into(),
+        Type::Double => "DOUBLE".into(),
+        Type::Decimal => "DECIMAL".into(),
+        Type::Timestamp => "TIMESTAMP".into(),
+        Type::Text => "VARCHAR".into(),
+        Type::Blob => "BLOB".into(),
+        Type::Date32 => "DATE".into(),
+        Type::Time64 => "TIME".into(),
+        Type::Interval => "INTERVAL".into(),
+        Type::Enum => "ENUM".into(),
+        Type::Union => "UNION".into(),
+        Type::Any => "ANY".into(),
+        Type::List(inner) => format!("LIST({})", format_column_type(inner)),
+        Type::Array(inner, size) => format!("{}[{size}]", format_column_type(inner)),
+        Type::Map(k, v) => format!("MAP({}, {})", format_column_type(k), format_column_type(v)),
+        Type::Struct(fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(n, t)| format!("{n} {}", format_column_type(t)))
+                .collect();
+            format!("STRUCT({})", parts.join(", "))
+        }
+    }
 }
 
 fn run_blocking(
@@ -225,7 +312,9 @@ fn run_blocking(
                         .map(|s| s.as_str())
                         .unwrap_or("")
                         .to_owned(),
-                    data_type: format!("{:?}", stmt.column_type(idx)),
+                    data_type: format_column_type(&duckdb::types::Type::from(
+                        &stmt.column_type(idx),
+                    )),
                 })
                 .collect();
             (count, headers)
@@ -300,7 +389,9 @@ impl Connection for DuckdbConnection {
                                 .map(|s| s.as_str())
                                 .unwrap_or("")
                                 .to_owned(),
-                            data_type: format!("{:?}", stmt.column_type(idx)),
+                            data_type: format_column_type(&duckdb::types::Type::from(
+                                &stmt.column_type(idx),
+                            )),
                         })
                         .collect();
                     (count, headers)
@@ -526,12 +617,28 @@ impl Connection for DuckdbConnection {
             })
             .collect();
 
-        let indexes = describe_indexes(self, schema, name)
-            .await
-            .unwrap_or_default();
-        let foreign_keys = describe_foreign_keys(self, schema, name)
-            .await
-            .unwrap_or_default();
+        let indexes = match describe_indexes(self, schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                warn!(
+                    target: "narwhal::duckdb",
+                    %schema, %name, %error,
+                    "failed to read index metadata; continuing with an empty list"
+                );
+                Vec::new()
+            }
+        };
+        let foreign_keys = match describe_foreign_keys(self, schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                warn!(
+                    target: "narwhal::duckdb",
+                    %schema, %name, %error,
+                    "failed to read foreign-key metadata; continuing with an empty list"
+                );
+                Vec::new()
+            }
+        };
         let unique_constraints = indexes
             .iter()
             .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
@@ -616,19 +723,78 @@ async fn describe_indexes(conn: &DuckdbConnection, schema: &str, name: &str) -> 
     Ok(out)
 }
 
-/// Best-effort: pull the comma-separated identifier list inside the *last*
-/// parenthesised group of a `CREATE INDEX … ON t (a, b)` statement.
+/// Pull the comma-separated identifier list out of
+/// `CREATE INDEX … ON t (a, b) [WHERE …]`.
+///
+/// We scan left-to-right and pick the *first* top-level parenthesised
+/// group — the column list. The old version used `rfind('(')` which
+/// broke on partial indexes like `… ON t (a, b) WHERE (status IS NOT
+/// NULL)` (it returned `status IS NOT NULL` as a column).
 fn parse_index_columns(sql: &str) -> Vec<String> {
-    let Some(open) = sql.rfind('(') else {
-        return Vec::new();
-    };
-    let Some(close) = sql.rfind(')') else {
-        return Vec::new();
-    };
-    if close <= open + 1 {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    let mut quote: Option<u8> = None;
+    // Walk to the first unquoted '('.
+    while i < bytes.len() {
+        let c = bytes[i];
+        if let Some(q) = quote {
+            if c == q {
+                if i + 1 < bytes.len() && bytes[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'\'' || c == b'"' {
+            quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if c == b'(' {
+            break;
+        }
+        i += 1;
+    }
+    if i >= bytes.len() {
         return Vec::new();
     }
-    sql[open + 1..close]
+    let start = i + 1;
+    let mut depth = 1usize;
+    i += 1;
+    quote = None;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if let Some(q) = quote {
+            if c == q {
+                if i + 1 < bytes.len() && bytes[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'\'' | b'"' => quote = Some(c),
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if i >= bytes.len() || depth != 0 {
+        return Vec::new();
+    }
+    sql[start..i]
         .split(',')
         .map(|part| part.trim().trim_matches('"').trim().to_owned())
         .filter(|s| !s.is_empty())
@@ -712,18 +878,6 @@ async fn describe_foreign_keys(
     Ok(by_name.into_values().collect())
 }
 
-// Keep the helper available so dead-code lints don't fire when the
-// describe path skips it.
-#[allow(dead_code)]
-async fn quote_and_run(conn: &DuckdbConnection, schema: &str, name: &str) -> Result<()> {
-    let q = format!(
-        "SELECT 1 FROM {}.{}",
-        quote_ident(schema),
-        quote_ident(name)
-    );
-    conn.execute_owned(q).await
-}
-
 // ---- streaming + cancellation ----
 
 struct DuckdbRowStream {
@@ -785,6 +939,96 @@ mod tests {
             .connect(&memory_config(), None)
             .await
             .expect("open in-memory database")
+    }
+
+    #[test]
+    fn statement_returns_rows_handles_returning_clauses() {
+        // The old version missed all four forms below — user got
+        // 'rows affected' instead of the rows.
+        assert!(statement_returns_rows(
+            "INSERT INTO t (n) VALUES (1) RETURNING n"
+        ));
+        assert!(statement_returns_rows("  update t set n = 2 returning n  "));
+        assert!(statement_returns_rows(
+            "DELETE FROM t WHERE n = 1 RETURNING n"
+        ));
+        // RETURNING-looking text inside a string literal must *not*
+        // fool the heuristic.
+        assert!(!statement_returns_rows(
+            "INSERT INTO t (n) VALUES ('we are returning home')"
+        ));
+        // Identifier with 'returning' in it is not the keyword.
+        assert!(!statement_returns_rows(
+            "INSERT INTO customer_returning (n) VALUES (1)"
+        ));
+        // Plain DML still goes to execute().
+        assert!(!statement_returns_rows("INSERT INTO t VALUES (1)"));
+        assert!(!statement_returns_rows("UPDATE t SET n = 0"));
+        // Sanity: SELECT branch still works.
+        assert!(statement_returns_rows("SELECT 1"));
+        assert!(statement_returns_rows(
+            "  with cte as (select 1) select * from cte"
+        ));
+    }
+
+    #[test]
+    fn format_column_type_renders_engine_names() {
+        use duckdb::types::Type;
+        assert_eq!(format_column_type(&Type::Int), "INTEGER");
+        assert_eq!(format_column_type(&Type::Text), "VARCHAR");
+        assert_eq!(format_column_type(&Type::Date32), "DATE");
+        assert_eq!(
+            format_column_type(&Type::List(Box::new(Type::BigInt))),
+            "LIST(BIGINT)"
+        );
+        assert_eq!(
+            format_column_type(&Type::Map(Box::new(Type::Text), Box::new(Type::Int))),
+            "MAP(VARCHAR, INTEGER)"
+        );
+    }
+
+    #[test]
+    fn parse_index_columns_handles_partial_indexes() {
+        // The old version returned ['status IS NOT NULL'] here.
+        assert_eq!(
+            parse_index_columns("CREATE INDEX idx ON t (a, b) WHERE (status IS NOT NULL)"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        // Quoted identifiers stay quoted-aware.
+        assert_eq!(
+            parse_index_columns("CREATE INDEX idx ON t (\"a b\", c)"),
+            vec!["a b".to_string(), "c".to_string()]
+        );
+        // No parens at all — empty list, no panic.
+        assert!(parse_index_columns("").is_empty());
+        assert!(parse_index_columns("CREATE INDEX idx ON t a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn returning_clause_actually_streams_rows() {
+        // End-to-end version of the unit test above — prove that a
+        // INSERT … RETURNING really does come back with columns and
+        // rows, not just rows_affected.
+        let mut conn = open().await;
+        conn.execute("CREATE TABLE t (id INTEGER, label TEXT)", &[])
+            .await
+            .unwrap();
+        let result = conn
+            .execute(
+                "INSERT INTO t (id, label) VALUES (1, 'a'), (2, 'b') RETURNING id",
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            result.columns.len(),
+            1,
+            "expected one column, got {:?}",
+            result.columns
+        );
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].data_type, "INTEGER");
+        assert_eq!(result.rows.len(), 2);
     }
 
     #[tokio::test]
