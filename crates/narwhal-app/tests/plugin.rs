@@ -301,6 +301,142 @@ async fn transform_hook_can_add_synthetic_columns() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn registering_a_command_that_shadows_a_builtin_is_rejected() {
+    // Plugin tries to claim ':run' — a built-in name. The parser would
+    // always match the built-in first, so silently allowing this would
+    // leave the user wondering why their override never fires.
+    let plugin = LuaPlugin::from_script(
+        "shadower",
+        r#"
+        narwhal.register_command("run", "hijack run", function() return "hi" end)
+        "#,
+    )
+    .unwrap();
+
+    let mut core = empty_core();
+    let err = core.register_lua_plugin(plugin).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("shadows a built-in"),
+        "unexpected error: {msg}"
+    );
+    // And the registry stays empty — the rejected plugin must not be
+    // partially registered.
+    assert!(core.plugins().catalogue().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn transform_chain_continues_past_a_failing_plugin() {
+    // Two plugins: the first transform errors, the second tags every
+    // row with a synthetic '__seen' column. The second one must still
+    // run — a broken first plugin shouldn't be able to suppress every
+    // transform that follows.
+    let broken = LuaPlugin::from_script(
+        "broken",
+        r#"
+        narwhal.register_transform(function(_) error("nope") end)
+        "#,
+    )
+    .unwrap();
+    let tagger = LuaPlugin::from_script(
+        "tagger",
+        r#"
+        narwhal.register_transform(function(result)
+            table.insert(result.columns, { name = "__seen", data_type = "TEXT" })
+            for _, row in ipairs(result.rows) do
+                table.insert(row, "yes")
+            end
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let (mut core, _dir) = core_with_items().await;
+    core.register_lua_plugin(broken).unwrap();
+    core.register_lua_plugin(tagger).unwrap();
+
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
+    core.execute_command("run");
+    core.drain_run_updates().await;
+
+    match core.result() {
+        ResultState::Rows { columns, rows, .. } => {
+            assert_eq!(columns.last().map(|c| c.name.as_str()), Some("__seen"));
+            assert_eq!(rows.len(), 3);
+            for row in rows {
+                assert_eq!(row.0.last().map(|v| v.render()), Some("yes".into()));
+            }
+        }
+        other => panic!("expected Rows, got {other:?}"),
+    }
+    let msg = core.status_message();
+    assert!(msg.contains("nope"), "missing first-plugin error: {msg}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sql_run_during_open_transaction_is_refused() {
+    // While a `:begin` transaction is open, the executor must refuse
+    // sql_run — a fresh pool connection wouldn't see the pinned
+    // transaction's writes, which would silently feed scripts wrong data.
+    let plugin = LuaPlugin::from_script(
+        "peek",
+        r#"
+        narwhal.register_command("peek", "count items", function(_)
+            local r = narwhal.sql_run("SELECT COUNT(*) FROM items")
+            return "items=" .. tostring(r.rows[1][1])
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let (mut core, _dir) = core_with_items().await;
+    core.register_lua_plugin(plugin).unwrap();
+
+    // Before :begin — works.
+    core.execute_command("peek");
+    assert_eq!(core.status_message(), "items=3");
+
+    core.execute_command("begin");
+    assert!(core.status_message().contains("transaction started"));
+
+    // During :begin — refused.
+    core.execute_command("peek");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("unavailable while a :begin transaction is open"),
+        "expected refusal, got: {msg}"
+    );
+
+    // After :commit — works again.
+    core.execute_command("commit");
+    core.execute_command("peek");
+    assert_eq!(core.status_message(), "items=3");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn registering_two_commands_with_the_same_name_in_one_plugin_fails_at_load() {
+    // Script-author error: same name twice. Should fail at
+    // `LuaPlugin::from_script` with a useful message rather than
+    // registering a half-broken plugin downstream.
+    let outcome = LuaPlugin::from_script(
+        "dup",
+        r#"
+        narwhal.register_command("foo", "v1", function() return "a" end)
+        narwhal.register_command("foo", "v2", function() return "b" end)
+        "#,
+    );
+    let err = match outcome {
+        Ok(_) => panic!("expected duplicate-register to fail"),
+        Err(e) => e,
+    };
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("already registered") && msg.contains("foo"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn transform_failure_surfaces_in_status_but_keeps_rows() {
     let plugin = LuaPlugin::from_script(
         "broken",
@@ -357,7 +493,9 @@ async fn shipped_example_plugins_load_and_work() {
     // :top exercises the snippet plugin (sql injection outcome).
     core.execute_command("top items");
     assert!(
-        core.editor().entire_text().contains("SELECT * FROM items LIMIT 10"),
+        core.editor()
+            .entire_text()
+            .contains("SELECT * FROM items LIMIT 10"),
         "editor missing snippet, got: {:?}",
         core.editor().entire_text()
     );

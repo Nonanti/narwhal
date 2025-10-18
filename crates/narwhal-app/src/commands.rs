@@ -87,6 +87,75 @@ pub enum Command {
     Empty,
 }
 
+/// Every token the parser accepts as a built-in `:`-line command head.
+/// Plugins that try to register one of these names are rejected at
+/// load time so the user isn't left wondering why their `:run`
+/// override never runs (the parser would always match the built-in
+/// first).
+///
+/// Keep this list in sync with the `match head` arms below in [`parse`].
+pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
+    "q",
+    "quit",
+    "exit",
+    "open",
+    "o",
+    "close",
+    "refresh",
+    "r",
+    "run",
+    "run-all",
+    "runall",
+    "stream",
+    "stream-all",
+    "streamall",
+    "cancel",
+    "clear",
+    "explain",
+    "export",
+    "dump-schema",
+    "dumpschema",
+    "add",
+    "next",
+    "next-page",
+    "npage",
+    "prev",
+    "prev-page",
+    "ppage",
+    "page-size",
+    "pagesize",
+    "begin",
+    "start",
+    "commit",
+    "rollback",
+    "abort",
+    "savepoint",
+    "sp",
+    "release",
+    "rollback-to",
+    "rollbackto",
+    "remove",
+    "rm",
+    "forget",
+    "plug-load",
+    "plugload",
+    "plug",
+    "plug-list",
+    "pluglist",
+    "plugins",
+    "new",
+    "tabnew",
+    "tabclose",
+    "tc",
+    "tabnext",
+    "tn",
+    "tabprev",
+    "tp",
+    "tabprevious",
+    "help",
+    "h",
+];
+
 pub fn parse(input: &str) -> Command {
     let trimmed = input.trim();
     if trimmed.is_empty() {

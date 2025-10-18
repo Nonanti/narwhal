@@ -205,7 +205,7 @@ pub struct AppCore {
     /// `narwhal.sql_run` call. Updated whenever a session opens or
     /// closes so scripts always target the currently-active
     /// connection.
-    plugin_pool: Arc<std::sync::Mutex<Option<narwhal_pool::Pool>>>,
+    plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -309,8 +309,12 @@ impl AppCore {
             connections_path: None,
             credentials,
             clipboard,
-            plugins: PluginRegistry::new(),
-            plugin_pool: Arc::new(std::sync::Mutex::new(None)),
+            plugins: {
+                let mut reg = PluginRegistry::new();
+                reg.reserve_builtins(crate::commands::BUILTIN_COMMAND_NAMES.iter().copied());
+                reg
+            },
+            plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -1434,7 +1438,7 @@ impl AppCore {
     /// the executor injection is impossible to forget.
     pub fn register_lua_plugin(&mut self, plugin: LuaPlugin) -> PluginResult<usize> {
         let executor: Arc<dyn SqlExecutor> = Arc::new(AppPluginExecutor {
-            pool: self.plugin_pool.clone(),
+            state: self.plugin_state.clone(),
         });
         plugin.install_executor(executor)?;
         self.plugins.register(plugin)
@@ -1450,7 +1454,18 @@ impl AppCore {
     pub fn auto_load_plugins(&mut self, dir: &std::path::Path) -> usize {
         let entries = match std::fs::read_dir(dir) {
             Ok(it) => it,
-            Err(_) => return 0,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
+            Err(err) => {
+                // Permission denied, ENOTDIR, etc. — the user almost
+                // certainly wants to know; running without plugins is
+                // also a valid choice, so we just warn rather than
+                // abort startup.
+                self.plugin_warning = Some(format!(
+                    "plugin auto-load: cannot read {}: {err}",
+                    dir.display()
+                ));
+                return 0;
+            }
         };
         let mut paths: Vec<std::path::PathBuf> = entries
             .filter_map(|e| e.ok().map(|e| e.path()))
@@ -1634,8 +1649,14 @@ impl AppCore {
                 );
                 // Publish the new pool to the plugin executor so any
                 // `narwhal.sql_run` calls hit the freshly-opened
-                // connection.
-                *self.plugin_pool.lock().unwrap() = Some(session.pool.clone());
+                // connection. Opening a connection always closes any
+                // prior `:begin` state implicitly, so the TX flag
+                // resets here too.
+                {
+                    let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+                    state.pool = Some(session.pool.clone());
+                    state.in_transaction = false;
+                }
                 self.session = Some(session);
                 self.rebuild_sidebar();
                 self.focus = Pane::Editor;
@@ -1648,7 +1669,10 @@ impl AppCore {
 
     fn close_session(&mut self) {
         if self.session.take().is_some() {
-            *self.plugin_pool.lock().unwrap() = None;
+            let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+            state.pool = None;
+            state.in_transaction = false;
+            drop(state);
             self.status_message = "connection closed".into();
             self.rebuild_sidebar();
         }
@@ -1789,6 +1813,14 @@ impl AppCore {
                     savepoints: Vec::new(),
                     isolation: iso,
                 });
+                // Mark the plugin executor so `narwhal.sql_run` refuses
+                // to run while a transaction is open — a fresh pool
+                // connection wouldn't see the uncommitted state and the
+                // user would silently get wrong answers.
+                self.plugin_state
+                    .lock()
+                    .expect("plugin_state poisoned")
+                    .in_transaction = true;
                 self.status_message = match iso {
                     Some(level) => format!("transaction started ({})", isolation_label(level)),
                     None => "transaction started".into(),
@@ -1850,6 +1882,14 @@ impl AppCore {
                 Ok::<(), narwhal_core::Error>(())
             })
         });
+        // Whatever happened to the underlying transaction, the host-side
+        // pinned-connection state is gone (we already `take()`d the txn
+        // out of `session.transaction` above). Clear the plugin-side
+        // flag so subsequent `sql_run` calls work again.
+        self.plugin_state
+            .lock()
+            .expect("plugin_state poisoned")
+            .in_transaction = false;
         match outcome {
             Ok(()) => {
                 self.status_message = if commit {
@@ -1993,7 +2033,9 @@ impl AppCore {
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
-                *self.plugin_pool.lock().unwrap() = None;
+                let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+                state.pool = None;
+                state.in_transaction = false;
             }
         }
         self.rebuild_sidebar();
@@ -2401,12 +2443,13 @@ impl AppCore {
             tokio::runtime::Handle::current()
                 .block_on(async { plugins.transform_result(&mut qr).await })
         });
-        if let Err(error) = result {
-            // Surface the error but keep whatever the transforms managed
-            // to mutate before failing — partial output is still useful.
-            // Stash the warning so the subsequent AllDone message doesn't
-            // overwrite it (see [`Self::handle_run_update`]).
-            self.plugin_warning = Some(format!("plugin transform failed: {error}"));
+        if let Err(errors) = result {
+            // The registry already ran every plugin's transform regardless
+            // of intermediate failures (see PluginRegistry::transform_result),
+            // so `qr` reflects whatever each transform managed in place.
+            // Surface every failure at once — the AllDone status message
+            // would otherwise clobber it.
+            self.plugin_warning = Some(format!("plugin transform failed: {errors}"));
         }
         (qr.columns, qr.rows)
     }
@@ -2624,34 +2667,63 @@ fn isolation_label(level: IsolationLevel) -> &'static str {
     }
 }
 
-/// SQL executor injected into every Lua plugin loaded by AppCore. The
-/// pool handle is shared with [`AppCore`] so opening/closing a session
-/// transparently retargets `narwhal.sql_run` to whatever connection is
-/// currently active.
+/// Shared state read by every plugin SQL executor on every
+/// `narwhal.sql_run` call. Owned by [`AppCore`] inside an
+/// `Arc<std::sync::Mutex<_>>` so:
 ///
-/// Scripts run sequentially against the pool — nothing serialises
-/// concurrent calls beyond the underlying pool's own queue — and the
-/// host-side transaction state is intentionally invisible. A script
-/// hitting `narwhal.sql_run` while a `:begin` transaction is active
-/// gets a *new* pool connection, not the pinned one. That mirrors how
-/// every other read in narwhal behaves (sidebar refresh, completion).
+/// * opening/closing a session can retarget plugin SQL transparently
+///   without rebuilding plugin objects;
+/// * `:begin`/`:commit`/`:rollback` can flip the in-transaction flag so
+///   the executor refuses to run during a pinned transaction (a fresh
+///   pool connection wouldn't see uncommitted state — silent
+///   correctness bug otherwise);
+/// * the plain `std::sync::Mutex` is fine because every access is short
+///   (clone the pool out, drop the guard) and never spans an `.await`.
+#[derive(Default)]
+pub(crate) struct PluginConnectionState {
+    pub(crate) pool: Option<narwhal_pool::Pool>,
+    pub(crate) in_transaction: bool,
+}
+
+/// SQL executor injected into every Lua plugin loaded by AppCore.
+///
+/// Reads [`PluginConnectionState`] on every call so the script always
+/// targets the *currently active* connection. Refuses to run while a
+/// `:begin` transaction is open — see the doc-comment on
+/// [`PluginConnectionState`] for why.
+///
+/// ### Memory footprint
+///
+/// `narwhal.sql_run` materialises the whole result set in memory before
+/// returning to Lua. Scripts that query unbounded tables can OOM the
+/// process; recommend `LIMIT` in the user-facing docs. Streaming
+/// support is a future addition.
 struct AppPluginExecutor {
-    pool: Arc<std::sync::Mutex<Option<narwhal_pool::Pool>>>,
+    state: Arc<std::sync::Mutex<PluginConnectionState>>,
 }
 
 #[async_trait::async_trait]
 impl SqlExecutor for AppPluginExecutor {
     async fn run(&self, sql: &str) -> PluginResult<narwhal_core::QueryResult> {
-        let pool = self
-            .pool
-            .lock()
-            .map_err(|e| PluginError::Runtime(format!("plugin pool poisoned: {e}")))?
-            .clone()
-            .ok_or_else(|| PluginError::Runtime("no active connection".into()))?;
+        // Grab a snapshot of the state and drop the guard *before* we
+        // touch any async API.
+        let (pool, in_tx) = {
+            let guard = self
+                .state
+                .lock()
+                .map_err(|e| PluginError::Runtime(format!("plugin state poisoned: {e}")))?;
+            (guard.pool.clone(), guard.in_transaction)
+        };
+        if in_tx {
+            return Err(PluginError::Runtime(
+                "narwhal.sql_run is unavailable while a :begin transaction is open".into(),
+            ));
+        }
+        let pool = pool.ok_or_else(|| PluginError::Runtime("no active connection".into()))?;
         let mut conn = pool
             .acquire()
             .await
-            .map_err(|e| PluginError::Runtime(format!("acquire: {e}")))?;
+            .map_err(|e| PluginError::Runtime(format!("could not acquire connection: {e}")))?;
         conn.execute(sql, &[])
             .await
             .map_err(|e| PluginError::Runtime(format!("execute: {e}")))

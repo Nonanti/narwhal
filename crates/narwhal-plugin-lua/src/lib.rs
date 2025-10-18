@@ -30,6 +30,31 @@
 //! Values inside `result.rows` are rendered as strings — round-tripping
 //! richer types through Lua is not in scope (it would force every script
 //! to carry an opaque userdata mapping). NULL becomes Lua `nil`.
+//!
+//! ## Concurrency and re-entrancy
+//!
+//! The Lua VM is held behind a [`std::sync::Mutex`] (not
+//! `tokio::sync::Mutex`, whose `blocking_lock()` panics from an async
+//! context). Plugin calls are dispatched via
+//! [`tokio::task::spawn_blocking`] so the blocking lock never starves
+//! the async runtime.
+//!
+//! Because [`std::sync::Mutex`] is **not re-entrant**, a Lua handler
+//! must not synchronously call back into the *same* plugin's dispatch
+//! or transform path. In practice the only Lua-callable bridge is
+//! `narwhal.sql_run`, and the host's [`SqlExecutor`] implementation
+//! never re-enters a plugin — it goes straight to the connection
+//! pool. If you add another Lua-callable bridge, audit it for the same
+//! property or the script will deadlock its own VM.
+//!
+//! ## Runtime requirement
+//!
+//! [`Plugin::dispatch`] and [`Plugin::transform_result`] use
+//! [`tokio::task::block_in_place`] internally for the `sql_run` bridge
+//! and so require a **multi-threaded Tokio runtime**. Tests in this
+//! crate annotate themselves with `#[tokio::test(flavor =
+//! "multi_thread")]`; the production binary uses the default
+//! `#[tokio::main]` which is multi-thread.
 
 #![forbid(unsafe_code)]
 
@@ -37,7 +62,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use mlua::{Function, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue, Variadic};
+use mlua::{Function, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue};
 use narwhal_plugin::{
     ColumnHeader, CommandContext, CommandDescriptor, CommandOutcome, Plugin, PluginError,
     PluginResult, QueryResult, Row, SqlExecutor, Value,
@@ -153,15 +178,24 @@ impl LuaPlugin {
     }
 
     /// Convenience: read a script from disk and call [`Self::from_script`].
+    ///
+    /// The plugin's identifier is the file stem (e.g. `format_json.lua`
+    /// becomes `"format_json"`). For paths whose file name is not valid
+    /// UTF-8 we fall back to a path-derived hash so two such plugins
+    /// don't collide in the registry display.
     pub fn from_path(path: impl AsRef<Path>) -> PluginResult<Self> {
         let path = path.as_ref();
         let source = std::fs::read_to_string(path)
             .map_err(|e| PluginError::Runtime(format!("read {}: {e}", path.display())))?;
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("lua-plugin")
-            .to_owned();
+        let stem = if let Some(s) = path.file_stem().and_then(|s| s.to_str()) {
+            s.to_owned()
+        } else {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            path.hash(&mut h);
+            format!("lua-plugin-{:x}", h.finish())
+        };
         Self::from_script(stem, &source)
     }
 }
@@ -233,10 +267,22 @@ fn install_api(
     let narwhal = lua.create_table()?;
 
     // narwhal.register_command(name, description, handler)
+    //
+    // Reject duplicates *inside the same plugin*: the previous
+    // implementation silently let `register_command("foo", ...)` be
+    // called twice, which left two descriptors and a single (last)
+    // handler. The host then rejected the whole plugin with a
+    // misleading "command already registered" error. Failing fast
+    // here, with a useful message, is friendlier to script authors.
     let cmds = commands_table.clone();
     let descs = descriptors_table.clone();
     let register_command = lua.create_function(
         move |_, (name, description, handler): (String, String, Function)| {
+            if cmds.contains_key(name.clone())? {
+                return Err(mlua::Error::external(format!(
+                    "command '{name}' is already registered in this plugin"
+                )));
+            }
             cmds.set(name.clone(), handler)?;
             descs.push(vec![name, description])?;
             Ok(())
@@ -278,9 +324,18 @@ fn invoke_command(
     let commands: Table = lua
         .registry_value(commands_key)
         .map_err(|e| PluginError::Runtime(e.to_string()))?;
+    // Distinguish "plugin doesn't claim this name" (→ Unknown) from
+    // "plugin claims it but the value is broken" (→ Runtime). The old
+    // code lumped both into Unknown and ate the underlying mlua error.
+    let has = commands
+        .contains_key(name)
+        .map_err(|e| PluginError::Runtime(e.to_string()))?;
+    if !has {
+        return Err(PluginError::Unknown(name.to_owned()));
+    }
     let handler: Function = commands
         .get(name)
-        .map_err(|_| PluginError::Unknown(name.to_owned()))?;
+        .map_err(|e| PluginError::Runtime(format!("handler '{name}' is not a function: {e}")))?;
     let returned: LuaValue = handler
         .call(argument.to_owned())
         .map_err(|e| PluginError::Handler(e.to_string()))?;
@@ -431,12 +486,6 @@ fn value_from_lua(value: LuaValue) -> Value {
         other => Value::String(format!("{:?}", other)),
     }
 }
-
-// Silence the unused-import warning when the lua54 feature is enabled but
-// Variadic isn't yet used by the surface API. Future helpers (e.g.
-// register_render that takes variadic args) will use it.
-#[allow(dead_code)]
-fn _variadic_anchor(_: Variadic<LuaValue>) {}
 
 #[cfg(test)]
 mod tests {

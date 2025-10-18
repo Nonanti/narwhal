@@ -144,10 +144,17 @@ pub trait Plugin: Send + Sync {
 /// The registry is keyed by command name (not by plugin name) so dispatch
 /// is O(1). The plugin that owns a given command is tracked alongside so
 /// the host can show provenance in `:help`.
+///
+/// **Reserved names**: the host can list built-in command tokens (e.g.
+/// `"run"`, `"open"`, `"begin"`) that plugins must not shadow. A plugin
+/// that tries to register one of those is rejected at [`register`] time
+/// rather than silently never being dispatched (the parser would otherwise
+/// always match the built-in first).
 #[derive(Default, Clone)]
 pub struct PluginRegistry {
     plugins: Vec<Arc<dyn Plugin>>,
     by_command: BTreeMap<String, Arc<dyn Plugin>>,
+    reserved: std::collections::BTreeSet<String>,
 }
 
 impl PluginRegistry {
@@ -155,12 +162,35 @@ impl PluginRegistry {
         Self::default()
     }
 
+    /// Mark `names` as reserved built-in commands. Plugins attempting to
+    /// register a command with any of these names will be rejected. The
+    /// host calls this once at start-up with the parser's command list.
+    pub fn reserve_builtins<I, S>(&mut self, names: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for name in names {
+            self.reserved.insert(name.into());
+        }
+    }
+
     /// Register `plugin` and index its commands. Returns the number of
-    /// commands that were *new*; duplicates raise a [`PluginError`].
+    /// commands that were *new*; duplicates or names that shadow a
+    /// reserved built-in raise a [`PluginError`]. No state mutates
+    /// unless every command passes validation — partial registration
+    /// is impossible.
     pub fn register<P: Plugin + 'static>(&mut self, plugin: P) -> PluginResult<usize> {
-        let plugin: Arc<dyn Plugin> = Arc::new(plugin);
+        // Validate against current state *before* allocating the Arc so
+        // a rejected registration costs nothing.
         let descriptors = plugin.commands();
         for d in &descriptors {
+            if self.reserved.contains(&d.name) {
+                return Err(PluginError::Handler(format!(
+                    "command '{}' shadows a built-in; pick a different name",
+                    d.name
+                )));
+            }
             if self.by_command.contains_key(&d.name) {
                 return Err(PluginError::Handler(format!(
                     "command '{}' already registered",
@@ -169,6 +199,7 @@ impl PluginRegistry {
             }
         }
         let count = descriptors.len();
+        let plugin: Arc<dyn Plugin> = Arc::new(plugin);
         for d in descriptors {
             self.by_command.insert(d.name, plugin.clone());
         }
@@ -199,13 +230,28 @@ impl PluginRegistry {
     }
 
     /// Run every plugin's [`Plugin::transform_result`] hook in order.
-    /// A failure aborts the chain so the user sees the first error
-    /// rather than silently dropping subsequent transforms.
-    pub async fn transform_result(&self, result: &mut QueryResult) -> PluginResult<()> {
+    ///
+    /// Errors from individual transforms are collected and returned in a
+    /// single [`TransformErrors`] value, but the chain keeps going — a
+    /// broken transform shouldn't be able to suppress every transform
+    /// registered after it. The caller surfaces the message(s) to the
+    /// user; the rows still reflect whatever each transform managed to
+    /// produce in place.
+    pub async fn transform_result(
+        &self,
+        result: &mut QueryResult,
+    ) -> std::result::Result<(), TransformErrors> {
+        let mut errors: Vec<String> = Vec::new();
         for plugin in &self.plugins {
-            plugin.transform_result(result).await?;
+            if let Err(e) = plugin.transform_result(result).await {
+                errors.push(format!("{}: {e}", plugin.name()));
+            }
         }
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(TransformErrors(errors))
+        }
     }
 
     /// Flattened command catalogue. Useful for `:help`.
@@ -221,6 +267,21 @@ impl PluginRegistry {
             .collect()
     }
 }
+
+/// Collected per-plugin transform failures from a single
+/// [`PluginRegistry::transform_result`] call. The chain runs every
+/// plugin regardless of intermediate failures so the user sees *all*
+/// problems at once.
+#[derive(Debug, Clone)]
+pub struct TransformErrors(pub Vec<String>);
+
+impl std::fmt::Display for TransformErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.join("; "))
+    }
+}
+
+impl std::error::Error for TransformErrors {}
 
 #[cfg(test)]
 mod tests {
@@ -327,6 +388,65 @@ mod tests {
         assert_eq!(result.columns[1].name, "__row_count");
         assert_eq!(result.rows[0].0[1].render(), "2");
         assert_eq!(result.rows[1].0[1].render(), "2");
+    }
+
+    /// A transform that always fails. Lets us verify the chain doesn't
+    /// stop on the first error.
+    struct FailingTransform;
+
+    #[async_trait]
+    impl Plugin for FailingTransform {
+        fn name(&self) -> &str {
+            "failing"
+        }
+
+        async fn transform_result(&self, _: &mut QueryResult) -> PluginResult<()> {
+            Err(PluginError::Handler("boom".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn transform_chain_keeps_going_past_failures() {
+        // failing first, counter second — counter must still run even
+        // though the first transform returned an error.
+        let mut registry = PluginRegistry::new();
+        registry.register(FailingTransform).unwrap();
+        registry.register(CounterPlugin).unwrap();
+        let mut result = QueryResult {
+            columns: vec![narwhal_core::ColumnHeader {
+                name: "x".into(),
+                data_type: "INT".into(),
+            }],
+            rows: vec![narwhal_core::Row(vec![Value::Int(1)])],
+            rows_affected: None,
+            elapsed_ms: 0,
+        };
+        let err = registry.transform_result(&mut result).await.unwrap_err();
+        assert!(
+            err.0
+                .iter()
+                .any(|m| m.contains("failing") && m.contains("boom")),
+            "missing failing message in {:?}",
+            err.0
+        );
+        assert_eq!(result.columns.len(), 2, "counter transform never ran");
+        assert_eq!(result.columns[1].name, "__row_count");
+    }
+
+    #[tokio::test]
+    async fn reserved_builtin_name_is_rejected() {
+        let mut registry = PluginRegistry::new();
+        registry.reserve_builtins(["echo"]);
+        let err = registry.register(EchoPlugin).unwrap_err();
+        match err {
+            PluginError::Handler(msg) => assert!(
+                msg.contains("shadows a built-in"),
+                "unexpected message: {msg}"
+            ),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        // And nothing partial-registered: catalogue still empty.
+        assert!(registry.catalogue().is_empty());
     }
 
     #[tokio::test]
