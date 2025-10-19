@@ -15,7 +15,8 @@
 //! narwhal.register_command(name, description, handler)
 //!     -- handler(arg : string)
 //!     --   returning a string sets the status bar to that string
-//!     --   returning a table { sql = "...", append = true } injects SQL
+//!     --   returning { sql = "..." } appends SQL to the editor
+//!     --   returning { sql = "...", append = false } replaces the buffer
 //!     --   returning nil or false is silent
 //!
 //! narwhal.register_transform(handler)
@@ -350,8 +351,23 @@ fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, Stri
         }),
         LuaValue::Table(t) => {
             // Either { sql = "...", append = bool } or { status = "..." }.
+            //
+            // append defaults to *true* because the most common script
+            // shape — a snippet that appends a SELECT to whatever the
+            // user already typed — is the safer default. Wiping the
+            // editor on every command would be a footgun for someone
+            // halfway through a long query. Scripts that explicitly
+            // want to replace the buffer set append = false.
             if let Ok(sql) = t.get::<String>("sql") {
-                let append = t.get::<bool>("append").unwrap_or(false);
+                // mlua converts a missing field to LuaNil, and FromLua
+                // for bool maps nil to false — so `get::<bool>("append")
+                // .unwrap_or(true)` would always be false. Use
+                // Option<bool> to distinguish 'unset' (→ default true)
+                // from 'explicitly false'.
+                let append = match t.get::<Option<bool>>("append") {
+                    Ok(Some(v)) => v,
+                    Ok(None) | Err(_) => true,
+                };
                 Ok(CommandOutcome::InsertSql { sql, append })
             } else if let Ok(status) = t.get::<String>("status") {
                 Ok(CommandOutcome::Status { message: status })
@@ -552,6 +568,45 @@ mod tests {
                 assert_eq!(sql, "SELECT 42");
                 assert!(append);
             }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn command_table_without_append_field_defaults_to_appending() {
+        // The user's editor buffer is more sacred than the plugin
+        // author's tidiness: omitting `append` should NOT wipe what
+        // the user already typed.
+        let script = r#"
+            narwhal.register_command("gen", "snippet", function(_)
+                return { sql = "SELECT 1" }
+            end)
+        "#;
+        let plugin = LuaPlugin::from_script("gen-plugin", script).unwrap();
+        let outcome = plugin
+            .dispatch("gen", CommandContext::default())
+            .await
+            .unwrap();
+        match outcome {
+            CommandOutcome::InsertSql { append, .. } => assert!(append),
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn command_table_with_explicit_append_false_replaces_buffer() {
+        let script = r#"
+            narwhal.register_command("gen", "snippet", function(_)
+                return { sql = "SELECT 1", append = false }
+            end)
+        "#;
+        let plugin = LuaPlugin::from_script("gen-plugin", script).unwrap();
+        let outcome = plugin
+            .dispatch("gen", CommandContext::default())
+            .await
+            .unwrap();
+        match outcome {
+            CommandOutcome::InsertSql { append, .. } => assert!(!append),
             other => panic!("unexpected outcome: {other:?}"),
         }
     }

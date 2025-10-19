@@ -10,9 +10,9 @@ Every script gets a `narwhal` global with three entry points:
 narwhal.register_command(name, description, handler)
     -- handler(arg : string)
     --   return "..."                 -> status bar message
-    --   return { sql = "..." }       -> replace editor buffer
-    --   return { sql = "...", append = true }
-    --                                -> append to editor buffer
+    --   return { sql = "..." }       -> append to editor buffer
+    --   return { sql = "...", append = false }
+    --                                -> replace editor buffer
     --   return { status = "..." }    -> same as plain string
     --   return nil | false           -> silent
 
