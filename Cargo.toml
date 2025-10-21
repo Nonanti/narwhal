@@ -10,6 +10,7 @@ members = [
     "crates/narwhal-driver-sqlite",
     "crates/narwhal-driver-mysql",
     "crates/narwhal-driver-duckdb",
+    "crates/narwhal-driver-clickhouse",
     "crates/narwhal-plugin",
     "crates/narwhal-plugin-lua",
     "crates/narwhal-vim",
@@ -76,6 +77,7 @@ narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
 narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
 narwhal-driver-mysql = { path = "crates/narwhal-driver-mysql" }
 narwhal-driver-duckdb = { path = "crates/narwhal-driver-duckdb" }
+narwhal-driver-clickhouse = { path = "crates/narwhal-driver-clickhouse" }
 narwhal-plugin = { path = "crates/narwhal-plugin" }
 narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }

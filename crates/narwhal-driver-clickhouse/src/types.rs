@@ -1,0 +1,476 @@
+//! ClickHouse type system bridge and SQL literal rendering.
+//!
+//! ClickHouse returns column metadata in the
+//! `TabSeparatedWithNamesAndTypes` wire format where each value is a
+//! tab-delimited field and the first two rows carry column names and
+//! native type strings respectively. This module:
+//!
+//! * maps ClickHouse type strings (`UInt32`, `Nullable(String)`,
+//!   `Array(Int64)`, …) to [`narwhal_core::Value`] variants for display;
+//! * renders [`narwhal_core::Value`] as safe SQL literals for the HTTP
+//!   query parameter substitution path;
+//! * parses TSV response bodies into rows of [`narwhal_core::Value`].
+
+use narwhal_core::Value;
+
+/// Classify a ClickHouse type string into the [`Value`] variant that
+/// should hold it.
+///
+/// Composite and exotic types (Array, Map, Tuple, Nested, LowCardinality,
+/// AggregateFunction, …) collapse to `Value::String` — the TSV wire
+/// representation is already human-readable and round-tripping structured
+/// types is out of scope for a TUI client.
+pub(crate) fn classify_type(ch_type: &str) -> ValueKind {
+    let ch_type = ch_type.trim();
+
+    // Strip Nullable(…) and LowCardinality(…) wrappers — the inner type
+    // determines the variant.
+    let inner = strip_wrappers(ch_type);
+
+    // 128/256-bit integers don't fit in i64 → String.
+    if inner.starts_with("Int128")
+        || inner.starts_with("Int256")
+        || inner.starts_with("UInt128")
+        || inner.starts_with("UInt256")
+    {
+        return ValueKind::String;
+    }
+    if inner.starts_with("Int8")
+        || inner.starts_with("Int16")
+        || inner.starts_with("Int32")
+        || inner.starts_with("Int64")
+        || inner.starts_with("UInt8")
+        || inner.starts_with("UInt16")
+        || inner.starts_with("UInt32")
+        || inner.starts_with("UInt64")
+    {
+        return ValueKind::Int;
+    }
+    if inner == "Float32" || inner == "Float64" {
+        return ValueKind::Float;
+    }
+    if inner == "String" || inner.starts_with("FixedString(") {
+        return ValueKind::String;
+    }
+    if inner == "UUID" {
+        return ValueKind::Uuid;
+    }
+    if inner == "Bool" {
+        return ValueKind::Bool;
+    }
+    if inner == "Date"
+        || inner == "Date32"
+        || inner.starts_with("DateTime")
+        || inner.starts_with("DateTime64")
+    {
+        return ValueKind::String;
+    }
+    // Decimal, Enum, IPv4, IPv6, Array, Map, Tuple, Nested, etc.
+    ValueKind::String
+}
+
+/// Simplified classification result used to decide which [`Value`] variant
+/// to produce when parsing a TSV field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValueKind {
+    Int,
+    Float,
+    Bool,
+    Uuid,
+    String,
+}
+
+/// Strip `Nullable(…)` and `LowCardinality(…)` wrappers, returning the
+/// innermost type string. If no wrapper is present, returns `ty` unchanged.
+fn strip_wrappers(ty: &str) -> &str {
+    let mut current = ty;
+    loop {
+        let stripped = if let Some(rest) = current.strip_prefix("Nullable(") {
+            rest.strip_suffix(')').unwrap_or(rest)
+        } else if let Some(rest) = current.strip_prefix("LowCardinality(") {
+            rest.strip_suffix(')').unwrap_or(rest)
+        } else {
+            break;
+        };
+        current = stripped;
+    }
+    current
+}
+
+/// Parse a single TSV field according to the ClickHouse type string.
+///
+/// `\\N` (literal backslash-N) is ClickHouse's NULL representation in
+/// TSV format. Empty strings in non-Nullable columns are preserved as
+/// `Value::String("")`.
+pub(crate) fn parse_tsv_value(raw: &str, ch_type: &str) -> Value {
+    // ClickHouse represents NULL as the two-character sequence \N in TSV.
+    if raw == "\\N" {
+        return Value::Null;
+    }
+
+    match classify_type(ch_type) {
+        ValueKind::Int => {
+            if raw.is_empty() {
+                return Value::Null;
+            }
+            match raw.parse::<i64>() {
+                Ok(v) => Value::Int(v),
+                Err(_) => Value::Unknown(raw.to_owned()),
+            }
+        }
+        ValueKind::Float => {
+            if raw.is_empty() {
+                return Value::Null;
+            }
+            match raw.parse::<f64>() {
+                Ok(v) => Value::Float(v),
+                Err(_) => Value::Unknown(raw.to_owned()),
+            }
+        }
+        ValueKind::Bool => match raw {
+            "1" | "true" => Value::Bool(true),
+            "0" | "false" => Value::Bool(false),
+            "" => Value::Null,
+            other => Value::Unknown(other.to_owned()),
+        },
+        ValueKind::Uuid => {
+            if raw.is_empty() {
+                return Value::Null;
+            }
+            match raw.parse::<uuid::Uuid>() {
+                Ok(u) => Value::Uuid(u),
+                Err(_) => Value::String(raw.to_owned()),
+            }
+        }
+        ValueKind::String => {
+            if raw.is_empty() && is_nullable_type(ch_type) {
+                Value::Null
+            } else {
+                Value::String(raw.to_owned())
+            }
+        }
+    }
+}
+
+/// Quick check: does the ClickHouse type string start with `Nullable(`?
+fn is_nullable_type(ch_type: &str) -> bool {
+    ch_type.trim().starts_with("Nullable(")
+}
+
+/// Render a [`Value`] as a SQL literal safe for embedding in a ClickHouse
+/// HTTP query string.
+///
+/// **Security**: String values are single-quoted with interior quotes
+/// escaped by doubling (`'` → `''`). Byte arrays are rendered as hex
+/// literals. All other variants use their natural SQL representation.
+/// This function must **never** produce an unescaped interpolation.
+pub(crate) fn value_to_sql_literal(value: &Value) -> String {
+    match value {
+        Value::Null => "NULL".to_owned(),
+        Value::Bool(b) => {
+            if *b {
+                "1".to_owned()
+            } else {
+                "0".to_owned()
+            }
+        }
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => {
+            let s = f.to_string();
+            // Ensure the float literal has a decimal point so ClickHouse
+            // does not interpret it as an integer.
+            if s.contains('.') || s.contains('e') || s.contains('E') {
+                s
+            } else {
+                format!("{s}.0")
+            }
+        }
+        Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        Value::Bytes(b) => {
+            let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+            format!("unhex('{hex}')")
+        }
+        Value::Date(d) => format!("'{d}'"),
+        Value::Time(t) => format!("'{t}'"),
+        Value::DateTime(dt) => format!("'{dt}'"),
+        Value::Timestamp(ts) => format!("'{}'", ts.to_rfc3339()),
+        Value::Uuid(u) => format!("'{u}'"),
+        Value::Json(v) => format!("'{}'", v.to_string().replace('\'', "''")),
+        Value::Unknown(s) => format!("'{}'", s.replace('\'', "''")),
+    }
+}
+
+/// Parse a complete TSV response body in `TabSeparatedWithNamesAndTypes`
+/// format.
+///
+/// Returns `(headers, type_strings, rows)` where `headers` has the column
+/// names, `type_strings` has the ClickHouse native types, and `rows` has
+/// the parsed [`Value`] rows.
+pub(crate) fn parse_tsv_body(body: &str) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
+    let mut lines = body.lines().peekable();
+
+    // First line: column names (tab-separated).
+    let header_line = match lines.next() {
+        Some(l) => l,
+        None => return (Vec::new(), Vec::new(), Vec::new()),
+    };
+    let headers: Vec<String> = split_tsv_line(header_line);
+
+    // Second line: type strings.
+    let type_line = match lines.next() {
+        Some(l) => l,
+        None => return (headers, Vec::new(), Vec::new()),
+    };
+    let type_strings: Vec<String> = split_tsv_line(type_line);
+
+    let mut rows = Vec::new();
+    for line in lines {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let fields = split_tsv_line(line);
+        let mut row = Vec::with_capacity(headers.len());
+        for (i, field) in fields.iter().enumerate() {
+            let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
+            row.push(parse_tsv_value(field, ch_type));
+        }
+        // Pad missing fields with Null.
+        while row.len() < headers.len() {
+            row.push(Value::Null);
+        }
+        rows.push(row);
+    }
+
+    (headers, type_strings, rows)
+}
+
+/// Split a TSV line on tab characters, preserving empty fields.
+fn split_tsv_line(line: &str) -> Vec<String> {
+    line.split('\t').map(String::from).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- classify_type ----
+
+    #[test]
+    fn classify_integer_types() {
+        assert_eq!(classify_type("UInt8"), ValueKind::Int);
+        assert_eq!(classify_type("UInt16"), ValueKind::Int);
+        assert_eq!(classify_type("UInt32"), ValueKind::Int);
+        assert_eq!(classify_type("UInt64"), ValueKind::Int);
+        assert_eq!(classify_type("Int8"), ValueKind::Int);
+        assert_eq!(classify_type("Int16"), ValueKind::Int);
+        assert_eq!(classify_type("Int32"), ValueKind::Int);
+        assert_eq!(classify_type("Int64"), ValueKind::Int);
+    }
+
+    #[test]
+    fn classify_oversized_ints_are_strings() {
+        assert_eq!(classify_type("UInt128"), ValueKind::String);
+        assert_eq!(classify_type("UInt256"), ValueKind::String);
+        assert_eq!(classify_type("Int128"), ValueKind::String);
+        assert_eq!(classify_type("Int256"), ValueKind::String);
+    }
+
+    #[test]
+    fn classify_float_types() {
+        assert_eq!(classify_type("Float32"), ValueKind::Float);
+        assert_eq!(classify_type("Float64"), ValueKind::Float);
+    }
+
+    #[test]
+    fn classify_string_types() {
+        assert_eq!(classify_type("String"), ValueKind::String);
+        assert_eq!(classify_type("FixedString(16)"), ValueKind::String);
+    }
+
+    #[test]
+    fn classify_uuid() {
+        assert_eq!(classify_type("UUID"), ValueKind::Uuid);
+        assert_eq!(classify_type("Nullable(UUID)"), ValueKind::Uuid);
+    }
+
+    #[test]
+    fn classify_bool() {
+        assert_eq!(classify_type("Bool"), ValueKind::Bool);
+    }
+
+    #[test]
+    fn classify_datetime() {
+        assert_eq!(classify_type("DateTime('UTC')"), ValueKind::String);
+        assert_eq!(classify_type("DateTime64(3)"), ValueKind::String);
+        assert_eq!(classify_type("Date"), ValueKind::String);
+        assert_eq!(classify_type("Date32"), ValueKind::String);
+    }
+
+    #[test]
+    fn classify_nullable_and_lowcardinality() {
+        assert_eq!(classify_type("Nullable(String)"), ValueKind::String);
+        assert_eq!(classify_type("Nullable(Int32)"), ValueKind::Int);
+        assert_eq!(classify_type("LowCardinality(String)"), ValueKind::String);
+        assert_eq!(
+            classify_type("Nullable(LowCardinality(String))"),
+            ValueKind::String
+        );
+    }
+
+    #[test]
+    fn classify_complex_types() {
+        assert_eq!(classify_type("Array(Int64)"), ValueKind::String);
+        assert_eq!(classify_type("Map(String, Int64)"), ValueKind::String);
+        assert_eq!(
+            classify_type("Tuple(String, Int64, Float64)"),
+            ValueKind::String
+        );
+        assert_eq!(classify_type("Decimal(18, 3)"), ValueKind::String);
+        assert_eq!(classify_type("IPv4"), ValueKind::String);
+        assert_eq!(classify_type("IPv6"), ValueKind::String);
+    }
+
+    // ---- parse_tsv_value ----
+
+    #[test]
+    fn parse_null_value() {
+        assert!(matches!(
+            parse_tsv_value("\\N", "Nullable(Int32)"),
+            Value::Null
+        ));
+    }
+
+    #[test]
+    fn parse_int_value() {
+        let v = parse_tsv_value("42", "UInt32");
+        assert!(matches!(v, Value::Int(42)));
+        assert_eq!(v.render(), "42");
+
+        let v2 = parse_tsv_value("-7", "Int32");
+        assert!(matches!(v2, Value::Int(-7)));
+    }
+
+    #[test]
+    fn parse_float_value() {
+        let v = parse_tsv_value("3.14", "Float64");
+        assert!(matches!(v, Value::Float(_)));
+        assert_eq!(v.render(), "3.14");
+    }
+
+    #[test]
+    fn parse_bool_value() {
+        assert!(matches!(parse_tsv_value("1", "Bool"), Value::Bool(true)));
+        assert!(matches!(parse_tsv_value("0", "Bool"), Value::Bool(false)));
+    }
+
+    #[test]
+    fn parse_uuid_value() {
+        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let parsed = parse_tsv_value(uuid_str, "UUID");
+        assert!(matches!(parsed, Value::Uuid(_)));
+    }
+
+    #[test]
+    fn parse_uuid_fallback_to_string() {
+        let parsed = parse_tsv_value("not-a-uuid", "UUID");
+        assert!(matches!(parsed, Value::String(_)));
+    }
+
+    #[test]
+    fn parse_string_value() {
+        let v = parse_tsv_value("hello world", "String");
+        assert!(matches!(v, Value::String(_)));
+        assert_eq!(v.render(), "hello world");
+    }
+
+    // ---- value_to_sql_literal ----
+
+    #[test]
+    fn sql_literal_string_escapes_quotes() {
+        assert_eq!(
+            value_to_sql_literal(&Value::String("it's here".into())),
+            "'it''s here'"
+        );
+    }
+
+    #[test]
+    fn sql_literal_null() {
+        assert_eq!(value_to_sql_literal(&Value::Null), "NULL");
+    }
+
+    #[test]
+    fn sql_literal_bool() {
+        assert_eq!(value_to_sql_literal(&Value::Bool(true)), "1");
+        assert_eq!(value_to_sql_literal(&Value::Bool(false)), "0");
+    }
+
+    #[test]
+    fn sql_literal_int() {
+        assert_eq!(value_to_sql_literal(&Value::Int(42)), "42");
+    }
+
+    #[test]
+    fn sql_literal_float_ensures_decimal() {
+        let result = value_to_sql_literal(&Value::Float(3.0));
+        assert!(
+            result.contains('.') || result.contains('e') || result.contains('E'),
+            "float literal must contain a decimal point or exponent: got {result}"
+        );
+    }
+
+    #[test]
+    fn sql_literal_bytes_hex() {
+        let result = value_to_sql_literal(&Value::Bytes(vec![0xDE, 0xAD]));
+        assert!(result.starts_with("unhex('"));
+        assert!(result.contains("dead"));
+    }
+
+    // ---- parse_tsv_body ----
+
+    #[test]
+    fn parse_full_tsv_body() {
+        let body = "id\tname\tactive\nUInt32\tString\tBool\n1\talice\t1\n2\tbob\t0";
+        let (headers, types, rows) = parse_tsv_body(body);
+        assert_eq!(headers, vec!["id", "name", "active"]);
+        assert_eq!(types, vec!["UInt32", "String", "Bool"]);
+        assert_eq!(rows.len(), 2);
+        assert!(matches!(rows[0][0], Value::Int(1)));
+        assert!(matches!(rows[0][1], Value::String(_)));
+        assert!(matches!(rows[0][2], Value::Bool(true)));
+        assert!(matches!(rows[1][0], Value::Int(2)));
+        assert!(matches!(rows[1][2], Value::Bool(false)));
+    }
+
+    #[test]
+    fn parse_tsv_body_with_null() {
+        let body = "id\tname\nUInt32\tNullable(String)\n1\t\\N";
+        let (_, _, rows) = parse_tsv_body(body);
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(rows[0][0], Value::Int(1)));
+        assert!(matches!(rows[0][1], Value::Null));
+    }
+
+    // ---- statement_returns_rows (in lib.rs) ----
+
+    #[test]
+    fn row_returning_keywords() {
+        assert!(crate::statement_returns_rows("SELECT 1"));
+        assert!(crate::statement_returns_rows(
+            "  with cte as (select 1) select * from cte"
+        ));
+        assert!(crate::statement_returns_rows("SHOW TABLES"));
+        assert!(crate::statement_returns_rows("DESCRIBE TABLE t"));
+        assert!(crate::statement_returns_rows("EXPLAIN SELECT 1"));
+    }
+
+    #[test]
+    fn non_row_returning_keywords() {
+        assert!(!crate::statement_returns_rows("INSERT INTO t VALUES (1)"));
+        assert!(!crate::statement_returns_rows("CREATE TABLE t (id Int32)"));
+        assert!(!crate::statement_returns_rows("DROP TABLE t"));
+        assert!(!crate::statement_returns_rows(
+            "ALTER TABLE t ADD COLUMN x String"
+        ));
+    }
+}

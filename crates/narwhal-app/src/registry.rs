@@ -40,6 +40,7 @@ impl DriverRegistry {
         registry.register(narwhal_driver_sqlite::SqliteDriver::new());
         registry.register(narwhal_driver_mysql::MysqlDriver::new());
         registry.register(narwhal_driver_duckdb::DuckdbDriver::new());
+        registry.register(narwhal_driver_clickhouse::ClickhouseDriver::new());
         registry
     }
 }
