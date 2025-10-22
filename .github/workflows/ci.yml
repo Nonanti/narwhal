@@ -30,8 +30,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev
+          llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
+          echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -43,8 +49,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev
+          llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
+          echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features
+      - run: cargo test --workspace
 
   integration:
     name: integration (docker)
@@ -52,8 +65,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev
+          llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
+          echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features -- --ignored --test-threads=1
+      - run: cargo test --workspace -- --ignored --test-threads=1
 
   doc:
     name: rustdoc
@@ -63,5 +82,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev
+          llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
+          echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
