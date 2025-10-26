@@ -71,21 +71,32 @@ pub enum CommandOutcome {
     Silent,
 }
 
-/// Context handed to a command handler. Today it only carries the raw
-/// argument string from the prompt; future fields can be added without
-/// breaking plugins because every consumer constructs it through the
-/// public API (the struct is `non_exhaustive`).
+/// Context handed to a command handler. Carries the raw argument
+/// string from the prompt and the current editor buffer text so
+/// plugins like :explain-cost can wrap the buffer in a prefix.
+/// Future fields can be added without breaking plugins because every
+/// consumer constructs it through the public API (the struct is
+/// `non_exhaustive`).
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct CommandContext {
     pub argument: String,
+    /// Current content of the editor buffer in the active tab.
+    pub editor_text: String,
 }
 
 impl CommandContext {
     pub fn new(argument: impl Into<String>) -> Self {
         Self {
             argument: argument.into(),
+            editor_text: String::new(),
         }
+    }
+
+    /// Attach the editor buffer text so the handler can read or wrap it.
+    pub fn with_editor_text(mut self, text: impl Into<String>) -> Self {
+        self.editor_text = text.into();
+        self
     }
 }
 

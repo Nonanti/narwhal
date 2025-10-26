@@ -503,6 +503,53 @@ async fn shipped_example_plugins_load_and_work() {
     // :rc exercises the sql_run plugin against the active sqlite.
     core.execute_command("rc items");
     assert_eq!(core.status_message(), "items: 3 row(s)");
+
+    // :csv-export exercises the CSV export plugin against the active sqlite.
+    // Per-test tempdir keeps parallel runs of this suite from racing on
+    // a single fixed /tmp path.
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv_path = csv_dir.path().join("items.csv");
+    let csv_cmd = format!("csv-export items {}", csv_path.display());
+    core.execute_command(&csv_cmd);
+    let csv_status = core.status_message().to_owned();
+    assert!(
+        csv_status.contains("wrote 3 row(s) to"),
+        "expected csv-export success, got: {csv_status}"
+    );
+    // Verify the file contents: header + 3 data rows.
+    let contents = std::fs::read_to_string(&csv_path).unwrap_or_default();
+    let lines: Vec<&str> = contents.trim().lines().collect();
+    assert_eq!(
+        lines.len(),
+        4,
+        "expected 4 lines (header + 3 rows), got {}",
+        lines.len()
+    );
+    assert!(
+        lines[0].contains("id"),
+        "header should contain 'id': {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("label"),
+        "header should contain 'label': {}",
+        lines[0]
+    );
+
+    // :explain-cost exercises the editor-wrapping plugin.
+    // Clear the editor first, then seed it with a statement.
+    core.execute_command("clear");
+    core.insert_into_editor("SELECT * FROM items");
+    core.execute_command("explain-cost");
+    let editor_after = core.editor().entire_text();
+    assert!(
+        editor_after.contains("EXPLAIN ANALYZE"),
+        "editor should contain EXPLAIN ANALYZE, got: {editor_after:?}"
+    );
+    assert!(
+        editor_after.contains("SELECT * FROM items"),
+        "editor should still contain the original statement, got: {editor_after:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -572,5 +619,114 @@ async fn lua_handler_runtime_error_surfaces_as_plugin_error() {
     assert!(
         msg.contains("plugin error") || msg.contains("intentional"),
         "got: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn help_with_builtin_arg_describes_it() {
+    let mut core = empty_core();
+
+    // :help open should print a description containing "open".
+    core.execute_command("help open");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("open"),
+        "expected :help open to mention 'open', got: {msg}"
+    );
+
+    // :help with no arg still shows the one-liner.
+    core.execute_command("help");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("quit"),
+        "expected :help to list commands, got: {msg}"
+    );
+
+    // :help with an unknown name.
+    core.execute_command("help nonexistent-cmd");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("unknown command"),
+        "expected unknown-command message, got: {msg}"
+    );
+
+    // :help alias resolves correctly.
+    core.execute_command("help o");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("open"),
+        "expected :help o to resolve to open description, got: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn help_with_plugin_arg_describes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let script_path = write_script(
+        &dir,
+        "row_count.lua",
+        r#"
+        narwhal.register_command("rc", "row count for <table>", function(arg)
+            local raw = arg:match("^%s*(.-)%s*$")
+            return raw .. ": ok"
+        end)
+        "#,
+    );
+
+    let mut core = empty_core();
+    core.execute_command(&format!("plug-load {}", script_path.display()));
+    assert!(core.status_message().contains("loaded"));
+
+    // :help rc should surface the plugin's description.
+    core.execute_command("help rc");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("row count"),
+        "expected :help rc to contain plugin description, got: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explain_cost_wraps_editor_buffer() {
+    let plugin = LuaPlugin::from_script(
+        "explain_cost",
+        r#"
+        narwhal.register_command("explain-cost", "wrap editor buffer in EXPLAIN ANALYZE", function(_)
+            local text = narwhal.editor_text or ""
+            local trimmed = text:match("^%s*(.-)%s*$") or ""
+            if trimmed == "" then
+                return "explain-cost: editor is empty; type a statement first"
+            end
+            return {
+                sql = "EXPLAIN ANALYZE " .. trimmed .. "\n",
+                append = false,
+            }
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let mut core = empty_core();
+    core.register_lua_plugin(plugin).unwrap();
+
+    // Empty buffer — should get a hint message.
+    core.execute_command("explain-cost");
+    let msg = core.status_message();
+    assert!(
+        msg.contains("editor is empty"),
+        "expected empty-buffer hint, got: {msg}"
+    );
+
+    // Seed the editor with a statement, then wrap it.
+    core.insert_into_editor("SELECT 1");
+    core.execute_command("explain-cost");
+    let editor = core.editor().entire_text();
+    assert!(
+        editor.contains("EXPLAIN ANALYZE"),
+        "editor should contain EXPLAIN ANALYZE, got: {editor:?}"
+    );
+    assert!(
+        editor.contains("SELECT 1"),
+        "editor should still contain the original statement, got: {editor:?}"
     );
 }

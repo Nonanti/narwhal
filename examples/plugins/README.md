@@ -30,6 +30,13 @@ narwhal.sql_run(sql : string) -> result
     -- Raises a Lua error if no connection is open or the driver
     -- refuses the statement. Bypasses any open :begin transaction
     -- and gets its own pool connection.
+
+narwhal.editor_text          : string (read-only)
+    -- The current content of the editor buffer, set by the host
+    -- before each command dispatch. Plugins that wrap the buffer
+    -- (e.g. :explain-cost) can read this to produce a modified
+    -- version. The field is empty for transforms; it only has a
+    -- value during command dispatch.
 ```
 
 ## The samples
@@ -40,6 +47,8 @@ narwhal.sql_run(sql : string) -> result
 | `format_json.lua` | Transform that pretty-prints any cell that parses as JSON. Pure Lua, no deps. |
 | `row_count.lua` | `:rc <table>` command. Uses `narwhal.sql_run` to count rows of the given table and reports the number in the status bar. Shows the executor in action. |
 | `query_snippet.lua` | `:top <table>` injects `SELECT * FROM <table> LIMIT 10` into the editor. Handy daily-driver snippet pattern. |
+| `csv_export.lua` | `:csv-export <table> <path>` dumps a table to a CSV file via `narwhal.sql_run`. Shows CSV escaping and path validation. |
+| `explain_cost.lua` | `:explain-cost` wraps the editor buffer in `EXPLAIN ANALYZE`; `:explain-sqlite` uses plain `EXPLAIN`. Reads `narwhal.editor_text`. |
 
 ## Loading without auto-load
 
@@ -97,6 +106,7 @@ end
 narwhal.register_command("mycmd", "what it does", function(arg)
     local name, err = safe_ident(arg:match("^%s*(.-)%s*$"))
     if name == nil then return "mycmd: " .. err end
+    -- narwhal.editor_text has the current buffer (empty string if nothing)
     -- …do something with `name`…
     return "done"
 end)

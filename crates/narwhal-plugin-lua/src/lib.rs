@@ -216,6 +216,7 @@ impl Plugin for LuaPlugin {
         let commands_key = self.commands_key.clone();
         let name = name.to_owned();
         let argument = ctx.argument;
+        let editor_text = ctx.editor_text;
 
         // Lua is single-threaded so we hold the mutex across the entire
         // call. The work itself is CPU-bound, so spawn_blocking is the
@@ -225,7 +226,7 @@ impl Plugin for LuaPlugin {
                 Ok(g) => g,
                 Err(e) => return Err(PluginError::Runtime(format!("lua mutex poisoned: {e}"))),
             };
-            invoke_command(&guard, &commands_key, &name, &argument)
+            invoke_command(&guard, &commands_key, &name, &argument, &editor_text)
         })
         .await
         .map_err(|e| PluginError::Runtime(format!("join: {e}")))?
@@ -321,7 +322,17 @@ fn invoke_command(
     commands_key: &RegistryKey,
     name: &str,
     argument: &str,
+    editor_text: &str,
 ) -> PluginResult<CommandOutcome> {
+    // Publish the editor buffer text on narwhal.editor_text so handlers
+    // can read it (e.g. :explain-cost wrapping the buffer in a prefix).
+    // The field is set before every dispatch and does not persist — a
+    // handler that reads it on the next call gets whatever is in the
+    // editor at that point.
+    if let Ok(narwhal) = lua.globals().get::<Table>("narwhal") {
+        let _ = narwhal.set("editor_text", editor_text);
+    }
+
     let commands: Table = lua
         .registry_value(commands_key)
         .map_err(|e| PluginError::Runtime(e.to_string()))?;

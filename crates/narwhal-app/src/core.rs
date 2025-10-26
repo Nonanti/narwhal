@@ -1397,10 +1397,34 @@ impl AppCore {
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
             Command::PrevTab => self.cycle_tab(-1),
-            Command::Help => {
+            Command::Help(None) => {
                 self.status_message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
                         .into();
+            }
+            Command::Help(Some(name)) => {
+                // Built-ins first — aliases (`o`, `q`, ...) resolve back
+                // to their primary key before the lookup.
+                let resolved = crate::commands::resolve_builtin_alias(&name);
+                if let Some((_, desc)) = crate::commands::BUILTIN_COMMAND_DESCRIPTIONS
+                    .iter()
+                    .find(|(key, _)| *key == resolved)
+                {
+                    self.status_message = format!(":{name} — {desc}");
+                } else if let Some(plugin) = self.plugins.plugin_for(&name) {
+                    // Plugin command: pull the descriptor straight off
+                    // the owning plugin instead of walking the full
+                    // catalogue. plugin_for already located it.
+                    let desc = plugin
+                        .commands()
+                        .into_iter()
+                        .find(|cmd| cmd.name == name)
+                        .map(|cmd| cmd.description)
+                        .unwrap_or_else(|| "(no description)".into());
+                    self.status_message = format!(":{name} — {desc}");
+                } else {
+                    self.status_message = format!("unknown command: {name}");
+                }
             }
             Command::Empty => {}
             Command::Unknown(text) => {
@@ -1547,7 +1571,8 @@ impl AppCore {
     }
 
     fn dispatch_plugin(&mut self, command: &str, argument: &str) {
-        let ctx = PluginCommandContext::new(argument);
+        let editor_text = self.tabs[self.active_tab].editor.entire_text();
+        let ctx = PluginCommandContext::new(argument).with_editor_text(&editor_text);
         let plugins = Arc::clone(&self.plugins);
         let command_owned = command.to_owned();
         // Plugin dispatch is async by trait definition; bridge to the

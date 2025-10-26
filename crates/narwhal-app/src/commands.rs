@@ -82,7 +82,7 @@ pub enum Command {
     PluginLoad(String),
     /// List loaded plugins and the commands they expose.
     PluginList,
-    Help,
+    Help(Option<String>),
     Unknown(String),
     Empty,
 }
@@ -155,6 +155,126 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "help",
     "h",
 ];
+
+/// Short descriptions for built-in commands, looked up by `:help <name>`.
+/// Each entry maps a primary token to a one-line human-readable summary.
+/// Aliases (e.g. `"o"` for `"open"`) are not listed here — `:help o`
+/// resolves through the parser to `Help(Some("o"))` and the core maps
+/// aliases back to the primary key before consulting this table.
+pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
+    ("quit", "quit narwhal (also :q, :exit)"),
+    ("open", "open a saved connection by name or URL (also :o)"),
+    ("close", "close the current database connection"),
+    (
+        "refresh",
+        "re-fetch the schema tree for the active connection",
+    ),
+    ("run", "execute the SQL statement under the cursor"),
+    (
+        "run-all",
+        "execute every statement in the editor buffer (also :runall)",
+    ),
+    (
+        "stream",
+        "stream the SQL statement under the cursor (row by row)",
+    ),
+    (
+        "stream-all",
+        "stream every statement in the editor buffer (also :streamall)",
+    ),
+    ("cancel", "cancel the currently running query"),
+    ("clear", "erase the editor buffer and its result"),
+    (
+        "explain",
+        "run EXPLAIN ANALYZE on the current statement (postgres)",
+    ),
+    (
+        "export",
+        "export the current result to a file (:export csv|json <path>)",
+    ),
+    (
+        "dump-schema",
+        "write CREATE TABLE DDL into the editor (:dump-schema [name|all])",
+    ),
+    ("add", "open the connection wizard to save a new connection"),
+    (
+        "next-page",
+        "show the next page of the current table preview (also :next)",
+    ),
+    (
+        "prev-page",
+        "show the previous page of the current table preview (also :prev)",
+    ),
+    (
+        "page-size",
+        "set the number of rows per page for previews (:page-size N)",
+    ),
+    (
+        "begin",
+        "start a transaction with an optional isolation level",
+    ),
+    ("commit", "commit the open transaction"),
+    ("rollback", "roll back the open transaction (also :abort)"),
+    (
+        "savepoint",
+        "create a savepoint inside the open transaction (also :sp)",
+    ),
+    ("release", "release a previously created savepoint"),
+    (
+        "rollback-to",
+        "roll back to a previously created savepoint (also :rollbackto)",
+    ),
+    ("remove", "remove a saved connection by name (also :rm)"),
+    (
+        "forget",
+        "delete the stored password for a saved connection",
+    ),
+    (
+        "plug-load",
+        "load a Lua plugin from disk (:plug-load <path>)",
+    ),
+    (
+        "plug-list",
+        "list loaded plugins and the commands they expose",
+    ),
+    ("new", "open a new editor tab (also :tabnew)"),
+    ("tabclose", "close the current editor tab (also :tc)"),
+    ("tabnext", "switch to the next editor tab (also :tn)"),
+    ("tabprev", "switch to the previous editor tab (also :tp)"),
+    (
+        "help",
+        "show help; :help <command> for details on a specific command",
+    ),
+];
+
+/// Map an alias token back to its primary command key so that `:help o`
+/// resolves to the description for "open", not "o".
+pub fn resolve_builtin_alias(token: &str) -> &str {
+    match token {
+        "q" | "exit" => "quit",
+        "o" => "open",
+        "r" => "refresh",
+        "runall" => "run-all",
+        "streamall" => "stream-all",
+        "dumpschema" => "dump-schema",
+        "next" | "npage" => "next-page",
+        "prev" | "ppage" => "prev-page",
+        "pagesize" => "page-size",
+        "start" => "begin",
+        "abort" => "rollback",
+        "sp" => "savepoint",
+        "rollbackto" => "rollback-to",
+        "rm" => "remove",
+        "plugload" | "plug" => "plug-load",
+        "pluglist" | "plugins" => "plug-list",
+        "tabnew" => "new",
+        "tc" => "tabclose",
+        "tn" => "tabnext",
+        "tp" | "tabprevious" => "tabprev",
+        "h" => "help",
+        other => other,
+    }
+}
 
 pub fn parse(input: &str) -> Command {
     let trimmed = input.trim();
@@ -250,7 +370,13 @@ pub fn parse(input: &str) -> Command {
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,
         "tabprev" | "tp" | "tabprevious" => Command::PrevTab,
-        "help" | "h" => Command::Help,
+        "help" | "h" => {
+            if arg.is_empty() {
+                Command::Help(None)
+            } else {
+                Command::Help(Some(arg.to_owned()))
+            }
+        }
         _ => Command::Unknown(trimmed.to_owned()),
     }
 }
