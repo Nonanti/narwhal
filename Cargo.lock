@@ -2376,6 +2376,8 @@ name = "narwhal-driver-clickhouse"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
+ "futures-util",
  "narwhal-core",
  "reqwest",
  "tokio",

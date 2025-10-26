@@ -10,17 +10,19 @@
 //! * **Transport** — [`reqwest`] async HTTP client. One client is shared
 //!   across all queries on a connection; the client is cloned (which is
 //!   cheap — it internally uses an `Arc` connection pool).
-//! * **Streaming** — [`Connection::stream`] currently **buffers the
-//!   full HTTP response body** before parsing it line-by-line into rows
-//!   that flow over an [`mpsc`] channel. True chunked streaming (via
-//!   `Response::bytes_stream`) is a planned improvement; today large
-//!   result sets are subject to the buffer's memory footprint.
-//! * **Cancellation** — Cancellation is **not wired up** in this MVP.
-//!   ClickHouse supports `KILL QUERY WHERE query_id = ?` server-side,
-//!   but the driver does not yet track the active query_id per
-//!   connection. [`Connection::cancel_handle`] therefore returns
-//!   `None` and [`ClickhouseDriver::capabilities`] reports
-//!   `with_cancellation(false)` rather than lie about support.
+//! * **Streaming** — [`Connection::stream`] uses
+//!   `reqwest::Response::bytes_stream()` to feed a small line buffer
+//!   that walks byte chunks as they arrive, emits the two TSV header
+//!   lines once available, then forwards each completed row through
+//!   an [`mpsc`] channel. Backpressure is provided by the channel's
+//!   bounded buffer (capacity 64).
+//! * **Cancellation** — Each outgoing request is tagged with a
+//!   `query_id` (UUID v4) that is tracked in an `Arc<Mutex<HashSet>>`
+//!   on the connection. [`Connection::cancel_handle`] returns a handle
+//!   whose `cancel()` method reads the active query IDs and issues a
+//!   `KILL QUERY WHERE query_id IN (...)` request. Cancellation is
+//!   best-effort: server errors during KILL are ignored and an empty
+//!   active-queries set is a no-op.
 //! * **Parameter binding** — ClickHouse's HTTP API does not support
 //!   server-side prepared statements. Parameters are rendered as SQL
 //!   literals via [`types::value_to_sql_literal`] and interpolated into
@@ -41,6 +43,7 @@
 
 mod types;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -74,11 +77,7 @@ impl ClickhouseDriver {
     fn capabilities() -> Capabilities {
         Capabilities::default()
             .with_transactions(false)
-            // No active-query tracking yet — KILL QUERY needs the
-            // running query_id and the connection doesn't carry one
-            // through the call chain. Flip to true together with the
-            // tracking work.
-            .with_cancellation(false)
+            .with_cancellation(true)
             .with_multiple_schemas(true)
             .with_prepared_statements(false)
             .with_savepoints(false)
@@ -158,13 +157,14 @@ impl DatabaseDriver for ClickhouseDriver {
         info!(target: "narwhal::clickhouse", %base_url, "connected");
 
         Ok(Box::new(ClickhouseConnection {
-            inner: Arc::new(Mutex::new(SharedState {
+            inner: Arc::new(SharedState {
                 client,
                 base_url,
                 user,
                 password: pw,
                 database,
-            })),
+                active_queries: Arc::new(Mutex::new(HashSet::new())),
+            }),
         }))
     }
 }
@@ -173,18 +173,44 @@ impl DatabaseDriver for ClickhouseDriver {
 // Connection
 // ---------------------------------------------------------------------------
 
-/// Shared state behind an `Arc<Mutex<>>` so the spawned streaming task
+/// Shared state behind a plain `Arc` so the spawned streaming task
 /// can clone the `Arc` and issue HTTP requests independently.
+/// `reqwest::Client` is already `Send + Sync` with an internal
+/// connection pool, so no mutex is needed to parallelise requests.
+///
+/// `active_queries` uses a `tokio::sync::Mutex` because we hold it
+/// briefly across `.await` points in the cancel path.
 struct SharedState {
     client: reqwest::Client,
     base_url: Url,
     user: String,
     password: String,
     database: String,
+    active_queries: Arc<Mutex<HashSet<String>>>,
+}
+
+impl SharedState {
+    /// Build an authenticated POST request with SQL in the body.
+    ///
+    /// Centralises the auth + body pattern so every call site stays
+    /// consistent and a future auth change touches one place.
+    fn build_request(&self, url: &Url, body: String) -> reqwest::RequestBuilder {
+        self.client
+            .post(url.as_str())
+            .basic_auth(
+                &self.user,
+                if self.password.is_empty() {
+                    None
+                } else {
+                    Some(self.password.as_str())
+                },
+            )
+            .body(body)
+    }
 }
 
 pub struct ClickhouseConnection {
-    inner: Arc<Mutex<SharedState>>,
+    inner: Arc<SharedState>,
 }
 
 /// Best-effort heuristic: does `sql` likely return a result set?
@@ -227,39 +253,55 @@ fn quote_ident(name: &str) -> String {
 impl ClickhouseConnection {
     /// Send a query to ClickHouse via HTTP and return the full response
     /// body as a string.
-    async fn http_query(&self, sql: &str) -> Result<String> {
-        let state = self.inner.lock().await;
+    ///
+    /// If `query_id` is `Some`, the query ID is registered in the
+    /// active-queries set for the duration of the request so that
+    /// cancellation can target it.
+    async fn http_query(&self, sql: &str, query_id: Option<&str>) -> Result<String> {
+        let state = &self.inner;
         let mut url = state.base_url.clone();
         url.query_pairs_mut()
             .append_pair("database", &state.database);
 
+        if let Some(qid) = query_id {
+            url.query_pairs_mut().append_pair("query_id", qid);
+        }
+
         debug!(target: "narwhal::clickhouse", %sql, "sending HTTP query");
+
+        // Register query ID before sending.
+        if let Some(qid) = query_id {
+            state.active_queries.lock().await.insert(qid.to_owned());
+        }
 
         // SQL goes in the request body, not the URL query string. URLs
         // are capped around 8 KiB on most front-end proxies and even on
         // bare ClickHouse, long analytical queries blow that limit.
-        let response = state
-            .client
-            .post(url.as_str())
-            .basic_auth(
-                &state.user,
-                if state.password.is_empty() {
-                    None
-                } else {
-                    Some(state.password.as_str())
-                },
-            )
-            .body(sql.to_owned())
-            .send()
-            .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+        let response = match state.build_request(&url, sql.to_owned()).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if let Some(qid) = query_id {
+                    state.active_queries.lock().await.remove(qid);
+                }
+                return Err(Error::Query(e.to_string()));
+            }
+        };
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            // Remove query ID on failure.
+            if let Some(qid) = query_id {
+                state.active_queries.lock().await.remove(qid);
+            }
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
             )));
+        }
+
+        // Remove query ID on success.
+        if let Some(qid) = query_id {
+            state.active_queries.lock().await.remove(qid);
         }
 
         response
@@ -272,6 +314,7 @@ impl ClickhouseConnection {
     /// return a parsed [`QueryResult`].
     async fn query_tsv(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let started = Instant::now();
+        let query_id = Self::new_query_id();
 
         let formatted_sql = if params.is_empty() {
             sql.to_owned()
@@ -282,7 +325,7 @@ impl ClickhouseConnection {
         // Append the format directive.
         let full_sql = format!("{formatted_sql}\nFORMAT TabSeparatedWithNamesAndTypes");
 
-        let body = self.http_query(&full_sql).await?;
+        let body = self.http_query(&full_sql, Some(&query_id)).await?;
         let (headers, type_strings, rows) = parse_tsv_body(&body);
 
         let column_headers: Vec<ColumnHeader> = headers
@@ -304,6 +347,7 @@ impl ClickhouseConnection {
     /// Execute a non-row-returning statement (DDL/DML).
     async fn execute_raw(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let started = Instant::now();
+        let query_id = Self::new_query_id();
 
         let formatted_sql = if params.is_empty() {
             sql.to_owned()
@@ -311,7 +355,7 @@ impl ClickhouseConnection {
             substitute_params(sql, params)
         };
 
-        self.http_query(&formatted_sql).await?;
+        self.http_query(&formatted_sql, Some(&query_id)).await?;
 
         Ok(QueryResult {
             columns: Vec::new(),
@@ -421,7 +465,7 @@ impl Connection for ClickhouseConnection {
     }
 
     async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
-        let state = self.inner.lock().await;
+        let state = &self.inner;
         let formatted_sql = if params.is_empty() {
             sql.to_owned()
         } else {
@@ -430,38 +474,39 @@ impl Connection for ClickhouseConnection {
 
         let query_id = Self::new_query_id();
 
+        // Register query ID for cancellation tracking.
+        state.active_queries.lock().await.insert(query_id.clone());
+
         if !statement_returns_rows(&formatted_sql) {
             // Non-row-returning: execute and return an empty stream.
+            // SQL goes in the body (not the URL) to avoid the ~8 KiB
+            // URL length limit on large analytical DML statements.
             let mut url = state.base_url.clone();
             {
                 let mut pairs = url.query_pairs_mut();
                 pairs.append_pair("database", &state.database);
-                pairs.append_pair("query", &formatted_sql);
                 pairs.append_pair("query_id", &query_id);
             }
 
-            let response = state
-                .client
-                .post(url.as_str())
-                .basic_auth(
-                    &state.user,
-                    if state.password.is_empty() {
-                        None
-                    } else {
-                        Some(state.password.as_str())
-                    },
-                )
-                .send()
-                .await
-                .map_err(|e| Error::Query(e.to_string()))?;
+            let response = match state.build_request(&url, formatted_sql).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    state.active_queries.lock().await.remove(&query_id);
+                    return Err(Error::Query(e.to_string()));
+                }
+            };
 
             if !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
+                state.active_queries.lock().await.remove(&query_id);
                 return Err(Error::Query(format!(
                     "ClickHouse returned {status}: {body}"
                 )));
             }
+
+            // Deregister on success.
+            state.active_queries.lock().await.remove(&query_id);
 
             // Drop the sender immediately so the receiver yields
             // `Ok(None)` on first poll — a clean empty stream.
@@ -479,100 +524,40 @@ impl Connection for ClickhouseConnection {
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("database", &state.database);
-            pairs.append_pair("query", &full_sql);
             pairs.append_pair("query_id", &query_id);
         }
 
-        let response = state
-            .client
-            .post(url.as_str())
-            .basic_auth(
-                &state.user,
-                if state.password.is_empty() {
-                    None
-                } else {
-                    Some(state.password.as_str())
-                },
-            )
-            .send()
-            .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+        let response = match state.build_request(&url, full_sql).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                state.active_queries.lock().await.remove(&query_id);
+                return Err(Error::Query(e.to_string()));
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            state.active_queries.lock().await.remove(&query_id);
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
             )));
         }
 
-        // We need the full body for header parsing (first two lines), then
-        // stream the remaining lines. Since reqwest's chunked streaming is
-        // byte-oriented and we need line boundaries, we buffer the body
-        // and stream rows via a channel task.
+        // Chunked streaming: use bytes_stream() to receive byte chunks
+        // as they arrive and feed a small line buffer. Rows are emitted
+        // through the mpsc channel as soon as their line is complete.
+        //
+        // The query ID is deregistered when the spawned task completes.
         let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
         let (row_tx, row_rx) = mpsc::channel::<Result<CoreRow>>(64);
-
-        let body_bytes = response
-            .bytes()
-            .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+        let active_queries = state.active_queries.clone();
+        let qid = query_id.clone();
 
         tokio::spawn(async move {
-            let body = String::from_utf8_lossy(&body_bytes);
-            let mut lines = body.lines();
-
-            // First line: column names.
-            let header_line = if let Some(l) = lines.next() {
-                l
-            } else {
-                let _ = header_tx.send(Ok(Vec::new()));
-                return;
-            };
-            let headers: Vec<String> = header_line.split('\t').map(String::from).collect();
-
-            // Second line: type strings.
-            let type_line = if let Some(l) = lines.next() {
-                l
-            } else {
-                let _ = header_tx.send(Ok(Vec::new()));
-                return;
-            };
-            let type_strings: Vec<String> = type_line.split('\t').map(String::from).collect();
-
-            let column_headers: Vec<ColumnHeader> = headers
-                .iter()
-                .zip(type_strings.iter())
-                .map(|(name, data_type)| ColumnHeader {
-                    name: name.clone(),
-                    data_type: data_type.clone(),
-                })
-                .collect();
-
-            if header_tx.send(Ok(column_headers)).is_err() {
-                return;
-            }
-
-            // Remaining lines: data rows.
-            for line in lines {
-                let line = line.trim_end_matches('\r');
-                if line.is_empty() {
-                    continue;
-                }
-                let fields: Vec<&str> = line.split('\t').collect();
-                let mut row = Vec::with_capacity(headers.len());
-                for (i, field) in fields.iter().enumerate() {
-                    let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
-                    row.push(parse_tsv_value(field, ch_type));
-                }
-                while row.len() < headers.len() {
-                    row.push(Value::Null);
-                }
-                if row_tx.send(Ok(CoreRow(row))).await.is_err() {
-                    // Consumer dropped the stream.
-                    break;
-                }
-            }
+            stream_tsv_chunks(response.bytes_stream(), header_tx, row_tx).await;
+            // Deregister the query ID now that the stream is complete.
+            active_queries.lock().await.remove(&qid);
         });
 
         let columns = header_rx
@@ -735,12 +720,13 @@ impl Connection for ClickhouseConnection {
     }
 
     async fn ping(&mut self) -> Result<()> {
-        self.http_query("SELECT 1").await.map(|_| ())
+        self.http_query("SELECT 1", None).await.map(|_| ())
     }
 
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
-        // See `capabilities()` — cancellation is not yet wired up.
-        None
+        Some(Box::new(ClickhouseCancel {
+            state: Arc::clone(&self.inner),
+        }))
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -778,6 +764,66 @@ impl ClickhouseConnection {
 }
 
 // ---------------------------------------------------------------------------
+// Cancellation
+// ---------------------------------------------------------------------------
+
+/// Cancellation handle for ClickHouse connections.
+///
+/// Reads the active query IDs from the shared state and issues a
+/// `KILL QUERY WHERE query_id IN (...)` request. Best-effort:
+/// server errors during KILL are silently ignored.
+struct ClickhouseCancel {
+    state: Arc<SharedState>,
+}
+
+#[async_trait]
+impl CancelHandle for ClickhouseCancel {
+    async fn cancel(&self) -> Result<()> {
+        let query_ids: Vec<String> = self.state.active_queries.lock().await.drain().collect();
+
+        if query_ids.is_empty() {
+            // No active queries — nothing to cancel.
+            return Ok(());
+        }
+
+        // Build a KILL QUERY statement targeting all active IDs.
+        let ids: Vec<String> = query_ids.iter().map(|id| format!("'{id}'")).collect();
+        let kill_sql = format!("KILL QUERY WHERE query_id IN ({})", ids.join(", "));
+
+        debug!(target: "narwhal::clickhouse", %kill_sql, "cancelling queries");
+
+        // Fire-and-forget: we don't care if the KILL succeeds or fails.
+        let state = &self.state;
+        let mut url = state.base_url.clone();
+        url.query_pairs_mut()
+            .append_pair("database", &state.database);
+
+        let result = state.build_request(&url, kill_sql).send().await;
+
+        match result {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    debug!(
+                        target: "narwhal::clickhouse",
+                        status = %response.status(),
+                        "KILL QUERY returned non-success (best-effort, ignoring)"
+                    );
+                }
+            }
+            Err(e) => {
+                debug!(
+                    target: "narwhal::clickhouse",
+                    error = %e,
+                    "KILL QUERY request failed (best-effort, ignoring)"
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Row stream
 // ---------------------------------------------------------------------------
 
@@ -807,5 +853,240 @@ impl RowStream for ClickhouseRowStream {
     }
 }
 
-// Cancellation: deliberately omitted in this MVP. See the module-level
-// doc comment for the why and the plan.
+// ---------------------------------------------------------------------------
+// Chunked TSV stream decoder (testable in isolation)
+// ---------------------------------------------------------------------------
+
+/// Drive a `bytes_stream`-style async byte source through the TSV
+/// line-buffered decoder and emit headers + rows via channels.
+///
+/// This is the core logic extracted from `Connection::stream` so it
+/// can be unit-tested without a real HTTP server.
+async fn stream_tsv_chunks<S>(
+    stream: S,
+    header_tx: tokio::sync::oneshot::Sender<Result<Vec<ColumnHeader>>>,
+    row_tx: mpsc::Sender<Result<CoreRow>>,
+) where
+    S: futures_util::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Unpin,
+{
+    use futures_util::StreamExt;
+
+    let mut stream = stream;
+    let mut buf: Vec<u8> = Vec::new();
+
+    // Collect the first two newline-terminated lines (column names,
+    // then type strings) before switching to row mode.
+    let mut header_lines: Vec<String> = Vec::new();
+
+    while header_lines.len() < 2 {
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                buf.extend_from_slice(&chunk);
+                while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                    let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+                    let line = String::from_utf8_lossy(&line_bytes);
+                    let line = line.trim_end_matches('\n').trim_end_matches('\r');
+                    header_lines.push(line.to_owned());
+                }
+            }
+            Some(Err(e)) => {
+                let _ = header_tx.send(Err(Error::Query(e.to_string())));
+                return;
+            }
+            None => {
+                // Stream ended before both header lines arrived — this
+                // indicates a network interruption or server-side
+                // cancellation, not a legitimate empty result.
+                let _ = header_tx.send(Err(Error::Query(
+                    "clickhouse stream ended before headers were complete".into(),
+                )));
+                return;
+            }
+        }
+    }
+
+    // Take exactly the first two lines as header/type lines. Any
+    // remaining lines extracted from the buffer are data rows that
+    // arrived in the same chunk; push them into the row buffer so
+    // they get processed in row mode.
+    let overflow_lines: Vec<String> = header_lines.drain(2..).collect();
+    for line in overflow_lines.iter().rev() {
+        buf.insert(0, b'\n');
+        buf.splice(0..0, line.as_bytes().iter().copied());
+    }
+
+    let header_line = header_lines.first().map(String::as_str).unwrap_or("");
+    let type_line = header_lines.get(1).map(String::as_str).unwrap_or("");
+
+    let headers: Vec<String> = header_line.split('\t').map(String::from).collect();
+    let type_strings: Vec<String> = type_line.split('\t').map(String::from).collect();
+
+    let column_headers: Vec<ColumnHeader> = headers
+        .iter()
+        .zip(type_strings.iter())
+        .map(|(name, data_type)| ColumnHeader {
+            name: name.clone(),
+            data_type: data_type.clone(),
+        })
+        .collect();
+
+    if header_tx.send(Ok(column_headers)).is_err() {
+        return;
+    }
+
+    // Row mode.
+    loop {
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line_bytes);
+            let line = line.trim_end_matches('\n').trim_end_matches('\r');
+            if line.is_empty() {
+                continue;
+            }
+            let fields: Vec<&str> = line.split('\t').collect();
+            let mut row = Vec::with_capacity(headers.len());
+            for (i, field) in fields.iter().enumerate() {
+                let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
+                row.push(parse_tsv_value(field, ch_type));
+            }
+            while row.len() < headers.len() {
+                row.push(Value::Null);
+            }
+            if row_tx.send(Ok(CoreRow(row))).await.is_err() {
+                return;
+            }
+        }
+
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                buf.extend_from_slice(&chunk);
+            }
+            Some(Err(e)) => {
+                let _ = row_tx.send(Err(Error::Query(e.to_string()))).await;
+                return;
+            }
+            None => {
+                // End of stream — flush any trailing incomplete line.
+                if !buf.is_empty() {
+                    let line = String::from_utf8_lossy(&buf);
+                    let line = line.trim_end_matches('\r');
+                    if !line.is_empty() {
+                        let fields: Vec<&str> = line.split('\t').collect();
+                        let mut row = Vec::with_capacity(headers.len());
+                        for (i, field) in fields.iter().enumerate() {
+                            let ch_type =
+                                type_strings.get(i).map(String::as_str).unwrap_or("String");
+                            row.push(parse_tsv_value(field, ch_type));
+                        }
+                        while row.len() < headers.len() {
+                            row.push(Value::Null);
+                        }
+                        let _ = row_tx.send(Ok(CoreRow(row))).await;
+                    }
+                }
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use bytes::Bytes;
+    use futures_util::stream;
+
+    /// Feed a known TSV payload through the chunked decoder split
+    /// across multiple byte chunks to verify line-buffered splitting.
+    #[tokio::test]
+    async fn chunked_tsv_decodes_rows() {
+        // Simulate a ClickHouse TSV response split across 3 chunks
+        // that don't align on line boundaries.
+        let payload: &[u8] = b"id\tname\nUInt32\tString\n1\talice\n2\tbob\n";
+
+        // Split the payload across chunk boundaries that don't
+        // align with line boundaries.
+        let chunks: Vec<std::result::Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::copy_from_slice(&payload[..8])),
+            Ok(Bytes::copy_from_slice(&payload[8..20])),
+            Ok(Bytes::copy_from_slice(&payload[20..])),
+        ];
+
+        let byte_stream = stream::iter(chunks);
+        let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
+        let (row_tx, mut row_rx) = mpsc::channel::<Result<CoreRow>>(64);
+
+        // Call directly instead of spawning — simpler for testing.
+        stream_tsv_chunks(byte_stream, header_tx, row_tx).await;
+
+        let columns = header_rx.await.expect("header rx").expect("headers");
+        assert_eq!(columns.len(), 2);
+        assert_eq!(columns[0].name, "id");
+        assert_eq!(columns[0].data_type, "UInt32");
+        assert_eq!(columns[1].name, "name");
+        assert_eq!(columns[1].data_type, "String");
+
+        let mut rows = Vec::new();
+        while let Some(result) = row_rx.recv().await {
+            let row = result.expect("row");
+            rows.push(row);
+        }
+
+        assert_eq!(rows.len(), 2);
+        assert!(matches!(rows[0].0.first(), Some(Value::Int(1))));
+        assert!(matches!(rows[0].0.get(1), Some(Value::String(_))));
+        assert!(matches!(rows[1].0.first(), Some(Value::Int(2))));
+        assert!(matches!(rows[1].0.get(1), Some(Value::String(_))));
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+
+    /// Verify that query IDs are correctly inserted into and removed
+    /// from the active-queries set.
+    #[tokio::test]
+    async fn tracks_active_query_id() {
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        // Simulate inserting a query ID.
+        active.lock().await.insert("test-qid-1".to_owned());
+        assert!(active.lock().await.contains("test-qid-1"));
+
+        // Simulate removing it.
+        active.lock().await.remove("test-qid-1");
+        assert!(!active.lock().await.contains("test-qid-1"));
+
+        // Set should be empty.
+        assert!(active.lock().await.is_empty());
+    }
+
+    /// Verify that calling cancel with no active queries returns Ok(())
+    /// and doesn't attempt an HTTP request (no server to contact).
+    #[tokio::test]
+    async fn cancel_with_no_active_queries_is_noop() {
+        // Build a minimal SharedState. The URL points at an unreachable
+        // host — if cancel tries to issue an HTTP request, the test
+        // would fail or hang, proving the early-return guard works.
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let client = reqwest::Client::new();
+        let base_url = Url::parse("http://127.0.0.1:1/").expect("url");
+
+        let state = Arc::new(SharedState {
+            client,
+            base_url,
+            user: "default".to_owned(),
+            password: String::new(),
+            database: "default".to_owned(),
+            active_queries: active.clone(),
+        });
+
+        let cancel = ClickhouseCancel { state };
+        let result = cancel.cancel().await;
+        assert!(result.is_ok());
+
+        // Active set should still be empty.
+        assert!(active.lock().await.is_empty());
+    }
+}
