@@ -10,6 +10,16 @@
 //! * renders [`narwhal_core::Value`] as safe SQL literals for the HTTP
 //!   query parameter substitution path;
 //! * parses TSV response bodies into rows of [`narwhal_core::Value`].
+//!
+//! # Byte-accurate TSV parsing
+//!
+//! ClickHouse's `String` type is byte-oriented — it stores any byte
+//! sequence, not just UTF-8 text. The TSV parser therefore works on
+//! `&[u8]` throughout the data path, decoding ClickHouse's TSV escape
+//! sequences (`\b \f \n \r \t \0 \\ \'`) and routing invalid-UTF-8
+//! payloads into [`Value::Bytes`] instead of silently replacing them
+//! with `U+FFFD`. Only header lines (column names and type strings,
+//! which are always ASCII identifiers) pass through UTF-8 conversion.
 
 use narwhal_core::Value;
 
@@ -97,14 +107,59 @@ fn strip_wrappers(ty: &str) -> &str {
     current
 }
 
+/// Decode ClickHouse TSV escape sequences in a string-typed field.
+/// Returns the decoded bytes (which may not be valid UTF-8).
+///
+/// ClickHouse escapes `\b \f \n \r \t \0 \\ \'` in TSV string cells.
+/// Any other byte is passed through unchanged — including bytes that
+/// are not valid UTF-8.
+fn decode_tsv_string_bytes(field: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(field.len());
+    let mut i = 0;
+    while i < field.len() {
+        if field[i] == b'\\' && i + 1 < field.len() {
+            let next = field[i + 1];
+            let decoded = match next {
+                b'b' => Some(0x08),
+                b'f' => Some(0x0C),
+                b'n' => Some(b'\n'),
+                b'r' => Some(b'\r'),
+                b't' => Some(b'\t'),
+                b'0' => Some(0x00),
+                b'\\' => Some(b'\\'),
+                b'\'' => Some(b'\''),
+                _ => None,
+            };
+            if let Some(byte) = decoded {
+                out.push(byte);
+                i += 2;
+                continue;
+            }
+        }
+        out.push(field[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Parse a single TSV field according to the ClickHouse type string.
 ///
 /// `\\N` (literal backslash-N) is ClickHouse's NULL representation in
 /// TSV format. Empty strings in non-Nullable columns are preserved as
 /// `Value::String("")`.
-pub(crate) fn parse_tsv_value(raw: &str, ch_type: &str) -> Value {
-    // ClickHouse represents NULL as the two-character sequence \N in TSV.
-    if raw == "\\N" {
+///
+/// Takes `&[u8]` because ClickHouse's `String` type is byte-oriented —
+/// it may contain arbitrary bytes that are not valid UTF-8. String-typed
+/// fields are decoded via [`decode_tsv_string_bytes`] and then routed to
+/// [`Value::String`] if the decoded bytes are valid UTF-8, or
+/// [`Value::Bytes`] otherwise. Numeric/Bool/Uuid fields use strict
+/// `std::str::from_utf8` because those types are always ASCII on the
+/// wire; invalid UTF-8 there produces [`Value::Unknown`].
+pub(crate) fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
+    // ClickHouse represents NULL as the two-byte sequence \N in TSV.
+    // This check must happen before escape decoding because \N is not
+    // an escaped byte — it is a literal backslash followed by 'N'.
+    if raw == b"\\N" {
         return Value::Null;
     }
 
@@ -113,40 +168,56 @@ pub(crate) fn parse_tsv_value(raw: &str, ch_type: &str) -> Value {
             if raw.is_empty() {
                 return Value::Null;
             }
-            match raw.parse::<i64>() {
-                Ok(v) => Value::Int(v),
-                Err(_) => Value::Unknown(raw.to_owned()),
+            match std::str::from_utf8(raw) {
+                Ok(s) => match s.parse::<i64>() {
+                    Ok(v) => Value::Int(v),
+                    Err(_) => Value::Unknown(s.to_owned()),
+                },
+                Err(_) => Value::Unknown(String::from_utf8_lossy(raw).into_owned()),
             }
         }
         ValueKind::Float => {
             if raw.is_empty() {
                 return Value::Null;
             }
-            match raw.parse::<f64>() {
-                Ok(v) => Value::Float(v),
-                Err(_) => Value::Unknown(raw.to_owned()),
+            match std::str::from_utf8(raw) {
+                Ok(s) => match s.parse::<f64>() {
+                    Ok(v) => Value::Float(v),
+                    Err(_) => Value::Unknown(s.to_owned()),
+                },
+                Err(_) => Value::Unknown(String::from_utf8_lossy(raw).into_owned()),
             }
         }
         ValueKind::Bool => match raw {
-            "1" | "true" => Value::Bool(true),
-            "0" | "false" => Value::Bool(false),
-            "" => Value::Null,
-            other => Value::Unknown(other.to_owned()),
+            b"1" | b"true" => Value::Bool(true),
+            b"0" | b"false" => Value::Bool(false),
+            b"" => Value::Null,
+            other => match std::str::from_utf8(other) {
+                Ok(s) => Value::Unknown(s.to_owned()),
+                Err(_) => Value::Unknown(String::from_utf8_lossy(other).into_owned()),
+            },
         },
         ValueKind::Uuid => {
             if raw.is_empty() {
                 return Value::Null;
             }
-            match raw.parse::<uuid::Uuid>() {
-                Ok(u) => Value::Uuid(u),
-                Err(_) => Value::String(raw.to_owned()),
+            match std::str::from_utf8(raw) {
+                Ok(s) => match s.parse::<uuid::Uuid>() {
+                    Ok(u) => Value::Uuid(u),
+                    Err(_) => Value::String(s.to_owned()),
+                },
+                Err(_) => Value::Unknown(String::from_utf8_lossy(raw).into_owned()),
             }
         }
         ValueKind::String => {
             if raw.is_empty() && is_nullable_type(ch_type) {
                 Value::Null
             } else {
-                Value::String(raw.to_owned())
+                let decoded = decode_tsv_string_bytes(raw);
+                match String::from_utf8(decoded) {
+                    Ok(s) => Value::String(s),
+                    Err(e) => Value::Bytes(e.into_bytes()),
+                }
             }
         }
     }
@@ -200,36 +271,73 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
     }
 }
 
+/// Split a byte body into lines, handling both `\n` and `\r\n` line
+/// endings. Returns slices into the original body; no copying.
+fn split_lines(body: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, &b) in body.iter().enumerate() {
+        if b == b'\n' {
+            let mut end = i;
+            if end > start && body[end - 1] == b'\r' {
+                end -= 1;
+            }
+            out.push(&body[start..end]);
+            start = i + 1;
+        }
+    }
+    if start < body.len() {
+        // Trailing line without LF.
+        let mut end = body.len();
+        if end > start && body[end - 1] == b'\r' {
+            end -= 1;
+        }
+        out.push(&body[start..end]);
+    }
+    out
+}
+
 /// Parse a complete TSV response body in `TabSeparatedWithNamesAndTypes`
 /// format.
 ///
 /// Returns `(headers, type_strings, rows)` where `headers` has the column
 /// names, `type_strings` has the ClickHouse native types, and `rows` has
 /// the parsed [`Value`] rows.
-pub(crate) fn parse_tsv_body(body: &str) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
-    let mut lines = body.lines().peekable();
+///
+/// Takes `&[u8]` because data cells may contain arbitrary bytes (the
+/// ClickHouse `String` type is byte-oriented). Header lines (column
+/// names and type strings) are always ASCII identifiers on the wire, so
+/// they are converted to `String` via `from_utf8_lossy` defensively.
+pub(crate) fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
+    let lines = split_lines(body);
+    let mut lines_iter = lines.iter().peekable();
 
     // First line: column names (tab-separated).
-    let header_line = match lines.next() {
-        Some(l) => l,
+    let header_line = match lines_iter.next() {
+        Some(l) => *l,
         None => return (Vec::new(), Vec::new(), Vec::new()),
     };
-    let headers: Vec<String> = split_tsv_line(header_line);
+    let headers: Vec<String> = header_line
+        .split(|&b| b == b'\t')
+        .map(|field| String::from_utf8_lossy(field).into_owned())
+        .collect();
 
     // Second line: type strings.
-    let type_line = match lines.next() {
-        Some(l) => l,
+    let type_line = match lines_iter.next() {
+        Some(l) => *l,
         None => return (headers, Vec::new(), Vec::new()),
     };
-    let type_strings: Vec<String> = split_tsv_line(type_line);
+    let type_strings: Vec<String> = type_line
+        .split(|&b| b == b'\t')
+        .map(|field| String::from_utf8_lossy(field).into_owned())
+        .collect();
 
     let mut rows = Vec::new();
-    for line in lines {
-        let line = line.trim_end_matches('\r');
+    for line in lines_iter {
         if line.is_empty() {
             continue;
         }
-        let fields = split_tsv_line(line);
+        let fields: Vec<&[u8]> = line.split(|&b| b == b'\t').collect();
         let mut row = Vec::with_capacity(headers.len());
         for (i, field) in fields.iter().enumerate() {
             let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
@@ -243,11 +351,6 @@ pub(crate) fn parse_tsv_body(body: &str) -> (Vec<String>, Vec<String>, Vec<Vec<V
     }
 
     (headers, type_strings, rows)
-}
-
-/// Split a TSV line on tab characters, preserving empty fields.
-fn split_tsv_line(line: &str) -> Vec<String> {
-    line.split('\t').map(String::from).collect()
 }
 
 #[cfg(test)]
@@ -336,50 +439,50 @@ mod tests {
     #[test]
     fn parse_null_value() {
         assert!(matches!(
-            parse_tsv_value("\\N", "Nullable(Int32)"),
+            parse_tsv_value(b"\\N", "Nullable(Int32)"),
             Value::Null
         ));
     }
 
     #[test]
     fn parse_int_value() {
-        let v = parse_tsv_value("42", "UInt32");
+        let v = parse_tsv_value(b"42", "UInt32");
         assert!(matches!(v, Value::Int(42)));
         assert_eq!(v.render(), "42");
 
-        let v2 = parse_tsv_value("-7", "Int32");
+        let v2 = parse_tsv_value(b"-7", "Int32");
         assert!(matches!(v2, Value::Int(-7)));
     }
 
     #[test]
     fn parse_float_value() {
-        let v = parse_tsv_value("3.14", "Float64");
+        let v = parse_tsv_value(b"3.14", "Float64");
         assert!(matches!(v, Value::Float(_)));
         assert_eq!(v.render(), "3.14");
     }
 
     #[test]
     fn parse_bool_value() {
-        assert!(matches!(parse_tsv_value("1", "Bool"), Value::Bool(true)));
-        assert!(matches!(parse_tsv_value("0", "Bool"), Value::Bool(false)));
+        assert!(matches!(parse_tsv_value(b"1", "Bool"), Value::Bool(true)));
+        assert!(matches!(parse_tsv_value(b"0", "Bool"), Value::Bool(false)));
     }
 
     #[test]
     fn parse_uuid_value() {
-        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let uuid_str = b"550e8400-e29b-41d4-a716-446655440000";
         let parsed = parse_tsv_value(uuid_str, "UUID");
         assert!(matches!(parsed, Value::Uuid(_)));
     }
 
     #[test]
     fn parse_uuid_fallback_to_string() {
-        let parsed = parse_tsv_value("not-a-uuid", "UUID");
+        let parsed = parse_tsv_value(b"not-a-uuid", "UUID");
         assert!(matches!(parsed, Value::String(_)));
     }
 
     #[test]
     fn parse_string_value() {
-        let v = parse_tsv_value("hello world", "String");
+        let v = parse_tsv_value(b"hello world", "String");
         assert!(matches!(v, Value::String(_)));
         assert_eq!(v.render(), "hello world");
     }
@@ -430,7 +533,7 @@ mod tests {
 
     #[test]
     fn parse_full_tsv_body() {
-        let body = "id\tname\tactive\nUInt32\tString\tBool\n1\talice\t1\n2\tbob\t0";
+        let body = b"id\tname\tactive\nUInt32\tString\tBool\n1\talice\t1\n2\tbob\t0";
         let (headers, types, rows) = parse_tsv_body(body);
         assert_eq!(headers, vec!["id", "name", "active"]);
         assert_eq!(types, vec!["UInt32", "String", "Bool"]);
@@ -444,11 +547,63 @@ mod tests {
 
     #[test]
     fn parse_tsv_body_with_null() {
-        let body = "id\tname\nUInt32\tNullable(String)\n1\t\\N";
+        let body = b"id\tname\nUInt32\tNullable(String)\n1\t\\N";
         let (_, _, rows) = parse_tsv_body(body);
         assert_eq!(rows.len(), 1);
         assert!(matches!(rows[0][0], Value::Int(1)));
         assert!(matches!(rows[0][1], Value::Null));
+    }
+
+    // ---- TSV escape decoding and byte preservation ----
+
+    #[test]
+    fn parse_tsv_escape_decoded_string() {
+        // Payload contains `line1\\nline2` (six characters on the wire),
+        // should decode to "line1\nline2" (two lines, 11 bytes).
+        let v = parse_tsv_value(b"line1\\nline2", "String");
+        match &v {
+            Value::String(s) => assert_eq!(s, "line1\nline2"),
+            other => panic!("expected Value::String, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tsv_string_preserves_invalid_utf8() {
+        // A single byte 0xFF is not valid UTF-8; should become Value::Bytes.
+        let v = parse_tsv_value(&[0xFF], "String");
+        match &v {
+            Value::Bytes(b) => assert_eq!(b, &vec![0xFF]),
+            other => panic!("expected Value::Bytes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tsv_string_decodes_all_known_escapes() {
+        // All known ClickHouse TSV escapes in one field.
+        let input = b"\\b\\f\\n\\r\\t\\0\\\\\\'";
+        let v = parse_tsv_value(input, "String");
+        // The decoded bytes are [0x08, 0x0C, 0x0A, 0x0D, 0x09, 0x00, 0x5C, 0x27].
+        // NUL (0x00) is valid UTF-8 (U+0000), so String::from_utf8
+        // succeeds and we get Value::String.
+        match &v {
+            Value::String(s) => {
+                assert_eq!(
+                    s.as_bytes(),
+                    &[0x08, 0x0C, 0x0A, 0x0D, 0x09, 0x00, 0x5C, 0x27]
+                );
+            }
+            other => panic!("expected Value::String, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tsv_string_preserves_unknown_backslash_sequences() {
+        // `\x` is not a known escape; both bytes pass through unchanged.
+        let v = parse_tsv_value(b"\\x", "String");
+        match &v {
+            Value::String(s) => assert_eq!(s, "\\x"),
+            other => panic!("expected Value::String, got {other:?}"),
+        }
     }
 
     // ---- statement_returns_rows (in lib.rs) ----

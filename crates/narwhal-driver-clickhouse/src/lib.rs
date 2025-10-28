@@ -15,7 +15,12 @@
 //!   that walks byte chunks as they arrive, emits the two TSV header
 //!   lines once available, then forwards each completed row through
 //!   an [`mpsc`] channel. Backpressure is provided by the channel's
-//!   bounded buffer (capacity 64).
+//!   bounded buffer (capacity 64). Data cells are parsed at the byte
+//!   level (not routed through `&str`) because ClickHouse's `String`
+//!   type is byte-oriented — cells may contain arbitrary bytes that
+//!   are not valid UTF-8. TSV escape sequences (`\b \f \n \r \t \0 \\ \'`)
+//!   are decoded, and invalid-UTF-8 payloads are preserved as
+//!   [`Value::Bytes`] instead of being silently replaced with `U+FFFD`.
 //! * **Cancellation** — Each outgoing request is tagged with a
 //!   `query_id` (UUID v4) that is tracked in an `Arc<Mutex<HashSet>>`
 //!   on the connection. [`Connection::cancel_handle`] returns a handle
@@ -257,7 +262,17 @@ impl ClickhouseConnection {
     /// If `query_id` is `Some`, the query ID is registered in the
     /// active-queries set for the duration of the request so that
     /// cancellation can target it.
-    async fn http_query(&self, sql: &str, query_id: Option<&str>) -> Result<String> {
+    /// Send a query to ClickHouse via HTTP and return the full response
+    /// body as raw bytes.
+    ///
+    /// If `query_id` is `Some`, the query ID is registered in the
+    /// active-queries set for the duration of the request so that
+    /// cancellation can target it.
+    ///
+    /// Uses `response.bytes()` instead of `response.text()` because
+    /// ClickHouse's `String` type is byte-oriented — cells may contain
+    /// arbitrary bytes that are not valid UTF-8.
+    async fn http_query(&self, sql: &str, query_id: Option<&str>) -> Result<Vec<u8>> {
         let state = &self.inner;
         let mut url = state.base_url.clone();
         url.query_pairs_mut()
@@ -289,6 +304,7 @@ impl ClickhouseConnection {
 
         let status = response.status();
         if !status.is_success() {
+            // Error bodies are ClickHouse error messages — always UTF-8.
             let body = response.text().await.unwrap_or_default();
             // Remove query ID on failure.
             if let Some(qid) = query_id {
@@ -305,8 +321,9 @@ impl ClickhouseConnection {
         }
 
         response
-            .text()
+            .bytes()
             .await
+            .map(|b| b.to_vec())
             .map_err(|e| Error::Query(e.to_string()))
     }
 
@@ -876,6 +893,11 @@ async fn stream_tsv_chunks<S>(
 
     // Collect the first two newline-terminated lines (column names,
     // then type strings) before switching to row mode.
+    //
+    // Header lines are always UTF-8 (ASCII identifiers and type names
+    // on the wire). We use `from_utf8_lossy` defensively — if the
+    // server sends non-UTF-8 headers that is a server bug, and the
+    // replacement character makes it visible.
     let mut header_lines: Vec<String> = Vec::new();
 
     while header_lines.len() < 2 {
@@ -883,7 +905,19 @@ async fn stream_tsv_chunks<S>(
             Some(Ok(chunk)) => {
                 buf.extend_from_slice(&chunk);
                 while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                    if header_lines.len() >= 2 {
+                        break;
+                    }
                     let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+                    // Warn if header bytes are not valid UTF-8 — this
+                    // would indicate a server-side bug since column names
+                    // and type strings are always ASCII identifiers.
+                    if String::from_utf8(line_bytes.clone()).is_err() {
+                        tracing::warn!(
+                            target: "narwhal::clickhouse",
+                            "header line contained invalid UTF-8; lossy conversion applied"
+                        );
+                    }
                     let line = String::from_utf8_lossy(&line_bytes);
                     let line = line.trim_end_matches('\n').trim_end_matches('\r');
                     header_lines.push(line.to_owned());
@@ -934,16 +968,23 @@ async fn stream_tsv_chunks<S>(
         return;
     }
 
-    // Row mode.
+    // Row mode — byte-level field splitting. Data cells may contain
+    // arbitrary bytes (ClickHouse String type is byte-oriented), so we
+    // never route through &str on the data path.
     loop {
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
-            let line = String::from_utf8_lossy(&line_bytes);
-            let line = line.trim_end_matches('\n').trim_end_matches('\r');
-            if line.is_empty() {
+            let mut line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+            // Strip trailing \n and optional \r.
+            if line_bytes.last() == Some(&b'\n') {
+                line_bytes.pop();
+            }
+            if line_bytes.last() == Some(&b'\r') {
+                line_bytes.pop();
+            }
+            if line_bytes.is_empty() {
                 continue;
             }
-            let fields: Vec<&str> = line.split('\t').collect();
+            let fields: Vec<&[u8]> = line_bytes.split(|&b| b == b'\t').collect();
             let mut row = Vec::with_capacity(headers.len());
             for (i, field) in fields.iter().enumerate() {
                 let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
@@ -966,12 +1007,15 @@ async fn stream_tsv_chunks<S>(
                 return;
             }
             None => {
-                // End of stream — flush any trailing incomplete line.
+                // End of stream — flush any trailing incomplete line
+                // using byte-level parsing.
                 if !buf.is_empty() {
-                    let line = String::from_utf8_lossy(&buf);
-                    let line = line.trim_end_matches('\r');
-                    if !line.is_empty() {
-                        let fields: Vec<&str> = line.split('\t').collect();
+                    // Strip trailing \r.
+                    if buf.last() == Some(&b'\r') {
+                        buf.pop();
+                    }
+                    if !buf.is_empty() {
+                        let fields: Vec<&[u8]> = buf.split(|&b| b == b'\t').collect();
                         let mut row = Vec::with_capacity(headers.len());
                         for (i, field) in fields.iter().enumerate() {
                             let ch_type =
@@ -1037,6 +1081,37 @@ mod stream_tests {
         assert!(matches!(rows[0].0.get(1), Some(Value::String(_))));
         assert!(matches!(rows[1].0.first(), Some(Value::Int(2))));
         assert!(matches!(rows[1].0.get(1), Some(Value::String(_))));
+    }
+
+    /// Verify that a binary String cell (non-UTF-8 bytes) arrives as
+    /// `Value::Bytes` through the streaming path.
+    #[tokio::test]
+    async fn chunked_tsv_preserves_binary_string() {
+        // Build a TSV payload where the String column contains
+        // 0xFF 0xFE 0x00 0x01 — not valid UTF-8.
+        let mut payload: Vec<u8> = b"col\nString\n".to_vec();
+        payload.extend_from_slice(&[0xFF, 0xFE, 0x00, 0x01]);
+        payload.push(b'\n');
+
+        let chunks: Vec<std::result::Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::copy_from_slice(&payload))];
+
+        let byte_stream = stream::iter(chunks);
+        let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
+        let (row_tx, mut row_rx) = mpsc::channel::<Result<CoreRow>>(64);
+
+        stream_tsv_chunks(byte_stream, header_tx, row_tx).await;
+
+        let columns = header_rx.await.expect("header rx").expect("headers");
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0].name, "col");
+        assert_eq!(columns[0].data_type, "String");
+
+        let row = row_rx.recv().await.expect("row rx").expect("row");
+        match row.0.first() {
+            Some(Value::Bytes(b)) => assert_eq!(b, &vec![0xFF, 0xFE, 0x00, 0x01]),
+            other => panic!("expected Value::Bytes, got {other:?}"),
+        }
     }
 }
 
