@@ -904,15 +904,15 @@ async fn stream_tsv_chunks<S>(
         match stream.next().await {
             Some(Ok(chunk)) => {
                 buf.extend_from_slice(&chunk);
-                while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-                    if header_lines.len() >= 2 {
+                while header_lines.len() < 2 {
+                    let Some(pos) = buf.iter().position(|&b| b == b'\n') else {
                         break;
-                    }
+                    };
                     let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
                     // Warn if header bytes are not valid UTF-8 — this
                     // would indicate a server-side bug since column names
                     // and type strings are always ASCII identifiers.
-                    if String::from_utf8(line_bytes.clone()).is_err() {
+                    if std::str::from_utf8(&line_bytes).is_err() {
                         tracing::warn!(
                             target: "narwhal::clickhouse",
                             "header line contained invalid UTF-8; lossy conversion applied"
@@ -939,18 +939,13 @@ async fn stream_tsv_chunks<S>(
         }
     }
 
-    // Take exactly the first two lines as header/type lines. Any
-    // remaining lines extracted from the buffer are data rows that
-    // arrived in the same chunk; push them into the row buffer so
-    // they get processed in row mode.
-    let overflow_lines: Vec<String> = header_lines.drain(2..).collect();
-    for line in overflow_lines.iter().rev() {
-        buf.insert(0, b'\n');
-        buf.splice(0..0, line.as_bytes().iter().copied());
-    }
-
-    let header_line = header_lines.first().map(String::as_str).unwrap_or("");
-    let type_line = header_lines.get(1).map(String::as_str).unwrap_or("");
+    // The header phase guarantees exactly two lines in header_lines
+    // (the inner loop stops as soon as the second \n is seen and any
+    // trailing data row bytes stay in `buf` for row mode to consume).
+    // Indexing is safe: the outer `while header_lines.len() < 2` exit
+    // condition implies len == 2 here.
+    let header_line = header_lines[0].as_str();
+    let type_line = header_lines[1].as_str();
 
     let headers: Vec<String> = header_line.split('\t').map(String::from).collect();
     let type_strings: Vec<String> = type_line.split('\t').map(String::from).collect();
