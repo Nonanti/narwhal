@@ -170,3 +170,57 @@ async fn run_without_session_emits_status_only() {
     assert!(core.status_message().contains("no active connection"));
     assert!(matches!(core.result(), ResultState::Empty));
 }
+
+/// Pin the active-tab invariant relied on by `AppCore::tab()` /
+/// `AppCore::tab_mut()`: `tabs.len() >= 1` and
+/// `active_tab < tabs.len()` at every public-API exit point.
+///
+/// Drives the four state-mutating tab commands (`:new`, `:tabclose`,
+/// `:tabnext`, `:tabprev`) across a small mix of tab counts and
+/// asserts the invariant after each.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_tab_invariant_holds_across_lifecycle() {
+    let (registry, connections) = fixture(PathBuf::from(":memory:"));
+    let mut core = AppCore::new(registry, connections, None);
+
+    let check = |core: &AppCore, where_: &str| {
+        let len = core.tabs().len();
+        assert!(len >= 1, "{where_}: tabs.len() == 0");
+        assert!(
+            core.active_tab() < len,
+            "{where_}: active_tab {} >= tabs.len() {}",
+            core.active_tab(),
+            len
+        );
+    };
+
+    check(&core, "fresh AppCore");
+
+    core.execute_command("new");
+    core.execute_command("new");
+    core.execute_command("new");
+    check(&core, "after :new x3");
+    assert_eq!(core.tabs().len(), 4);
+
+    core.execute_command("tabnext");
+    core.execute_command("tabnext");
+    core.execute_command("tabnext");
+    core.execute_command("tabnext");
+    check(&core, "after :tabnext x4 (wrap)");
+
+    core.execute_command("tabprev");
+    core.execute_command("tabprev");
+    check(&core, "after :tabprev x2");
+
+    core.execute_command("tabclose");
+    core.execute_command("tabclose");
+    core.execute_command("tabclose");
+    check(&core, "after :tabclose x3");
+    assert_eq!(core.tabs().len(), 1);
+
+    // Closing the last tab is a no-op with a status message.
+    core.execute_command("tabclose");
+    check(&core, "after attempted close of last tab");
+    assert_eq!(core.tabs().len(), 1);
+    assert!(core.status_message().contains("last tab"));
+}

@@ -36,7 +36,12 @@ local function quote_ident(name)
 end
 
 -- Escape a single cell for CSV output per RFC 4180.
+-- NULL cells arrive from narwhal.sql_run as Lua nil. Emit an empty
+-- field for those instead of the literal string "nil" — round-tripping
+-- the CSV back through Pandas/Excel would otherwise materialise "nil"
+-- as a real string value and corrupt the data.
 local function csv_escape(cell)
+    if cell == nil then return "" end
     local s = tostring(cell)
     if s:find('[,"\r\n]') then
         return '"' .. s:gsub('"', '""') .. '"'

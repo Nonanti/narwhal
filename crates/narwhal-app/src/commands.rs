@@ -499,4 +499,26 @@ mod tests {
         assert_eq!(parse("   "), Command::Empty);
         assert_eq!(parse("zz"), Command::Unknown("zz".into()));
     }
+
+    /// `:help <cmd>` walks BUILTIN_COMMAND_DESCRIPTIONS after
+    /// resolving aliases through `resolve_builtin_alias`. The lookup
+    /// only stays useful as long as every parser-accepted built-in
+    /// (and every alias it accepts) resolves to a primary key that
+    /// has a description entry. Without this test, adding a new
+    /// command to BUILTIN_COMMAND_NAMES + parser without touching
+    /// BUILTIN_COMMAND_DESCRIPTIONS silently makes `:help <newcmd>`
+    /// report "unknown command".
+    #[test]
+    fn every_builtin_command_name_has_a_description() {
+        for &name in BUILTIN_COMMAND_NAMES {
+            let primary = resolve_builtin_alias(name);
+            assert!(
+                BUILTIN_COMMAND_DESCRIPTIONS
+                    .iter()
+                    .any(|(key, _)| *key == primary),
+                "BUILTIN_COMMAND_NAMES contains '{name}' (resolves to '{primary}') \
+                 but BUILTIN_COMMAND_DESCRIPTIONS has no entry for it"
+            );
+        }
+    }
 }

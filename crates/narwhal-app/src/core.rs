@@ -401,10 +401,21 @@ impl AppCore {
         self.active_tab
     }
 
+    /// Borrow the active tab.
+    ///
+    /// Indexing is sound because two invariants are upheld at every
+    /// `&mut self` entry point:
+    /// - `self.tabs` always contains at least one element. `close_tab`
+    ///   early-returns when `tabs.len() == 1`.
+    /// - `self.active_tab < self.tabs.len()`. `close_tab` clamps after
+    ///   removal; `cycle_tab` uses `rem_euclid(len)`.
+    ///
+    /// See `active_tab_invariant_holds_after_close` in the test suite.
     fn tab(&self) -> &Tab {
         &self.tabs[self.active_tab]
     }
 
+    /// Mutable counterpart to [`Self::tab`]. Same invariants apply.
     #[allow(dead_code)]
     fn tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.active_tab]
