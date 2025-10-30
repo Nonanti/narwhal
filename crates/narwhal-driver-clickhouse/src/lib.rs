@@ -153,7 +153,10 @@ impl DatabaseDriver for ClickhouseDriver {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
             return Err(Error::Connection(format!(
                 "ClickHouse returned {status}: {body}"
             )));
@@ -305,7 +308,10 @@ impl ClickhouseConnection {
         let status = response.status();
         if !status.is_success() {
             // Error bodies are ClickHouse error messages — always UTF-8.
-            let body = response.text().await.unwrap_or_default();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
             // Remove query ID on failure.
             if let Some(qid) = query_id {
                 state.active_queries.lock().await.remove(qid);
@@ -515,7 +521,10 @@ impl Connection for ClickhouseConnection {
 
             if !response.status().is_success() {
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
                 state.active_queries.lock().await.remove(&query_id);
                 return Err(Error::Query(format!(
                     "ClickHouse returned {status}: {body}"
@@ -526,11 +535,14 @@ impl Connection for ClickhouseConnection {
             state.active_queries.lock().await.remove(&query_id);
 
             // Drop the sender immediately so the receiver yields
-            // `Ok(None)` on first poll — a clean empty stream.
+            // `Ok(None)` on first poll — a clean empty stream. No task
+            // was spawned in this branch, so the stream owns nothing
+            // that needs cancellation.
             let (_tx, rx) = mpsc::channel::<Result<CoreRow>>(1);
             return Ok(Box::new(ClickhouseRowStream {
                 columns: Vec::new(),
                 rx,
+                task: None,
             }));
         }
 
@@ -554,7 +566,10 @@ impl Connection for ClickhouseConnection {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
             state.active_queries.lock().await.remove(&query_id);
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
@@ -571,19 +586,31 @@ impl Connection for ClickhouseConnection {
         let active_queries = state.active_queries.clone();
         let qid = query_id.clone();
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             stream_tsv_chunks(response.bytes_stream(), header_tx, row_tx).await;
             // Deregister the query ID now that the stream is complete.
             active_queries.lock().await.remove(&qid);
         });
 
-        let columns = header_rx
-            .await
-            .map_err(|_| Error::Other("clickhouse stream cancelled".into()))??;
+        let columns = match header_rx.await {
+            Ok(Ok(cols)) => cols,
+            Ok(Err(e)) => {
+                // stream_tsv_chunks sent an error through header_tx. The
+                // spawned task has already returned, so abort() is a
+                // no-op but keeps the cleanup path uniform.
+                task.abort();
+                return Err(e);
+            }
+            Err(_) => {
+                task.abort();
+                return Err(Error::Other("clickhouse stream cancelled".into()));
+            }
+        };
 
         Ok(Box::new(ClickhouseRowStream {
             columns,
             rx: row_rx,
+            task: Some(task),
         }))
     }
 
@@ -847,6 +874,11 @@ impl CancelHandle for ClickhouseCancel {
 struct ClickhouseRowStream {
     columns: Vec<ColumnHeader>,
     rx: mpsc::Receiver<Result<CoreRow>>,
+    /// Handle to the spawned task that drives [`stream_tsv_chunks`].
+    /// `close()` aborts it so a slow server cannot keep dribbling bytes
+    /// into a buffer no one is reading after the consumer walks away.
+    /// `None` for the empty-stream case (no task was spawned).
+    task: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[async_trait]
@@ -863,10 +895,26 @@ impl RowStream for ClickhouseRowStream {
         }
     }
 
-    async fn close(self: Box<Self>) -> Result<()> {
-        // Dropping the receiver is sufficient — the sender side will
-        // detect the closed channel and stop producing rows.
+    async fn close(mut self: Box<Self>) -> Result<()> {
+        // Closing the receiver alone is not enough: if the task is
+        // currently parked on bytes_stream.next().await waiting for the
+        // next chunk from the server, it stays parked until that chunk
+        // arrives and only then notices the dropped row_tx. On a big
+        // result set that can keep the HTTP connection and a chunk of
+        // RAM tied up for seconds. abort() unparks it immediately.
+        if let Some(handle) = self.task.take() {
+            handle.abort();
+        }
         Ok(())
+    }
+}
+
+impl Drop for ClickhouseRowStream {
+    fn drop(&mut self) {
+        // Caller dropped without calling close(): same reasoning.
+        if let Some(handle) = self.task.take() {
+            handle.abort();
+        }
     }
 }
 
@@ -1002,25 +1050,20 @@ async fn stream_tsv_chunks<S>(
                 return;
             }
             None => {
-                // End of stream — flush any trailing incomplete line
-                // using byte-level parsing.
+                // End of stream. ClickHouse always terminates rows with
+                // \n in TSV, so a non-empty buffer here means the
+                // response was truncated mid-row — surface it instead of
+                // silently delivering a half-parsed row as a real result.
                 if !buf.is_empty() {
-                    // Strip trailing \r.
                     if buf.last() == Some(&b'\r') {
                         buf.pop();
                     }
                     if !buf.is_empty() {
-                        let fields: Vec<&[u8]> = buf.split(|&b| b == b'\t').collect();
-                        let mut row = Vec::with_capacity(headers.len());
-                        for (i, field) in fields.iter().enumerate() {
-                            let ch_type =
-                                type_strings.get(i).map(String::as_str).unwrap_or("String");
-                            row.push(parse_tsv_value(field, ch_type));
-                        }
-                        while row.len() < headers.len() {
-                            row.push(Value::Null);
-                        }
-                        let _ = row_tx.send(Ok(CoreRow(row))).await;
+                        let _ = row_tx
+                            .send(Err(Error::Query(
+                                "clickhouse stream truncated mid-row (no trailing newline)".into(),
+                            )))
+                            .await;
                     }
                 }
                 return;
@@ -1106,6 +1149,39 @@ mod stream_tests {
         match row.0.first() {
             Some(Value::Bytes(b)) => assert_eq!(b, &vec![0xFF, 0xFE, 0x00, 0x01]),
             other => panic!("expected Value::Bytes, got {other:?}"),
+        }
+    }
+
+    /// A response truncated mid-row (no trailing newline after the last
+    /// row's bytes) must surface as `Error::Query`, not as a half-parsed
+    /// row silently delivered to the consumer.
+    #[tokio::test]
+    async fn chunked_tsv_truncated_mid_row_errors() {
+        // Headers complete (two \n-terminated lines), then a partial
+        // row with no trailing \n.
+        let payload: &[u8] = b"id\tname\nUInt32\tString\n1\tali";
+
+        let chunks: Vec<std::result::Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::copy_from_slice(payload))];
+
+        let byte_stream = stream::iter(chunks);
+        let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
+        let (row_tx, mut row_rx) = mpsc::channel::<Result<CoreRow>>(64);
+
+        stream_tsv_chunks(byte_stream, header_tx, row_tx).await;
+
+        // Headers came through fine — truncation is mid-row.
+        let _columns = header_rx.await.expect("header rx").expect("headers");
+
+        // The first (and only) item from the row channel must be Err.
+        match row_rx.recv().await {
+            Some(Err(Error::Query(msg))) => {
+                assert!(
+                    msg.contains("truncated"),
+                    "expected truncation error, got: {msg}"
+                );
+            }
+            other => panic!("expected Err(Error::Query(truncated)), got {other:?}"),
         }
     }
 }
