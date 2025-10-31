@@ -425,15 +425,26 @@ pub fn render_completion_popup(
     if view.items.is_empty() {
         return;
     }
-    // Size: widest item + 8 (glyph, padding, detail) capped at 60. Height:
-    // items + 2 borders capped at 10.
+    // Width: glyph column (2) + widest text column + widest detail
+    // column + breathing room (4). The popup is allowed to grow up to
+    // whatever the screen can host minus a small margin, so multi-word
+    // phrases like 'SELECT COUNT(*)' don't get cropped to 'SELECT C'
+    // when the editor pane is narrow.
     let max_text = view
         .items
         .iter()
-        .map(|i| i.text.len() + i.detail.map(|d| d.len() + 3).unwrap_or(0))
+        .map(|i| i.text.chars().count())
         .max()
         .unwrap_or(0);
-    let width = (max_text as u16 + 6).clamp(16, 60);
+    let max_detail = view
+        .items
+        .iter()
+        .map(|i| i.detail.map(|d| d.chars().count()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let want = 2 + max_text + if max_detail == 0 { 0 } else { max_detail + 1 } + 4;
+    let avail = (screen.width.saturating_sub(2) as usize).clamp(20, 100);
+    let width = want.clamp(20, avail) as u16;
     let height = (view.items.len() as u16 + 2).min(10);
 
     let (ax, ay) = view.anchor;
@@ -485,11 +496,20 @@ pub fn render_completion_popup(
             Cell::from(detail.to_owned()).style(style),
         ])
     });
-    let widths = [
-        Constraint::Length(2),
-        Constraint::Min(8),
-        Constraint::Length(16),
-    ];
+    // Constraints adapt to the actual content rather than the old fixed
+    // 8/16 split: a long phrase like 'CREATE TABLE IF NOT EXISTS' takes
+    // the room it needs and the detail column shrinks to zero when no
+    // item has a detail string.
+    let text_w = (max_text as u16).max(4);
+    let widths: Vec<Constraint> = if max_detail == 0 {
+        vec![Constraint::Length(2), Constraint::Min(text_w)]
+    } else {
+        vec![
+            Constraint::Length(2),
+            Constraint::Length(text_w),
+            Constraint::Length(max_detail as u16),
+        ]
+    };
     let table = Table::new(rows, widths);
     frame.render_widget(table, inner);
 }
