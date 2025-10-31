@@ -111,6 +111,74 @@ pub const KEYWORDS: &[&str] = &[
     "TRANSACTION",
 ];
 
+/// Multi-word SQL phrases offered as a single completion. They cover the
+/// most common 2- to 4-token sequences a daily database user types so
+/// the popup can suggest `CREATE TABLE` instead of just `CREATE` and
+/// then forcing a second round of completion.
+///
+/// Matching is the same lowercase prefix/substring strategy used for
+/// single keywords — typing `crea` lights up `CREATE TABLE`, `CREATE
+/// INDEX`, ... in alphabetical order.
+pub const PHRASES: &[&str] = &[
+    "CREATE TABLE",
+    "CREATE TABLE IF NOT EXISTS",
+    "CREATE INDEX",
+    "CREATE UNIQUE INDEX",
+    "CREATE VIEW",
+    "CREATE OR REPLACE VIEW",
+    "CREATE MATERIALIZED VIEW",
+    "CREATE SCHEMA",
+    "CREATE TEMPORARY TABLE",
+    "DROP TABLE",
+    "DROP TABLE IF EXISTS",
+    "DROP INDEX",
+    "DROP VIEW",
+    "DROP SCHEMA",
+    "ALTER TABLE",
+    "ALTER INDEX",
+    "ADD COLUMN",
+    "DROP COLUMN",
+    "RENAME COLUMN",
+    "RENAME TO",
+    "INSERT INTO",
+    "DELETE FROM",
+    "SELECT *",
+    "SELECT * FROM",
+    "SELECT DISTINCT",
+    "SELECT COUNT(*)",
+    "LEFT JOIN",
+    "RIGHT JOIN",
+    "INNER JOIN",
+    "OUTER JOIN",
+    "FULL OUTER JOIN",
+    "CROSS JOIN",
+    "GROUP BY",
+    "ORDER BY",
+    "ORDER BY ASC",
+    "ORDER BY DESC",
+    "LIMIT",
+    "OFFSET",
+    "UNION ALL",
+    "IS NULL",
+    "IS NOT NULL",
+    "NOT NULL",
+    "DEFAULT NULL",
+    "PRIMARY KEY",
+    "FOREIGN KEY",
+    "REFERENCES",
+    "ON DELETE CASCADE",
+    "ON UPDATE CASCADE",
+    "ON CONFLICT",
+    "BEGIN TRANSACTION",
+    "COMMIT TRANSACTION",
+    "ROLLBACK TRANSACTION",
+    "SAVEPOINT",
+    "WITH RECURSIVE",
+    "AS",
+    "CASE WHEN",
+    "ELSE END",
+];
+
 /// Compute the completion list for `prefix` against `schemas`.
 ///
 /// Returns up to `limit` entries, with exact prefix matches first. An
@@ -148,6 +216,19 @@ pub fn gather(prefix: &str, schemas: &[SchemaListing], limit: usize) -> Vec<Comp
         push(
             Completion {
                 text: (*keyword).to_owned(),
+                kind: CompletionKind::Keyword,
+                detail: None,
+            },
+            &mut prefix_hits,
+            &mut substr_hits,
+            &mut seen,
+        );
+    }
+
+    for phrase in PHRASES {
+        push(
+            Completion {
+                text: (*phrase).to_owned(),
                 kind: CompletionKind::Keyword,
                 detail: None,
             },

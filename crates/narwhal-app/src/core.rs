@@ -389,6 +389,15 @@ impl AppCore {
         &self.tab().result
     }
 
+    /// Test helper: is the completion popup currently open on the
+    /// active tab? Used by integration tests that drive the editor and
+    /// want to assert auto-trigger fired without depending on a
+    /// specific status-bar message.
+    #[doc(hidden)]
+    pub fn editor_completion_is_open(&self) -> bool {
+        self.tabs[self.active_tab].completion.is_some()
+    }
+
     pub fn editor(&self) -> &EditorBuffer {
         &self.tab().editor
     }
@@ -659,7 +668,10 @@ impl AppCore {
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
-        // The completion popup is modal while it's open.
+        // The completion popup is modal while it's open: Tab cycles,
+        // Enter accepts, Esc closes. Plain character keys fall through
+        // so the user can keep typing and the popup refreshes against
+        // the new prefix on the way out.
         if self.tabs[self.active_tab].completion.is_some() && self.handle_completion_key(key) {
             return;
         }
@@ -674,6 +686,52 @@ impl AppCore {
         };
         let action = self.vim.handle(logical);
         self.apply_action(action);
+
+        // After every insert-mode keystroke, refresh the completion
+        // popup against the new word prefix. Two thresholds:
+        // - prefix.len() >= 2 opens or refreshes the popup;
+        // - prefix.len() < 2 closes any open popup so the user can
+        //   type short words without a flashing list.
+        // Silent: no status spam, no '4-space' fallback — manual Tab
+        // / Ctrl-Space still handle those cases.
+        if self.vim.mode() == Mode::Insert {
+            self.maybe_auto_complete();
+        }
+    }
+
+    /// Refresh-or-close the completion popup based on the current word
+    /// prefix. Called after every insert-mode keystroke. See
+    /// [`Self::trigger_completion`] for the manual (Tab / Ctrl-Space)
+    /// variant that handles the empty-prefix and no-matches cases
+    /// explicitly.
+    fn maybe_auto_complete(&mut self) {
+        let prefix = self.tabs[self.active_tab].editor.current_word_prefix();
+        if prefix.len() < 2 {
+            self.tabs[self.active_tab].completion = None;
+            return;
+        }
+        let schemas = self
+            .session
+            .as_ref()
+            .map(|s| s.schemas.as_slice())
+            .unwrap_or(&[]);
+        let items = gather_completions(&prefix, schemas, 50);
+        if items.is_empty() {
+            self.tabs[self.active_tab].completion = None;
+            return;
+        }
+        // Preserve the user's current selection across keystrokes when
+        // possible — a brand-new popup starts at index 0.
+        let selected = self.tabs[self.active_tab]
+            .completion
+            .as_ref()
+            .map(|c| c.selected.min(items.len() - 1))
+            .unwrap_or(0);
+        self.tabs[self.active_tab].completion = Some(CompletionState {
+            items,
+            selected,
+            prefix,
+        });
     }
 
     // ----- completion -----
@@ -709,11 +767,19 @@ impl AppCore {
             selected: 0,
             prefix,
         });
-        self.status_message =
-            "completion: Tab/Shift-Tab cycles · Enter selects · Esc cancels".into();
+        self.status_message = "completion: ↑↓ cycles · Tab/Enter accepts · Esc cancels".into();
     }
 
     /// Returns `true` when the key was consumed by the completion popup.
+    ///
+    /// Bindings inside the popup follow the IDE convention used by
+    /// IntelliJ / DataGrip / VS Code so the muscle memory transfers:
+    /// - Tab / Enter: accept the selected completion
+    /// - ↑ / ↓: move the highlight
+    /// - Shift-Tab: previous highlight (kept for keyboards without
+    ///   arrow access in vim-aware terminal multiplexers)
+    /// - Esc: dismiss the popup; the editor stays in insert mode and
+    ///   the originally typed prefix is preserved
     fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
         let Some(state) = self.tabs[self.active_tab].completion.as_mut() else {
             return false;
@@ -724,7 +790,7 @@ impl AppCore {
                 self.status_message = "completion cancelled".into();
                 true
             }
-            CtKey::Enter => {
+            CtKey::Enter | CtKey::Tab => {
                 let choice = state.items[state.selected].text.clone();
                 self.tabs[self.active_tab]
                     .editor
@@ -733,16 +799,7 @@ impl AppCore {
                 self.status_message = format!("completed: {choice}");
                 true
             }
-            CtKey::Tab => {
-                state.selected = (state.selected + 1) % state.items.len();
-                true
-            }
-            CtKey::BackTab => {
-                let len = state.items.len();
-                state.selected = (state.selected + len - 1) % len;
-                true
-            }
-            CtKey::Up => {
+            CtKey::BackTab | CtKey::Up => {
                 let len = state.items.len();
                 state.selected = (state.selected + len - 1) % len;
                 true
