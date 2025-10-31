@@ -20,7 +20,7 @@ expression: snapshot_core(&mut core)
 │                                ││                                                                                    │
 │                                │└────────────────────────────────────────────────────────────────────────────────────┘
 │                                │┌ results ───────────────────────────────────────────────────────────────────────────┐
-│                                ││  no results yet — Ctrl-; to run, :run-all for whole buffer                         │
+│                                ││  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-│
 │                                ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │

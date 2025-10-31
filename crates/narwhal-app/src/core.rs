@@ -583,6 +583,33 @@ impl AppCore {
     }
 
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
+        // Terminal-agnostic function keys first. Most terminal emulators
+        // forward F-keys and Alt-Enter as distinct events, while Ctrl +
+        // punctuation (Ctrl-;, Ctrl-/) is frequently swallowed by the
+        // VT100-style key encoding before it ever reaches the program.
+        match key.code {
+            CtKey::F(5) => {
+                self.dispatch_current_statement(RunMode::Execute);
+                return true;
+            }
+            CtKey::F(6) => {
+                self.dispatch_all_statements(RunMode::Execute);
+                return true;
+            }
+            CtKey::F(7) => {
+                self.dispatch_current_statement(RunMode::Stream);
+                return true;
+            }
+            CtKey::F(4) if self.running => {
+                self.spawn_cancel();
+                return true;
+            }
+            CtKey::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.dispatch_current_statement(RunMode::Execute);
+                return true;
+            }
+            _ => {}
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 CtKey::Char('w') => {
@@ -596,6 +623,17 @@ impl AppCore {
                 }
                 CtKey::Char(';') => {
                     self.dispatch_current_statement(RunMode::Execute);
+                    return true;
+                }
+                CtKey::Char(' ')
+                    if self.focus == Pane::Editor && self.vim.mode() == Mode::Insert =>
+                {
+                    // Ctrl-Space is the IDE-standard completion trigger
+                    // and survives most terminal key-encoding layers.
+                    // Only fires when the editor pane is focused and
+                    // we're in insert mode — in normal mode it would
+                    // collide with the vim layer's leader.
+                    self.trigger_completion();
                     return true;
                 }
                 CtKey::Char('s') => {

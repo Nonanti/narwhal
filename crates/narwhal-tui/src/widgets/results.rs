@@ -170,7 +170,7 @@ pub fn render_results(
     match display {
         ResultDisplay::Empty => {
             let p = Paragraph::new(Span::styled(
-                "  no results yet — Ctrl-; to run, :run-all for whole buffer",
+                "  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-Space completes",
                 Style::default().fg(theme.muted),
             ));
             frame.render_widget(p, inner);
@@ -406,7 +406,11 @@ fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
             let header_len = format!("{} ({})", c.name, c.data_type).width();
             let body_len = rows
                 .iter()
-                .map(|r| r.0.get(i).map(|v| v.render().width()).unwrap_or(0))
+                .map(|r| {
+                    r.0.get(i)
+                        .map(|v| render_for_grid(&v.render()).width())
+                        .unwrap_or(0)
+                })
                 .max()
                 .unwrap_or(0);
             header_len
@@ -414,6 +418,32 @@ fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
                 .clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH)
         })
         .collect()
+}
+
+/// Single-line projection used in the result grid. Cell popup still shows
+/// the raw value through a `Paragraph` widget so the user can read the
+/// real text on demand — this just keeps grid rows one row tall.
+fn render_for_grid(s: &str) -> String {
+    if !s.contains(['\n', '\r', '\t']) {
+        return s.to_owned();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                // Collapse CRLF into one glyph.
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push('⏎');
+            }
+            '\n' => out.push('⏎'),
+            '\t' => out.push('→'),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
@@ -577,7 +607,16 @@ fn draw_table(
         .iter()
         .enumerate()
         .map(|(idx, row)| {
-            let cells = row.0.iter().map(|v| Cell::from(v.render()));
+            // Grid cells are one terminal row tall. Multi-line strings
+            // (notes with line breaks, JSON with embedded newlines) used
+            // to disappear past the first line because ratatui clipped
+            // the overflow vertically. Substitute visible glyphs so the
+            // user sees data is there — the cell popup (Enter) still
+            // shows the un-mangled value through Paragraph wrapping.
+            let cells = row
+                .0
+                .iter()
+                .map(|v| Cell::from(render_for_grid(&v.render())));
             let mut r = TableRow::new(cells);
             if let Some(search) = search {
                 if search.matches.contains(&idx) {
