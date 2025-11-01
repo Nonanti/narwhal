@@ -33,4 +33,4 @@ expression: snapshot_core(&mut core)
 │                                ││                                                                                    │
 │                                ││                                                                                    │
 └────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
- NOR   editor │ (no connection) │ ready
+  NOR editor  (no connection)  ready

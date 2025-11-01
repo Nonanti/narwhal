@@ -1,6 +1,5 @@
 use narwhal_vim::Mode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
@@ -36,15 +35,23 @@ impl Pane {
     }
 }
 
+/// Read-only view of the three-slot status bar passed from
+/// [`narwhal_app::core::StatusBar`] into the render path.
+#[derive(Debug, Clone, Default)]
+pub struct StatusBarView<'a> {
+    /// Center slot — connection name + driver (sticky).
+    pub connection: Option<&'a str>,
+    /// Right slot — last transient message.
+    pub message: &'a str,
+    /// Optional fourth slot — transaction isolation level.
+    pub transaction: Option<&'a str>,
+}
+
 pub struct RootLayout<'a> {
     pub mode: Mode,
     pub focus: Pane,
-    pub connection_label: &'a str,
-    pub status_message: &'a str,
+    pub status_bar: StatusBarView<'a>,
     pub running: bool,
-    /// `Some` when a transaction is open; the inner str is a short tag
-    /// such as "TX" or "TX·sp:2" that the status bar renders verbatim.
-    pub transaction_badge: Option<&'a str>,
     pub theme: &'a Theme,
     pub sidebar: SidebarView<'a>,
     pub editor: &'a mut EditorBuffer,
@@ -105,38 +112,65 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
 }
 
 fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
+    let mode_style = match view.mode {
+        Mode::Insert => view.theme.mode_insert(),
+        Mode::Command | Mode::Visual | Mode::VisualLine => view.theme.mode_command(),
+        Mode::Normal => view.theme.mode_normal(),
+    };
+
+    let mode_label = format!(" {} ", view.mode.short_label());
+    let _mode_width = mode_label.chars().count() as u16;
+
+    let focus_label = view.focus.label();
+    let left_text = format!(" {mode_label}{focus_label} ");
+    let left_width = left_text.chars().count() as u16;
+
+    let conn_text = match view.status_bar.connection {
+        Some(c) => format!(" {c} "),
+        None => " (no connection) ".to_owned(),
+    };
+    let conn_width = conn_text.chars().count() as u16;
+
+    let txn_text = match view.status_bar.transaction {
+        Some(t) => format!(" TX:{t} "),
+        None => String::new(),
+    };
+    let txn_width = txn_text.chars().count() as u16;
+
+    let running_prefix = if view.running { "⏳ " } else { "" };
+    let msg_text = format!(" {}{}", running_prefix, view.status_bar.message);
+    let msg_width: u16 = 20; // minimum for the right slot
+
     let parts = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(5),
-            Constraint::Length(1),
-            Constraint::Min(1),
+            Constraint::Length(left_width),
+            Constraint::Length(conn_width),
+            Constraint::Length(txn_width),
+            Constraint::Min(msg_width),
         ])
         .split(area);
 
-    let mode_label = format!(" {} ", view.mode.short_label());
+    // Left slot: mode + focus pane
+    frame.render_widget(Paragraph::new(left_text).style(mode_style), parts[0]);
+
+    // Center slot: connection (sticky)
     frame.render_widget(
-        Paragraph::new(mode_label).style(view.theme.mode_indicator()),
-        parts[0],
+        Paragraph::new(conn_text).style(view.theme.status_bar()),
+        parts[1],
     );
 
-    frame.render_widget(Paragraph::new(" ").style(view.theme.status_bar()), parts[1]);
+    // Optional fourth slot: transaction badge (yellow text)
+    if !txn_text.is_empty() {
+        frame.render_widget(
+            Paragraph::new(txn_text).style(view.theme.transaction_badge()),
+            parts[2],
+        );
+    }
 
-    let running_indicator = if view.running { "⏳ " } else { "" };
-    let txn = match view.transaction_badge {
-        Some(tag) => format!("│ {tag} "),
-        None => String::new(),
-    };
-    let body = Line::from(vec![Span::raw(format!(
-        " {} │ {} {}│ {}{} ",
-        view.focus.label(),
-        view.connection_label,
-        txn,
-        running_indicator,
-        view.status_message
-    ))]);
+    // Right slot: message
     frame.render_widget(
-        Paragraph::new(body).style(view.theme.status_bar()),
-        parts[2],
+        Paragraph::new(msg_text).style(view.theme.status_bar()),
+        parts[3],
     );
 }

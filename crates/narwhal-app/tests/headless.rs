@@ -224,3 +224,86 @@ async fn active_tab_invariant_holds_across_lifecycle() {
     assert_eq!(core.tabs().len(), 1);
     assert!(core.status_message().contains("last tab"));
 }
+
+/// The connection slot in the status bar is sticky: it survives
+/// transient messages produced by queries, searches, etc.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn status_bar_pins_connection_through_transient_messages() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("test.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);
+             INSERT INTO items (label) VALUES ('alpha'), ('beta');",
+        )
+        .unwrap();
+    }
+
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+
+    // No connection yet.
+    assert!(core.status_bar().connection.is_none());
+
+    // Open a connection — the center slot must be populated.
+    core.execute_command("open headless");
+    let conn_slot = core
+        .status_bar()
+        .connection
+        .clone()
+        .expect("connection slot should be set after :open");
+    assert!(
+        conn_slot.contains("headless"),
+        "connection slot should contain the connection name, got: {conn_slot}"
+    );
+
+    // Run a query — produces a transient message but must NOT clear the
+    // connection slot.
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
+    core.execute_command("run");
+    core.drain_run_updates().await;
+
+    assert!(
+        core.status_bar().connection.is_some(),
+        "connection slot must survive transient messages"
+    );
+    assert!(
+        core.status_bar()
+            .connection
+            .as_ref()
+            .unwrap()
+            .contains("headless"),
+        "connection slot still names headless after query"
+    );
+}
+
+/// Closing a session clears the connection slot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn status_bar_clears_connection_on_close() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("test.db");
+    {
+        rusqlite::Connection::open(&db_path).unwrap();
+    }
+
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+
+    // No connection initially.
+    assert!(core.status_bar().connection.is_none());
+
+    // Open — slot appears.
+    core.execute_command("open headless");
+    assert!(
+        core.status_bar().connection.is_some(),
+        "connection slot must be set after :open"
+    );
+
+    // Close — slot clears.
+    core.execute_command("close");
+    assert!(
+        core.status_bar().connection.is_none(),
+        "connection slot must be cleared after :close"
+    );
+}

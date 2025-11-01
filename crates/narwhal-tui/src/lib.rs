@@ -8,7 +8,7 @@ pub mod theme;
 pub mod widgets;
 
 pub use input::translate_key_event;
-pub use layout::{render_root, Pane, RootLayout};
+pub use layout::{render_root, Pane, RootLayout, StatusBarView};
 pub use theme::Theme;
 pub use widgets::{
     editor_cursor_anchor, render_completion_popup, render_editor, render_results, render_sidebar,

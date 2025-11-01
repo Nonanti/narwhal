@@ -16,8 +16,8 @@ use narwhal_history::Journal;
 use narwhal_tui::{
     render_root, render_wizard, translate_key_event, CellEditView, CellPopup, CompletionItemView,
     CompletionPopupView, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay, ResultView,
-    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, Theme, WizardFieldView,
-    WizardView,
+    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, StatusBarView, Theme,
+    WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -43,6 +43,25 @@ use narwhal_plugin::{
 use narwhal_plugin_lua::LuaPlugin;
 
 const RUN_CHANNEL_CAPACITY: usize = 128;
+
+/// Three-slot (plus optional fourth) status bar.
+///
+/// - **Left** (rendered by the TUI): mode (NOR/INS/CMD) + focused pane.
+/// - **Center**: connection name + driver — set once on `:open`,
+///   cleared on `:close`; sticky across transient messages.
+/// - **Right**: last transient message — the field every other
+///   piece of code writes through.
+/// - **Optional fourth**: open transaction's isolation level,
+///   rendered between center and right when present.
+#[derive(Debug, Default, Clone)]
+pub struct StatusBar {
+    /// Center slot — set once on connect, cleared on disconnect.
+    pub connection: Option<String>,
+    /// Right slot — last transient message.
+    pub message: String,
+    /// Optional fourth slot — open transaction's isolation level.
+    pub transaction: Option<String>,
+}
 
 /// What the result pane is currently showing.
 #[derive(Debug, Default)]
@@ -216,7 +235,7 @@ pub struct AppCore {
     focus: Pane,
     sidebar_items: Vec<SidebarItem>,
     sidebar_index: usize,
-    status_message: String,
+    status: StatusBar,
     /// One-shot warning carried over from a plugin (transform or command
     /// hook) so that the final 'done · N statement(s)' AllDone message
     /// doesn't overwrite it silently. Cleared after it bubbles up.
@@ -325,7 +344,10 @@ impl AppCore {
             focus: Pane::Editor,
             sidebar_items: Vec::new(),
             sidebar_index: 0,
-            status_message: "ready".into(),
+            status: StatusBar {
+                message: "ready".into(),
+                ..Default::default()
+            },
             plugin_warning: None,
             running: false,
             cancel_slot: Arc::new(Mutex::new(None)),
@@ -382,7 +404,12 @@ impl AppCore {
     // ----- accessors -----
 
     pub fn status_message(&self) -> &str {
-        &self.status_message
+        &self.status.message
+    }
+
+    /// Read-only accessor for the full [`StatusBar`] struct.
+    pub fn status_bar(&self) -> &StatusBar {
+        &self.status
     }
 
     pub fn result(&self) -> &ResultState {
@@ -493,19 +520,6 @@ impl AppCore {
             selected_index: self.sidebar_index,
             focused: self.focus == Pane::Sidebar,
         };
-        let connection_label = self
-            .session
-            .as_ref()
-            .map(|s| s.config.name.clone())
-            .unwrap_or_else(|| "(no connection)".into());
-        let transaction_badge = self.session.as_ref().and_then(|s| {
-            let txn = s.transaction.as_ref()?;
-            Some(if txn.savepoints.is_empty() {
-                "TX".to_owned()
-            } else {
-                format!("TX·sp:{}", txn.savepoints.len())
-            })
-        });
         let editor_title = self.editor_title_with_tabs();
 
         let tab = &mut self.tabs[self.active_tab];
@@ -540,10 +554,12 @@ impl AppCore {
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
-            connection_label: &connection_label,
-            status_message: &self.status_message,
+            status_bar: StatusBarView {
+                connection: self.status.connection.as_deref(),
+                message: &self.status.message,
+                transaction: self.status.transaction.as_deref(),
+            },
             running: self.running,
-            transaction_badge: transaction_badge.as_deref(),
             theme: &self.theme,
             sidebar: sidebar_view,
             editor: &mut tab.editor,
@@ -623,7 +639,7 @@ impl AppCore {
             match key.code {
                 CtKey::Char('w') => {
                     self.focus = self.focus.cycle();
-                    self.status_message = format!("focus → {}", self.focus.label());
+                    self.status.message = format!("focus → {}", self.focus.label());
                     return true;
                 }
                 CtKey::Char('c') if self.running => {
@@ -750,7 +766,7 @@ impl AppCore {
             .unwrap_or(&[]);
         let items = gather_completions(&prefix, schemas, 50);
         if items.is_empty() {
-            self.status_message = format!("no completions for '{prefix}'");
+            self.status.message = format!("no completions for '{prefix}'");
             return;
         }
         if items.len() == 1 {
@@ -759,7 +775,7 @@ impl AppCore {
             self.tabs[self.active_tab]
                 .editor
                 .replace_current_word_with(&only);
-            self.status_message = format!("completed: {only}");
+            self.status.message = format!("completed: {only}");
             return;
         }
         self.tabs[self.active_tab].completion = Some(CompletionState {
@@ -767,7 +783,7 @@ impl AppCore {
             selected: 0,
             prefix,
         });
-        self.status_message = "completion: ↑↓ cycles · Tab/Enter accepts · Esc cancels".into();
+        self.status.message = "completion: ↑↓ cycles · Tab/Enter accepts · Esc cancels".into();
     }
 
     /// Returns `true` when the key was consumed by the completion popup.
@@ -787,7 +803,7 @@ impl AppCore {
         match key.code {
             CtKey::Esc => {
                 self.tabs[self.active_tab].completion = None;
-                self.status_message = "completion cancelled".into();
+                self.status.message = "completion cancelled".into();
                 true
             }
             CtKey::Enter | CtKey::Tab => {
@@ -796,7 +812,7 @@ impl AppCore {
                     .editor
                     .replace_current_word_with(&choice);
                 self.tabs[self.active_tab].completion = None;
-                self.status_message = format!("completed: {choice}");
+                self.status.message = format!("completed: {choice}");
                 true
             }
             CtKey::BackTab | CtKey::Up => {
@@ -837,7 +853,7 @@ impl AppCore {
             return;
         };
         let SidebarItem::Table { schema, name, .. } = item else {
-            self.status_message = "select a table to preview".into();
+            self.status.message = "select a table to preview".into();
             return;
         };
         self.run_preview(&schema, &name, 0);
@@ -848,7 +864,7 @@ impl AppCore {
     /// pagination work.
     fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
@@ -886,7 +902,7 @@ impl AppCore {
 
     fn next_page(&mut self) {
         let Some((schema, table, offset)) = self.current_preview_target() else {
-            self.status_message = "no preview to paginate; select a table first".into();
+            self.status.message = "no preview to paginate; select a table first".into();
             return;
         };
         let limit = self.tabs[self.active_tab].page_size;
@@ -895,11 +911,11 @@ impl AppCore {
 
     fn prev_page(&mut self) {
         let Some((schema, table, offset)) = self.current_preview_target() else {
-            self.status_message = "no preview to paginate; select a table first".into();
+            self.status.message = "no preview to paginate; select a table first".into();
             return;
         };
         if offset == 0 {
-            self.status_message = "already on the first page".into();
+            self.status.message = "already on the first page".into();
             return;
         }
         let limit = self.tabs[self.active_tab].page_size;
@@ -909,7 +925,7 @@ impl AppCore {
 
     fn set_page_size(&mut self, size: usize) {
         self.tabs[self.active_tab].page_size = size;
-        self.status_message = format!("page size set to {size}");
+        self.status.message = format!("page size set to {size}");
     }
 
     fn current_preview_target(&self) -> Option<(String, String, usize)> {
@@ -936,7 +952,7 @@ impl AppCore {
 
     fn describe_table_into_result(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let pool = session.pool.clone();
@@ -954,7 +970,7 @@ impl AppCore {
         match result {
             Ok(ts) => {
                 self.tabs[self.active_tab].result_view.reset();
-                self.status_message = format!(
+                self.status.message = format!(
                     "{}.{}: {} cols·{} idx·{} fk",
                     ts.table.schema,
                     ts.table.name,
@@ -965,7 +981,7 @@ impl AppCore {
                 self.tabs[self.active_tab].result = ResultState::TableDetail { schema: ts };
             }
             Err(error) => {
-                self.status_message = format!("describe failed: {error}");
+                self.status.message = format!("describe failed: {error}");
             }
         }
     }
@@ -986,7 +1002,7 @@ impl AppCore {
                 match key.code {
                     CtKey::Esc => {
                         self.tabs[self.active_tab].search = None;
-                        self.status_message = "search cancelled".into();
+                        self.status.message = "search cancelled".into();
                     }
                     CtKey::Enter => {
                         search.editing = false;
@@ -1031,7 +1047,7 @@ impl AppCore {
             CtKey::Char('n') => self.advance_search(1),
             CtKey::Char('N') => self.advance_search(-1),
             CtKey::Esc if self.tabs[self.active_tab].search.take().is_some() => {
-                self.status_message = "search cleared".into();
+                self.status.message = "search cleared".into();
             }
             CtKey::Enter => self.open_cell_popup(),
             CtKey::Char('e') => self.start_cell_edit(),
@@ -1049,14 +1065,14 @@ impl AppCore {
             ResultState::Rows { rows, columns, .. }
             | ResultState::Running { rows, columns, .. } => (rows, columns),
             _ => {
-                self.status_message = "no cell to yank".into();
+                self.status.message = "no cell to yank".into();
                 return;
             }
         };
         let row_idx = tab.result_view.state.selected().unwrap_or(0);
         let col_idx = tab.result_view.column_index;
         let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
-            self.status_message = "no cell selected".into();
+            self.status.message = "no cell selected".into();
             return;
         };
         let text = match value {
@@ -1065,10 +1081,10 @@ impl AppCore {
         };
         match self.clipboard.set_text(&text) {
             Ok(()) => {
-                self.status_message = format!("yanked {} char(s) to clipboard", text.len());
+                self.status.message = format!("yanked {} char(s) to clipboard", text.len());
             }
             Err(error) => {
-                self.status_message = format!("yank failed: {error}");
+                self.status.message = format!("yank failed: {error}");
             }
         }
     }
@@ -1078,13 +1094,13 @@ impl AppCore {
         let rows = match &tab.result {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
             _ => {
-                self.status_message = "no row to yank".into();
+                self.status.message = "no row to yank".into();
                 return;
             }
         };
         let row_idx = tab.result_view.state.selected().unwrap_or(0);
         let Some(row) = rows.get(row_idx) else {
-            self.status_message = "no row selected".into();
+            self.status.message = "no row selected".into();
             return;
         };
         let text = row
@@ -1098,10 +1114,10 @@ impl AppCore {
             .join("\t");
         match self.clipboard.set_text(&text) {
             Ok(()) => {
-                self.status_message = format!("yanked row ({} cell(s)) to clipboard", row.0.len());
+                self.status.message = format!("yanked row ({} cell(s)) to clipboard", row.0.len());
             }
             Err(error) => {
-                self.status_message = format!("yank failed: {error}");
+                self.status.message = format!("yank failed: {error}");
             }
         }
     }
@@ -1118,32 +1134,32 @@ impl AppCore {
                     ..
                 } => (columns, rows, source),
                 ResultState::Rows { source: None, .. } => {
-                    self.status_message =
+                    self.status.message =
                         "this result is read-only (no row source); preview a table to edit".into();
                     return;
                 }
                 _ => {
-                    self.status_message = "no editable cell here".into();
+                    self.status.message = "no editable cell here".into();
                     return;
                 }
             };
             if columns.is_empty() || rows.is_empty() {
-                self.status_message = "no rows to edit".into();
+                self.status.message = "no rows to edit".into();
                 return;
             }
             if !source.columns.iter().any(|c| c.primary_key) {
-                self.status_message =
+                self.status.message =
                     format!("{}: no primary key, cell edits are disabled", source.table);
                 return;
             }
             let row_index = tab.result_view.state.selected().unwrap_or(0);
             let col_index = tab.result_view.column_index;
             let Some(row) = rows.get(row_index) else {
-                self.status_message = "select a row first (j/k)".into();
+                self.status.message = "select a row first (j/k)".into();
                 return;
             };
             let Some(column) = columns.get(col_index) else {
-                self.status_message = "select a column first (h/l)".into();
+                self.status.message = "select a column first (h/l)".into();
                 return;
             };
             let cell = row.0.get(col_index);
@@ -1179,7 +1195,7 @@ impl AppCore {
             buffer,
             error: None,
         });
-        self.status_message = "edit: Enter saves · Esc cancels".into();
+        self.status.message = "edit: Enter saves · Esc cancels".into();
     }
 
     fn handle_cell_edit_key(&mut self, key: KeyEvent) {
@@ -1190,7 +1206,7 @@ impl AppCore {
             CtKey::Esc => {
                 self.tabs[self.active_tab].editing = None;
                 self.tabs[self.active_tab].result_view.edit = None;
-                self.status_message = "edit cancelled".into();
+                self.status.message = "edit cancelled".into();
             }
             CtKey::Enter => self.commit_cell_edit(),
             CtKey::Backspace => {
@@ -1218,7 +1234,7 @@ impl AppCore {
             return;
         };
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         // Extract everything we need from the result before mutating state.
@@ -1231,11 +1247,11 @@ impl AppCore {
         {
             (columns.clone(), rows.clone(), source.clone())
         } else {
-            self.status_message = "result is no longer editable".into();
+            self.status.message = "result is no longer editable".into();
             return;
         };
         let Some(row) = rows.get(edit.row_index).cloned() else {
-            self.status_message = "row went away under the editor".into();
+            self.status.message = "row went away under the editor".into();
             return;
         };
         let new_value = crate::edit::parse_input(&edit.buffer);
@@ -1303,7 +1319,7 @@ impl AppCore {
                 }
                 self.tabs[self.active_tab].editing = None;
                 self.tabs[self.active_tab].result_view.edit = None;
-                self.status_message = format!("updated 1 row in {}", source.table);
+                self.status.message = format!("updated 1 row in {}", source.table);
             }
             Err(error) => {
                 self.set_edit_error(error.to_string());
@@ -1315,7 +1331,7 @@ impl AppCore {
         if let Some(view) = self.tabs[self.active_tab].result_view.edit.as_mut() {
             view.error = Some(message.clone());
         }
-        self.status_message = format!("edit failed: {message}");
+        self.status.message = format!("edit failed: {message}");
     }
 
     fn start_search(&mut self) {
@@ -1323,7 +1339,7 @@ impl AppCore {
             self.tabs[self.active_tab].result,
             ResultState::Rows { .. } | ResultState::Running { .. }
         ) {
-            self.status_message = "no result to search".into();
+            self.status.message = "no result to search".into();
             return;
         }
         self.tabs[self.active_tab].search = Some(ResultSearch {
@@ -1332,7 +1348,7 @@ impl AppCore {
             current: None,
             editing: true,
         });
-        self.status_message = "search: ".into();
+        self.status.message = "search: ".into();
     }
 
     fn refresh_search_matches(&mut self) {
@@ -1343,7 +1359,7 @@ impl AppCore {
                     s.matches.clear();
                     s.current = None;
                 }
-                self.status_message = "search: ".into();
+                self.status.message = "search: ".into();
                 return;
             }
             None => return,
@@ -1366,7 +1382,7 @@ impl AppCore {
         let query = search.query.clone();
         search.matches = matches;
         search.current = if total == 0 { None } else { Some(0) };
-        self.status_message = if total == 0 {
+        self.status.message = if total == 0 {
             format!("search: {query} · no matches")
         } else {
             format!("search: {query} · 1/{total}")
@@ -1386,7 +1402,7 @@ impl AppCore {
         search.current = Some(next);
         let total = search.matches.len();
         let query = search.query.clone();
-        self.status_message = format!("search: {query} · {}/{}", next + 1, total);
+        self.status.message = format!("search: {query} · {}/{}", next + 1, total);
         self.jump_to_current_match();
     }
 
@@ -1405,7 +1421,7 @@ impl AppCore {
 
     fn open_cell_popup(&mut self) {
         let Some(row_index) = self.tabs[self.active_tab].result_view.state.selected() else {
-            self.status_message = "select a row first (j/k)".into();
+            self.status.message = "select a row first (j/k)".into();
             return;
         };
         let col_index = self.tabs[self.active_tab].result_view.column_index;
@@ -1445,7 +1461,7 @@ impl AppCore {
                 self.tabs[self.active_tab].editor.delete_char();
             }
             Action::EnterMode(mode) => {
-                self.status_message = match mode {
+                self.status.message = match mode {
                     Mode::Insert => "-- INSERT --".into(),
                     Mode::Normal => "ready".into(),
                     Mode::Command => ":".into(),
@@ -1456,7 +1472,7 @@ impl AppCore {
             Action::SubmitCommand(cmd) => self.execute_command(&cmd),
             Action::Pending => {
                 if self.vim.mode() == Mode::Command {
-                    self.status_message = format!(":{}", self.vim.command_buffer());
+                    self.status.message = format!(":{}", self.vim.command_buffer());
                 }
             }
             Action::Operate { .. } => {}
@@ -1480,7 +1496,7 @@ impl AppCore {
                 self.tabs[self.active_tab].editor.clear();
                 self.tabs[self.active_tab].result = ResultState::Empty;
                 self.tabs[self.active_tab].result_view.reset();
-                self.status_message = "buffer cleared".into();
+                self.status.message = "buffer cleared".into();
             }
             Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
@@ -1504,7 +1520,7 @@ impl AppCore {
             Command::NextTab => self.cycle_tab(1),
             Command::PrevTab => self.cycle_tab(-1),
             Command::Help(None) => {
-                self.status_message =
+                self.status.message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
                         .into();
             }
@@ -1516,7 +1532,7 @@ impl AppCore {
                     .iter()
                     .find(|(key, _)| *key == resolved)
                 {
-                    self.status_message = format!(":{name} — {desc}");
+                    self.status.message = format!(":{name} — {desc}");
                 } else if let Some(plugin) = self.plugins.plugin_for(&name) {
                     // Plugin command: pull the descriptor straight off
                     // the owning plugin instead of walking the full
@@ -1527,9 +1543,9 @@ impl AppCore {
                         .find(|cmd| cmd.name == name)
                         .map(|cmd| cmd.description)
                         .unwrap_or_else(|| "(no description)".into());
-                    self.status_message = format!(":{name} — {desc}");
+                    self.status.message = format!(":{name} — {desc}");
                 } else {
-                    self.status_message = format!("unknown command: {name}");
+                    self.status.message = format!("unknown command: {name}");
                 }
             }
             Command::Empty => {}
@@ -1542,7 +1558,7 @@ impl AppCore {
                 if self.plugins.plugin_for(head).is_some() {
                     self.dispatch_plugin(head, arg);
                 } else {
-                    self.status_message = format!("unknown command: {text}");
+                    self.status.message = format!("unknown command: {text}");
                 }
             }
         }
@@ -1637,7 +1653,7 @@ impl AppCore {
             ));
         }
         if loaded > 0 {
-            self.status_message = format!("auto-loaded {loaded} plugin(s) from {}", dir.display());
+            self.status.message = format!("auto-loaded {loaded} plugin(s) from {}", dir.display());
         }
         loaded
     }
@@ -1646,7 +1662,7 @@ impl AppCore {
         let plugin = match LuaPlugin::from_path(path) {
             Ok(p) => p,
             Err(e) => {
-                self.status_message = format!("plug-load failed: {e}");
+                self.status.message = format!("plug-load failed: {e}");
                 return;
             }
         };
@@ -1654,10 +1670,10 @@ impl AppCore {
         let cmd_count = plugin.commands().len();
         match self.register_lua_plugin(plugin) {
             Ok(_) => {
-                self.status_message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
+                self.status.message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
             }
             Err(e) => {
-                self.status_message = format!("plug-load failed: {e}");
+                self.status.message = format!("plug-load failed: {e}");
             }
         }
     }
@@ -1665,7 +1681,7 @@ impl AppCore {
     fn list_plugins(&mut self) {
         let catalogue = self.plugins.catalogue();
         if catalogue.is_empty() {
-            self.status_message = "no plugins loaded; use :plug-load <file.lua>".into();
+            self.status.message = "no plugins loaded; use :plug-load <file.lua>".into();
             return;
         }
         let summary = catalogue
@@ -1673,7 +1689,7 @@ impl AppCore {
             .map(|(plugin, cmd)| format!("{}:{} — {}", plugin, cmd.name, cmd.description))
             .collect::<Vec<_>>()
             .join(" · ");
-        self.status_message = summary;
+        self.status.message = summary;
     }
 
     fn dispatch_plugin(&mut self, command: &str, argument: &str) {
@@ -1690,21 +1706,21 @@ impl AppCore {
         });
         match outcome {
             Ok(PluginCommandOutcome::Status { message }) => {
-                self.status_message = message;
+                self.status.message = message;
             }
             Ok(PluginCommandOutcome::InsertSql { sql, append }) => {
                 if !append {
                     self.tabs[self.active_tab].editor.clear();
                 }
                 self.tabs[self.active_tab].editor.insert_str(&sql);
-                self.status_message = format!("plugin inserted {} char(s) of SQL", sql.len());
+                self.status.message = format!("plugin inserted {} char(s) of SQL", sql.len());
             }
             Ok(PluginCommandOutcome::Silent) => {}
             Err(PluginError::Unknown(name)) => {
-                self.status_message = format!("unknown command: {name}");
+                self.status.message = format!("unknown command: {name}");
             }
             Err(error) => {
-                self.status_message = format!("plugin error: {error}");
+                self.status.message = format!("plugin error: {error}");
             }
         }
     }
@@ -1724,7 +1740,7 @@ impl AppCore {
                     self.open_connection_with_password(parsed.config, parsed.password);
                 }
                 Err(error) => {
-                    self.status_message = format!("invalid url: {error}");
+                    self.status.message = format!("invalid url: {error}");
                 }
             }
             return;
@@ -1736,7 +1752,7 @@ impl AppCore {
             .find(|c| c.name == target)
             .cloned()
         else {
-            self.status_message = format!("connection not found: {target}");
+            self.status.message = format!("connection not found: {target}");
             return;
         };
         self.open_connection(config);
@@ -1759,11 +1775,11 @@ impl AppCore {
         password: Option<String>,
     ) {
         let Ok(driver) = self.registry.get(&config.driver) else {
-            self.status_message = format!("driver not registered: {}", config.driver);
+            self.status.message = format!("driver not registered: {}", config.driver);
             return;
         };
         let label = config.name.clone();
-        self.status_message = format!("connecting to {label}…");
+        self.status.message = format!("connecting to {label}…");
 
         let driver = driver.clone();
         let password_for_open = password.clone();
@@ -1778,7 +1794,12 @@ impl AppCore {
                 }) {
                     debug!(target: "narwhal::app", error = %error, "schema refresh on connect failed");
                 }
-                self.status_message = format!(
+                self.status.connection = Some(format!(
+                    "{} · {}",
+                    session.config.name,
+                    session.driver.name()
+                ));
+                self.status.message = format!(
                     "connected · {} · {}",
                     session.config.name,
                     session.driver.name()
@@ -1798,7 +1819,7 @@ impl AppCore {
                 self.focus = Pane::Editor;
             }
             Err(error) => {
-                self.status_message = format!("connect failed: {error}");
+                self.status.message = format!("connect failed: {error}");
             }
         }
     }
@@ -1809,14 +1830,16 @@ impl AppCore {
             state.pool = None;
             state.in_transaction = false;
             drop(state);
-            self.status_message = "connection closed".into();
+            self.status.connection = None;
+            self.status.transaction = None;
+            self.status.message = "connection closed".into();
             self.rebuild_sidebar();
         }
     }
 
     fn refresh_schema(&mut self) {
         let Some(session) = self.session.as_mut() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let result = tokio::task::block_in_place(|| {
@@ -1824,10 +1847,10 @@ impl AppCore {
         });
         match result {
             Ok(()) => {
-                self.status_message = "schema refreshed".into();
+                self.status.message = "schema refreshed".into();
                 self.rebuild_sidebar();
             }
-            Err(error) => self.status_message = format!("refresh failed: {error}"),
+            Err(error) => self.status.message = format!("refresh failed: {error}"),
         }
     }
 
@@ -1835,19 +1858,19 @@ impl AppCore {
 
     fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let Some(sql) = self.tabs[self.active_tab]
             .editor
             .statement_at_cursor(session.dialect())
         else {
-            self.status_message = "no statement under cursor".into();
+            self.status.message = "no statement under cursor".into();
             return;
         };
         let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
         if trimmed.is_empty() {
-            self.status_message = "no statement under cursor".into();
+            self.status.message = "no statement under cursor".into();
             return;
         }
         self.dispatch_batch(vec![trimmed], mode);
@@ -1855,14 +1878,14 @@ impl AppCore {
 
     fn dispatch_all_statements(&mut self, mode: RunMode) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let statements = self.tabs[self.active_tab]
             .editor
             .all_statements(session.dialect());
         if statements.is_empty() {
-            self.status_message = "buffer contains no statements".into();
+            self.status.message = "buffer contains no statements".into();
             return;
         }
         self.dispatch_batch(statements, mode);
@@ -1870,7 +1893,7 @@ impl AppCore {
 
     fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
         if self.running {
-            self.status_message = "a query is already running".into();
+            self.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.as_ref() else {
@@ -1898,7 +1921,7 @@ impl AppCore {
             rows: Vec::new(),
             streaming: matches!(mode, RunMode::Stream),
         };
-        self.status_message = match mode {
+        self.status.message = match mode {
             RunMode::Execute => "executing…".into(),
             RunMode::Stream => "streaming…".into(),
         };
@@ -1908,22 +1931,22 @@ impl AppCore {
     fn start_wizard(&mut self) {
         self.wizard = Some(ConnectionWizard::new());
         self.wizard_error = None;
-        self.status_message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
+        self.status.message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
     }
 
     // ----- transactions -----
 
     fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
         if self.running {
-            self.status_message = "a query is already running".into();
+            self.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.as_mut() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         if session.transaction.is_some() {
-            self.status_message = "a transaction is already open".into();
+            self.status.message = "a transaction is already open".into();
             return;
         }
         let iso = isolation.map(map_isolation);
@@ -1957,13 +1980,14 @@ impl AppCore {
                     .lock()
                     .expect("plugin_state poisoned")
                     .in_transaction = true;
-                self.status_message = match iso {
+                self.status.transaction = iso.map(|level| isolation_label(level).to_owned());
+                self.status.message = match iso {
                     Some(level) => format!("transaction started ({})", isolation_label(level)),
                     None => "transaction started".into(),
                 };
             }
             Err(error) => {
-                self.status_message = format!("begin failed: {error}");
+                self.status.message = format!("begin failed: {error}");
             }
         }
     }
@@ -1981,15 +2005,15 @@ impl AppCore {
     /// returned to the pool.
     fn end_transaction(&mut self, commit: bool) {
         if self.running {
-            self.status_message = "a query is already running".into();
+            self.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.as_mut() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let Some(txn) = session.transaction.take() else {
-            self.status_message = "no open transaction".into();
+            self.status.message = "no open transaction".into();
             return;
         };
         let conn_arc = txn.conn;
@@ -2026,16 +2050,17 @@ impl AppCore {
             .lock()
             .expect("plugin_state poisoned")
             .in_transaction = false;
+        self.status.transaction = None;
         match outcome {
             Ok(()) => {
-                self.status_message = if commit {
+                self.status.message = if commit {
                     "transaction committed".into()
                 } else {
                     "transaction rolled back".into()
                 };
             }
             Err(error) => {
-                self.status_message = if commit {
+                self.status.message = if commit {
                     format!("commit failed: {error}")
                 } else {
                     format!("rollback failed: {error}")
@@ -2115,15 +2140,15 @@ impl AppCore {
         ErrF: FnOnce(&str, &narwhal_core::Error) -> String,
     {
         if self.running {
-            self.status_message = "a query is already running".into();
+            self.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.as_mut() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let Some(txn) = session.transaction.as_ref() else {
-            self.status_message = "no open transaction".into();
+            self.status.message = "no open transaction".into();
             return;
         };
         let conn_arc = txn.conn.clone();
@@ -2136,10 +2161,10 @@ impl AppCore {
         match result {
             Ok(()) => {
                 on_success(session, name);
-                self.status_message = ok_msg(name);
+                self.status.message = ok_msg(name);
             }
             Err(error) => {
-                self.status_message = err_msg(name, &error);
+                self.status.message = err_msg(name, &error);
             }
         }
     }
@@ -2151,7 +2176,7 @@ impl AppCore {
             .iter()
             .position(|c| c.name == name)
         else {
-            self.status_message = format!("remove: no connection named '{name}'");
+            self.status.message = format!("remove: no connection named '{name}'");
             return;
         };
         let removed = self.connections.connections.remove(pos);
@@ -2159,7 +2184,7 @@ impl AppCore {
             if let Err(error) = self.connections.save(path) {
                 // Restore in-memory state so we don't drift from disk.
                 self.connections.connections.insert(pos, removed);
-                self.status_message = format!("remove failed: {error}");
+                self.status.message = format!("remove failed: {error}");
                 return;
             }
         }
@@ -2175,20 +2200,20 @@ impl AppCore {
             }
         }
         self.rebuild_sidebar();
-        self.status_message = format!("removed connection '{name}'");
+        self.status.message = format!("removed connection '{name}'");
     }
 
     fn forget_password(&mut self, name: &str) {
         let Some(config) = self.connections.connections.iter().find(|c| c.name == name) else {
-            self.status_message = format!("forget: no connection named '{name}'");
+            self.status.message = format!("forget: no connection named '{name}'");
             return;
         };
         match self.credentials.delete(config.id) {
             Ok(()) => {
-                self.status_message = format!("forgot password for '{name}'");
+                self.status.message = format!("forgot password for '{name}'");
             }
             Err(error) => {
-                self.status_message = format!("forget failed: {error}");
+                self.status.message = format!("forget failed: {error}");
             }
         }
     }
@@ -2196,7 +2221,7 @@ impl AppCore {
     fn cancel_wizard(&mut self) {
         if self.wizard.take().is_some() {
             self.wizard_error = None;
-            self.status_message = "add cancelled".into();
+            self.status.message = "add cancelled".into();
         }
     }
 
@@ -2246,7 +2271,7 @@ impl AppCore {
                 self.wizard_error = None;
                 self.rebuild_sidebar();
                 let name = built.config.name.clone();
-                self.status_message = format!("connection '{name}' saved");
+                self.status.message = format!("connection '{name}' saved");
                 // Pre-select the new connection in the sidebar.
                 if let Some(idx) = self.sidebar_items.iter().position(|i| match i {
                     SidebarItem::Connection { name: n, .. } => n == &name,
@@ -2290,20 +2315,20 @@ impl AppCore {
         self.next_tab_id += 1;
         self.tabs.push(Tab::new(name));
         self.active_tab = self.tabs.len() - 1;
-        self.status_message = format!("tab {} opened", self.active_tab + 1);
+        self.status.message = format!("tab {} opened", self.active_tab + 1);
         self.focus = Pane::Editor;
     }
 
     fn close_tab(&mut self) {
         if self.tabs.len() == 1 {
-            self.status_message = "last tab; use :q to quit".into();
+            self.status.message = "last tab; use :q to quit".into();
             return;
         }
         self.tabs.remove(self.active_tab);
         if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;
         }
-        self.status_message = format!("tab closed; now on {}", self.active_tab + 1);
+        self.status.message = format!("tab closed; now on {}", self.active_tab + 1);
     }
 
     fn cycle_tab(&mut self, delta: i32) {
@@ -2313,7 +2338,7 @@ impl AppCore {
         let len = self.tabs.len() as i32;
         let next = ((self.active_tab as i32) + delta).rem_euclid(len) as usize;
         self.active_tab = next;
-        self.status_message = format!(
+        self.status.message = format!(
             "tab {} of {} · {}",
             self.active_tab + 1,
             self.tabs.len(),
@@ -2323,7 +2348,7 @@ impl AppCore {
 
     fn dump_schema(&mut self, target: DumpTarget) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
@@ -2343,7 +2368,7 @@ impl AppCore {
                 if let ResultState::TableDetail { schema } = &self.tabs[self.active_tab].result {
                     vec![(schema.table.schema.clone(), schema.table.name.clone())]
                 } else {
-                    self.status_message =
+                    self.status.message =
                         "dump-schema: select a table in the sidebar or pass a name".into();
                     return;
                 }
@@ -2353,14 +2378,14 @@ impl AppCore {
                 if let Some(pair) = schemas.iter().find(|(_, t)| t == name).cloned() {
                     vec![pair]
                 } else {
-                    self.status_message = format!("dump-schema: table not found: {name}");
+                    self.status.message = format!("dump-schema: table not found: {name}");
                     return;
                 }
             }
         };
 
         if names.is_empty() {
-            self.status_message = "dump-schema: nothing to dump".into();
+            self.status.message = "dump-schema: nothing to dump".into();
             return;
         }
 
@@ -2387,46 +2412,46 @@ impl AppCore {
                 };
                 self.tabs[self.active_tab].editor.clear();
                 self.tabs[self.active_tab].editor.insert_str(&ddl);
-                self.status_message = format!(
+                self.status.message = format!(
                     "dump-schema: wrote {} table(s) into the editor buffer",
                     tables.len()
                 );
                 self.focus = Pane::Editor;
             }
             Err(error) => {
-                self.status_message = format!("dump-schema failed: {error}");
+                self.status.message = format!("dump-schema failed: {error}");
             }
         }
     }
 
     fn dispatch_explain(&mut self) {
         let Some(session) = self.session.as_ref() else {
-            self.status_message = "no active connection".into();
+            self.status.message = "no active connection".into();
             return;
         };
         if session.driver.name() != "postgres" {
-            self.status_message = "explain is only supported on postgres for now".into();
+            self.status.message = "explain is only supported on postgres for now".into();
             return;
         }
         let Some(sql) = self.tabs[self.active_tab]
             .editor
             .statement_at_cursor(session.dialect())
         else {
-            self.status_message = "no statement under cursor".into();
+            self.status.message = "no statement under cursor".into();
             return;
         };
         let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
         if trimmed.is_empty() {
-            self.status_message = "no statement under cursor".into();
+            self.status.message = "no statement under cursor".into();
             return;
         }
         self.dispatch_batch(vec![wrap_explain(&trimmed)], RunMode::Execute);
-        self.status_message = "explaining…".into();
+        self.status.message = "explaining…".into();
     }
 
     fn export_results(&mut self, format: &str, path: &str) {
         let Some(format) = ExportFormat::from_token(format) else {
-            self.status_message = format!("unknown export format: {format} (csv|json)");
+            self.status.message = format!("unknown export format: {format} (csv|json)");
             return;
         };
         let (columns, rows) = match &self.tabs[self.active_tab].result {
@@ -2435,14 +2460,14 @@ impl AppCore {
                 (columns.as_slice(), rows.as_slice())
             }
             _ => {
-                self.status_message = "no tabular result to export".into();
+                self.status.message = "no tabular result to export".into();
                 return;
             }
         };
         let path = std::path::PathBuf::from(path);
         match export_rows(columns, rows, format, &path) {
             Ok(()) => {
-                self.status_message = format!(
+                self.status.message = format!(
                     "exported {} rows to {} ({})",
                     rows.len(),
                     path.display(),
@@ -2450,7 +2475,7 @@ impl AppCore {
                 );
             }
             Err(error) => {
-                self.status_message = format!("export failed: {error}");
+                self.status.message = format!("export failed: {error}");
             }
         }
     }
@@ -2465,7 +2490,7 @@ impl AppCore {
                 }
             }
         });
-        self.status_message = "cancellation requested".into();
+        self.status.message = "cancellation requested".into();
     }
 
     // ----- run-loop integration -----
@@ -2494,7 +2519,7 @@ impl AppCore {
                     streaming,
                 };
                 self.tabs[self.active_tab].result_view.reset();
-                self.status_message = format!("running {index}/{total}: {}", truncate(&sql, 60));
+                self.status.message = format!("running {index}/{total}: {}", truncate(&sql, 60));
             }
             RunUpdate::HeaderReady { columns: cols } => {
                 if let ResultState::Running { columns, .. } = &mut self.tabs[self.active_tab].result
@@ -2532,7 +2557,7 @@ impl AppCore {
                 } else {
                     format!("done · {successes} ok · {failures} failed")
                 };
-                self.status_message = match self.plugin_warning.take() {
+                self.status.message = match self.plugin_warning.take() {
                     Some(warning) => format!("{base} · {warning}"),
                     None => base,
                 };
@@ -2633,7 +2658,7 @@ impl AppCore {
                         planning_time_ms: plan.planning_time_ms,
                         execution_time_ms: plan.execution_time_ms,
                     };
-                    self.status_message = format!("explain ok · {elapsed_ms} ms");
+                    self.status.message = format!("explain ok · {elapsed_ms} ms");
                     return;
                 }
                 Err(error) => {
@@ -2660,7 +2685,7 @@ impl AppCore {
                 source,
             };
         }
-        self.status_message = match rows_affected {
+        self.status.message = match rows_affected {
             Some(n) => format!("ok {index}/{total} · {n} affected · {elapsed_ms} ms"),
             None => format!("ok {index}/{total} · {rows_returned} rows · {elapsed_ms} ms"),
         };

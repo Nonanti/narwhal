@@ -19,7 +19,7 @@ pub mod terminal;
 pub mod wizard;
 
 pub use app::App;
-pub use core::{AppCore, ResultState};
+pub use core::{AppCore, ResultState, StatusBar};
 pub use registry::DriverRegistry;
 pub use session::Session;
 pub use terminal::TerminalGuard;
