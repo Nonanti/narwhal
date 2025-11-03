@@ -14,10 +14,10 @@ use narwhal_core::{
 };
 use narwhal_history::Journal;
 use narwhal_tui::{
-    render_root, render_wizard, translate_key_event, CellEditView, CellPopup, CompletionItemView,
-    CompletionPopupView, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay, ResultView,
-    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, StatusBarView, Theme,
-    WizardFieldView, WizardView,
+    render_help_modal, render_root, render_wizard, translate_key_event, CellEditView, CellPopup,
+    CompletionItemView, CompletionPopupView, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay,
+    ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView,
+    StatusBarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -245,6 +245,7 @@ pub struct AppCore {
     should_quit: bool,
     wizard: Option<ConnectionWizard>,
     wizard_error: Option<String>,
+    help_open: bool,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
 }
@@ -354,6 +355,7 @@ impl AppCore {
             should_quit: false,
             wizard: None,
             wizard_error: None,
+            help_open: false,
             run_tx,
             run_rx,
         }
@@ -477,6 +479,20 @@ impl AppCore {
         self.should_quit
     }
 
+    pub fn help_open(&self) -> bool {
+        self.help_open
+    }
+
+    /// Open the help modal. Primarily for tests; the UI path goes
+    /// through `handle_key(F1)` or `handle_key(?)`.
+    pub fn open_help(&mut self) {
+        self.help_open = true;
+    }
+
+    fn toggle_help(&mut self) {
+        self.help_open = !self.help_open;
+    }
+
     // ----- render -----
 
     fn editor_title_with_tabs(&self) -> String {
@@ -588,6 +604,10 @@ impl AppCore {
             };
             render_wizard(frame, area, &view, &self.theme);
         }
+
+        if self.help_open {
+            render_help_modal(frame, area, &self.theme);
+        }
     }
 
     // ----- input -----
@@ -595,6 +615,23 @@ impl AppCore {
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.wizard.is_some() {
             self.handle_wizard_key(key);
+            return;
+        }
+        // When the help modal is open, it intercepts Esc / ? / F1 to
+        // close and silently consumes every other key so the user
+        // doesn't accidentally trigger an action behind the overlay.
+        if self.help_open {
+            match key.code {
+                CtKey::Esc | CtKey::F(1) => {
+                    self.help_open = false;
+                }
+                CtKey::Char('?') if key.modifiers.is_empty() => {
+                    self.help_open = false;
+                }
+                _ => {
+                    // consumed but no-op
+                }
+            }
             return;
         }
         if self.handle_global_key(key) {
@@ -613,6 +650,10 @@ impl AppCore {
         // punctuation (Ctrl-;, Ctrl-/) is frequently swallowed by the
         // VT100-style key encoding before it ever reaches the program.
         match key.code {
+            CtKey::F(1) => {
+                self.toggle_help();
+                return true;
+            }
             CtKey::F(5) => {
                 self.dispatch_current_statement(RunMode::Execute);
                 return true;
@@ -679,6 +720,16 @@ impl AppCore {
                 }
                 _ => {}
             }
+        }
+        // ? opens help in normal mode when the editor pane is NOT focused.
+        // In the editor pane, ? is reserved for reverse search (plan 06-06).
+        if key.code == CtKey::Char('?')
+            && key.modifiers.is_empty()
+            && self.vim.mode() == Mode::Normal
+            && self.focus != Pane::Editor
+        {
+            self.toggle_help();
+            return true;
         }
         false
     }

@@ -1,0 +1,54 @@
+---
+source: crates/narwhal-app/tests/snapshots.rs
+expression: "snapshot_core_sized(&mut core, 120, 50)"
+---
+┌ narwhal ───────────────────────┐┌ editor ────────────────────────────────────────────────────────────────────────────┐
+│                                ││  1 │                                                                               │
+│  no connections           ┌ help · esc closes ───────────────────────────────────────────┐                           │
+│                           │ Global                                                       │                           │
+│  add one to connections.to│  F5 / Alt-Enter / Ctrl-;     run statement under cursor      │                           │
+│                           │  F6                          run whole buffer                │                           │
+│                           │  F7                          stream cursor statement         │                           │
+│                           │  F4 / Ctrl-C                 cancel running query            │                           │
+│                           │  Ctrl-W                      cycle pane focus                │                           │
+│                           │  Ctrl-T                      new editor tab                  │                           │
+│                           │  Ctrl-Tab / Ctrl-Shift-Tab   cycle tabs                      │                           │
+│                           │  ? / F1                      this help                       │                           │
+│                           │  :q                          quit                            │                           │
+│                           │                                                              │                           │
+│                           │ Editor                                                       │                           │
+│                           │  i / a                       enter insert mode               │                           │
+│                           │  Esc                         back to normal mode             │                           │
+│                           │  Tab / Ctrl-Space            completion                      │                           │
+│                           │  ↑ ↓ / Shift-Tab             cycle popup items               │                           │
+│                           │  Enter / Tab (in popup)      accept completion               │                           │
+│                           │  h j k l / arrows            move cursor                     │                           │
+│                           │  w / b                       word forward / backward         │                           │
+│                           │  0 / $                       line start / end                │                           │
+│                           │  v / V                       visual / visual-line mode       │                           │
+│                           │                                                              │                           │
+│                           │ Results                                                      │                           │
+│                           │  h j k l / arrows            move selection                  │───────────────────────────┘
+│                           │  Enter                       open cell popup                 │───────────────────────────┐
+│                           │  e                           edit cell value                 │F6 runs whole buffer, Ctrl-│
+│                           │  y / Y                       yank cell / row to clipboard    │                           │
+│                           │  /                           filter rows                     │                           │
+│                           │  n / N                       next / prev search match        │                           │
+│                           │  g / G                       jump to first / last row        │                           │
+│                           │  :next / :prev               page through results            │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           │                                                              │                           │
+│                           └──────────────────────────────────────────────────────────────┘                           │
+│                                ││                                                                                    │
+└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
+  NOR editor  (no connection)  ready
