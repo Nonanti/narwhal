@@ -55,7 +55,12 @@ pub struct SidebarView<'a> {
     pub focused: bool,
 }
 
-pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &SidebarView<'_>, theme: &Theme) {
+pub fn render_sidebar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view: &SidebarView<'_>,
+    theme: &Theme,
+) -> Vec<(Rect, usize)> {
     let border_style = if view.focused {
         Style::default().fg(theme.accent)
     } else {
@@ -82,7 +87,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &SidebarView<'_>,
             )),
         ]);
         frame.render_widget(p, inner);
-        return;
+        return Vec::new();
     }
 
     let lines: Vec<Line<'_>> = view
@@ -115,4 +120,26 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view: &SidebarView<'_>,
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+
+    // Build hit-test rects for table entries. Each visible item occupies
+    // one row in the inner area starting at y = inner.y.
+    let mut table_rects = Vec::new();
+    for (idx, row) in view.items.iter().enumerate() {
+        if matches!(
+            row.kind,
+            SidebarRowKind::Table
+                | SidebarRowKind::View
+                | SidebarRowKind::MaterializedView
+                | SidebarRowKind::SystemTable
+        ) {
+            let rect = Rect {
+                x: inner.x,
+                y: inner.y + idx as u16,
+                width: inner.width,
+                height: 1,
+            };
+            table_rects.push((rect, idx));
+        }
+    }
+    table_rects
 }

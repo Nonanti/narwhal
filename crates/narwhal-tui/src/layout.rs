@@ -9,6 +9,27 @@ use crate::widgets::{
     CompletionPopupView, EditorBuffer, ResultDisplay, ResultView, SidebarView,
 };
 
+/// Hit-test regions computed during the last render. Stored on `AppCore`
+/// so that a `MouseEvent` arriving on the next frame can determine which
+/// element the pointer landed on.
+#[derive(Debug, Default, Clone)]
+pub struct LayoutRegions {
+    pub sidebar: Rect,
+    pub editor: Rect,
+    pub results: Rect,
+    pub status: Rect,
+    pub completion: Option<Rect>,
+    /// One `(Rect, sidebar_index)` per visible table entry in the sidebar.
+    /// `sidebar_index` indexes into `AppCore::sidebar_items`.
+    pub sidebar_tables: Vec<(Rect, usize)>,
+    /// One `(Rect, column_index)` per rendered column header cell.
+    pub result_headers: Vec<(Rect, usize)>,
+    /// One `(Rect, row_index)` per rendered data row.
+    pub result_rows: Vec<(Rect, usize)>,
+    /// One `(Rect, item_index)` per visible completion item.
+    pub completion_items: Vec<(Rect, usize)>,
+}
+
 /// Indicates which pane currently owns keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
@@ -63,7 +84,7 @@ pub struct RootLayout<'a> {
     pub completion: Option<CompletionPopupView<'a>>,
 }
 
-pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) {
+pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) -> LayoutRegions {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -74,7 +95,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         .constraints([Constraint::Length(34), Constraint::Min(1)])
         .split(outer[0]);
 
-    render_sidebar(frame, body[0], &view.sidebar, view.theme);
+    let sidebar_table_indices = render_sidebar(frame, body[0], &view.sidebar, view.theme);
 
     let main = Layout::default()
         .direction(Direction::Vertical)
@@ -91,7 +112,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.editor_title,
     );
 
-    render_results(
+    let result_regions = render_results(
         frame,
         main[1],
         &view.result,
@@ -102,12 +123,44 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
 
     render_status_bar(frame, outer[1], view);
 
-    if let Some(popup) = view.completion.as_ref() {
+    let completion_regions = if let Some(popup) = view.completion.as_ref() {
         let mut popup = *popup;
         // Re-anchor the popup to the actual editor cursor coordinates so
         // the host app doesn't need to mirror our layout maths.
         popup.anchor = editor_cursor_anchor(editor_area, view.editor);
-        render_completion_popup(frame, area, &popup, view.theme);
+        let regions = render_completion_popup(frame, area, &popup, view.theme);
+        Some((
+            Rect {
+                x: popup.anchor.0.saturating_sub(1),
+                y: popup
+                    .anchor
+                    .1
+                    .saturating_add(1)
+                    .saturating_sub(popup.items.len() as u16 + 2),
+                width: 40, // approximate; not used for hit-testing
+                height: (popup.items.len() as u16 + 2).min(10),
+            },
+            regions,
+        ))
+    } else {
+        None
+    };
+
+    // Build LayoutRegions from the captured rects.
+    let sidebar_tables = sidebar_table_indices;
+
+    LayoutRegions {
+        sidebar: body[0],
+        editor: editor_area,
+        results: main[1],
+        status: outer[1],
+        completion: completion_regions.as_ref().map(|(rect, _)| *rect),
+        sidebar_tables,
+        result_headers: result_regions.headers,
+        result_rows: result_regions.rows,
+        completion_items: completion_regions
+            .map(|(_, regions)| regions.items)
+            .unwrap_or_default(),
     }
 }
 

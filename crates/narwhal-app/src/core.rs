@@ -15,9 +15,9 @@ use narwhal_core::{
 use narwhal_history::Journal;
 use narwhal_tui::{
     render_help_modal, render_root, render_wizard, translate_key_event, CellEditView, CellPopup,
-    CompletionItemView, CompletionPopupView, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay,
-    ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView,
-    StatusBarView, Theme, WizardFieldView, WizardView,
+    CompletionItemView, CompletionPopupView, EditorBuffer, ExplainPlanLine, LayoutRegions, Pane,
+    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
+    SidebarView, StatusBarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -246,6 +246,7 @@ pub struct AppCore {
     wizard: Option<ConnectionWizard>,
     wizard_error: Option<String>,
     help_open: bool,
+    last_layout: LayoutRegions,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
 }
@@ -356,6 +357,7 @@ impl AppCore {
             wizard: None,
             wizard_error: None,
             help_open: false,
+            last_layout: LayoutRegions::default(),
             run_tx,
             run_rx,
         }
@@ -465,6 +467,13 @@ impl AppCore {
 
     pub fn focus(&self) -> Pane {
         self.focus
+    }
+
+    /// Read-only accessor for the most recent layout regions computed
+    /// during render. Used by tests to determine where to click.
+    #[doc(hidden)]
+    pub fn last_layout(&self) -> &narwhal_tui::LayoutRegions {
+        &self.last_layout
     }
 
     pub fn mode(&self) -> Mode {
@@ -591,7 +600,7 @@ impl AppCore {
             result: result_display,
             completion: completion_view,
         };
-        render_root(frame, area, &mut layout);
+        self.last_layout = render_root(frame, area, &mut layout);
 
         if let Some(wizard) = self.wizard.as_ref() {
             let view = WizardView {
@@ -649,6 +658,175 @@ impl AppCore {
             Pane::Sidebar => self.handle_sidebar_key(key),
             Pane::Results => self.handle_results_key(key),
         }
+    }
+
+    /// Route a crossterm [`MouseEvent`] through the same handlers the
+    /// keyboard path uses. `LayoutRegions` from the most recent render
+    /// provides the hit-test rects.
+    pub fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+
+        let pos = (event.column, event.row);
+
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_left_click(pos);
+            }
+            MouseEventKind::ScrollUp => {
+                self.handle_scroll(pos, -1);
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_scroll(pos, 1);
+            }
+            // Up, Moved, Drag are no-ops for now.
+            _ => {}
+        }
+    }
+
+    fn handle_left_click(&mut self, pos: (u16, u16)) {
+        let layout = self.last_layout.clone();
+
+        // Priority: completion popup > sidebar tables > result headers/rows > pane focus.
+        for (rect, item_index) in &layout.completion_items {
+            if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+                self.accept_completion_at(*item_index);
+                return;
+            }
+        }
+
+        for (rect, sidebar_idx) in &layout.sidebar_tables {
+            if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+                self.click_sidebar_table(*sidebar_idx);
+                return;
+            }
+        }
+
+        for (rect, col_idx) in &layout.result_headers {
+            if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+                // Sort cycle action — no-op until 06-04, but the dispatch
+                // site is here so 06-04 doesn't have to re-touch routing.
+                debug!(target: "narwhal::app", col = *col_idx, "result header clicked (sort cycle not yet implemented)");
+                return;
+            }
+        }
+
+        for (rect, row_idx) in &layout.result_rows {
+            if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+                self.tabs[self.active_tab]
+                    .result_view
+                    .state
+                    .select(Some(*row_idx));
+                self.focus = Pane::Results;
+                self.status.message = format!("focus → {}", Pane::Results.label());
+                return;
+            }
+        }
+
+        // Fall through to pane focus change.
+        if layout
+            .sidebar
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            self.focus = Pane::Sidebar;
+            self.status.message = format!("focus → {}", Pane::Sidebar.label());
+        } else if layout
+            .editor
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            self.focus = Pane::Editor;
+            self.status.message = format!("focus → {}", Pane::Editor.label());
+        } else if layout
+            .results
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            self.focus = Pane::Results;
+            self.status.message = format!("focus → {}", Pane::Results.label());
+        }
+    }
+
+    fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
+        let layout = &self.last_layout;
+
+        if layout
+            .results
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            let row_count = match &self.tabs[self.active_tab].result {
+                ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows.len(),
+                _ => return,
+            };
+            if delta > 0 {
+                self.tabs[self.active_tab].result_view.move_down(row_count);
+            } else {
+                self.tabs[self.active_tab].result_view.move_up();
+            }
+        } else if layout
+            .editor
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            // Editor scroll: move cursor line offset without changing column.
+            let height = layout.editor.height.saturating_sub(2) as usize; // subtract borders
+            if height == 0 {
+                return;
+            }
+            let buf = &mut self.tabs[self.active_tab].editor;
+            if delta > 0 {
+                // Scroll down: move cursor down
+                buf.apply_motion(narwhal_vim::Motion::Down, 1);
+                buf.ensure_visible(height);
+            } else {
+                buf.apply_motion(narwhal_vim::Motion::Up, 1);
+                buf.ensure_visible(height);
+            }
+        }
+    }
+
+    /// Accept the completion item at `index`, replicating the Tab/Enter
+    /// path from `handle_completion_key`.
+    fn accept_completion_at(&mut self, index: usize) {
+        let Some(state) = self.tabs[self.active_tab].completion.as_mut() else {
+            return;
+        };
+        if index >= state.items.len() {
+            return;
+        }
+        state.selected = index;
+        let choice = state.items[index].text.clone();
+        self.tabs[self.active_tab]
+            .editor
+            .replace_current_word_with(&choice);
+        self.tabs[self.active_tab].completion = None;
+        self.status.message = format!("completed: {choice}");
+    }
+
+    /// Click on a sidebar table row: navigate the sidebar to that index
+    /// and inject a preview query.
+    fn click_sidebar_table(&mut self, sidebar_idx: usize) {
+        let Some(item) = self.sidebar_items.get(sidebar_idx).cloned() else {
+            return;
+        };
+        let SidebarItem::Table { schema, name, .. } = item else {
+            return;
+        };
+        self.sidebar_index = sidebar_idx;
+        self.inject_table_preview(&schema, &name);
+    }
+
+    /// Inject a `SELECT * FROM <schema>.<table> LIMIT 100;` into the
+    /// editor and dispatch it. This mirrors the keyboard-driven
+    /// `preview_sidebar_selection` but injects the SQL into the editor
+    /// so the user can see what ran.
+    fn inject_table_preview(&mut self, schema: &str, table: &str) {
+        let dialect = self
+            .session
+            .as_ref()
+            .map(|s| s.dialect())
+            .unwrap_or(narwhal_sql::Dialect::Generic);
+        let sql =
+            crate::ddl::preview_query(schema, table, self.tabs[self.active_tab].page_size, dialect);
+        self.tabs[self.active_tab].editor.clear();
+        self.tabs[self.active_tab].editor.insert_str(&sql);
+        self.dispatch_current_statement(RunMode::Execute);
     }
 
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {

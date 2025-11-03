@@ -574,20 +574,30 @@ pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
     (cursor_x, cursor_y)
 }
 
+/// Hit-test regions for completion popup items.
+#[derive(Debug, Default, Clone)]
+pub struct CompletionHitRegions {
+    /// One `(Rect, item_index)` per visible completion item.
+    pub items: Vec<(Rect, usize)>,
+}
+
 /// Render the completion popup overlay. Should be called *after*
 /// [`render_editor`] so it draws on top.
+///
+/// Returns hit-test regions for each visible completion item so mouse
+/// clicks can be routed to the correct item.
 pub fn render_completion_popup(
     frame: &mut Frame<'_>,
     screen: Rect,
     view: &CompletionPopupView<'_>,
     theme: &Theme,
-) {
+) -> CompletionHitRegions {
     use ratatui::layout::Constraint;
     use ratatui::style::Modifier;
     use ratatui::widgets::{Cell, Clear, Row as TableRow, Table};
 
     if view.items.is_empty() {
-        return;
+        return CompletionHitRegions::default();
     }
     // Width: glyph column (2) + widest text column + widest detail
     // column + breathing room (4). The popup is allowed to grow up to
@@ -676,6 +686,22 @@ pub fn render_completion_popup(
     };
     let table = Table::new(rows, widths);
     frame.render_widget(table, inner);
+
+    // Build hit-test rects for each visible completion item.
+    let mut item_rects = Vec::with_capacity(end - start);
+    for i in start..end {
+        let local = i - start;
+        item_rects.push((
+            Rect {
+                x: inner.x,
+                y: inner.y + local as u16,
+                width: inner.width,
+                height: 1,
+            },
+            i,
+        ));
+    }
+    CompletionHitRegions { items: item_rects }
 }
 
 #[cfg(test)]

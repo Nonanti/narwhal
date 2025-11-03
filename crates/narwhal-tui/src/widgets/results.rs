@@ -146,6 +146,16 @@ pub struct ExplainPlanLine {
     pub text: String,
 }
 
+/// Hit-test regions computed during the last render of the results pane.
+/// Returned by [`render_results`] so the host app can route mouse events.
+#[derive(Debug, Default, Clone)]
+pub struct ResultHitRegions {
+    /// One `(Rect, column_index)` per rendered column header cell.
+    pub headers: Vec<(Rect, usize)>,
+    /// One `(Rect, row_index)` per rendered data row.
+    pub rows: Vec<(Rect, usize)>,
+}
+
 pub fn render_results(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -153,7 +163,7 @@ pub fn render_results(
     view: &mut ResultView,
     theme: &Theme,
     focused: bool,
-) {
+) -> ResultHitRegions {
     let border_style = if focused {
         Style::default().fg(theme.accent)
     } else {
@@ -167,13 +177,14 @@ pub fn render_results(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    match display {
+    let regions = match display {
         ResultDisplay::Empty => {
             let p = Paragraph::new(Span::styled(
                 "  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-Space completes",
                 Style::default().fg(theme.muted),
             ));
             frame.render_widget(p, inner);
+            ResultHitRegions::default()
         }
         ResultDisplay::Running {
             sql, columns, rows, ..
@@ -184,8 +195,9 @@ pub fn render_results(
                     Style::default().fg(theme.muted),
                 ))]);
                 frame.render_widget(p, inner);
+                ResultHitRegions::default()
             } else {
-                draw_table(frame, inner, columns, rows, None, theme, view);
+                draw_table(frame, inner, columns, rows, None, theme, view)
             }
         }
         ResultDisplay::Affected {
@@ -199,17 +211,17 @@ pub fn render_results(
             );
             let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.foreground)));
             frame.render_widget(p, inner);
+            ResultHitRegions::default()
         }
         ResultDisplay::Rows {
             columns,
             rows,
             search,
             ..
-        } => {
-            draw_table(frame, inner, columns, rows, *search, theme, view);
-        }
+        } => draw_table(frame, inner, columns, rows, *search, theme, view),
         ResultDisplay::TableDetail { schema } => {
             draw_table_detail(frame, inner, schema, theme);
+            ResultHitRegions::default()
         }
         ResultDisplay::Explain {
             lines,
@@ -224,6 +236,7 @@ pub fn render_results(
                 *execution_time_ms,
                 theme,
             );
+            ResultHitRegions::default()
         }
         ResultDisplay::Error {
             message,
@@ -234,8 +247,10 @@ pub fn render_results(
                 Style::default().fg(theme.error),
             ))]);
             frame.render_widget(p, inner);
+            ResultHitRegions::default()
         }
-    }
+    };
+    regions
 }
 
 fn build_title(display: &ResultDisplay<'_>) -> String {
@@ -582,7 +597,7 @@ fn draw_table(
     search: Option<&SearchHighlight<'_>>,
     theme: &Theme,
     view: &mut ResultView,
-) {
+) -> ResultHitRegions {
     let widths = compute_column_widths(columns, rows);
     let header_cells: Vec<Cell<'_>> = columns
         .iter()
@@ -639,10 +654,55 @@ fn draw_table(
         .column_spacing(1);
     frame.render_stateful_widget(table, area, &mut view.state);
 
+    // Compute hit-test regions for the header row and visible data rows.
+    // The header occupies the first two terminal rows of the area (1 row
+    // for content + 1 bottom_margin). Data rows start after that.
+    let header_height = 2u16; // header line + bottom_margin
+    let mut header_rects = Vec::with_capacity(columns.len());
+    let mut x_offset = area.x;
+    for (i, w) in widths.iter().enumerate() {
+        let w16 = *w as u16;
+        header_rects.push((
+            Rect {
+                x: x_offset,
+                y: area.y,
+                width: w16,
+                height: header_height,
+            },
+            i,
+        ));
+        x_offset += w16 + 1; // +1 for column_spacing
+    }
+
+    let scroll_offset = view.state.offset();
+    let data_y_start = area.y + header_height;
+    let visible_height = area.height.saturating_sub(header_height) as usize;
+    let mut row_rects = Vec::new();
+    for visible_idx in 0..visible_height {
+        let data_idx = scroll_offset + visible_idx;
+        if data_idx >= rows.len() {
+            break;
+        }
+        row_rects.push((
+            Rect {
+                x: area.x,
+                y: data_y_start + visible_idx as u16,
+                width: area.width,
+                height: 1,
+            },
+            data_idx,
+        ));
+    }
+
     if let Some(popup) = view.popup.as_ref() {
         draw_cell_popup(frame, area, popup, theme);
     }
     if let Some(edit) = view.edit.as_ref() {
         draw_cell_edit(frame, area, edit, theme);
+    }
+
+    ResultHitRegions {
+        headers: header_rects,
+        rows: row_rects,
     }
 }

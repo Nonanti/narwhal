@@ -116,6 +116,7 @@ impl App {
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.core.handle_key(key),
+            Event::Mouse(m) => self.core.handle_mouse(m),
             Event::Resize(_, _) => debug!(target: "narwhal::app", "terminal resized"),
             _ => {}
         }
