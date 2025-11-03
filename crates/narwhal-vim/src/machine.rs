@@ -23,6 +23,16 @@ impl Vim {
         &self.command_buffer
     }
 
+    /// Replace the trailing non-whitespace token in the command buffer
+    /// with `replacement`. Called by the host after a prompt Tab-completion
+    /// produces a single match or a longest-common-prefix insertion.
+    pub fn replace_command_token(&mut self, replacement: &str) {
+        while self.command_buffer.ends_with(|c: char| !c.is_whitespace()) {
+            self.command_buffer.pop();
+        }
+        self.command_buffer.push_str(replacement);
+    }
+
     /// Feed one key event and obtain the resulting action.
     pub fn handle(&mut self, key: Key) -> Action {
         match self.mode {
@@ -130,6 +140,7 @@ impl Vim {
                 self.command_buffer.pop();
                 Action::Pending
             }
+            KeyCode::Tab => Action::PromptComplete,
             KeyCode::Char(c) => {
                 self.command_buffer.push(c);
                 Action::Pending

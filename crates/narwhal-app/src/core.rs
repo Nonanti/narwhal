@@ -471,6 +471,13 @@ impl AppCore {
         self.vim.mode()
     }
 
+    /// Read-only accessor for the vim command buffer. Used by tests to
+    /// assert prompt Tab-completion results.
+    #[doc(hidden)]
+    pub fn command_buffer(&self) -> &str {
+        self.vim.command_buffer()
+    }
+
     pub fn is_running(&self) -> bool {
         self.running
     }
@@ -1526,7 +1533,89 @@ impl AppCore {
                     self.status.message = format!(":{}", self.vim.command_buffer());
                 }
             }
+            Action::PromptComplete => self.complete_prompt(),
             Action::Operate { .. } => {}
+        }
+    }
+
+    // ----- prompt tab-completion -----
+
+    /// Complete the last token in the `:`-prompt buffer against the
+    /// universe appropriate for the current command head.
+    ///
+    /// - `:open <pref>`, `:remove <pref>`, `:rm <pref>`, `:forget <pref>`
+    ///   → connection names from `ConnectionsFile`
+    /// - `:help <pref>` → built-in command names ∪ plugin command names
+    /// - `:export <pref>` → `csv` | `json`
+    /// - bare `:` (empty buffer) → no completion (too noisy)
+    /// - any other head → no-op
+    fn complete_prompt(&mut self) {
+        let buf = self.vim.command_buffer().to_owned();
+        let parts: Vec<&str> = buf.split_whitespace().collect();
+        let head = parts.first().copied().unwrap_or("");
+
+        // Identify which universe to complete from.
+        let universe: Vec<String> = match head {
+            "open" | "o" | "remove" | "rm" | "forget" => self
+                .connections
+                .connections
+                .iter()
+                .map(|c| c.name.clone())
+                .collect(),
+            "help" | "h" => {
+                let mut v: Vec<String> = crate::commands::BUILTIN_COMMAND_NAMES
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect();
+                v.extend(
+                    self.plugins
+                        .catalogue()
+                        .into_iter()
+                        .map(|(_, cmd)| cmd.name),
+                );
+                v
+            }
+            "export" => vec!["csv".into(), "json".into()],
+            _ => return,
+        };
+
+        // The token being completed is the last whitespace-separated word;
+        // if the buffer ends with whitespace we are starting a fresh token
+        // (empty prefix).
+        let prefix = if buf.ends_with(char::is_whitespace) {
+            String::new()
+        } else {
+            parts.last().copied().unwrap_or("").to_owned()
+        };
+
+        // When the prefix is the command head itself (user typed
+        // `:open` with no trailing space), we are not completing an
+        // argument yet — skip so the command head isn't replaced.
+        if prefix == head && !buf.ends_with(char::is_whitespace) {
+            return;
+        }
+
+        let matches: Vec<&str> = universe
+            .iter()
+            .filter(|name| name.to_lowercase().starts_with(&prefix.to_lowercase()))
+            .map(String::as_str)
+            .collect();
+
+        match matches.as_slice() {
+            [] => {
+                self.status.message = format!("no completions for {prefix:?}");
+            }
+            [only] => {
+                self.vim.replace_command_token(only);
+                self.status.message = format!(":{}", self.vim.command_buffer());
+            }
+            many => {
+                let lcp = longest_common_prefix(many);
+                if lcp.len() > prefix.len() {
+                    self.vim.replace_command_token(&lcp);
+                }
+                self.status.message = many.join(" ");
+            }
         }
     }
 
@@ -2965,4 +3054,22 @@ fn truncate(s: &str, max: usize) -> String {
         }
         format!("{}…", &s[..end])
     }
+}
+
+/// Compute the longest common prefix across a non-empty slice of strings,
+/// character by character.
+fn longest_common_prefix(strings: &[&str]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+    let first = strings[0];
+    let mut end = 0;
+    for (i, ch) in first.char_indices() {
+        if strings[1..].iter().all(|s| s.chars().nth(i) == Some(ch)) {
+            end = i + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    first[..end].to_owned()
 }
