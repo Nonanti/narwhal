@@ -12,8 +12,8 @@ pub use editor::{
 };
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use results::{
-    render_results, CellEditView, CellPopup, ExplainPlanLine, ResultDisplay, ResultHitRegions,
-    ResultView, SearchHighlight,
+    compare_values, render_results, CellEditView, CellPopup, ExplainPlanLine, ResultDisplay,
+    ResultHitRegions, ResultView, SearchHighlight, SortDir,
 };
 pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};
 pub use wizard::{render_wizard, WizardFieldView, WizardView};

@@ -1,6 +1,6 @@
 //! Tabular result viewer.
 
-use narwhal_core::{ColumnHeader, ForeignKey, Index, Row, TableSchema, UniqueConstraint};
+use narwhal_core::{ColumnHeader, ForeignKey, Index, Row, TableSchema, UniqueConstraint, Value};
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -8,9 +8,82 @@ use ratatui::widgets::{
     Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Wrap,
 };
 use ratatui::Frame;
+use std::cmp::Ordering;
 use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
+
+/// Sort direction for a result column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDir {
+    Asc,
+    Desc,
+}
+
+/// Compare two optional [`Value`] references for sorting purposes.
+///
+/// Ordering rules:
+/// - `None` (missing column) sorts last regardless of direction.
+/// - `Null` sorts last in Asc, first in Desc.
+/// - Same-type values compare naturally (Int numerically, String
+///   lexicographically, etc.).
+/// - Different types sort by a stable type-order: Int < Float < Bool <
+///   String < Bytes < Date < Time < DateTime < Timestamp < Uuid < Json <
+///   Unknown.
+pub fn compare_values(a: Option<&Value>, b: Option<&Value>) -> Ordering {
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, _) => Ordering::Greater,
+        (_, None) => Ordering::Less,
+        (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,
+        (Some(Value::Null), _) => Ordering::Greater,
+        (_, Some(Value::Null)) => Ordering::Less,
+        (Some(va), Some(vb)) => {
+            let ta = type_rank(va);
+            let tb = type_rank(vb);
+            match ta.cmp(&tb) {
+                Ordering::Equal => compare_same_type(va, vb),
+                other => other,
+            }
+        }
+    }
+}
+
+fn type_rank(v: &Value) -> u8 {
+    match v {
+        Value::Int(_) => 0,
+        Value::Float(_) => 1,
+        Value::Bool(_) => 2,
+        Value::String(_) => 3,
+        Value::Bytes(_) => 4,
+        Value::Date(_) => 5,
+        Value::Time(_) => 6,
+        Value::DateTime(_) => 7,
+        Value::Timestamp(_) => 8,
+        Value::Uuid(_) => 9,
+        Value::Json(_) => 10,
+        Value::Unknown(_) => 11,
+        Value::Null => 12, // unreachable in practice but included for completeness
+    }
+}
+
+fn compare_same_type(a: &Value, b: &Value) -> Ordering {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Bytes(x), Value::Bytes(y)) => x.cmp(y),
+        (Value::Date(x), Value::Date(y)) => x.cmp(y),
+        (Value::Time(x), Value::Time(y)) => x.cmp(y),
+        (Value::DateTime(x), Value::DateTime(y)) => x.cmp(y),
+        (Value::Timestamp(x), Value::Timestamp(y)) => x.cmp(y),
+        (Value::Uuid(x), Value::Uuid(y)) => x.cmp(y),
+        (Value::Json(x), Value::Json(y)) => x.to_string().cmp(&y.to_string()),
+        (Value::Unknown(x), Value::Unknown(y)) => x.cmp(y),
+        _ => Ordering::Equal,
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct ResultView {
@@ -21,6 +94,17 @@ pub struct ResultView {
     /// place of the read-only popup. Only one of `popup` and `edit` is
     /// rendered at a time; the host app enforces this.
     pub edit: Option<CellEditView>,
+    /// Active sort: `(column_index, direction)`.
+    pub sort: Option<(usize, SortDir)>,
+    /// Active filter text. Rows that don't contain this
+    /// case-insensitive substring in any column are hidden.
+    pub filter: String,
+    /// When `true`, the filter input prompt is open for editing.
+    pub filter_prompt_open: bool,
+    /// Cached visible row indices computed by the last render.
+    /// `visible_indices[i]` is the original row index of the i-th
+    /// rendered row.
+    pub visible_indices: Vec<usize>,
 }
 
 /// Editor-style popup used by inline cell edits.
@@ -90,6 +174,49 @@ impl ResultView {
         self.state.select(None);
         self.column_index = 0;
         self.popup = None;
+        self.sort = None;
+        self.filter.clear();
+        self.filter_prompt_open = false;
+        self.visible_indices.clear();
+    }
+
+    /// Derive the visible row indices after applying filter then sort.
+    /// Filter applies first; sort applies to the filtered subset.
+    /// Sort is stable across ties.
+    pub fn visible_rows(&self, columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..rows.len()).collect();
+
+        // Filter: keep rows where any cell contains the needle
+        // (case-insensitive).
+        if !self.filter.is_empty() {
+            let needle = self.filter.to_lowercase();
+            indices.retain(|&i| {
+                rows[i]
+                    .0
+                    .iter()
+                    .any(|v| v.render().to_lowercase().contains(&needle))
+            });
+        }
+
+        // Sort: stable sort on the filtered subset.
+        if let Some((col, dir)) = self.sort {
+            let col_clamped = if col < columns.len() {
+                col
+            } else {
+                return indices;
+            };
+            indices.sort_by(|&a, &b| {
+                let av = rows[a].0.get(col_clamped);
+                let bv = rows[b].0.get(col_clamped);
+                let ord = compare_values(av, bv);
+                match dir {
+                    SortDir::Asc => ord,
+                    SortDir::Desc => ord.reverse(),
+                }
+            });
+        }
+
+        indices
     }
 }
 
@@ -169,7 +296,7 @@ pub fn render_results(
     } else {
         Style::default().fg(theme.muted)
     };
-    let title = build_title(display);
+    let title = build_title(display, view);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
@@ -253,8 +380,8 @@ pub fn render_results(
     regions
 }
 
-fn build_title(display: &ResultDisplay<'_>) -> String {
-    match display {
+fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
+    let base = match display {
         ResultDisplay::Empty => " results ".into(),
         ResultDisplay::Running {
             index, total, rows, ..
@@ -301,6 +428,12 @@ fn build_title(display: &ResultDisplay<'_>) -> String {
             )
         }
         ResultDisplay::Error { elapsed_ms, .. } => format!(" results · error · {elapsed_ms} ms "),
+    };
+    // Append filter tag when a filter is active but the prompt is closed.
+    if !view.filter.is_empty() && !view.filter_prompt_open {
+        format!("{base}[filter: {}] ", view.filter)
+    } else {
+        base
     }
 }
 
@@ -598,12 +731,34 @@ fn draw_table(
     theme: &Theme,
     view: &mut ResultView,
 ) -> ResultHitRegions {
+    // Reserve one row at the bottom for the filter prompt when open.
+    let filter_prompt_open = view.filter_prompt_open;
+    let table_area = if filter_prompt_open {
+        Rect {
+            height: area.height.saturating_sub(1),
+            ..area
+        }
+    } else {
+        area
+    };
+
+    // Derive visible row indices (filter then sort).
+    let visible = view.visible_rows(columns, rows);
+    // Cache for the host app to look up original row indices.
+    view.visible_indices = visible.clone();
+
     let widths = compute_column_widths(columns, rows);
     let header_cells: Vec<Cell<'_>> = columns
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            let label = format!("{} ({})", c.name, c.data_type);
+            // Sort indicator: ▲ for Asc, ▼ for Desc.
+            let suffix = match view.sort {
+                Some((col, SortDir::Asc)) if col == i => " \u{25b2}",
+                Some((col, SortDir::Desc)) if col == i => " \u{25bc}",
+                _ => "",
+            };
+            let label = format!("{} ({}){suffix}", c.name, c.data_type);
             let mut style = Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD);
@@ -618,16 +773,10 @@ fn draw_table(
         .iter()
         .map(|w| Constraint::Length(*w as u16))
         .collect();
-    let body_rows: Vec<TableRow<'_>> = rows
+    let body_rows: Vec<TableRow<'_>> = visible
         .iter()
-        .enumerate()
-        .map(|(idx, row)| {
-            // Grid cells are one terminal row tall. Multi-line strings
-            // (notes with line breaks, JSON with embedded newlines) used
-            // to disappear past the first line because ratatui clipped
-            // the overflow vertically. Substitute visible glyphs so the
-            // user sees data is there — the cell popup (Enter) still
-            // shows the un-mangled value through Paragraph wrapping.
+        .map(|&idx| {
+            let row = &rows[idx];
             let cells = row
                 .0
                 .iter()
@@ -652,20 +801,44 @@ fn draw_table(
         .header(header)
         .highlight_style(Style::default().bg(theme.muted))
         .column_spacing(1);
-    frame.render_stateful_widget(table, area, &mut view.state);
+    frame.render_stateful_widget(table, table_area, &mut view.state);
+
+    // Render the filter prompt row at the bottom of the result area.
+    if filter_prompt_open {
+        let prompt_y = area.y + area.height.saturating_sub(1);
+        let prompt_line = if view.filter.is_empty() {
+            Line::from(vec![
+                Span::styled(" / ", Style::default().fg(theme.accent)),
+                Span::styled("\u{2588}", Style::default().fg(theme.foreground)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(" / ", Style::default().fg(theme.accent)),
+                Span::raw(&view.filter),
+                Span::styled("\u{2588}", Style::default().fg(theme.foreground)),
+            ])
+        };
+        frame.render_widget(
+            Paragraph::new(prompt_line),
+            Rect {
+                x: area.x,
+                y: prompt_y,
+                width: area.width,
+                height: 1,
+            },
+        );
+    }
 
     // Compute hit-test regions for the header row and visible data rows.
-    // The header occupies the first two terminal rows of the area (1 row
-    // for content + 1 bottom_margin). Data rows start after that.
     let header_height = 2u16; // header line + bottom_margin
     let mut header_rects = Vec::with_capacity(columns.len());
-    let mut x_offset = area.x;
+    let mut x_offset = table_area.x;
     for (i, w) in widths.iter().enumerate() {
         let w16 = *w as u16;
         header_rects.push((
             Rect {
                 x: x_offset,
-                y: area.y,
+                y: table_area.y,
                 width: w16,
                 height: header_height,
             },
@@ -675,19 +848,20 @@ fn draw_table(
     }
 
     let scroll_offset = view.state.offset();
-    let data_y_start = area.y + header_height;
-    let visible_height = area.height.saturating_sub(header_height) as usize;
+    let data_y_start = table_area.y + header_height;
+    let visible_height = table_area.height.saturating_sub(header_height) as usize;
     let mut row_rects = Vec::new();
     for visible_idx in 0..visible_height {
-        let data_idx = scroll_offset + visible_idx;
-        if data_idx >= rows.len() {
+        let absolute_idx = scroll_offset + visible_idx;
+        if absolute_idx >= visible.len() {
             break;
         }
+        let data_idx = visible[absolute_idx];
         row_rects.push((
             Rect {
-                x: area.x,
+                x: table_area.x,
                 y: data_y_start + visible_idx as u16,
-                width: area.width,
+                width: table_area.width,
                 height: 1,
             },
             data_idx,
@@ -695,10 +869,10 @@ fn draw_table(
     }
 
     if let Some(popup) = view.popup.as_ref() {
-        draw_cell_popup(frame, area, popup, theme);
+        draw_cell_popup(frame, table_area, popup, theme);
     }
     if let Some(edit) = view.edit.as_ref() {
-        draw_cell_edit(frame, area, edit, theme);
+        draw_cell_edit(frame, table_area, edit, theme);
     }
 
     ResultHitRegions {

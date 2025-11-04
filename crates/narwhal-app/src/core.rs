@@ -17,7 +17,7 @@ use narwhal_tui::{
     render_help_modal, render_root, render_wizard, translate_key_event, CellEditView, CellPopup,
     CompletionItemView, CompletionPopupView, EditorBuffer, ExplainPlanLine, LayoutRegions, Pane,
     ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
-    SidebarView, StatusBarView, Theme, WizardFieldView, WizardView,
+    SidebarView, SortDir, StatusBarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -703,9 +703,9 @@ impl AppCore {
 
         for (rect, col_idx) in &layout.result_headers {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
-                // Sort cycle action — no-op until 06-04, but the dispatch
-                // site is here so 06-04 doesn't have to re-touch routing.
-                debug!(target: "narwhal::app", col = *col_idx, "result header clicked (sort cycle not yet implemented)");
+                // Sort cycle action: move column focus and toggle sort.
+                self.tabs[self.active_tab].result_view.column_index = *col_idx;
+                self.toggle_sort();
                 return;
             }
         }
@@ -1233,6 +1233,34 @@ impl AppCore {
             }
             return;
         }
+        // Filter prompt editing: modal — consumes keys before any
+        // other result-pane handler.
+        if self.tabs[self.active_tab].result_view.filter_prompt_open {
+            match key.code {
+                CtKey::Esc => {
+                    self.tabs[self.active_tab].result_view.filter.clear();
+                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
+                    self.status.message = "filter cleared".into();
+                }
+                CtKey::Enter => {
+                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
+                    self.status.message =
+                        if self.tabs[self.active_tab].result_view.filter.is_empty() {
+                            "filter closed".into()
+                        } else {
+                            format!("filter: {}", self.tabs[self.active_tab].result_view.filter)
+                        };
+                }
+                CtKey::Backspace => {
+                    self.tabs[self.active_tab].result_view.filter.pop();
+                }
+                CtKey::Char(c) => {
+                    self.tabs[self.active_tab].result_view.filter.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
         if let Some(search) = self.tabs[self.active_tab].search.as_mut() {
             if search.editing {
                 match key.code {
@@ -1258,32 +1286,50 @@ impl AppCore {
                 return;
             }
         }
-        let (row_count, col_count) = match &self.tabs[self.active_tab].result {
-            ResultState::Rows { rows, columns, .. }
-            | ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
+
+        // Compute visible row count (after filter/sort) for navigation.
+        let (visible_count, col_count) = match &self.tabs[self.active_tab].result {
+            ResultState::Rows { rows, columns, .. } => {
+                let vis = self.tabs[self.active_tab]
+                    .result_view
+                    .visible_rows(columns, rows);
+                (vis.len(), columns.len())
+            }
+            ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
             _ => (0, 0),
         };
+
         match key.code {
-            CtKey::Char('j') | CtKey::Down => {
-                self.tabs[self.active_tab].result_view.move_down(row_count)
-            }
+            CtKey::Char('j') | CtKey::Down => self.tabs[self.active_tab]
+                .result_view
+                .move_down(visible_count),
             CtKey::Char('k') | CtKey::Up => self.tabs[self.active_tab].result_view.move_up(),
             CtKey::Char('h') | CtKey::Left => self.tabs[self.active_tab].result_view.move_left(),
             CtKey::Char('l') | CtKey::Right => {
                 self.tabs[self.active_tab].result_view.move_right(col_count)
             }
             CtKey::Char('g') => self.tabs[self.active_tab].result_view.state.select(Some(0)),
-            CtKey::Char('G') if row_count > 0 => {
+            CtKey::Char('G') if visible_count > 0 => {
                 self.tabs[self.active_tab]
                     .result_view
                     .state
-                    .select(Some(row_count - 1));
+                    .select(Some(visible_count - 1));
             }
-            CtKey::Char('/') => self.start_search(),
+            CtKey::Char('s') => self.toggle_sort(),
+            CtKey::Char('/') => self.open_filter_prompt(),
             CtKey::Char('n') => self.advance_search(1),
             CtKey::Char('N') => self.advance_search(-1),
-            CtKey::Esc if self.tabs[self.active_tab].search.take().is_some() => {
-                self.status.message = "search cleared".into();
+            CtKey::Esc => {
+                let had_search = self.tabs[self.active_tab].search.take().is_some();
+                let had_filter = !self.tabs[self.active_tab].result_view.filter.is_empty();
+                if had_search {
+                    self.status.message = "search cleared".into();
+                }
+                if had_filter {
+                    self.tabs[self.active_tab].result_view.filter.clear();
+                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
+                    self.status.message = "filter cleared".into();
+                }
             }
             CtKey::Enter => self.open_cell_popup(),
             CtKey::Char('e') => self.start_cell_edit(),
@@ -1295,6 +1341,15 @@ impl AppCore {
 
     // ----- yank -----
 
+    /// Translate the current TableState selection (which is an index
+    /// into the visible/rendered rows) to the original row index in
+    /// the full result set. Returns `None` when there are no rows.
+    fn selected_original_row(&self) -> Option<usize> {
+        let tab = &self.tabs[self.active_tab];
+        let vis_selected = tab.result_view.state.selected()?;
+        tab.result_view.visible_indices.get(vis_selected).copied()
+    }
+
     fn yank_cell(&mut self) {
         let tab = &self.tabs[self.active_tab];
         let (rows, _columns) = match &tab.result {
@@ -1305,7 +1360,7 @@ impl AppCore {
                 return;
             }
         };
-        let row_idx = tab.result_view.state.selected().unwrap_or(0);
+        let row_idx = self.selected_original_row().unwrap_or(0);
         let col_idx = tab.result_view.column_index;
         let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
             self.status.message = "no cell selected".into();
@@ -1334,7 +1389,7 @@ impl AppCore {
                 return;
             }
         };
-        let row_idx = tab.result_view.state.selected().unwrap_or(0);
+        let row_idx = self.selected_original_row().unwrap_or(0);
         let Some(row) = rows.get(row_idx) else {
             self.status.message = "no row selected".into();
             return;
@@ -1388,7 +1443,7 @@ impl AppCore {
                     format!("{}: no primary key, cell edits are disabled", source.table);
                 return;
             }
-            let row_index = tab.result_view.state.selected().unwrap_or(0);
+            let row_index = self.selected_original_row().unwrap_or(0);
             let col_index = tab.result_view.column_index;
             let Some(row) = rows.get(row_index) else {
                 self.status.message = "select a row first (j/k)".into();
@@ -1570,6 +1625,7 @@ impl AppCore {
         self.status.message = format!("edit failed: {message}");
     }
 
+    #[allow(dead_code)]
     fn start_search(&mut self) {
         if !matches!(
             self.tabs[self.active_tab].result,
@@ -1585,6 +1641,46 @@ impl AppCore {
             editing: true,
         });
         self.status.message = "search: ".into();
+    }
+
+    fn toggle_sort(&mut self) {
+        // Streaming guard.
+        if self.running {
+            self.status.message = "sort/filter unavailable while streaming".into();
+            return;
+        }
+        if !matches!(self.tabs[self.active_tab].result, ResultState::Rows { .. }) {
+            self.status.message = "no result to sort".into();
+            return;
+        }
+        let col = self.tabs[self.active_tab].result_view.column_index;
+        let view = &mut self.tabs[self.active_tab].result_view;
+        let next = match view.sort {
+            Some((c, SortDir::Asc)) if c == col => Some((col, SortDir::Desc)),
+            Some((c, SortDir::Desc)) if c == col => None,
+            _ => Some((col, SortDir::Asc)),
+        };
+        view.sort = next;
+        let msg = match view.sort {
+            Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
+            Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
+            None => "sort: cleared".into(),
+        };
+        self.status.message = msg;
+    }
+
+    fn open_filter_prompt(&mut self) {
+        // Streaming guard.
+        if self.running {
+            self.status.message = "sort/filter unavailable while streaming".into();
+            return;
+        }
+        if !matches!(self.tabs[self.active_tab].result, ResultState::Rows { .. }) {
+            self.status.message = "no result to filter".into();
+            return;
+        }
+        self.tabs[self.active_tab].result_view.filter_prompt_open = true;
+        self.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
     }
 
     fn refresh_search_matches(&mut self) {
@@ -1656,7 +1752,7 @@ impl AppCore {
     }
 
     fn open_cell_popup(&mut self) {
-        let Some(row_index) = self.tabs[self.active_tab].result_view.state.selected() else {
+        let Some(row_index) = self.selected_original_row() else {
             self.status.message = "select a row first (j/k)".into();
             return;
         };

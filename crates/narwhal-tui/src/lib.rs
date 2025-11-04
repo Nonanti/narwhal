@@ -15,5 +15,5 @@ pub use widgets::{
     render_results, render_sidebar, render_wizard, CellEditView, CellPopup, CheatsheetEntry,
     CheatsheetSection, CompletionHitRegions, CompletionItemView, CompletionPopupView, EditorBuffer,
     ExplainPlanLine, ResultDisplay, ResultHitRegions, ResultView, SchemaListing, SearchHighlight,
-    SidebarRow, SidebarRowKind, SidebarView, WizardFieldView, WizardView, CHEATSHEET,
+    SidebarRow, SidebarRowKind, SidebarView, SortDir, WizardFieldView, WizardView, CHEATSHEET,
 };
