@@ -180,12 +180,128 @@ pub struct EditorSearchState {
     pub highlight: bool,
 }
 
+/// Bundle of per-statement results produced by a multi-statement batch.
+/// When the dispatch pipeline produces N result sets the user can cycle
+/// through them with `]r` / `[r` (or Ctrl-PgDown / Ctrl-PgUp); the
+/// active tab's state — scroll, sort, filter — is preserved across
+/// switches.
+///
+/// The common case (single result) has `states.len() == 1` and the
+/// strip is not rendered; behaviour is byte-for-byte identical to the
+/// pre-bundle world.
+///
+/// `states` and `views` are kept in parallel arrays so the render path
+/// can borrow from `states` immutably while mutating `views` — they
+/// live in separate allocations, satisfying the borrow checker.
+#[derive(Debug)]
+pub struct ResultBundle {
+    /// One `ResultState` per statement in the batch.
+    pub states: Vec<ResultState>,
+    /// One `ResultView` per statement (scroll, sort, filter, etc.).
+    pub views: Vec<ResultView>,
+    /// Index of the currently-visible result.
+    pub active: usize,
+}
+
+impl ResultBundle {
+    /// Construct a single-result bundle. No tab strip renders.
+    pub fn single(state: ResultState, view: ResultView) -> Self {
+        Self {
+            states: vec![state],
+            views: vec![view],
+            active: 0,
+        }
+    }
+
+    /// Construct a multi-result bundle from parallel vectors.
+    /// `active` starts at 0.
+    pub fn multi(states: Vec<ResultState>, views: Vec<ResultView>) -> Self {
+        assert!(
+            !states.is_empty(),
+            "ResultBundle must contain at least one entry"
+        );
+        assert_eq!(
+            states.len(),
+            views.len(),
+            "states and views must have the same length"
+        );
+        Self {
+            states,
+            views,
+            active: 0,
+        }
+    }
+
+    /// Whether the bundle contains more than one result (and thus a
+    /// tab strip should be rendered).
+    pub fn is_multi(&self) -> bool {
+        self.states.len() > 1
+    }
+
+    /// Total number of results in the bundle.
+    pub fn len(&self) -> usize {
+        self.states.len()
+    }
+
+    /// Whether the bundle has no results. (Always false in practice
+    /// since we guarantee at least one entry, but required by clippy.)
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+
+    /// Read-only access to the active result view.
+    pub fn active(&self) -> &ResultView {
+        &self.views[self.active]
+    }
+
+    /// Mutable access to the active result view.
+    pub fn active_mut(&mut self) -> &mut ResultView {
+        &mut self.views[self.active]
+    }
+
+    /// Read-only access to the active result state.
+    pub fn active_state(&self) -> &ResultState {
+        &self.states[self.active]
+    }
+
+    /// Mutable access to the active result state.
+    pub fn active_state_mut(&mut self) -> &mut ResultState {
+        &mut self.states[self.active]
+    }
+
+    /// Advance to the next result (wraps).
+    pub fn next(&mut self) {
+        if self.states.len() > 1 {
+            self.active = (self.active + 1) % self.states.len();
+        }
+    }
+
+    /// Go to the previous result (wraps).
+    pub fn prev(&mut self) {
+        if self.states.len() > 1 {
+            self.active = self.active.checked_sub(1).unwrap_or(self.states.len() - 1);
+        }
+    }
+
+    /// Reset every `ResultView` in the bundle.
+    pub fn reset_all(&mut self) {
+        for view in &mut self.views {
+            view.reset();
+        }
+    }
+}
+
+impl Default for ResultBundle {
+    fn default() -> Self {
+        Self::single(ResultState::Empty, ResultView::new())
+    }
+}
+
 /// One editor tab: a buffer + the most recent result it produced.
 pub struct Tab {
     pub name: String,
     pub editor: EditorBuffer,
-    pub result: ResultState,
-    pub result_view: ResultView,
+    pub results: ResultBundle,
     pub search: Option<ResultSearch>,
     pub editing: Option<CellEdit>,
     pub completion: Option<CompletionState>,
@@ -204,8 +320,7 @@ impl Tab {
         Self {
             name: name.into(),
             editor: EditorBuffer::new(),
-            result: ResultState::Empty,
-            result_view: ResultView::new(),
+            results: ResultBundle::default(),
             search: None,
             editing: None,
             completion: None,
@@ -298,6 +413,14 @@ pub struct AppCore {
     wizard: Option<ConnectionWizard>,
     wizard_error: Option<String>,
     help_open: bool,
+    /// Pending leader key for result-tab cycling. `]` followed by
+    /// `r` cycles forward; `[` followed by `r` cycles backward.
+    pending_result_leader: Option<char>,
+    /// Collects per-statement results during a multi-statement batch.
+    /// Populated by `finalize_statement`; consumed and turned into a
+    /// `ResultBundle` by the `AllDone` handler.
+    pending_result_entries_states: Vec<ResultState>,
+    pending_result_entries_views: Vec<ResultView>,
     last_layout: LayoutRegions,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
@@ -410,6 +533,9 @@ impl AppCore {
             wizard: None,
             wizard_error: None,
             help_open: false,
+            pending_result_leader: None,
+            pending_result_entries_states: Vec::new(),
+            pending_result_entries_views: Vec::new(),
             last_layout: LayoutRegions::default(),
             run_tx,
             run_rx,
@@ -470,7 +596,7 @@ impl AppCore {
     }
 
     pub fn result(&self) -> &ResultState {
-        &self.tab().result
+        self.tab().results.active_state()
     }
 
     /// Test helper: is the completion popup currently open on the
@@ -720,7 +846,11 @@ impl AppCore {
             matches: &s.matches,
             current: s.current,
         });
-        let result_display = display_from_state(&tab.result, search_view.as_ref());
+        // Extract result state and view via the active index to avoid
+        // overlapping borrows on `tab.results`.
+        let active_idx = tab.results.active;
+        let result_display =
+            display_from_state(&tab.results.states[active_idx], search_view.as_ref());
         let completion_item_views: Vec<CompletionItemView<'_>> = tab
             .completion
             .as_ref()
@@ -754,6 +884,7 @@ impl AppCore {
             } else {
                 None
             };
+        let result_count = tab.results.len();
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
@@ -767,10 +898,12 @@ impl AppCore {
             sidebar: sidebar_view,
             editor: &mut tab.editor,
             editor_title: &editor_title,
-            result_view: &mut tab.result_view,
+            result_view: &mut tab.results.views[active_idx],
             result: result_display,
             completion: completion_view,
             editor_search: editor_search_view,
+            result_count,
+            active_result: active_idx,
         };
         self.last_layout = render_root(frame, area, &mut layout);
 
@@ -856,6 +989,18 @@ impl AppCore {
         if self.handle_global_key(key) {
             return;
         }
+        // Pending result-tab leader: `]` or `[` was pressed, waiting
+        // for `r` to complete the sequence. Any other key cancels.
+        if let Some(leader) = self.pending_result_leader.take() {
+            if key.code == CtKey::Char('r') && key.modifiers.is_empty() {
+                match leader {
+                    ']' => self.cycle_result_tab(1),
+                    '[' => self.cycle_result_tab(-1),
+                    _ => {}
+                }
+            }
+            return;
+        }
         match self.focus {
             Pane::Editor => self.handle_editor_key(key),
             Pane::Sidebar => self.handle_sidebar_key(key),
@@ -904,10 +1049,17 @@ impl AppCore {
             }
         }
 
+        for (rect, result_idx) in &layout.result_tabs {
+            if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+                self.click_result_tab(*result_idx);
+                return;
+            }
+        }
+
         for (rect, col_idx) in &layout.result_headers {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
                 // Sort cycle action: move column focus and toggle sort.
-                self.tabs[self.active_tab].result_view.column_index = *col_idx;
+                self.tabs[self.active_tab].results.active_mut().column_index = *col_idx;
                 self.toggle_sort();
                 return;
             }
@@ -916,7 +1068,8 @@ impl AppCore {
         for (rect, row_idx) in &layout.result_rows {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
                 self.tabs[self.active_tab]
-                    .result_view
+                    .results
+                    .active_mut()
                     .state
                     .select(Some(*row_idx));
                 self.focus = Pane::Results;
@@ -954,14 +1107,17 @@ impl AppCore {
             .results
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            let row_count = match &self.tabs[self.active_tab].result {
+            let row_count = match self.tabs[self.active_tab].results.active_state() {
                 ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows.len(),
                 _ => return,
             };
             if delta > 0 {
-                self.tabs[self.active_tab].result_view.move_down(row_count);
+                self.tabs[self.active_tab]
+                    .results
+                    .active_mut()
+                    .move_down(row_count);
             } else {
-                self.tabs[self.active_tab].result_view.move_up();
+                self.tabs[self.active_tab].results.active_mut().move_up();
             }
         } else if layout
             .editor
@@ -1013,6 +1169,16 @@ impl AppCore {
         };
         self.sidebar_index = sidebar_idx;
         self.inject_table_preview(&schema, &name);
+    }
+
+    /// Click on a result tab: switch to that result index.
+    fn click_result_tab(&mut self, result_idx: usize) {
+        let bundle = &mut self.tabs[self.active_tab].results;
+        if result_idx < bundle.len() && bundle.is_multi() {
+            bundle.active = result_idx;
+            let total = bundle.len();
+            self.status.message = format!("result {} of {total}", result_idx + 1);
+        }
     }
 
     /// Inject a `SELECT * FROM <schema>.<table> LIMIT 100;` into the
@@ -1108,6 +1274,14 @@ impl AppCore {
                 }
                 CtKey::Char('r') => {
                     self.open_history();
+                    return true;
+                }
+                CtKey::PageDown => {
+                    self.cycle_result_tab(1);
+                    return true;
+                }
+                CtKey::PageUp => {
+                    self.cycle_result_tab(-1);
                     return true;
                 }
                 _ => {}
@@ -1700,7 +1874,7 @@ impl AppCore {
     }
 
     fn current_preview_target(&self) -> Option<(String, String, usize)> {
-        match &self.tabs[self.active_tab].result {
+        match self.tabs[self.active_tab].results.active_state() {
             ResultState::Rows {
                 source: Some(s), ..
             } => Some((s.schema.clone(), s.table.clone(), s.offset)),
@@ -1762,12 +1936,13 @@ impl AppCore {
                         ),
                     );
                 }
-                self.tabs[self.active_tab].result_view.reset();
+                self.tabs[self.active_tab].results.active_mut().reset();
                 self.status.message = format!(
                     "{}.{}: {} cols·{} idx·{} fk",
                     table_schema, table_name, col_count, idx_count, fk_count
                 );
-                self.tabs[self.active_tab].result = ResultState::TableDetail { schema: ts };
+                *self.tabs[self.active_tab].results.active_state_mut() =
+                    ResultState::TableDetail { schema: ts };
             }
             Err(error) => {
                 self.status.message = format!("describe failed: {error}");
@@ -1780,35 +1955,47 @@ impl AppCore {
             self.handle_cell_edit_key(key);
             return;
         }
-        if self.tabs[self.active_tab].result_view.popup.is_some() {
+        if self.tabs[self.active_tab].results.active().popup.is_some() {
             if matches!(key.code, CtKey::Esc | CtKey::Char('q') | CtKey::Enter) {
-                self.tabs[self.active_tab].result_view.popup = None;
+                self.tabs[self.active_tab].results.active_mut().popup = None;
             }
             return;
         }
         // Filter prompt editing: modal — consumes keys before any
         // other result-pane handler.
-        if self.tabs[self.active_tab].result_view.filter_prompt_open {
+        if self.tabs[self.active_tab]
+            .results
+            .active()
+            .filter_prompt_open
+        {
             match key.code {
                 CtKey::Esc => {
-                    self.tabs[self.active_tab].result_view.filter.clear();
-                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
+                    let rv = self.tabs[self.active_tab].results.active_mut();
+                    rv.filter.clear();
+                    rv.filter_prompt_open = false;
                     self.status.message = "filter cleared".into();
                 }
                 CtKey::Enter => {
-                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
-                    self.status.message =
-                        if self.tabs[self.active_tab].result_view.filter.is_empty() {
-                            "filter closed".into()
-                        } else {
-                            format!("filter: {}", self.tabs[self.active_tab].result_view.filter)
-                        };
+                    let filter_text = self.tabs[self.active_tab].results.active().filter.clone();
+                    self.tabs[self.active_tab]
+                        .results
+                        .active_mut()
+                        .filter_prompt_open = false;
+                    self.status.message = if filter_text.is_empty() {
+                        "filter closed".into()
+                    } else {
+                        format!("filter: {filter_text}")
+                    };
                 }
                 CtKey::Backspace => {
-                    self.tabs[self.active_tab].result_view.filter.pop();
+                    self.tabs[self.active_tab].results.active_mut().filter.pop();
                 }
                 CtKey::Char(c) => {
-                    self.tabs[self.active_tab].result_view.filter.push(c);
+                    self.tabs[self.active_tab]
+                        .results
+                        .active_mut()
+                        .filter
+                        .push(c);
                 }
                 _ => {}
             }
@@ -1841,10 +2028,11 @@ impl AppCore {
         }
 
         // Compute visible row count (after filter/sort) for navigation.
-        let (visible_count, col_count) = match &self.tabs[self.active_tab].result {
+        let (visible_count, col_count) = match self.tabs[self.active_tab].results.active_state() {
             ResultState::Rows { rows, columns, .. } => {
                 let vis = self.tabs[self.active_tab]
-                    .result_view
+                    .results
+                    .active()
                     .visible_rows(columns, rows);
                 (vis.len(), columns.len())
             }
@@ -1854,17 +2042,28 @@ impl AppCore {
 
         match key.code {
             CtKey::Char('j') | CtKey::Down => self.tabs[self.active_tab]
-                .result_view
+                .results
+                .active_mut()
                 .move_down(visible_count),
-            CtKey::Char('k') | CtKey::Up => self.tabs[self.active_tab].result_view.move_up(),
-            CtKey::Char('h') | CtKey::Left => self.tabs[self.active_tab].result_view.move_left(),
-            CtKey::Char('l') | CtKey::Right => {
-                self.tabs[self.active_tab].result_view.move_right(col_count)
+            CtKey::Char('k') | CtKey::Up => {
+                self.tabs[self.active_tab].results.active_mut().move_up()
             }
-            CtKey::Char('g') => self.tabs[self.active_tab].result_view.state.select(Some(0)),
+            CtKey::Char('h') | CtKey::Left => {
+                self.tabs[self.active_tab].results.active_mut().move_left()
+            }
+            CtKey::Char('l') | CtKey::Right => self.tabs[self.active_tab]
+                .results
+                .active_mut()
+                .move_right(col_count),
+            CtKey::Char('g') => self.tabs[self.active_tab]
+                .results
+                .active_mut()
+                .state
+                .select(Some(0)),
             CtKey::Char('G') if visible_count > 0 => {
                 self.tabs[self.active_tab]
-                    .result_view
+                    .results
+                    .active_mut()
                     .state
                     .select(Some(visible_count - 1));
             }
@@ -1874,13 +2073,18 @@ impl AppCore {
             CtKey::Char('N') => self.advance_search(-1),
             CtKey::Esc => {
                 let had_search = self.tabs[self.active_tab].search.take().is_some();
-                let had_filter = !self.tabs[self.active_tab].result_view.filter.is_empty();
+                let had_filter = !self.tabs[self.active_tab]
+                    .results
+                    .active()
+                    .filter
+                    .is_empty();
                 if had_search {
                     self.status.message = "search cleared".into();
                 }
                 if had_filter {
-                    self.tabs[self.active_tab].result_view.filter.clear();
-                    self.tabs[self.active_tab].result_view.filter_prompt_open = false;
+                    let rv = self.tabs[self.active_tab].results.active_mut();
+                    rv.filter.clear();
+                    rv.filter_prompt_open = false;
                     self.status.message = "filter cleared".into();
                 }
             }
@@ -1888,6 +2092,12 @@ impl AppCore {
             CtKey::Char('e') => self.start_cell_edit(),
             CtKey::Char('y') => self.yank_cell(),
             CtKey::Char('Y') => self.yank_row(),
+            CtKey::Char(']') => {
+                self.pending_result_leader = Some(']');
+            }
+            CtKey::Char('[') => {
+                self.pending_result_leader = Some('[');
+            }
             _ => {}
         }
     }
@@ -1899,13 +2109,17 @@ impl AppCore {
     /// the full result set. Returns `None` when there are no rows.
     fn selected_original_row(&self) -> Option<usize> {
         let tab = &self.tabs[self.active_tab];
-        let vis_selected = tab.result_view.state.selected()?;
-        tab.result_view.visible_indices.get(vis_selected).copied()
+        let vis_selected = tab.results.active().state.selected()?;
+        tab.results
+            .active()
+            .visible_indices
+            .get(vis_selected)
+            .copied()
     }
 
     fn yank_cell(&mut self) {
         let tab = &self.tabs[self.active_tab];
-        let (rows, _columns) = match &tab.result {
+        let (rows, _columns) = match tab.results.active_state() {
             ResultState::Rows { rows, columns, .. }
             | ResultState::Running { rows, columns, .. } => (rows, columns),
             _ => {
@@ -1914,7 +2128,7 @@ impl AppCore {
             }
         };
         let row_idx = self.selected_original_row().unwrap_or(0);
-        let col_idx = tab.result_view.column_index;
+        let col_idx = tab.results.active().column_index;
         let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
             self.status.message = "no cell selected".into();
             return;
@@ -1935,7 +2149,7 @@ impl AppCore {
 
     fn yank_row(&mut self) {
         let tab = &self.tabs[self.active_tab];
-        let rows = match &tab.result {
+        let rows = match tab.results.active_state() {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
             _ => {
                 self.status.message = "no row to yank".into();
@@ -1970,7 +2184,7 @@ impl AppCore {
         // Gather the data we need by value first, then mutate.
         let prepared = {
             let tab = &self.tabs[self.active_tab];
-            let (columns, rows, source) = match &tab.result {
+            let (columns, rows, source) = match tab.results.active_state() {
                 ResultState::Rows {
                     columns,
                     rows,
@@ -1997,7 +2211,7 @@ impl AppCore {
                 return;
             }
             let row_index = self.selected_original_row().unwrap_or(0);
-            let col_index = tab.result_view.column_index;
+            let col_index = tab.results.active().column_index;
             let Some(row) = rows.get(row_index) else {
                 self.status.message = "select a row first (j/k)".into();
                 return;
@@ -2032,7 +2246,7 @@ impl AppCore {
             original,
             buffer: buffer.clone(),
         });
-        tab.result_view.edit = Some(CellEditView {
+        tab.results.active_mut().edit = Some(CellEditView {
             column_name,
             column_type,
             row_index,
@@ -2049,7 +2263,7 @@ impl AppCore {
         match key.code {
             CtKey::Esc => {
                 self.tabs[self.active_tab].editing = None;
-                self.tabs[self.active_tab].result_view.edit = None;
+                self.tabs[self.active_tab].results.active_mut().edit = None;
                 self.status.message = "edit cancelled".into();
             }
             CtKey::Enter => self.commit_cell_edit(),
@@ -2067,7 +2281,9 @@ impl AppCore {
 
     fn sync_edit_view(&mut self) {
         let tab = &mut self.tabs[self.active_tab];
-        if let (Some(edit), Some(view)) = (tab.editing.as_ref(), tab.result_view.edit.as_mut()) {
+        if let (Some(edit), Some(view)) =
+            (tab.editing.as_ref(), tab.results.active_mut().edit.as_mut())
+        {
             view.buffer = edit.buffer.clone();
             view.error = None;
         }
@@ -2087,7 +2303,7 @@ impl AppCore {
             rows,
             source: Some(source),
             ..
-        } = &self.tabs[self.active_tab].result
+        } = self.tabs[self.active_tab].results.active_state()
         {
             (columns.clone(), rows.clone(), source.clone())
         } else {
@@ -2154,7 +2370,9 @@ impl AppCore {
                 }
                 // Patch the in-memory cell with the parsed value so the
                 // grid reflects the new state without re-fetching.
-                if let ResultState::Rows { rows, .. } = &mut self.tabs[self.active_tab].result {
+                if let ResultState::Rows { rows, .. } =
+                    self.tabs[self.active_tab].results.active_state_mut()
+                {
                     if let Some(row) = rows.get_mut(edit.row_index) {
                         if let Some(cell) = row.0.get_mut(edit.column_index) {
                             *cell = new_value;
@@ -2162,7 +2380,7 @@ impl AppCore {
                     }
                 }
                 self.tabs[self.active_tab].editing = None;
-                self.tabs[self.active_tab].result_view.edit = None;
+                self.tabs[self.active_tab].results.active_mut().edit = None;
                 self.status.message = format!("updated 1 row in {}", source.table);
             }
             Err(error) => {
@@ -2172,7 +2390,12 @@ impl AppCore {
     }
 
     fn set_edit_error(&mut self, message: String) {
-        if let Some(view) = self.tabs[self.active_tab].result_view.edit.as_mut() {
+        if let Some(view) = self.tabs[self.active_tab]
+            .results
+            .active_mut()
+            .edit
+            .as_mut()
+        {
             view.error = Some(message.clone());
         }
         self.status.message = format!("edit failed: {message}");
@@ -2181,7 +2404,7 @@ impl AppCore {
     #[allow(dead_code)]
     fn start_search(&mut self) {
         if !matches!(
-            self.tabs[self.active_tab].result,
+            self.tabs[self.active_tab].results.active_state(),
             ResultState::Rows { .. } | ResultState::Running { .. }
         ) {
             self.status.message = "no result to search".into();
@@ -2202,12 +2425,15 @@ impl AppCore {
             self.status.message = "sort/filter unavailable while streaming".into();
             return;
         }
-        if !matches!(self.tabs[self.active_tab].result, ResultState::Rows { .. }) {
+        if !matches!(
+            self.tabs[self.active_tab].results.active_state(),
+            ResultState::Rows { .. }
+        ) {
             self.status.message = "no result to sort".into();
             return;
         }
-        let col = self.tabs[self.active_tab].result_view.column_index;
-        let view = &mut self.tabs[self.active_tab].result_view;
+        let col = self.tabs[self.active_tab].results.active().column_index;
+        let view = self.tabs[self.active_tab].results.active_mut();
         let next = match view.sort {
             Some((c, SortDir::Asc)) if c == col => Some((col, SortDir::Desc)),
             Some((c, SortDir::Desc)) if c == col => None,
@@ -2228,11 +2454,17 @@ impl AppCore {
             self.status.message = "sort/filter unavailable while streaming".into();
             return;
         }
-        if !matches!(self.tabs[self.active_tab].result, ResultState::Rows { .. }) {
+        if !matches!(
+            self.tabs[self.active_tab].results.active_state(),
+            ResultState::Rows { .. }
+        ) {
             self.status.message = "no result to filter".into();
             return;
         }
-        self.tabs[self.active_tab].result_view.filter_prompt_open = true;
+        self.tabs[self.active_tab]
+            .results
+            .active_mut()
+            .filter_prompt_open = true;
         self.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
     }
 
@@ -2249,7 +2481,7 @@ impl AppCore {
             }
             None => return,
         };
-        let matches = match &self.tabs[self.active_tab].result {
+        let matches = match self.tabs[self.active_tab].results.active_state() {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows
                 .iter()
                 .enumerate()
@@ -2299,7 +2531,8 @@ impl AppCore {
             return;
         };
         self.tabs[self.active_tab]
-            .result_view
+            .results
+            .active_mut()
             .state
             .select(Some(idx));
     }
@@ -2309,8 +2542,8 @@ impl AppCore {
             self.status.message = "select a row first (j/k)".into();
             return;
         };
-        let col_index = self.tabs[self.active_tab].result_view.column_index;
-        let (columns, rows) = match &self.tabs[self.active_tab].result {
+        let col_index = self.tabs[self.active_tab].results.active().column_index;
+        let (columns, rows) = match self.tabs[self.active_tab].results.active_state() {
             ResultState::Rows { rows, columns, .. } => (columns, rows),
             ResultState::Running { rows, columns, .. } => (columns, rows),
             _ => return,
@@ -2324,7 +2557,7 @@ impl AppCore {
         let Some(value) = row.0.get(col_index) else {
             return;
         };
-        self.tabs[self.active_tab].result_view.popup = Some(CellPopup {
+        self.tabs[self.active_tab].results.active_mut().popup = Some(CellPopup {
             column_name: column.name.clone(),
             column_type: column.data_type.clone(),
             value_text: value.render(),
@@ -2464,8 +2697,8 @@ impl AppCore {
             Command::Cancel => self.spawn_cancel(),
             Command::Clear => {
                 self.tabs[self.active_tab].editor.clear();
-                self.tabs[self.active_tab].result = ResultState::Empty;
-                self.tabs[self.active_tab].result_view.reset();
+                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Empty;
+                self.tabs[self.active_tab].results.active_mut().reset();
                 self.status.message = "buffer cleared".into();
             }
             Command::Explain => self.dispatch_explain(),
@@ -2897,15 +3130,20 @@ impl AppCore {
         };
         let request = RunRequest { statements, mode };
         self.running = true;
-        self.tabs[self.active_tab].result_view.reset();
-        self.tabs[self.active_tab].result = ResultState::Running {
-            sql: String::new(),
-            index: 0,
-            total: request.statements.len(),
-            columns: Vec::new(),
-            rows: Vec::new(),
-            streaming: matches!(mode, RunMode::Stream),
-        };
+        self.pending_result_entries_states.clear();
+        self.pending_result_entries_views.clear();
+        // Reset the bundle to a single empty entry for the running state.
+        self.tabs[self.active_tab].results = ResultBundle::single(
+            ResultState::Running {
+                sql: String::new(),
+                index: 0,
+                total: request.statements.len(),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                streaming: matches!(mode, RunMode::Stream),
+            },
+            ResultView::new(),
+        );
         self.status.message = match mode {
             RunMode::Execute => "executing…".into(),
             RunMode::Stream => "streaming…".into(),
@@ -3331,6 +3569,24 @@ impl AppCore {
         );
     }
 
+    /// Cycle through the per-statement results inside the active tab's
+    /// [`ResultBundle`]. `delta` +1 goes forward, −1 goes backward.
+    /// Does nothing when the bundle has only one result.
+    fn cycle_result_tab(&mut self, delta: i32) {
+        let bundle = &mut self.tabs[self.active_tab].results;
+        if !bundle.is_multi() {
+            return;
+        }
+        match delta {
+            1 => bundle.next(),
+            -1 => bundle.prev(),
+            _ => {}
+        }
+        let active = bundle.active;
+        let total = bundle.states.len();
+        self.status.message = format!("result {} of {total}", active + 1);
+    }
+
     fn dump_schema(&mut self, target: DumpTarget) {
         let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
@@ -3350,7 +3606,9 @@ impl AppCore {
 
         let names: Vec<(String, String)> = match target {
             DumpTarget::Current => {
-                if let ResultState::TableDetail { schema } = &self.tabs[self.active_tab].result {
+                if let ResultState::TableDetail { schema } =
+                    self.tabs[self.active_tab].results.active_state()
+                {
                     vec![(schema.table.schema.clone(), schema.table.name.clone())]
                 } else {
                     self.status.message =
@@ -3439,7 +3697,7 @@ impl AppCore {
             self.status.message = format!("unknown export format: {format} (csv|json)");
             return;
         };
-        let (columns, rows) = match &self.tabs[self.active_tab].result {
+        let (columns, rows) = match self.tabs[self.active_tab].results.active_state() {
             ResultState::Rows { columns, rows, .. } => (columns.as_slice(), rows.as_slice()),
             ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
                 (columns.as_slice(), rows.as_slice())
@@ -3489,31 +3747,49 @@ impl AppCore {
         match update {
             RunUpdate::StatementStarted { index, total, sql } => {
                 let streaming = matches!(
-                    &self.tabs[self.active_tab].result,
+                    self.tabs[self.active_tab].results.active_state(),
                     ResultState::Running {
                         streaming: true,
                         ..
                     }
                 );
-                self.tabs[self.active_tab].result = ResultState::Running {
-                    sql: sql.clone(),
-                    index,
-                    total,
-                    columns: Vec::new(),
-                    rows: Vec::new(),
-                    streaming,
-                };
-                self.tabs[self.active_tab].result_view.reset();
+                // If there is a previously-finalized entry sitting in the
+                // active slot (index > 1 means we've finished at least one
+                // statement), snapshot it before overwriting.
+                //
+                // Note: `index` is 1-based, so index > 1 means we are
+                // past the first StatementStarted.
+                if index > 1 {
+                    let state = self.tabs[self.active_tab].results.states.swap_remove(0);
+                    let view = self.tabs[self.active_tab].results.views.swap_remove(0);
+                    self.pending_result_entries_states.push(state);
+                    self.pending_result_entries_views.push(view);
+                }
+                // Create a fresh entry for the new statement.
+                self.tabs[self.active_tab].results = ResultBundle::single(
+                    ResultState::Running {
+                        sql: sql.clone(),
+                        index,
+                        total,
+                        columns: Vec::new(),
+                        rows: Vec::new(),
+                        streaming,
+                    },
+                    ResultView::new(),
+                );
                 self.status.message = format!("running {index}/{total}: {}", truncate(&sql, 60));
             }
             RunUpdate::HeaderReady { columns: cols } => {
-                if let ResultState::Running { columns, .. } = &mut self.tabs[self.active_tab].result
+                if let ResultState::Running { columns, .. } =
+                    self.tabs[self.active_tab].results.active_state_mut()
                 {
                     *columns = cols;
                 }
             }
             RunUpdate::RowsAppended { rows: new_rows } => {
-                if let ResultState::Running { rows, .. } = &mut self.tabs[self.active_tab].result {
+                if let ResultState::Running { rows, .. } =
+                    self.tabs[self.active_tab].results.active_state_mut()
+                {
                     rows.extend(new_rows);
                 }
             }
@@ -3526,17 +3802,45 @@ impl AppCore {
                 self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
             }
             RunUpdate::Failed { error, elapsed_ms } => {
-                self.tabs[self.active_tab].result = ResultState::Error {
+                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Error {
                     message: error,
                     elapsed_ms,
                 };
-                self.tabs[self.active_tab].result_view.reset();
+                self.tabs[self.active_tab].results.active_mut().reset();
             }
             RunUpdate::AllDone {
                 successes,
                 failures,
             } => {
                 self.running = false;
+
+                // Build the final ResultBundle from collected entries.
+                // Push the current (last) active entry into the pending
+                // list first so everything is in order.
+                let current_state = self.tabs[self.active_tab].results.states.swap_remove(0);
+                let current_view = self.tabs[self.active_tab].results.views.swap_remove(0);
+                self.pending_result_entries_states.push(current_state);
+                self.pending_result_entries_views.push(current_view);
+
+                let states = std::mem::take(&mut self.pending_result_entries_states);
+                let views = std::mem::take(&mut self.pending_result_entries_views);
+                self.tabs[self.active_tab].results = if states.len() == 1 {
+                    // Single result — no strip, behaviour-preserving.
+                    ResultBundle::single(
+                        states.into_iter().next().unwrap_or(ResultState::Empty),
+                        views.into_iter().next().unwrap_or_default(),
+                    )
+                } else {
+                    let len = states.len();
+                    let mut bundle = ResultBundle::multi(states, views);
+                    // Default to showing the last result — this is the
+                    // SELECT the user most likely cares about, and matches
+                    // the pre-bundle behaviour where the final statement
+                    // overwrote the result pane.
+                    bundle.active = len - 1;
+                    bundle
+                };
+
                 let base = if failures == 0 {
                     format!("done · {successes} statement(s)")
                 } else {
@@ -3608,7 +3912,7 @@ impl AppCore {
         streamed: bool,
     ) {
         let (columns, rows, index, total) =
-            match std::mem::take(&mut self.tabs[self.active_tab].result) {
+            match std::mem::take(self.tabs[self.active_tab].results.active_state_mut()) {
                 ResultState::Running {
                     columns,
                     rows,
@@ -3617,12 +3921,12 @@ impl AppCore {
                     ..
                 } => (columns, rows, index, total),
                 other => {
-                    self.tabs[self.active_tab].result = other;
+                    *self.tabs[self.active_tab].results.active_state_mut() = other;
                     return;
                 }
             };
         if columns.is_empty() {
-            self.tabs[self.active_tab].result = ResultState::Affected {
+            *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Affected {
                 rows: rows_affected.unwrap_or(0),
                 elapsed_ms,
                 index,
@@ -3631,7 +3935,7 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    self.tabs[self.active_tab].result = ResultState::Explain {
+                    *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Explain {
                         lines: plan
                             .lines
                             .into_iter()
@@ -3647,7 +3951,7 @@ impl AppCore {
                     return;
                 }
                 Err(error) => {
-                    self.tabs[self.active_tab].result = ResultState::Error {
+                    *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Error {
                         message: format!("explain parse failed: {error}"),
                         elapsed_ms,
                     };
@@ -3660,7 +3964,7 @@ impl AppCore {
             // originating table.
             let source = self.tabs[self.active_tab].pending_source.take();
             let (columns, rows) = self.apply_plugin_transforms(columns, rows, elapsed_ms);
-            self.tabs[self.active_tab].result = ResultState::Rows {
+            *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Rows {
                 columns,
                 rows,
                 elapsed_ms,

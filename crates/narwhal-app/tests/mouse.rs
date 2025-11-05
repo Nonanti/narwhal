@@ -220,11 +220,19 @@ async fn scroll_in_results_pane_moves_view() {
     render(&mut core);
 
     let results_rect = core.last_layout().results;
-    let initial_selected = core.tabs()[core.active_tab()].result_view.state.selected();
+    let initial_selected = core.tabs()[core.active_tab()]
+        .results
+        .active()
+        .state
+        .selected();
 
     // Scroll down inside the results pane.
     core.handle_mouse(scroll_down_at(results_rect.x + 2, results_rect.y + 5));
-    let after_scroll = core.tabs()[core.active_tab()].result_view.state.selected();
+    let after_scroll = core.tabs()[core.active_tab()]
+        .results
+        .active()
+        .state
+        .selected();
 
     // The selection should have moved down (or been set to 0 from None).
     match (initial_selected, after_scroll) {
