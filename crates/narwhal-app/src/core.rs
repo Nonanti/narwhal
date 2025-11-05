@@ -16,11 +16,11 @@ use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
     render_help_modal, render_history_modal, render_root, render_wizard, translate_key_event,
     CellEditView, CellPopup, CompletionItemView, CompletionPopupView, EditorBuffer,
-    ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane, ResultDisplay, ResultView,
-    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, SortDir, StatusBarView,
-    Theme, WizardFieldView, WizardView,
+    EditorSearchHighlight, ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane,
+    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
+    SidebarView, SortDir, StatusBarView, Theme, WizardFieldView, WizardView,
 };
-use narwhal_vim::{Action, Mode, Vim};
+use narwhal_vim::{Action, Mode, SearchDirection, Vim};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use tokio::sync::{mpsc, Mutex};
@@ -160,6 +160,26 @@ pub struct ResultSearch {
     pub editing: bool,
 }
 
+/// Editor search state, separate from the result pane search.
+/// Per-tab so each editor pane carries its own needle and highlight state.
+#[derive(Debug, Clone, Default)]
+pub struct EditorSearchState {
+    /// The literal substring needle.
+    pub needle: String,
+    /// Direction of the search that opened the prompt.
+    pub direction: SearchDirection,
+    /// Whether the search prompt is currently open for editing.
+    pub prompt_open: bool,
+    /// Cursor position saved when `/` or `?` was pressed, restored on Esc.
+    pub saved_cursor: Option<(usize, usize)>,
+    /// All match positions as `(line_idx, byte_col)` pairs.
+    pub matches: Vec<(usize, usize)>,
+    /// Index into `matches` for the current match (where the cursor sits).
+    pub current: Option<usize>,
+    /// Whether matches are highlighted in the editor.
+    pub highlight: bool,
+}
+
 /// One editor tab: a buffer + the most recent result it produced.
 pub struct Tab {
     pub name: String,
@@ -169,6 +189,8 @@ pub struct Tab {
     pub search: Option<ResultSearch>,
     pub editing: Option<CellEdit>,
     pub completion: Option<CompletionState>,
+    /// Per-tab editor search state (separate from result pane search).
+    pub editor_search: EditorSearchState,
     /// Page size used by the next sidebar preview. Stored per-tab so a
     /// user paging through one table doesn't disturb another tab.
     pub page_size: usize,
@@ -187,6 +209,7 @@ impl Tab {
             search: None,
             editing: None,
             completion: None,
+            editor_search: EditorSearchState::default(),
             page_size: 100,
             pending_source: None,
         }
@@ -721,6 +744,16 @@ impl AppCore {
             selected: s.selected,
             anchor: (0, 0), // overwritten by render_root once it knows the editor rect
         });
+        let editor_search_view =
+            if tab.editor_search.highlight && !tab.editor_search.needle.is_empty() {
+                Some(EditorSearchHighlight {
+                    matches: &tab.editor_search.matches,
+                    needle_len: tab.editor_search.needle.len(),
+                    current: tab.editor_search.current,
+                })
+            } else {
+                None
+            };
         let mut layout = RootLayout {
             mode: self.vim.mode(),
             focus: self.focus,
@@ -737,6 +770,7 @@ impl AppCore {
             result_view: &mut tab.result_view,
             result: result_display,
             completion: completion_view,
+            editor_search: editor_search_view,
         };
         self.last_layout = render_root(frame, area, &mut layout);
 
@@ -1093,6 +1127,12 @@ impl AppCore {
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
+        // The editor search prompt is modal: characters build the needle,
+        // Enter accepts, Esc cancels and restores the cursor.
+        if self.tabs[self.active_tab].editor_search.prompt_open {
+            self.handle_editor_search_key(key);
+            return;
+        }
         // The completion popup is modal while it's open: Tab cycles,
         // Enter accepts, Esc closes. Plain character keys fall through
         // so the user can keep typing and the popup refreshes against
@@ -1186,6 +1226,276 @@ impl AppCore {
             selected,
             prefix,
         });
+    }
+
+    // ----- editor search -----
+
+    /// Open the editor search prompt (`/` for forward, `?` for backward).
+    fn open_editor_search(&mut self, direction: SearchDirection) {
+        let tab = &mut self.tabs[self.active_tab];
+        tab.editor_search.saved_cursor = Some(tab.editor.cursor());
+        tab.editor_search.direction = direction;
+        tab.editor_search.prompt_open = true;
+        tab.editor_search.needle.clear();
+        tab.editor_search.matches.clear();
+        tab.editor_search.current = None;
+        let prompt_char = match direction {
+            SearchDirection::Forward => '/',
+            SearchDirection::Backward => '?',
+        };
+        self.status.message = format!("{prompt_char}");
+    }
+
+    /// Handle a key event while the editor search prompt is open.
+    fn handle_editor_search_key(&mut self, key: KeyEvent) {
+        match key.code {
+            CtKey::Esc => {
+                let tab = &mut self.tabs[self.active_tab];
+                if let Some((row, col)) = tab.editor_search.saved_cursor.take() {
+                    tab.editor.set_cursor(row, col);
+                }
+                tab.editor_search.prompt_open = false;
+                tab.editor_search.needle.clear();
+                tab.editor_search.matches.clear();
+                tab.editor_search.current = None;
+                tab.editor_search.highlight = false;
+                self.status.message = "search cancelled".into();
+            }
+            CtKey::Enter => {
+                let tab = &mut self.tabs[self.active_tab];
+                tab.editor_search.prompt_open = false;
+                tab.editor_search.highlight = true;
+                // Set current to whatever match the cursor is on.
+                self.sync_editor_search_current();
+                let count = self.tabs[self.active_tab].editor_search.matches.len();
+                let needle = self.tabs[self.active_tab].editor_search.needle.clone();
+                if count == 0 {
+                    self.status.message = format!("/{needle} · no matches");
+                } else {
+                    let idx = self.tabs[self.active_tab]
+                        .editor_search
+                        .current
+                        .map(|i| i + 1)
+                        .unwrap_or(1);
+                    self.status.message = format!("/{needle} · {idx}/{count}");
+                }
+            }
+            CtKey::Backspace => {
+                self.tabs[self.active_tab].editor_search.needle.pop();
+                self.refresh_editor_search_matches();
+                self.jump_to_editor_search_match();
+                let needle = self.tabs[self.active_tab].editor_search.needle.clone();
+                let prompt_char = match self.tabs[self.active_tab].editor_search.direction {
+                    SearchDirection::Forward => '/',
+                    SearchDirection::Backward => '?',
+                };
+                self.status.message = format!("{prompt_char}{needle}");
+            }
+            CtKey::Char(c) => {
+                self.tabs[self.active_tab].editor_search.needle.push(c);
+                self.refresh_editor_search_matches();
+                self.jump_to_editor_search_match();
+                let needle = self.tabs[self.active_tab].editor_search.needle.clone();
+                let prompt_char = match self.tabs[self.active_tab].editor_search.direction {
+                    SearchDirection::Forward => '/',
+                    SearchDirection::Backward => '?',
+                };
+                self.status.message = format!("{prompt_char}{needle}");
+            }
+            _ => {}
+        }
+    }
+
+    /// Recompute all match positions for the current needle.
+    fn refresh_editor_search_matches(&mut self) {
+        let needle = self.tabs[self.active_tab].editor_search.needle.clone();
+        if needle.is_empty() {
+            self.tabs[self.active_tab].editor_search.matches.clear();
+            self.tabs[self.active_tab].editor_search.current = None;
+            return;
+        }
+        let text = self.tabs[self.active_tab].editor.entire_text();
+        let matches = find_all(&text, &needle);
+        self.tabs[self.active_tab].editor_search.matches = matches;
+        self.sync_editor_search_current();
+    }
+
+    /// Jump the cursor to the best match given the current direction
+    /// and saved cursor position.
+    fn jump_to_editor_search_match(&mut self) {
+        let tab = &self.tabs[self.active_tab];
+        if tab.editor_search.matches.is_empty() {
+            return;
+        }
+        let (cur_row, cur_col) = tab
+            .editor_search
+            .saved_cursor
+            .unwrap_or_else(|| tab.editor.cursor());
+        let direction = tab.editor_search.direction;
+        let cursor_byte = row_col_to_offset(&tab.editor, cur_row, cur_col);
+
+        let idx = match direction {
+            SearchDirection::Forward => tab
+                .editor_search
+                .matches
+                .iter()
+                .position(|&(l, c)| {
+                    let m_byte = row_col_to_offset(&tab.editor, l, c);
+                    m_byte > cursor_byte
+                })
+                .or({
+                    // Wrap around.
+                    if !tab.editor_search.matches.is_empty() {
+                        Some(0)
+                    } else {
+                        None
+                    }
+                }),
+            SearchDirection::Backward => {
+                // Find the last match before the cursor.
+                let mut best: Option<usize> = None;
+                for (i, &(l, c)) in tab.editor_search.matches.iter().enumerate() {
+                    let m_byte = row_col_to_offset(&tab.editor, l, c);
+                    if m_byte < cursor_byte {
+                        best = Some(i);
+                    } else {
+                        break;
+                    }
+                }
+                best.or_else(|| {
+                    // Wrap around to the last match.
+                    if !tab.editor_search.matches.is_empty() {
+                        Some(tab.editor_search.matches.len() - 1)
+                    } else {
+                        None
+                    }
+                })
+            }
+        };
+
+        if let Some(i) = idx {
+            let (row, col) = self.tabs[self.active_tab].editor_search.matches[i];
+            self.tabs[self.active_tab].editor.set_cursor(row, col);
+            self.tabs[self.active_tab].editor_search.current = Some(i);
+        }
+    }
+
+    /// Set `current` to the index of the match the cursor currently sits on.
+    fn sync_editor_search_current(&mut self) {
+        let tab = &self.tabs[self.active_tab];
+        let (cur_row, cur_col) = tab.editor.cursor();
+        let needle_len = tab.editor_search.needle.len();
+        if needle_len == 0 {
+            self.tabs[self.active_tab].editor_search.current = None;
+            return;
+        }
+        let current = tab
+            .editor_search
+            .matches
+            .iter()
+            .position(|&(l, c)| l == cur_row && c <= cur_col && cur_col < c + needle_len)
+            .or_else(|| {
+                tab.editor_search
+                    .matches
+                    .iter()
+                    .position(|&(l, c)| l == cur_row && c == cur_col)
+            });
+        self.tabs[self.active_tab].editor_search.current = current;
+    }
+
+    /// Repeat the editor search in the original or reverse direction.
+    fn repeat_editor_search(&mut self, reverse: bool) {
+        let tab = &self.tabs[self.active_tab];
+        if tab.editor_search.needle.is_empty() {
+            self.status.message = "no previous search".into();
+            return;
+        }
+        if tab.editor_search.matches.is_empty() {
+            self.status.message = format!("/{} · no matches", tab.editor_search.needle);
+            return;
+        }
+        let direction = tab.editor_search.direction;
+        let go_forward = match (direction, reverse) {
+            (SearchDirection::Forward, false) => true,
+            (SearchDirection::Forward, true) => false,
+            (SearchDirection::Backward, false) => false,
+            (SearchDirection::Backward, true) => true,
+        };
+
+        let count = tab.editor_search.matches.len();
+        let cur = tab.editor_search.current.unwrap_or(0);
+        let next = if go_forward {
+            (cur + 1) % count
+        } else {
+            (cur + count - 1) % count
+        };
+
+        let (row, col) = self.tabs[self.active_tab].editor_search.matches[next];
+        self.tabs[self.active_tab].editor.set_cursor(row, col);
+        self.tabs[self.active_tab].editor_search.current = Some(next);
+        let needle = self.tabs[self.active_tab].editor_search.needle.clone();
+        self.status.message = format!("/{needle} · {}/{count}", next + 1);
+    }
+
+    // ----- substitute -----
+
+    /// Execute a substitute command (`:s/old/new/[g][c]` or `:%s/old/new/[g][c]`).
+    fn execute_substitute(
+        &mut self,
+        range: crate::commands::SubstituteRange,
+        pattern: &str,
+        replacement: &str,
+        global: bool,
+        confirm: bool,
+    ) {
+        if confirm {
+            // TODO(v1.1): implement interactive confirm mode with y/n/a/q.
+            // For v1, execute all replacements and report via status message.
+            self.status.message = "confirm flag not yet supported; replacing all matches".into();
+        }
+
+        let total_replacements = match range {
+            crate::commands::SubstituteRange::CurrentLine => {
+                let row = self.tabs[self.active_tab].editor.cursor_row();
+                let line = self.tabs[self.active_tab].editor.get_line(row).to_owned();
+                let (new_line, count) = if global {
+                    replace_all(&line, pattern, replacement)
+                } else {
+                    replace_first(&line, pattern, replacement)
+                };
+                if count > 0 {
+                    self.tabs[self.active_tab]
+                        .editor
+                        .replace_line(row, &new_line);
+                }
+                count
+            }
+            crate::commands::SubstituteRange::WholeBuffer => {
+                let line_count = self.tabs[self.active_tab].editor.line_count();
+                let mut total = 0usize;
+                for row in 0..line_count {
+                    let line = self.tabs[self.active_tab].editor.get_line(row).to_owned();
+                    let (new_line, count) = if global {
+                        replace_all(&line, pattern, replacement)
+                    } else {
+                        replace_first(&line, pattern, replacement)
+                    };
+                    if count > 0 {
+                        self.tabs[self.active_tab]
+                            .editor
+                            .replace_line(row, &new_line);
+                    }
+                    total += count;
+                }
+                total
+            }
+        };
+
+        if total_replacements == 0 {
+            self.status.message = format!("{pattern} not found");
+        } else {
+            self.status.message = format!("{total_replacements} replacement(s) made");
+        }
     }
 
     // ----- completion -----
@@ -2051,6 +2361,9 @@ impl AppCore {
                 }
             }
             Action::PromptComplete => self.complete_prompt(),
+            Action::OpenSearch(dir) => self.open_editor_search(dir),
+            Action::RepeatSearch => self.repeat_editor_search(false),
+            Action::RepeatSearchReverse => self.repeat_editor_search(true),
             Action::Operate { .. } => {}
         }
     }
@@ -2205,6 +2518,20 @@ impl AppCore {
                 } else {
                     self.status.message = format!("unknown command: {name}");
                 }
+            }
+            Command::Substitute {
+                range,
+                pattern,
+                replacement,
+                global,
+                confirm,
+            } => self.execute_substitute(range, &pattern, &replacement, global, confirm),
+            Command::NoHlSearch => {
+                self.tabs[self.active_tab].editor_search.highlight = false;
+                self.tabs[self.active_tab].editor_search.needle.clear();
+                self.tabs[self.active_tab].editor_search.matches.clear();
+                self.tabs[self.active_tab].editor_search.current = None;
+                self.status.message = "search highlight cleared".into();
             }
             Command::Empty => {}
             Command::Unknown(text) => {
@@ -3590,4 +3917,66 @@ fn longest_common_prefix(strings: &[&str]) -> String {
         }
     }
     first[..end].to_owned()
+}
+
+/// Find all occurrences of `needle` in `buffer`, returning
+/// `(line_idx, byte_col)` pairs. Literal substring, no regex.
+fn find_all(buffer: &str, needle: &str) -> Vec<(usize, usize)> {
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (line_idx, line) in buffer.lines().enumerate() {
+        let mut start = 0;
+        while let Some(pos) = line[start..].find(needle) {
+            out.push((line_idx, start + pos));
+            start += pos + needle.len().max(1);
+        }
+    }
+    out
+}
+
+/// Convert a (row, col) position in the editor buffer to a byte offset.
+fn row_col_to_offset(buffer: &EditorBuffer, row: usize, col: usize) -> usize {
+    let mut offset = 0usize;
+    for (i, line) in buffer.lines().iter().enumerate() {
+        if i == row {
+            return offset + col.min(line.len());
+        }
+        offset += line.len() + 1; // +1 for the synthetic newline
+    }
+    offset
+}
+
+/// Replace the first occurrence of `pattern` with `replacement` in `text`.
+/// Returns the new string and the number of replacements (0 or 1).
+fn replace_first(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
+    if let Some(pos) = text.find(pattern) {
+        let mut result = String::with_capacity(text.len() + replacement.len());
+        result.push_str(&text[..pos]);
+        result.push_str(replacement);
+        result.push_str(&text[pos + pattern.len()..]);
+        (result, 1)
+    } else {
+        (text.to_owned(), 0)
+    }
+}
+
+/// Replace every occurrence of `pattern` with `replacement` in `text`.
+/// Returns the new string and the count of replacements.
+fn replace_all(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
+    if pattern.is_empty() {
+        return (text.to_owned(), 0);
+    }
+    let mut result = String::with_capacity(text.len());
+    let mut count = 0usize;
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(pattern) {
+        result.push_str(&text[start..start + pos]);
+        result.push_str(replacement);
+        start += pos + pattern.len();
+        count += 1;
+    }
+    result.push_str(&text[start..]);
+    (result, count)
 }

@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::mode::Mode;
 
+/// Direction for the search prompt opened by `/` or `?`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SearchDirection {
+    #[default]
+    Forward,
+    Backward,
+}
+
 /// Effect produced by the state machine.
 ///
 /// The buffer applies actions; the state machine never mutates text directly.
@@ -23,6 +31,12 @@ pub enum Action {
     EnterMode(Mode),
     /// Submit the current command-line buffer.
     SubmitCommand(String),
+    /// Open the search prompt (`/` for forward, `?` for backward).
+    OpenSearch(SearchDirection),
+    /// Repeat the last search in the original direction (`n`).
+    RepeatSearch,
+    /// Repeat the last search in the reverse direction (`N`).
+    RepeatSearchReverse,
     /// The key was consumed but produced no observable effect (for example, a
     /// partially typed count or operator).
     Pending,

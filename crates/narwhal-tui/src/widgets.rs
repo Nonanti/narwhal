@@ -9,7 +9,7 @@ pub mod wizard;
 
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
-    CompletionItemView, CompletionPopupView, EditorBuffer,
+    CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow};
