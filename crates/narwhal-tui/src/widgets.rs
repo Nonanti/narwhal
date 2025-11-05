@@ -2,6 +2,7 @@
 
 pub mod editor;
 pub mod help;
+pub mod history;
 pub mod results;
 pub mod sidebar;
 pub mod wizard;
@@ -11,6 +12,7 @@ pub use editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer,
 };
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
+pub use history::{render_history_modal, HistoryModalState, HistoryRow};
 pub use results::{
     compare_values, render_results, CellEditView, CellPopup, ExplainPlanLine, ResultDisplay,
     ResultHitRegions, ResultView, SearchHighlight, SortDir,

@@ -143,6 +143,20 @@ impl Journal {
         guard.flush().await?;
         Ok(())
     }
+
+    /// Return up to `n` most-recent entries, newest first.
+    ///
+    /// Reads the JSONL file from disk (synchronous I/O) and returns the
+    /// last `n` lines in reverse order so the most recent entry comes
+    /// first. Malformed lines are silently skipped.
+    pub fn recent(&self, n: usize) -> Result<Vec<HistoryEntry>, HistoryError> {
+        let reader = JournalReader::open(&self.path)?;
+        let all: Vec<HistoryEntry> = reader.filter_map(|r| r.ok()).collect();
+        let start = all.len().saturating_sub(n);
+        let mut slice = all[start..].to_vec();
+        slice.reverse();
+        Ok(slice)
+    }
 }
 
 /// Synchronous iterator over journal entries. Reading is intentionally
@@ -259,6 +273,40 @@ mod tests {
         let reader = JournalReader::open(&path).unwrap();
         let entries: Vec<_> = reader.collect::<Result<_, _>>().unwrap();
         assert_eq!(entries.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn recent_returns_newest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("history.jsonl");
+        let journal = Journal::open(&path).await.unwrap();
+        for i in 0..5 {
+            journal
+                .append(&HistoryEntry::success(format!("SELECT {i}")))
+                .await
+                .unwrap();
+        }
+
+        let recent = journal.recent(3).unwrap();
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].sql, "SELECT 4");
+        assert_eq!(recent[1].sql, "SELECT 3");
+        assert_eq!(recent[2].sql, "SELECT 2");
+    }
+
+    #[tokio::test]
+    async fn recent_clamps_to_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("history.jsonl");
+        let journal = Journal::open(&path).await.unwrap();
+        journal
+            .append(&HistoryEntry::success("SELECT 1"))
+            .await
+            .unwrap();
+
+        let recent = journal.recent(200).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].sql, "SELECT 1");
     }
 
     #[tokio::test]

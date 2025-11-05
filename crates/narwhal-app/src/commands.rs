@@ -82,6 +82,8 @@ pub enum Command {
     PluginLoad(String),
     /// List loaded plugins and the commands they expose.
     PluginList,
+    /// Open the Ctrl+R history modal.
+    History,
     Help(Option<String>),
     Unknown(String),
     Empty,
@@ -143,6 +145,7 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "plug-list",
     "pluglist",
     "plugins",
+    "history",
     "new",
     "tabnew",
     "tabclose",
@@ -237,6 +240,7 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
         "plug-list",
         "list loaded plugins and the commands they expose",
     ),
+    ("history", "open the query history modal (also Ctrl+R)"),
     ("new", "open a new editor tab (also :tabnew)"),
     ("tabclose", "close the current editor tab (also :tc)"),
     ("tabnext", "switch to the next editor tab (also :tn)"),
@@ -267,6 +271,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "rm" => "remove",
         "plugload" | "plug" => "plug-load",
         "pluglist" | "plugins" => "plug-list",
+        "history" => "history",
         "tabnew" => "new",
         "tc" => "tabclose",
         "tn" => "tabnext",
@@ -366,6 +371,7 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "plug-list" | "pluglist" | "plugins" => Command::PluginList,
+        "history" => Command::History,
         "new" | "tabnew" => Command::NewTab,
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,

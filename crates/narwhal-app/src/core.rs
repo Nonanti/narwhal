@@ -12,12 +12,13 @@ use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{
     Column, ColumnHeader, ConnectionConfig, IsolationLevel, Row, TableKind, TableSchema,
 };
-use narwhal_history::Journal;
+use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
-    render_help_modal, render_root, render_wizard, translate_key_event, CellEditView, CellPopup,
-    CompletionItemView, CompletionPopupView, EditorBuffer, ExplainPlanLine, LayoutRegions, Pane,
-    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
-    SidebarView, SortDir, StatusBarView, Theme, WizardFieldView, WizardView,
+    render_help_modal, render_history_modal, render_root, render_wizard, translate_key_event,
+    CellEditView, CellPopup, CompletionItemView, CompletionPopupView, EditorBuffer,
+    ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane, ResultDisplay, ResultView,
+    RootLayout, SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, SortDir, StatusBarView,
+    Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -212,6 +213,32 @@ enum SidebarItem {
     },
 }
 
+/// State for the Ctrl+R history modal.
+#[derive(Debug, Clone)]
+pub struct HistoryState {
+    /// All entries loaded from the journal.
+    pub entries: Vec<HistoryEntry>,
+    /// Current filter string (case-insensitive substring).
+    pub filter: String,
+    /// Index into the filtered subset.
+    pub selected: usize,
+}
+
+impl HistoryState {
+    /// Return the subset of entries matching the current filter.
+    pub fn visible_entries(&self) -> Vec<&HistoryEntry> {
+        if self.filter.is_empty() {
+            self.entries.iter().collect()
+        } else {
+            let needle = self.filter.to_lowercase();
+            self.entries
+                .iter()
+                .filter(|e| e.sql.to_lowercase().contains(&needle))
+                .collect()
+        }
+    }
+}
+
 /// Pure, IO-free application state and behaviour.
 pub struct AppCore {
     registry: DriverRegistry,
@@ -225,7 +252,9 @@ pub struct AppCore {
     /// closes so scripts always target the currently-active
     /// connection.
     plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
-    history: Option<Arc<Journal>>,
+    history_journal: Option<Arc<Journal>>,
+    /// When `Some`, the Ctrl+R history modal is open.
+    history_state: Option<HistoryState>,
     session: Option<Session>,
     tabs: Vec<Tab>,
     active_tab: usize,
@@ -336,7 +365,8 @@ impl AppCore {
                 Arc::new(reg)
             },
             plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
-            history,
+            history_journal: history,
+            history_state: None,
             session: None,
             tabs: vec![Tab::new("untitled")],
             active_tab: 0,
@@ -499,6 +529,18 @@ impl AppCore {
         self.help_open
     }
 
+    /// Whether the history modal is currently open.
+    #[doc(hidden)]
+    pub fn history_is_open(&self) -> bool {
+        self.history_state.is_some()
+    }
+
+    /// Read-only accessor for the history modal state (for tests).
+    #[doc(hidden)]
+    pub fn history_state(&self) -> Option<&HistoryState> {
+        self.history_state.as_ref()
+    }
+
     /// Open the help modal. Primarily for tests; the UI path goes
     /// through `handle_key(F1)` or `handle_key(?)`.
     pub fn open_help(&mut self) {
@@ -507,6 +549,102 @@ impl AppCore {
 
     fn toggle_help(&mut self) {
         self.help_open = !self.help_open;
+    }
+
+    // ----- history modal -----
+
+    /// Open the Ctrl+R history modal. Reads the 200 most recent
+    /// entries from the journal synchronously via
+    /// `block_in_place + Handle::current().block_on`, the same
+    /// sync→async bridge used elsewhere in AppCore.
+    pub fn open_history(&mut self) {
+        let entries = if let Some(j) = &self.history_journal {
+            let j = Arc::clone(j);
+            match tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async { j.recent(200) })
+            }) {
+                Ok(e) => e,
+                Err(err) => {
+                    self.status.message = format!("history read failed: {err}");
+                    return;
+                }
+            }
+        } else {
+            self.status.message = "history disabled".into();
+            return;
+        };
+        if entries.is_empty() {
+            self.status.message = "no history entries".into();
+            return;
+        }
+        self.history_state = Some(HistoryState {
+            entries,
+            filter: String::new(),
+            selected: 0,
+        });
+        self.status.message =
+            "history: type to filter · Enter insert · Shift-Enter run · Esc close".into();
+    }
+
+    fn close_history(&mut self) {
+        self.history_state = None;
+    }
+
+    /// Handle key events while the history modal is open.
+    fn handle_history_key(&mut self, key: KeyEvent) {
+        let Some(state) = self.history_state.as_mut() else {
+            return;
+        };
+        match key.code {
+            CtKey::Esc => {
+                self.close_history();
+                self.status.message = "history closed".into();
+            }
+            CtKey::Up | CtKey::Char('k')
+                if key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let visible = state.visible_entries();
+                if !visible.is_empty() {
+                    state.selected = (state.selected + visible.len() - 1) % visible.len();
+                }
+            }
+            CtKey::Down | CtKey::Char('j')
+                if key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let visible = state.visible_entries();
+                if !visible.is_empty() {
+                    state.selected = (state.selected + 1) % visible.len();
+                }
+            }
+            CtKey::Enter => {
+                let sql = {
+                    let visible = state.visible_entries();
+                    visible.get(state.selected).map(|e| e.sql.clone())
+                };
+                if let Some(sql) = sql {
+                    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+                    self.close_history();
+                    self.tabs[self.active_tab].editor.insert_str(&sql);
+                    if shift {
+                        self.dispatch_current_statement(RunMode::Execute);
+                    } else {
+                        self.status.message =
+                            format!("inserted {} char(s) from history", sql.len());
+                    }
+                } else {
+                    self.close_history();
+                }
+            }
+            CtKey::Backspace => {
+                state.filter.pop();
+                state.selected = 0;
+            }
+            CtKey::Char(c) => {
+                state.filter.push(c);
+                state.selected = 0;
+            }
+            _ => {}
+        }
     }
 
     // ----- render -----
@@ -624,6 +762,32 @@ impl AppCore {
         if self.help_open {
             render_help_modal(frame, area, &self.theme);
         }
+
+        if let Some(state) = self.history_state.as_ref() {
+            let visible_data: Vec<(String, String, String)> = state
+                .visible_entries()
+                .iter()
+                .map(|e| {
+                    let ts = e.timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
+                    let conn = e.connection_name.as_deref().unwrap_or("<local>").to_owned();
+                    (ts, conn, e.sql.clone())
+                })
+                .collect();
+            let modal_state = HistoryModalState {
+                total: state.entries.len(),
+                visible: visible_data
+                    .iter()
+                    .map(|(ts, conn, sql)| HistoryRow {
+                        timestamp: ts.as_str(),
+                        connection: conn.as_str(),
+                        sql: sql.as_str(),
+                    })
+                    .collect(),
+                filter: &state.filter,
+                selected: state.selected,
+            };
+            render_history_modal(frame, area, &modal_state, &self.theme);
+        }
     }
 
     // ----- input -----
@@ -648,6 +812,11 @@ impl AppCore {
                     // consumed but no-op
                 }
             }
+            return;
+        }
+        // When the history modal is open, it intercepts all keys.
+        if self.history_state.is_some() {
+            self.handle_history_key(key);
             return;
         }
         if self.handle_global_key(key) {
@@ -901,6 +1070,10 @@ impl AppCore {
                 }
                 CtKey::Char('t') => {
                     self.new_tab();
+                    return true;
+                }
+                CtKey::Char('r') => {
+                    self.open_history();
                     return true;
                 }
                 _ => {}
@@ -1999,6 +2172,7 @@ impl AppCore {
             Command::Forget(name) => self.forget_password(&name),
             Command::PluginLoad(path) => self.load_plugin(&path),
             Command::PluginList => self.list_plugins(),
+            Command::History => self.open_history(),
             Command::NewTab => self.new_tab(),
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
@@ -2389,7 +2563,7 @@ impl AppCore {
         };
         let ctx = RunContext {
             target,
-            history: self.history.clone(),
+            history: self.history_journal.clone(),
             connection_id: session.config.id,
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
