@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use crate::clipboard::{Clipboard, InMemoryClipboard};
 use crate::commands::{parse, Command, DumpTarget, IsolationArg};
-use crate::completion::{gather as gather_completions, Completion, CompletionKind};
+use crate::completion::{detect_context, gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
@@ -951,6 +951,31 @@ impl AppCore {
         }
     }
 
+    /// Build a column-name lookup map from the session's schema cache.
+    ///
+    /// Keys are lowercased table names; values are `(schema_name, columns)`
+    /// tuples so each column completion can carry the schema as its detail
+    /// string. Returns an empty map when no session is active.
+    fn column_cache(&self) -> std::collections::HashMap<String, (String, Vec<ColumnHeader>)> {
+        let Some(session) = self.session.as_ref() else {
+            return std::collections::HashMap::new();
+        };
+        let mut map = std::collections::HashMap::new();
+        for (schema, tables) in &session.schemas {
+            for table in tables {
+                let key = table.name.to_ascii_lowercase();
+                // Only insert if not already present (first schema wins).
+                map.entry(key)
+                    .or_insert_with(|| (schema.name.clone(), Vec::new()));
+            }
+        }
+        // Merge any cached column data from the session.
+        for (table_lower, (schema_name, cols)) in &session.column_cache {
+            map.insert(table_lower.clone(), (schema_name.clone(), cols.clone()));
+        }
+        map
+    }
+
     /// Refresh-or-close the completion popup based on the current word
     /// prefix. Called after every insert-mode keystroke. See
     /// [`Self::trigger_completion`] for the manual (Tab / Ctrl-Space)
@@ -967,7 +992,11 @@ impl AppCore {
             .as_ref()
             .map(|s| s.schemas.as_slice())
             .unwrap_or(&[]);
-        let items = gather_completions(&prefix, schemas, 50);
+        let buffer_text = self.tabs[self.active_tab].editor.entire_text();
+        let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
+        let context = detect_context(&buffer_text, offset);
+        let columns = self.column_cache();
+        let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
             self.tabs[self.active_tab].completion = None;
             return;
@@ -1000,7 +1029,11 @@ impl AppCore {
             .as_ref()
             .map(|s| s.schemas.as_slice())
             .unwrap_or(&[]);
-        let items = gather_completions(&prefix, schemas, 50);
+        let buffer_text = self.tabs[self.active_tab].editor.entire_text();
+        let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
+        let context = detect_context(&buffer_text, offset);
+        let columns = self.column_cache();
+        let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
             self.status.message = format!("no completions for '{prefix}'");
             return;
@@ -1118,13 +1151,32 @@ impl AppCore {
             })
         });
         let source = match described {
-            Ok(ts) => Some(RowSource {
-                schema: schema.to_owned(),
-                table: table.to_owned(),
-                columns: ts.columns,
-                offset,
-                limit,
-            }),
+            Ok(ts) => {
+                let columns = ts.columns.clone();
+                // Cache column names for completion.
+                if let Some(session) = self.session.as_mut() {
+                    session.column_cache.insert(
+                        table.to_ascii_lowercase(),
+                        (
+                            schema.to_owned(),
+                            columns
+                                .iter()
+                                .map(|c| ColumnHeader {
+                                    name: c.name.clone(),
+                                    data_type: c.data_type.clone(),
+                                })
+                                .collect(),
+                        ),
+                    );
+                }
+                Some(RowSource {
+                    schema: schema.to_owned(),
+                    table: table.to_owned(),
+                    columns,
+                    offset,
+                    limit,
+                })
+            }
             Err(error) => {
                 debug!(target: "narwhal::app", error = %error, "describe_table for preview failed; rows will be read-only");
                 None
@@ -1205,14 +1257,32 @@ impl AppCore {
         });
         match result {
             Ok(ts) => {
+                let col_count = ts.columns.len();
+                let idx_count = ts.indexes.len();
+                let fk_count = ts.foreign_keys.len();
+                let table_schema = ts.table.schema.clone();
+                let table_name = ts.table.name.clone();
+                let columns = ts.columns.clone();
+                // Cache column names for completion.
+                if let Some(session) = self.session.as_mut() {
+                    session.column_cache.insert(
+                        table_name.to_ascii_lowercase(),
+                        (
+                            table_schema.clone(),
+                            columns
+                                .iter()
+                                .map(|c| ColumnHeader {
+                                    name: c.name.clone(),
+                                    data_type: c.data_type.clone(),
+                                })
+                                .collect(),
+                        ),
+                    );
+                }
                 self.tabs[self.active_tab].result_view.reset();
                 self.status.message = format!(
                     "{}.{}: {} cols·{} idx·{} fk",
-                    ts.table.schema,
-                    ts.table.name,
-                    ts.columns.len(),
-                    ts.indexes.len(),
-                    ts.foreign_keys.len()
+                    table_schema, table_name, col_count, idx_count, fk_count
                 );
                 self.tabs[self.active_tab].result = ResultState::TableDetail { schema: ts };
             }
