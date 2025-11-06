@@ -4,6 +4,7 @@ pub mod editor;
 pub mod help;
 pub mod history;
 pub mod results;
+pub mod row_detail;
 pub mod sidebar;
 pub mod wizard;
 
@@ -17,5 +18,6 @@ pub use results::{
     compare_values, render_results, CellEditView, CellPopup, ExplainPlanLine, ResultDisplay,
     ResultHitRegions, ResultView, SearchHighlight, SortDir,
 };
+pub use row_detail::{render_row_detail, RowDetailView};
 pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};
 pub use wizard::{render_wizard, WizardFieldView, WizardView};

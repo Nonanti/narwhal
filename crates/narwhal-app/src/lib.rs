@@ -19,7 +19,7 @@ pub mod terminal;
 pub mod wizard;
 
 pub use app::App;
-pub use core::{AppCore, HistoryState, ResultBundle, ResultState, StatusBar};
+pub use core::{AppCore, HistoryState, ResultBundle, ResultState, RowDetailState, StatusBar};
 pub use export::{ExportError, ExportFormat, QualifiedName};
 pub use registry::DriverRegistry;
 pub use session::Session;

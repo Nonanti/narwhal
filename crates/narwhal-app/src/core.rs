@@ -14,11 +14,12 @@ use narwhal_core::{
 };
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
-    render_help_modal, render_history_modal, render_root, render_wizard, translate_key_event,
-    CellEditView, CellPopup, CompletionItemView, CompletionPopupView, EditorBuffer,
-    EditorSearchHighlight, ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane,
-    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
-    SidebarView, SortDir, StatusBarView, Theme, WizardFieldView, WizardView,
+    render_help_modal, render_history_modal, render_root, render_row_detail, render_wizard,
+    translate_key_event, CellEditView, CellPopup, CompletionItemView, CompletionPopupView,
+    EditorBuffer, EditorSearchHighlight, ExplainPlanLine, HistoryModalState, HistoryRow,
+    LayoutRegions, Pane, ResultDisplay, ResultView, RootLayout, RowDetailView, SearchHighlight,
+    SidebarRow, SidebarRowKind, SidebarView, SortDir, StatusBarView, Theme, WizardFieldView,
+    WizardView,
 };
 use narwhal_vim::{Action, Mode, SearchDirection, Vim};
 use ratatui::layout::Rect;
@@ -185,6 +186,18 @@ pub struct EditorSearchState {
     pub highlight: bool,
 }
 
+/// In-flight row detail modal. `R` (or Shift+Enter) opens it from the
+/// result pane; Esc / `R` / Shift+Enter dismisses it.
+#[derive(Debug, Clone)]
+pub struct RowDetailState {
+    /// Original row index in the full result set.
+    pub row_index: usize,
+    pub columns: Vec<ColumnHeader>,
+    pub values: Vec<narwhal_core::Value>,
+    pub selected_column: usize,
+    pub scroll_offset: u16,
+}
+
 /// Bundle of per-statement results produced by a multi-statement batch.
 /// When the dispatch pipeline produces N result sets the user can cycle
 /// through them with `]r` / `[r` (or Ctrl-PgDown / Ctrl-PgUp); the
@@ -318,6 +331,10 @@ pub struct Tab {
     /// Pending row source to attach to the next `Rows` result. Populated
     /// by `preview_sidebar_selection` and consumed in `finish_run`.
     pub pending_source: Option<RowSource>,
+    /// When `Some`, the row detail modal is open on the result pane.
+    /// Sits at the same layer as the cell popup; only one of them
+    /// should be open at a time.
+    pub row_detail: Option<RowDetailState>,
 }
 
 impl Tab {
@@ -332,6 +349,7 @@ impl Tab {
             editor_search: EditorSearchState::default(),
             page_size: 100,
             pending_source: None,
+            row_detail: None,
         }
     }
 }
@@ -695,6 +713,18 @@ impl AppCore {
         self.history_state.as_ref()
     }
 
+    /// Whether the row detail modal is currently open on the active tab.
+    #[doc(hidden)]
+    pub fn row_detail_is_open(&self) -> bool {
+        self.tabs[self.active_tab].row_detail.is_some()
+    }
+
+    /// Read-only accessor for the row detail modal state (for tests).
+    #[doc(hidden)]
+    pub fn row_detail_state(&self) -> Option<&RowDetailState> {
+        self.tabs[self.active_tab].row_detail.as_ref()
+    }
+
     /// Open the help modal. Primarily for tests; the UI path goes
     /// through `handle_key(F1)` or `handle_key(?)`.
     pub fn open_help(&mut self) {
@@ -959,6 +989,19 @@ impl AppCore {
                 selected: state.selected,
             };
             render_history_modal(frame, area, &modal_state, &self.theme);
+        }
+
+        // Row detail modal — same layer as cell popup, rendered on
+        // top of the result pane.
+        if let Some(state) = self.tabs[self.active_tab].row_detail.as_ref() {
+            let view = RowDetailView {
+                columns: &state.columns,
+                values: &state.values,
+                selected_column: state.selected_column,
+                scroll_offset: state.scroll_offset,
+                row_index: state.row_index,
+            };
+            render_row_detail(frame, area, &view, &self.theme);
         }
     }
 
@@ -1956,6 +1999,12 @@ impl AppCore {
     }
 
     fn handle_results_key(&mut self, key: KeyEvent) {
+        // Row detail modal: sits at the same layer as the cell popup.
+        // When open, it intercepts navigation and dismiss keys.
+        if self.tabs[self.active_tab].row_detail.is_some() {
+            self.handle_row_detail_key(key);
+            return;
+        }
         if self.tabs[self.active_tab].editing.is_some() {
             self.handle_cell_edit_key(key);
             return;
@@ -2093,7 +2142,14 @@ impl AppCore {
                     self.status.message = "filter cleared".into();
                 }
             }
-            CtKey::Enter => self.open_cell_popup(),
+            CtKey::Enter => {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    self.open_row_detail();
+                } else {
+                    self.open_cell_popup();
+                }
+            }
+            CtKey::Char('R') => self.open_row_detail(),
             CtKey::Char('e') => self.start_cell_edit(),
             CtKey::Char('y') => self.yank_cell(),
             CtKey::Char('Y') => self.yank_row(),
@@ -2568,6 +2624,93 @@ impl AppCore {
             value_text: value.render(),
             row_index,
         });
+    }
+
+    // ----- row detail modal -----
+
+    fn open_row_detail(&mut self) {
+        let tab = &self.tabs[self.active_tab];
+        // Don't open if another modal at the same layer is already open.
+        if tab.row_detail.is_some() || tab.results.active().popup.is_some() || tab.editing.is_some()
+        {
+            return;
+        }
+        // Compute visible rows to map selected index → original row index.
+        // This avoids depending on `visible_indices` being populated by
+        // a prior render pass.
+        let Some(vis_selected) = tab.results.active().state.selected() else {
+            self.status.message = "no row selected".into();
+            return;
+        };
+        let (columns, rows) = match tab.results.active_state() {
+            ResultState::Rows { columns, rows, .. } => (columns.clone(), rows.clone()),
+            ResultState::Running { columns, rows, .. } => (columns.clone(), rows.clone()),
+            _ => {
+                self.status.message = "no result to inspect".into();
+                return;
+            }
+        };
+        let visible = tab.results.active().visible_rows(&columns, &rows);
+        let Some(&row_idx) = visible.get(vis_selected) else {
+            self.status.message = "no row selected".into();
+            return;
+        };
+        let Some(row) = rows.get(row_idx) else {
+            return;
+        };
+        self.tabs[self.active_tab].row_detail = Some(RowDetailState {
+            row_index: row_idx,
+            columns,
+            values: row.0.clone(),
+            selected_column: 0,
+            scroll_offset: 0,
+        });
+    }
+
+    fn handle_row_detail_key(&mut self, key: KeyEvent) {
+        let Some(state) = self.tabs[self.active_tab].row_detail.as_mut() else {
+            return;
+        };
+        let col_count = state.columns.len().saturating_sub(1);
+        match key.code {
+            CtKey::Up | CtKey::Char('k') => {
+                state.selected_column = state.selected_column.saturating_sub(1);
+                state.scroll_offset = 0;
+            }
+            CtKey::Down | CtKey::Char('j') => {
+                if state.selected_column < col_count {
+                    state.selected_column += 1;
+                }
+                state.scroll_offset = 0;
+            }
+            CtKey::PageUp => {
+                let page = 10usize; // approximate page size
+                state.selected_column = state.selected_column.saturating_sub(page);
+                state.scroll_offset = 0;
+            }
+            CtKey::PageDown => {
+                let page = 10usize;
+                state.selected_column = (state.selected_column + page).min(col_count);
+                state.scroll_offset = 0;
+            }
+            CtKey::Char('g') => {
+                state.selected_column = 0;
+                state.scroll_offset = 0;
+            }
+            CtKey::Char('G') => {
+                state.selected_column = col_count;
+                state.scroll_offset = 0;
+            }
+            CtKey::Esc | CtKey::Char('R') => {
+                self.tabs[self.active_tab].row_detail = None;
+                self.status.message = "row detail closed".into();
+            }
+            CtKey::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.tabs[self.active_tab].row_detail = None;
+                self.status.message = "row detail closed".into();
+            }
+            _ => {}
+        }
     }
 
     fn apply_action(&mut self, action: Action) {
@@ -3137,6 +3280,7 @@ impl AppCore {
         self.running = true;
         self.pending_result_entries_states.clear();
         self.pending_result_entries_views.clear();
+        self.tabs[self.active_tab].row_detail = None;
         // Reset the bundle to a single empty entry for the running state.
         self.tabs[self.active_tab].results = ResultBundle::single(
             ResultState::Running {
