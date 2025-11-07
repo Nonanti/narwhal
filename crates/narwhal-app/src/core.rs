@@ -6,6 +6,7 @@
 //! core is fully usable with `ratatui::backend::TestBackend` in tests.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
@@ -77,6 +78,13 @@ pub enum ResultState {
         columns: Vec<ColumnHeader>,
         rows: Vec<Row>,
         streaming: bool,
+        /// Moment the stream task was spawned. Used to compute elapsed
+        /// time in the streaming title bar.
+        started_at: Instant,
+        /// Instant of the last redraw triggered by a chunk. Throttles
+        /// renders to ≤10 Hz so a fast-arriving stream does not drown
+        /// the redraw loop.
+        last_render: Instant,
     },
     Affected {
         rows: u64,
@@ -108,6 +116,12 @@ pub enum ResultState {
     },
     TableDetail {
         schema: TableSchema,
+    },
+    /// Stream was cancelled by the user (F4 / Ctrl-C). Shows
+    /// how many rows were received before cancellation.
+    Cancelled {
+        rows_so_far: usize,
+        elapsed_ms: u64,
     },
     Error {
         message: String,
@@ -3281,6 +3295,7 @@ impl AppCore {
         self.pending_result_entries_states.clear();
         self.pending_result_entries_views.clear();
         self.tabs[self.active_tab].row_detail = None;
+        let now = Instant::now();
         // Reset the bundle to a single empty entry for the running state.
         self.tabs[self.active_tab].results = ResultBundle::single(
             ResultState::Running {
@@ -3290,6 +3305,8 @@ impl AppCore {
                 columns: Vec::new(),
                 rows: Vec::new(),
                 streaming: matches!(mode, RunMode::Stream),
+                started_at: now,
+                last_render: now,
             },
             ResultView::new(),
         );
@@ -3943,6 +3960,8 @@ impl AppCore {
                         columns: Vec::new(),
                         rows: Vec::new(),
                         streaming,
+                        started_at: Instant::now(),
+                        last_render: Instant::now(),
                     },
                     ResultView::new(),
                 );
@@ -3956,7 +3975,19 @@ impl AppCore {
                 }
             }
             RunUpdate::RowsAppended { rows: new_rows } => {
-                if let ResultState::Running { rows, .. } =
+                if let ResultState::Running {
+                    rows,
+                    last_render,
+                    streaming: true,
+                    ..
+                } = self.tabs[self.active_tab].results.active_state_mut()
+                {
+                    rows.extend(new_rows);
+                    let now = Instant::now();
+                    if now.duration_since(*last_render) >= Duration::from_millis(100) {
+                        *last_render = now;
+                    }
+                } else if let ResultState::Running { rows, .. } =
                     self.tabs[self.active_tab].results.active_state_mut()
                 {
                     rows.extend(new_rows);
@@ -3971,6 +4002,31 @@ impl AppCore {
                 self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
             }
             RunUpdate::Failed { error, elapsed_ms } => {
+                // If a streaming query was cancelled, produce a Cancelled
+                // state so the title bar shows the partial row count.
+                if let ResultState::Running {
+                    rows,
+                    streaming: true,
+                    started_at,
+                    ..
+                } = self.tabs[self.active_tab].results.active_state()
+                {
+                    if error.contains("cancelled") {
+                        let rows_so_far = rows.len();
+                        let elapsed_ms = started_at
+                            .elapsed()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                        *self.tabs[self.active_tab].results.active_state_mut() =
+                            ResultState::Cancelled {
+                                rows_so_far,
+                                elapsed_ms,
+                            };
+                        self.tabs[self.active_tab].results.active_mut().reset();
+                        return;
+                    }
+                }
                 *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Error {
                     message: error,
                     elapsed_ms,
@@ -4185,6 +4241,8 @@ fn display_from_state<'a>(
             total,
             columns,
             rows,
+            streaming,
+            started_at,
             ..
         } => ResultDisplay::Running {
             sql,
@@ -4192,6 +4250,8 @@ fn display_from_state<'a>(
             total: *total,
             columns,
             rows,
+            streaming: *streaming,
+            started_at: *started_at,
         },
         ResultState::Affected {
             rows,
@@ -4232,6 +4292,13 @@ fn display_from_state<'a>(
             execution_time_ms: *execution_time_ms,
         },
         ResultState::TableDetail { schema } => ResultDisplay::TableDetail { schema },
+        ResultState::Cancelled {
+            rows_so_far,
+            elapsed_ms,
+        } => ResultDisplay::Cancelled {
+            rows_so_far: *rows_so_far,
+            elapsed_ms: *elapsed_ms,
+        },
         ResultState::Error {
             message,
             elapsed_ms,

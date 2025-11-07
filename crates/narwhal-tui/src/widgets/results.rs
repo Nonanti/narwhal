@@ -235,6 +235,8 @@ pub enum ResultDisplay<'a> {
         total: usize,
         columns: &'a [ColumnHeader],
         rows: &'a [Row],
+        streaming: bool,
+        started_at: std::time::Instant,
     },
     Affected {
         rows: u64,
@@ -258,6 +260,10 @@ pub enum ResultDisplay<'a> {
     },
     TableDetail {
         schema: &'a TableSchema,
+    },
+    Cancelled {
+        rows_so_far: usize,
+        elapsed_ms: u64,
     },
     Error {
         message: &'a str,
@@ -418,6 +424,19 @@ pub fn render_results(
             );
             ResultHitRegions::default()
         }
+        ResultDisplay::Cancelled {
+            rows_so_far,
+            elapsed_ms,
+        } => {
+            let msg = format!(
+                "  cancelled at {} rows · {} ms",
+                format_count(*rows_so_far),
+                elapsed_ms
+            );
+            let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.muted)));
+            frame.render_widget(p, inner);
+            ResultHitRegions::default()
+        }
         ResultDisplay::Error {
             message,
             elapsed_ms,
@@ -434,9 +453,42 @@ pub fn render_results(
     regions
 }
 
+fn format_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 10_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+fn format_elapsed(d: std::time::Duration) -> String {
+    let total = d.as_secs_f64();
+    if total < 60.0 {
+        format!("{total:.1}s")
+    } else {
+        let mins = (total / 60.0).floor() as u64;
+        let secs = (total % 60.0).floor() as u64;
+        format!("{mins:02}:{secs:02}")
+    }
+}
+
 fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
     let base = match display {
         ResultDisplay::Empty => " results ".into(),
+        ResultDisplay::Running {
+            index: _,
+            total: _,
+            rows,
+            streaming: true,
+            started_at,
+            ..
+        } => {
+            let count = format_count(rows.len());
+            let elapsed = format_elapsed(started_at.elapsed());
+            format!(" streaming · {count} rows · {elapsed} ")
+        }
         ResultDisplay::Running {
             index, total, rows, ..
         } => format!(" results · running {index}/{total} · {} rows ", rows.len()),
@@ -454,11 +506,16 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
             streamed,
             ..
         } => {
-            let badge = if *streamed { "stream" } else { "exec" };
-            format!(
-                " results · {index}/{total} · {} rows · {elapsed_ms} ms · {badge} ",
-                rows.len()
-            )
+            if *streamed {
+                let count = format_count(rows.len());
+                format!(" results · {count} rows · {elapsed_ms}ms ")
+            } else {
+                let badge = "exec";
+                format!(
+                    " results · {index}/{total} · {} rows · {elapsed_ms} ms · {badge} ",
+                    rows.len()
+                )
+            }
         }
         ResultDisplay::Explain {
             execution_time_ms, ..
@@ -480,6 +537,13 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
                 schema.indexes.len(),
                 schema.foreign_keys.len()
             )
+        }
+        ResultDisplay::Cancelled {
+            rows_so_far,
+            elapsed_ms,
+        } => {
+            let count = format_count(*rows_so_far);
+            format!(" cancelled at {count} rows · {elapsed_ms}ms ")
         }
         ResultDisplay::Error { elapsed_ms, .. } => format!(" results · error · {elapsed_ms} ms "),
     };
@@ -933,5 +997,47 @@ fn draw_table(
         headers: header_rects,
         rows: row_rects,
         tabs: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn format_count_small() {
+        assert_eq!(format_count(0), "0");
+        assert_eq!(format_count(999), "999");
+        assert_eq!(format_count(9999), "9999");
+    }
+
+    #[test]
+    fn format_count_k_suffix() {
+        assert_eq!(format_count(10_000), "10.0k");
+        assert_eq!(format_count(12_345), "12.3k");
+        assert_eq!(format_count(999_999), "1000.0k");
+    }
+
+    #[test]
+    fn format_count_m_suffix() {
+        assert_eq!(format_count(1_000_000), "1.0M");
+        assert_eq!(format_count(1_234_567), "1.2M");
+        assert_eq!(format_count(12_345_678), "12.3M");
+    }
+
+    #[test]
+    fn format_elapsed_under_60s() {
+        assert_eq!(format_elapsed(Duration::from_millis(0)), "0.0s");
+        assert_eq!(format_elapsed(Duration::from_millis(100)), "0.1s");
+        assert_eq!(format_elapsed(Duration::from_millis(2100)), "2.1s");
+        assert_eq!(format_elapsed(Duration::from_millis(59999)), "60.0s");
+    }
+
+    #[test]
+    fn format_elapsed_over_60s() {
+        assert_eq!(format_elapsed(Duration::from_secs(60)), "01:00");
+        assert_eq!(format_elapsed(Duration::from_secs(125)), "02:05");
+        assert_eq!(format_elapsed(Duration::from_secs(3661)), "61:01");
     }
 }
