@@ -8,6 +8,21 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 use uuid::Uuid;
 
+/// Check whether a SQL statement is a DDL statement by inspecting its
+/// first token. Matches CREATE, DROP, ALTER, TRUNCATE, RENAME
+/// (case-insensitive).
+pub fn is_ddl_statement(sql: &str) -> bool {
+    let head = sql
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    matches!(
+        head.as_str(),
+        "CREATE" | "DROP" | "ALTER" | "TRUNCATE" | "RENAME"
+    )
+}
+
 /// How the worker should execute a statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunMode {
@@ -73,7 +88,15 @@ pub enum RunUpdate {
     /// The current statement failed; the batch is aborted.
     Failed { error: String, elapsed_ms: u64 },
     /// The whole batch has terminated.
-    AllDone { successes: usize, failures: usize },
+    AllDone {
+        successes: usize,
+        failures: usize,
+        /// Whether any successful statement in the batch was DDL.
+        ddl: bool,
+    },
+    /// A debounced schema refresh is due. Sent by the debounce timer
+    /// task, not by the run worker.
+    SchemaRefresh,
 }
 
 /// Handle to the in-flight statement.
@@ -94,6 +117,7 @@ pub fn spawn_run(
                 .send(RunUpdate::AllDone {
                     successes: 0,
                     failures: 0,
+                    ddl: false,
                 })
                 .await;
             return;
@@ -132,6 +156,7 @@ pub fn spawn_run(
                         .send(RunUpdate::AllDone {
                             successes: 0,
                             failures: total,
+                            ddl: false,
                         })
                         .await;
                     return;
@@ -142,6 +167,7 @@ pub fn spawn_run(
 
         let mut successes = 0;
         let mut failures = 0;
+        let mut ddl = false;
 
         for (i, sql) in request.statements.iter().enumerate() {
             let _ = tx
@@ -166,7 +192,12 @@ pub fn spawn_run(
             record_history(&ctx, sql, &outcome).await;
 
             match &outcome {
-                StatementOutcome::Ok { .. } => successes += 1,
+                StatementOutcome::Ok { .. } => {
+                    successes += 1;
+                    if is_ddl_statement(sql) {
+                        ddl = true;
+                    }
+                }
                 StatementOutcome::Err { .. } => {
                     failures += 1;
                     break;
@@ -179,6 +210,7 @@ pub fn spawn_run(
             .send(RunUpdate::AllDone {
                 successes,
                 failures,
+                ddl,
             })
             .await;
     });
@@ -352,5 +384,42 @@ async fn record_history(ctx: &RunContext, sql: &str, outcome: &StatementOutcome)
     }
     if let Err(error) = journal.append(&entry).await {
         warn!(target: "narwhal::run", error = %error, "history append failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ddl_statement;
+
+    #[test]
+    fn ddl_classifier_matches_keywords() {
+        assert!(is_ddl_statement("CREATE TABLE t (id INT)"));
+        assert!(is_ddl_statement("DROP TABLE t"));
+        assert!(is_ddl_statement("ALTER TABLE t ADD col INT"));
+        assert!(is_ddl_statement("TRUNCATE TABLE t"));
+        assert!(is_ddl_statement("RENAME TABLE t TO u"));
+    }
+
+    #[test]
+    fn ddl_classifier_case_insensitive() {
+        assert!(is_ddl_statement("create table t (id int)"));
+        assert!(is_ddl_statement("drop table t"));
+        assert!(is_ddl_statement("CrEaTe TABLE t (id INT)"));
+    }
+
+    #[test]
+    fn ddl_classifier_leading_whitespace() {
+        assert!(is_ddl_statement("   CREATE TABLE t (id INT)"));
+        assert!(is_ddl_statement("\n\tDROP TABLE t"));
+    }
+
+    #[test]
+    fn ddl_classifier_rejects_non_ddl() {
+        assert!(!is_ddl_statement("SELECT * FROM t"));
+        assert!(!is_ddl_statement("INSERT INTO t VALUES (1)"));
+        assert!(!is_ddl_statement("UPDATE t SET x = 1"));
+        assert!(!is_ddl_statement("DELETE FROM t"));
+        assert!(!is_ddl_statement(""));
+        assert!(!is_ddl_statement("   "));
     }
 }

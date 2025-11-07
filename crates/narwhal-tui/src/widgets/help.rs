@@ -71,6 +71,10 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
                 keys: ":q",
                 description: "quit",
             },
+            CheatsheetEntry {
+                keys: ":refresh",
+                description: "re-fetch schema tree for active connection",
+            },
         ],
     },
     CheatsheetSection {
