@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+mod ddl;
 mod tls;
 mod types;
 
@@ -646,6 +647,10 @@ impl Connection for PostgresConnection {
             foreign_keys,
             unique_constraints,
         })
+    }
+
+    async fn fetch_ddl(&mut self, schema: &str, name: &str) -> Result<String> {
+        ddl::build_create_table(self, schema, name).await
     }
 
     async fn ping(&mut self) -> Result<()> {

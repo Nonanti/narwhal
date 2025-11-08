@@ -119,6 +119,27 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
         ],
     },
     CheatsheetSection {
+        title: "Sidebar",
+        entries: &[
+            CheatsheetEntry {
+                keys: "j / k / ↑ / ↓",
+                description: "navigate",
+            },
+            CheatsheetEntry {
+                keys: "Enter",
+                description: "describe table",
+            },
+            CheatsheetEntry {
+                keys: "o",
+                description: "preview table data",
+            },
+            CheatsheetEntry {
+                keys: "d",
+                description: "inject DDL into editor",
+            },
+        ],
+    },
+    CheatsheetSection {
         title: "Results",
         entries: &[
             CheatsheetEntry {

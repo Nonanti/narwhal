@@ -498,6 +498,22 @@ impl Connection for SqliteConnection {
         })
     }
 
+    async fn fetch_ddl(&mut self, _schema: &str, name: &str) -> Result<String> {
+        let escaped = name.replace('"', "\"\"");
+        let sql =
+            format!("SELECT sql FROM sqlite_master WHERE type='table' AND name = \"{escaped}\"");
+        let result = self.run(&sql, &[]).await?;
+        match result
+            .rows
+            .into_iter()
+            .next()
+            .and_then(|r| r.0.into_iter().next())
+        {
+            Some(Value::String(ddl)) => Ok(ddl),
+            _ => Err(Error::Schema(format!("DDL not found for table {name}"))),
+        }
+    }
+
     async fn ping(&mut self) -> Result<()> {
         self.execute_batch("SELECT 1").await
     }

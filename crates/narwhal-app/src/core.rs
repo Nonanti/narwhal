@@ -1851,6 +1851,7 @@ impl AppCore {
             }
             CtKey::Enter => self.activate_sidebar_selection(),
             CtKey::Char('o') => self.preview_sidebar_selection(),
+            CtKey::Char('d') => self.ddl_sidebar_selection(),
             _ => {}
         }
     }
@@ -1864,6 +1865,49 @@ impl AppCore {
             return;
         };
         self.run_preview(&schema, &name, 0);
+    }
+
+    /// Pressing `d` with a sidebar table focused fetches the DDL and
+    /// injects it into the editor at the cursor. No auto-run — the
+    /// user inspects and decides.
+    fn ddl_sidebar_selection(&mut self) {
+        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+            return;
+        };
+        let SidebarItem::Table { schema, name, .. } = item else {
+            self.status.message = "select a table to fetch DDL".into();
+            return;
+        };
+        self.inject_ddl(&schema, &name);
+    }
+
+    fn inject_ddl(&mut self, schema: &str, name: &str) {
+        let Some(session) = self.session.as_ref() else {
+            self.status.message = "no active connection".into();
+            return;
+        };
+        let pool = session.pool.clone();
+        let schema_owned = schema.to_owned();
+        let name_owned = name.to_owned();
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                let mut conn = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                conn.fetch_ddl(&schema_owned, &name_owned).await
+            })
+        });
+        match result {
+            Ok(ddl) => {
+                self.tabs[self.active_tab].editor.insert_str(&ddl);
+                self.status.message = format!("injected DDL for {schema}.{name}");
+                self.focus = Pane::Editor;
+            }
+            Err(e) => {
+                self.status.message = format!("DDL fetch failed: {e}");
+            }
+        }
     }
 
     /// Dispatch a `SELECT * FROM schema.table LIMIT n OFFSET k` and attach

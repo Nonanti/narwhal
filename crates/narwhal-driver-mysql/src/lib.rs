@@ -449,6 +449,29 @@ impl Connection for MysqlConnection {
         })
     }
 
+    async fn fetch_ddl(&mut self, schema: &str, name: &str) -> Result<String> {
+        let qualified = format!(
+            "`{}`.`{}`",
+            schema.replace('`', "``"),
+            name.replace('`', "``")
+        );
+        let sql = format!("SHOW CREATE TABLE {qualified}");
+        let result = self.execute(&sql, &[]).await?;
+        // SHOW CREATE TABLE returns columns: Table, Create Table, ...
+        // The DDL is in column index 1.
+        match result
+            .rows
+            .into_iter()
+            .next()
+            .and_then(|r| r.0.into_iter().nth(1))
+        {
+            Some(Value::String(ddl)) => Ok(ddl),
+            _ => Err(Error::Schema(format!(
+                "DDL not found for table {schema}.{name}"
+            ))),
+        }
+    }
+
     async fn ping(&mut self) -> Result<()> {
         self.with_conn(|conn| {
             Box::pin(async move {
