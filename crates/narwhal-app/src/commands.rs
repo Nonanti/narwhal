@@ -95,6 +95,20 @@ pub enum Command {
     },
     /// Clear search highlighting (`:nohlsearch`).
     NoHlSearch,
+    /// Save the current editor buffer as a named snippet (`:save <name>`).
+    SaveSnippet {
+        name: String,
+    },
+    /// Load a named snippet into a new editor tab (`:load <name>`).
+    LoadSnippet {
+        name: String,
+    },
+    /// Delete a named snippet (`:rm-snippet <name>`).
+    RemoveSnippet {
+        name: String,
+    },
+    /// Open the snippets modal (`:snippets`).
+    ListSnippets,
     Unknown(String),
     Empty,
 }
@@ -178,6 +192,11 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "h",
     "nohlsearch",
     "noh",
+    "save",
+    "load",
+    "rm-snippet",
+    "rmsnippet",
+    "snippets",
 ];
 
 /// Short descriptions for built-in commands, looked up by `:help <name>`.
@@ -274,6 +293,19 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
         "nohlsearch",
         "clear search highlighting in the editor (also :noh)",
     ),
+    (
+        "save",
+        "save the current editor buffer as a named snippet (:save <name>)",
+    ),
+    (
+        "load",
+        "load a named snippet into a new editor tab (:load <name>)",
+    ),
+    ("rm-snippet", "delete a named snippet (:rm-snippet <name>)"),
+    (
+        "snippets",
+        "open the snippets modal to browse and load saved queries",
+    ),
 ];
 
 /// Map an alias token back to its primary command key so that `:help o`
@@ -303,6 +335,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "tp" | "tabprevious" => "tabprev",
         "h" => "help",
         "noh" => "nohlsearch",
+        "rmsnippet" => "rm-snippet",
         other => other,
     }
 }
@@ -410,6 +443,34 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "nohlsearch" | "noh" => Command::NoHlSearch,
+        "save" => {
+            if arg.is_empty() {
+                Command::Unknown("save: snippet name required".into())
+            } else {
+                Command::SaveSnippet {
+                    name: arg.to_owned(),
+                }
+            }
+        }
+        "load" => {
+            if arg.is_empty() {
+                Command::Unknown("load: snippet name required".into())
+            } else {
+                Command::LoadSnippet {
+                    name: arg.to_owned(),
+                }
+            }
+        }
+        "rm-snippet" | "rmsnippet" => {
+            if arg.is_empty() {
+                Command::Unknown("rm-snippet: snippet name required".into())
+            } else {
+                Command::RemoveSnippet {
+                    name: arg.to_owned(),
+                }
+            }
+        }
+        "snippets" => Command::ListSnippets,
         _ => {
             // Try substitute: s/pat/rep/[gc] or %s/pat/rep/[gc]
             if let Some(cmd) = try_parse_substitute(trimmed) {

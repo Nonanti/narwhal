@@ -6,6 +6,7 @@ pub mod history;
 pub mod results;
 pub mod row_detail;
 pub mod sidebar;
+pub mod snippets;
 pub mod wizard;
 
 pub use editor::{
@@ -20,4 +21,5 @@ pub use results::{
 };
 pub use row_detail::{render_row_detail, RowDetailView};
 pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};
+pub use snippets::{render_snippets_modal, SnippetsModalState};
 pub use wizard::{render_wizard, WizardFieldView, WizardView};

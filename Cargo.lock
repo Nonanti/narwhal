@@ -2319,6 +2319,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "crossterm",
+ "directories",
  "futures",
  "insta",
  "narwhal-config",

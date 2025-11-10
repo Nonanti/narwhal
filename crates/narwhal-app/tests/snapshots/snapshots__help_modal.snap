@@ -44,10 +44,10 @@ expression: "snapshot_core_sized(&mut core, 120, 50)"
 │                           │  g / G                       jump to first / last row        │                           │
 │                           │  :next / :prev               page through results            │                           │
 │                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
+│                           │ Snippets                                                     │                           │
+│                           │  :save <name>                save editor buffer as a named sn│                           │
+│                           │  :load <name>                load a snippet into a new tab   │                           │
+│                           │  :rm-snippet <name>          delete a saved snippet          │                           │
 │                           └──────────────────────────────────────────────────────────────┘                           │
 │                                ││                                                                                    │
 └────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
