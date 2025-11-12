@@ -26,6 +26,12 @@
 //!     --   result.rows_affected: integer or nil
 //!     --   result.elapsed_ms   : integer
 //!     -- mutate in place; return value is ignored
+//!
+//! narwhal.set_timeout(seconds)
+//!     -- Override the default 5 s execution budget for this plugin's
+//!     -- command handlers.  0 disables the timeout entirely.  Call at
+//!     -- the top level of the script (not inside a handler) so the
+//!     -- budget takes effect on the next invocation.
 //! ```
 //!
 //! Values inside `result.rows` are rendered as strings — round-tripping
@@ -61,15 +67,63 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use mlua::{Function, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue};
+use mlua::{
+    Function, HookTriggers, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue,
+    VmState,
+};
 use narwhal_plugin::{
     ColumnHeader, CommandContext, CommandDescriptor, CommandOutcome, Plugin, PluginError,
     PluginResult, QueryResult, Row, SqlExecutor, Value,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tokio::task;
+
+/// Default execution budget for a plugin command handler. Long enough
+/// for any reasonable result-pane transformation, short enough to be
+/// obvious when something went wrong.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Tracks elapsed time for a single plugin invocation against a
+/// configured budget. Used inside the mlua hook callback to decide
+/// whether the invocation has exceeded its time limit.
+struct InvocationTimeout {
+    started_at: Instant,
+    budget: Duration,
+}
+
+impl InvocationTimeout {
+    fn new(budget: Duration) -> Self {
+        Self {
+            started_at: Instant::now(),
+            budget: budget.max(Duration::from_millis(1)),
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.started_at.elapsed()
+    }
+
+    fn exceeded(&self) -> bool {
+        self.elapsed() >= self.budget
+    }
+}
+
+/// Read the per-plugin timeout budget from `narwhal._timeout_budget`.
+/// Returns `None` when the plugin hasn't called `narwhal.set_timeout`
+/// (the caller should fall back to [`DEFAULT_TIMEOUT`]).
+fn read_timeout_budget(lua: &Lua) -> Option<Duration> {
+    let narwhal: Table = lua.globals().get("narwhal").ok()?;
+    let secs: f64 = narwhal.get("_timeout_budget").ok()?;
+    Some(if secs > 0.0 {
+        Duration::from_secs_f64(secs)
+    } else {
+        Duration::MAX // 0, negative, or NaN → disable timeout
+    })
+}
 
 /// Lua-backed plugin. Wraps a single Lua VM together with the metadata
 /// the host needs to look it up.
@@ -300,6 +354,19 @@ fn install_api(
     })?;
     narwhal.set("register_transform", register_transform)?;
 
+    // narwhal.set_timeout(seconds)
+    //
+    // Override the default 5 s execution budget for this plugin's
+    // command handlers. 0 disables the timeout entirely. Call at the
+    // top level of the script (not inside a handler) so the budget
+    // takes effect on the next invocation.
+    let set_timeout = lua.create_function(|lua, secs: f64| {
+        let narwhal: Table = lua.globals().get("narwhal")?;
+        narwhal.set("_timeout_budget", secs)?;
+        Ok(())
+    })?;
+    narwhal.set("set_timeout", set_timeout)?;
+
     lua.globals().set("narwhal", narwhal)?;
     Ok(())
 }
@@ -348,10 +415,76 @@ fn invoke_command(
     let handler: Function = commands
         .get(name)
         .map_err(|e| PluginError::Runtime(format!("handler '{name}' is not a function: {e}")))?;
-    let returned: LuaValue = handler
-        .call(argument.to_owned())
-        .map_err(|e| PluginError::Handler(e.to_string()))?;
+
+    let budget = read_timeout_budget(lua).unwrap_or(DEFAULT_TIMEOUT);
+    let returned: LuaValue = call_handler_with_timeout(lua, &handler, argument, budget)?;
+
     outcome_from_lua(returned).map_err(PluginError::Handler)
+}
+
+/// Call a Lua handler function with an optional execution timeout.
+///
+/// When `budget` is [`Duration::MAX`] (timeout disabled via
+/// `narwhal.set_timeout(0)`), the handler runs without any hook.
+/// Otherwise an mlua line-hook is installed that checks
+/// [`InvocationTimeout::exceeded`] on every line boundary. When the
+/// budget is exceeded the hook raises a `RuntimeError` that propagates
+/// back as [`PluginError::Timeout`].
+///
+/// The hook is always removed after the handler returns (or errors) so
+/// the next invocation doesn't inherit this one's budget.
+fn call_handler_with_timeout(
+    lua: &Lua,
+    handler: &Function,
+    argument: &str,
+    budget: Duration,
+) -> PluginResult<LuaValue> {
+    if budget == Duration::MAX {
+        return handler
+            .call(argument.to_owned())
+            .map_err(|e| PluginError::Handler(e.to_string()));
+    }
+
+    let timeout_state = Arc::new(Mutex::new(InvocationTimeout::new(budget)));
+    let timeout_hook = timeout_state.clone();
+    let timeout_err = timeout_state.clone();
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let timed_out_hook = timed_out.clone();
+
+    lua.set_hook(HookTriggers::EVERY_LINE, move |_lua, _debug| {
+        let t = timeout_hook
+            .lock()
+            .map_err(|_| mlua::Error::RuntimeError("timeout mutex poisoned".into()))?;
+        if t.exceeded() {
+            timed_out_hook.store(true, Ordering::Relaxed);
+            Err(mlua::Error::RuntimeError(format!(
+                "plugin timed out after {:.1}s",
+                t.elapsed().as_secs_f64()
+            )))
+        } else {
+            Ok(VmState::Continue)
+        }
+    });
+
+    let result = handler.call(argument.to_owned());
+    lua.remove_hook();
+
+    // If the handler returned a value (even if the timeout flag is
+    // also set due to a race), prefer the successful result — the
+    // plugin *did* finish, just barely over budget.
+    match result {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            if timed_out.load(Ordering::Relaxed) {
+                let elapsed = timeout_err.lock().map(|t| t.elapsed()).unwrap_or(budget);
+                Err(PluginError::Timeout {
+                    elapsed_secs: elapsed.as_secs_f64(),
+                })
+            } else {
+                Err(PluginError::Handler(e.to_string()))
+            }
+        }
+    }
 }
 
 fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, String> {

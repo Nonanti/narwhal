@@ -43,6 +43,9 @@ pub enum PluginError {
     /// The dispatched name isn't bound by any plugin.
     #[error("unknown plugin command: {0}")]
     Unknown(String),
+    /// The plugin exceeded its execution budget and was interrupted.
+    #[error("plugin timed out after {elapsed_secs:.1}s")]
+    Timeout { elapsed_secs: f64 },
 }
 
 pub type PluginResult<T> = std::result::Result<T, PluginError>;

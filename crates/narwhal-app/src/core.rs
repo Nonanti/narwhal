@@ -3332,6 +3332,15 @@ impl AppCore {
             Err(PluginError::Unknown(name)) => {
                 self.status.message = format!("unknown command: {name}");
             }
+            Err(PluginError::Timeout { elapsed_secs }) => {
+                let plugin_name = self
+                    .plugins
+                    .plugin_for(command)
+                    .map(|p| p.name().to_owned())
+                    .unwrap_or_else(|| command.to_owned());
+                self.status.message =
+                    format!("plugin {plugin_name}: timed out after {elapsed_secs:.1}s");
+            }
             Err(error) => {
                 self.status.message = format!("plugin error: {error}");
             }
