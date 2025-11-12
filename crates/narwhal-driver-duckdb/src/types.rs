@@ -52,7 +52,10 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
         ValueRef::Float(v) => Value::Float(f64::from(v)),
         ValueRef::Double(v) => Value::Float(v),
         ValueRef::Decimal(d) => Value::String(d.to_string()),
-        ValueRef::Text(bytes) => Value::String(String::from_utf8_lossy(bytes).into_owned()),
+        ValueRef::Text(bytes) => match std::str::from_utf8(bytes) {
+            Ok(s) => Value::String(s.to_owned()),
+            Err(_) => Value::Bytes(bytes.to_vec()),
+        },
         ValueRef::Blob(bytes) => Value::Bytes(bytes.to_vec()),
         ValueRef::Date32(days) => Value::String(format!("date({days})")),
         ValueRef::Time64(unit, ticks) => Value::String(format!("time({})", scaled(unit, ticks))),

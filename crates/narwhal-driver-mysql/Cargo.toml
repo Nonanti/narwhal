@@ -25,3 +25,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 uuid = { workspace = true }
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["mysql"] }
+tempfile = "3.13"
