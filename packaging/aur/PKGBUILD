@@ -1,0 +1,23 @@
+# Maintainer: <packager-name> <packager-email>
+pkgname=narwhal
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="A TUI database client"
+arch=('x86_64' 'aarch64')
+url="https://github.com/berkant/narwhal"
+license=('MIT' 'Apache')
+depends=('postgresql-libs' 'mariadb-libs' 'gcc-libs')
+makedepends=('cargo' 'pkgconf')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')  # filled at release time
+
+build() {
+    cd "$pkgname-$pkgver"
+    cargo build --release --bin narwhal
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm755 "target/release/narwhal" "$pkgdir/usr/bin/narwhal"
+    install -Dm644 "LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
