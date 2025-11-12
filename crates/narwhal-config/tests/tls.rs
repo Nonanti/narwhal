@@ -1,0 +1,137 @@
+//! TLS/SSL configuration tests (serde round-trip + validation).
+//!
+//! These tests verify the TOML schema and config-level validation only;
+//! live TLS handshake tests require a configured TLS-enabled database
+//! and are gated behind driver-level feature flags.
+
+use std::path::PathBuf;
+
+use narwhal_config::{ConfigError, ConnectionsFile};
+use narwhal_core::SslMode;
+
+/// 1. Round-trip: a TOML with all four TLS fields parses and the
+///    deserialised values match.
+#[test]
+fn config_parses_ssl_fields() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440000"
+name = "prod-postgres"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+port = 5432
+database = "analytics"
+username = "reader"
+ssl_mode = "verify-full"
+ssl_root_cert = "/etc/ssl/certs/ca-bundle.crt"
+ssl_cert = "/etc/ssl/client-cert.pem"
+ssl_key = "/etc/ssl/client-key.pem"
+"#;
+
+    let file = ConnectionsFile::load_from_str(toml).expect("parse should succeed");
+    assert_eq!(file.connections.len(), 1);
+
+    let conn = &file.connections[0];
+    assert_eq!(conn.name, "prod-postgres");
+    assert_eq!(conn.driver, "postgres");
+    assert_eq!(conn.params.ssl_mode, SslMode::VerifyFull);
+    assert_eq!(
+        conn.params.ssl_root_cert,
+        Some(PathBuf::from("/etc/ssl/certs/ca-bundle.crt"))
+    );
+    assert_eq!(
+        conn.params.ssl_cert,
+        Some(PathBuf::from("/etc/ssl/client-cert.pem"))
+    );
+    assert_eq!(
+        conn.params.ssl_key,
+        Some(PathBuf::from("/etc/ssl/client-key.pem"))
+    );
+}
+
+/// 2. verify-ca / verify-full without ssl_root_cert should reject at
+///    config load time.
+#[test]
+fn verify_ca_without_root_cert_rejects() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440001"
+name = "bad-tls"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+database = "analytics"
+username = "reader"
+ssl_mode = "verify-ca"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(result.is_err(), "should reject verify-ca without root cert");
+    match result.unwrap_err() {
+        ConfigError::Validation(msg) => {
+            assert!(
+                msg.contains("ssl_root_cert"),
+                "error should mention ssl_root_cert, got: {msg}"
+            );
+        }
+        other => panic!("expected ConfigError::Validation, got: {other}"),
+    }
+}
+
+/// 3. sqlite with non-disable ssl_mode should reject at config load time.
+#[test]
+fn sqlite_with_non_disable_rejects() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440002"
+name = "local-sqlite"
+driver = "sqlite"
+
+[connection.params]
+path = "/tmp/test.db"
+ssl_mode = "require"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(
+        result.is_err(),
+        "should reject sqlite with ssl_mode=require"
+    );
+    match result.unwrap_err() {
+        ConfigError::Validation(msg) => {
+            assert!(
+                msg.contains("disable") && msg.contains("sqlite"),
+                "error should mention sqlite and disable, got: {msg}"
+            );
+        }
+        other => panic!("expected ConfigError::Validation, got: {other}"),
+    }
+}
+
+/// 4. TOML missing all SSL fields parses, ssl_mode defaults to Prefer
+///    for network drivers.
+#[test]
+fn default_ssl_mode_prefer_for_network() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440003"
+name = "plain-mysql"
+driver = "mysql"
+
+[connection.params]
+host = "localhost"
+username = "root"
+"#;
+
+    let file = ConnectionsFile::load_from_str(toml).expect("parse should succeed");
+    assert_eq!(file.connections.len(), 1);
+
+    let conn = &file.connections[0];
+    assert_eq!(conn.params.ssl_mode, SslMode::Prefer);
+    assert!(conn.params.ssl_root_cert.is_none());
+    assert!(conn.params.ssl_cert.is_none());
+    assert!(conn.params.ssl_key.is_none());
+}

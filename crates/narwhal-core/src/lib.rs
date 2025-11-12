@@ -17,7 +17,7 @@ pub mod value;
 
 pub use cancel::CancelHandle;
 pub use capabilities::Capabilities;
-pub use connection::{Connection, ConnectionConfig, ConnectionParams, IsolationLevel};
+pub use connection::{Connection, ConnectionConfig, ConnectionParams, IsolationLevel, SslMode};
 pub use driver::DatabaseDriver;
 pub use error::{Error, Result};
 pub use schema::{

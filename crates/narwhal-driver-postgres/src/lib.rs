@@ -31,7 +31,7 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
 
-use crate::tls::{make_tls_connector, SslMode};
+use crate::tls::{make_tls_connector, InternalSslMode};
 use crate::types::{column_to_value, Param};
 
 /// PostgreSQL driver. The current implementation uses `NoTls`; configurable
@@ -87,11 +87,11 @@ impl DatabaseDriver for PostgresDriver {
         password: Option<&str>,
     ) -> Result<Box<dyn Connection>> {
         let connection_string = build_connection_string(config, password)?;
-        let sslmode = SslMode::from_options(&config.params.options)?;
+        let sslmode = InternalSslMode::from_params(&config.params)?;
         debug!(target: "narwhal::postgres", sslmode = %sslmode.as_str(), "establishing connection");
 
         let client = match sslmode {
-            SslMode::Disable => {
+            InternalSslMode::Disable => {
                 let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;
@@ -99,7 +99,7 @@ impl DatabaseDriver for PostgresDriver {
                 client
             }
             other => {
-                let connector = make_tls_connector(other)?;
+                let connector = make_tls_connector(other, &config.params)?;
                 let (client, connection) = tokio_postgres::connect(&connection_string, connector)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;

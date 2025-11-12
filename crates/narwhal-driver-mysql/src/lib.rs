@@ -14,11 +14,12 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use mysql_async::prelude::*;
-use mysql_async::{Conn, Opts, OptsBuilder, Params};
+use mysql_async::{ClientIdentity, Conn, Opts, OptsBuilder, Params, SslOpts};
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
     Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
-    Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
+    Row as CoreRow, RowStream, Schema, SslMode, Table, TableKind, TableSchema, UniqueConstraint,
+    Value,
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info};
@@ -106,6 +107,36 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
     if let Some(db) = config.params.database.as_deref() {
         builder = builder.db_name(Some(db));
     }
+
+    // Wire TLS options from the connection params.
+    if config.params.ssl_mode != SslMode::Disable {
+        let mut ssl_opts = SslOpts::default();
+
+        if let Some(path) = &config.params.ssl_root_cert {
+            ssl_opts = ssl_opts.with_root_certs(vec![path.clone().into()]);
+        }
+
+        if config.params.ssl_cert.is_some() && config.params.ssl_key.is_some() {
+            let cert_path = config.params.ssl_cert.clone();
+            let key_path = config.params.ssl_key.clone();
+            let identity = ClientIdentity::new(cert_path.unwrap().into(), key_path.unwrap().into());
+            ssl_opts = ssl_opts.with_client_identity(Some(identity));
+        }
+
+        // For verify-ca / verify-full, enforce server certificate
+        // verification. For prefer/require, skip it.
+        let skip_domain = !matches!(
+            config.params.ssl_mode,
+            SslMode::VerifyCa | SslMode::VerifyFull
+        );
+        let accept_invalid_certs = matches!(config.params.ssl_mode, SslMode::Prefer);
+
+        ssl_opts = ssl_opts.with_danger_skip_domain_validation(skip_domain);
+        ssl_opts = ssl_opts.with_danger_accept_invalid_certs(accept_invalid_certs);
+
+        builder = builder.ssl_opts(ssl_opts);
+    }
+
     Ok(Opts::from(builder))
 }
 
