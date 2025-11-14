@@ -20,8 +20,8 @@ expression: snapshot_core(&mut core)
 │                                ││                                                                                    │
 │                                │└────────────────────────────────────────────────────────────────────────────────────┘
 │                                │┌ results ───────────────────────────────────────────────────────────────────────────┐
-│                                ││  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-│
-│                                ││                                                                                    │
+│                                ││  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer,      │
+│                                ││Ctrl-Space completes                                                                │
 │                                ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │

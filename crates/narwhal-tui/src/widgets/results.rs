@@ -368,7 +368,8 @@ pub fn render_results(
             let p = Paragraph::new(Span::styled(
                 "  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-Space completes",
                 Style::default().fg(theme.muted),
-            ));
+            ))
+            .wrap(Wrap { trim: false });
             frame.render_widget(p, content_area);
             ResultHitRegions::default()
         }
