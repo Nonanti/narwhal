@@ -111,6 +111,31 @@ ssl_mode = "require"
     }
 }
 
+/// 3b. Backwards-compat: a sqlite (or duckdb) connection WITHOUT any
+///     ssl_mode field still parses.  The default is `Prefer` but
+///     validation tolerates it for file-local drivers — anything else
+///     would break every pre-TLS connections.toml that exists in the
+///     wild.
+#[test]
+fn sqlite_without_ssl_mode_still_loads() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440099"
+name = "legacy-sqlite"
+driver = "sqlite"
+
+[connection.params]
+path = "/tmp/legacy.db"
+"#;
+
+    let file = ConnectionsFile::load_from_str(toml).expect(
+        "sqlite without an explicit ssl_mode must still parse \
+         (default Prefer is silently tolerated for file-local drivers)",
+    );
+    assert_eq!(file.connections.len(), 1);
+    assert_eq!(file.connections[0].driver, "sqlite");
+}
+
 /// 4. TOML missing all SSL fields parses, ssl_mode defaults to Prefer
 ///    for network drivers.
 #[test]
