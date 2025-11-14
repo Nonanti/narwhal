@@ -62,6 +62,45 @@ Coming after the crate name is finalised — see the release notes.
 
 ![wizard](./docs/img/wizard.png)
 
+### `connections.toml` schema
+
+Named connections live in `~/.config/narwhal/connections.toml`.  One
+`[[connection]]` block per database; `[connection.params]` carries the
+driver-specific options.  The field names match the
+[`ConnectionParams`](./crates/narwhal-core/src/connection.rs) struct —
+in particular `username` (not `user`) is the canonical name.
+
+```toml
+# Local SQLite — the file path is the only required param.
+[[connection]]
+id     = "00000000-0000-0000-0000-000000000001"
+name   = "smoke"
+driver = "sqlite"
+
+[connection.params]
+path = "/tmp/narwhal-smoke.db"
+
+# Postgres on a non-default port, no TLS — typical local docker setup.
+[[connection]]
+id     = "00000000-0000-0000-0000-000000000002"
+name   = "demo-pg"
+driver = "postgres"
+
+[connection.params]
+host     = "127.0.0.1"
+port     = 5433
+username = "postgres"        # NOTE: `username`, not `user`
+password = "narwhal"
+database = "demo"
+ssl_mode = "disable"         # disable | prefer (default) | require | verify-ca | verify-full
+```
+
+File-local drivers (`sqlite`, `duckdb`) tolerate the default `prefer`
+so pre-TLS configs still load; the wire layer ignores it.  Network
+drivers (`postgres`, `mysql`, `clickhouse`) accept any of the five
+`ssl_mode` values plus optional `ssl_root_cert`, `ssl_cert`, `ssl_key`
+paths for mutual TLS.
+
 ## Keymap
 
 ### Global
