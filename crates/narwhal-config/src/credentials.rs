@@ -132,4 +132,33 @@ mod tests {
         let store = InMemoryStore::new();
         store.delete(Uuid::new_v4()).unwrap();
     }
+
+    /// Regression: the `keyring` crate (>= 3.x) ships zero default
+    /// features and falls back to a mock backend that accepts `set()`
+    /// and returns `None` from `get()`.  If our Cargo.toml ever loses
+    /// the platform-native / secret-service feature flags, every
+    /// production install would silently drop saved passwords on the
+    /// floor.  This test pins the workspace by asserting that the
+    /// default credential builder is NOT the mock one — the mock
+    /// reports `CredentialPersistence::EntryOnly`, every real backend
+    /// reports `UntilDelete` or `UntilReboot`.
+    #[test]
+    fn keyring_backend_is_not_mock() {
+        use keyring::credential::CredentialPersistence;
+
+        // `keyring::default` is `pub use mock as default` when no
+        // backend feature is enabled, so the persistence reported by
+        // its credential builder is `EntryOnly` — the smoking-gun for
+        // a misconfigured Cargo.toml.  Any real backend (linux-native,
+        // sync-secret-service, apple-native, windows-native) reports
+        // `UntilDelete` or `UntilReboot`.
+        let persistence = keyring::default::default_credential_builder().persistence();
+        assert!(
+            !matches!(persistence, CredentialPersistence::EntryOnly),
+            "keyring crate compiled WITHOUT a real backend feature \
+             flag — saved passwords would be silently lost. Enable \
+             one of: apple-native, windows-native, sync-secret-service, \
+             linux-native in workspace Cargo.toml."
+        );
+    }
 }

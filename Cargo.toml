@@ -63,7 +63,18 @@ mysql_common = { version = "0.32", default-features = false, features = ["chrono
 
 # Utilities
 directories = "5.0"
-keyring = "3.0"
+# Platform-specific backend features are MANDATORY in keyring 3.x.
+# Without them the crate silently falls back to a mock store that
+# accepts set() and returns None from get(), which means narwhal
+# would happily ask for a password, store it nowhere, and then fail
+# the next :open with 'no password'. crypto-rust avoids the OpenSSL
+# system dep on Linux.
+keyring = { version = "3.0", features = [
+    "apple-native",
+    "windows-native",
+    "sync-secret-service",
+    "crypto-rust",
+] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
