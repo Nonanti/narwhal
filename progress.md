@@ -54,3 +54,23 @@ In Progress
 ### Test Coverage Gaps:
 - Postgres DDL: no composite PK, JSONB, ARRAY, DEFAULT now(), identity, or computed column tests
 - DuckDB/SQLite: no view DDL test
+
+## Alan A Review — Multi-statement tabs + result lifecycle
+**Status:** ✅ Complete  
+**Output:** /tmp/review-a-multistatement.md  
+**Verdict:** ⚠️ Changes Requested
+
+### Critical (2):
+- K1: Tab-switch while query running → run updates land on wrong tab (core.rs:4205–4499, 1508–1516); originating tab stuck in Running forever; multi-statement `swap_remove(0)` corrupts non-active tab's bundle
+- K2: INSERT export column/table names unquoted (export.rs:269–277); reserved words (`order`, `from`, `key`, etc.) produce invalid SQL
+
+### High (2):
+- Y1: Cancellation detection via `error.contains("cancelled")` string match; non-streaming Cancel → Error (not Cancelled state) due to `streaming: true` guard (core.rs:4283–4308)
+- Y2: `extract_source_table` false-positive: `SELECT * FROM orders AS o JOIN users u ON ...` returns `Some("orders")` — wrong table; `AS` not in `is_clause_boundary` list (export.rs:392–401)
+
+### Medium (5):
+- O1: `format_count` lacks G/T suffix; 999,999 → "1000.0k" (results.rs:457); test asserts the wrong value
+- O2: CSV `\t` not in quoting set (export.rs:141); breaks TSV-mode readers
+- O3: `unwrap()` in `refresh_search_matches` at core.rs:2799 (AGENTS.md violation)
+- O4: `extract_source_table` doesn't handle quoted identifiers `"schema"."table"` → None (export.rs:432)
+- O5: `]r` on single-result silently no-ops — no user feedback (core.rs:4022)
