@@ -139,7 +139,9 @@ fn write_csv<W: Write>(
 }
 
 fn write_csv_field<W: Write>(writer: &mut W, field: &str) -> Result<(), ExportError> {
-    let needs_quoting = field.chars().any(|c| matches!(c, ',' | '"' | '\n' | '\r'));
+    let needs_quoting = field
+        .chars()
+        .any(|c| matches!(c, ',' | '"' | '\n' | '\r' | '\t'));
     if needs_quoting {
         writer.write_all(b"\"")?;
         for ch in field.chars() {
@@ -265,13 +267,17 @@ fn write_insert<W: Write>(
         return Ok(());
     }
 
-    // Build the column list once.
+    // Build the column list once, quoting every identifier so that
+    // reserved words like `order` or `from` produce valid SQL.
     let col_list: String = columns
         .iter()
-        .map(|c| c.name.as_str())
+        .map(|c| quote_ident(&c.name))
         .collect::<Vec<_>>()
         .join(", ");
-    let table_name = table.to_string();
+    let table_name = match &table.schema {
+        Some(s) => format!("{}.{}", quote_ident(s), quote_ident(&table.table)),
+        None => quote_ident(&table.table),
+    };
 
     for row in rows {
         write!(writer, "INSERT INTO {table_name} ({col_list}) VALUES (")
@@ -349,6 +355,23 @@ fn write_quoted_sql_string<W: Write>(writer: &mut W, s: &str) -> Result<(), Expo
     Ok(())
 }
 
+/// Double-quote a SQL identifier, escaping embedded double quotes by
+/// doubling them (`"` → `""`). Always quotes unconditionally so that
+/// reserved words like `order` or `from` are safe.
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Strip surrounding double quotes from a SQL identifier and unescape
+/// doubled quotes (`""` → `"`).
+fn unquote_ident(s: &str) -> String {
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        s[1..s.len() - 1].replace("\"\"", "\"")
+    } else {
+        s.to_owned()
+    }
+}
+
 /// Regex-based heuristic to extract a single-table source from SQL.
 ///
 /// Matches patterns like:
@@ -380,24 +403,25 @@ pub fn extract_source_table(sql: &str) -> Option<QualifiedName> {
         return None;
     }
 
-    // Check that what follows is a clause boundary or end-of-string.
     let rest_trimmed = rest.trim();
+
+    // End of query or clause boundary → single table.
     if rest_trimmed.is_empty() || is_clause_boundary(rest_trimmed) {
-        // Split schema.table if qualified.
-        if let Some(dot_pos) = ident.find('.') {
-            let schema = &ident[..dot_pos];
-            let table = &ident[dot_pos + 1..];
-            if !schema.is_empty() && !table.is_empty() {
-                return Some(QualifiedName {
-                    schema: Some(schema.to_owned()),
-                    table: table.to_owned(),
-                });
-            }
+        return Some(split_qualified(&ident));
+    }
+
+    // Multi-table indicator (JOIN, comma) → not a single table.
+    if is_multi_table_indicator(rest_trimmed) {
+        return None;
+    }
+
+    // Try to skip an alias ("AS alias" or bare non-keyword identifier),
+    // then re-check for end-of-query / clause boundary.
+    if let Some(after_alias) = skip_alias(rest_trimmed) {
+        let after_trimmed = after_alias.trim();
+        if after_trimmed.is_empty() || is_clause_boundary(after_trimmed) {
+            return Some(split_qualified(&ident));
         }
-        return Some(QualifiedName {
-            schema: None,
-            table: ident.clone(),
-        });
     }
 
     None
@@ -433,34 +457,62 @@ fn find_from_keyword(lower: &str) -> Option<usize> {
 
 /// Extract the first SQL identifier from `input`, returning the
 /// identifier and the remaining text. An identifier may be
-/// `schema.table` (two identifiers joined by a dot).
+/// `schema.table` (two identifiers joined by a dot). Supports both
+/// bare (`users`) and double-quoted (`"users"`) identifiers.
 fn extract_first_identifier(input: &str) -> (String, &str) {
     let bytes = input.as_bytes();
     let len = bytes.len();
-    let mut end = 0;
 
-    // First segment: [a-zA-Z_][a-zA-Z0-9_]*
-    if end < len && (bytes[end].is_ascii_alphabetic() || bytes[end] == b'_') {
-        end += 1;
-        while end < len && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-            end += 1;
-        }
-    } else {
+    // First segment: bare or quoted.
+    let end = extract_ident_segment(bytes, 0);
+    if end == 0 {
         return (String::new(), input);
     }
 
-    // Optional dot + second segment
-    if end < len && bytes[end] == b'.' {
-        let after_dot = end + 1;
-        if after_dot < len && (bytes[after_dot].is_ascii_alphabetic() || bytes[after_dot] == b'_') {
-            end = after_dot + 1;
-            while end < len && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-                end += 1;
-            }
+    // Optional dot + second segment.
+    let mut final_end = end;
+    if final_end < len && bytes[final_end] == b'.' {
+        let seg = extract_ident_segment(bytes, final_end + 1);
+        if seg > final_end + 1 {
+            final_end = seg;
         }
     }
 
-    (input[..end].to_owned(), &input[end..])
+    (input[..final_end].to_owned(), &input[final_end..])
+}
+
+/// Advance past one identifier segment starting at `start`.
+/// Returns the new position (== `start` if no identifier found).
+/// Handles both bare identifiers and `"quoted"` identifiers.
+fn extract_ident_segment(bytes: &[u8], start: usize) -> usize {
+    let len = bytes.len();
+    if start >= len {
+        return start;
+    }
+    if bytes[start] == b'"' {
+        // Quoted identifier: scan to the closing unescaped double-quote.
+        let mut i = start + 1;
+        while i < len {
+            if bytes[i] == b'"' {
+                if i + 1 < len && bytes[i + 1] == b'"' {
+                    i += 2; // escaped ""
+                } else {
+                    return i + 1; // closing quote
+                }
+            } else {
+                i += 1;
+            }
+        }
+        start // unclosed quote — treat as no identifier
+    } else if bytes[start].is_ascii_alphabetic() || bytes[start] == b'_' {
+        let mut i = start + 1;
+        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1;
+        }
+        i
+    } else {
+        start
+    }
 }
 
 /// Check whether `rest` starts with a SQL clause keyword, indicating
@@ -484,6 +536,97 @@ fn is_clause_boundary(rest: &str) -> bool {
         ";",
     ];
     keywords.iter().any(|kw| lower.starts_with(kw))
+}
+
+/// Split a possibly-quoted qualified identifier (`schema.table` or
+/// `"schema"."table"`) into a [`QualifiedName`], unquoting each part.
+fn split_qualified(ident: &str) -> QualifiedName {
+    let bytes = ident.as_bytes();
+    let len = bytes.len();
+
+    // Skip the first segment to find the dot separator.
+    let first_end = extract_ident_segment(bytes, 0);
+
+    if first_end < len && bytes[first_end] == b'.' {
+        let schema_raw = &ident[..first_end];
+        let table_raw = &ident[first_end + 1..];
+        let schema = unquote_ident(schema_raw);
+        let table = unquote_ident(table_raw);
+        if !schema.is_empty() && !table.is_empty() {
+            return QualifiedName {
+                schema: Some(schema),
+                table,
+            };
+        }
+    }
+
+    QualifiedName {
+        schema: None,
+        table: unquote_ident(ident),
+    }
+}
+
+/// Return `true` if `s` starts with a JOIN keyword or comma,
+/// indicating a multi-table query.
+fn is_multi_table_indicator(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    [
+        "join ", "inner ", "left ", "right ", "full ", "cross ", "natural ", ",",
+    ]
+    .iter()
+    .any(|kw| lower.starts_with(kw))
+}
+
+/// Try to skip an alias after a table name. Returns the remaining text
+/// after the alias, or `None` if no alias pattern was recognised.
+fn skip_alias(s: &str) -> Option<&str> {
+    let lower = s.to_ascii_lowercase();
+
+    // "AS <alias>" pattern.
+    if lower.starts_with("as ") || lower.starts_with("as\t") || lower.starts_with("as\n") {
+        let after_as = s["as".len()..].trim_start();
+        let (_alias, rest) = extract_first_identifier(after_as);
+        if _alias.is_empty() {
+            return None;
+        }
+        return Some(rest);
+    }
+
+    // Bare alias: a non-keyword identifier.
+    let (candidate, rest) = extract_first_identifier(s);
+    if candidate.is_empty() {
+        return None;
+    }
+
+    // Reject SQL keywords that can follow a table name but are not aliases.
+    let kw = candidate.to_ascii_lowercase();
+    let reserved = [
+        "where",
+        "group",
+        "having",
+        "order",
+        "limit",
+        "offset",
+        "union",
+        "intersect",
+        "except",
+        "for",
+        "lock",
+        "join",
+        "inner",
+        "left",
+        "right",
+        "full",
+        "cross",
+        "natural",
+        "on",
+        "using",
+    ];
+    if reserved.contains(&kw.as_str()) {
+        return None;
+    }
+
+    Some(rest)
 }
 
 #[cfg(test)]
@@ -746,6 +889,130 @@ mod tests {
             body,
             r#"[{"id":1,"name":"alice","tag":null},{"id":2,"name":"she said \"hi\"","tag":"with, comma"}]
 "#
+        );
+    }
+
+    // -- New tests for K2-A, Y2-A, O2 fixes ----------------------------------
+
+    #[test]
+    fn insert_quotes_reserved_columns() {
+        let columns = vec![
+            ColumnHeader {
+                name: "id".into(),
+                data_type: "INTEGER".into(),
+            },
+            ColumnHeader {
+                name: "order".into(),
+                data_type: "INTEGER".into(),
+            },
+            ColumnHeader {
+                name: "from".into(),
+                data_type: "TEXT".into(),
+            },
+        ];
+        let rows = vec![Row(vec![
+            Value::Int(1),
+            Value::Int(42),
+            Value::String("warehouse".into()),
+        ])];
+        let table = QualifiedName {
+            schema: None,
+            table: "orders".into(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.sql");
+        export_rows(&columns, &rows, ExportFormat::Insert, &path, Some(&table)).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        // All identifiers must be double-quoted.
+        assert!(
+            body.contains(r#"INSERT INTO "orders" ("id", "order", "from") VALUES"#),
+            "expected quoted identifiers, got: {body}"
+        );
+        // Verify the output is valid SQL by executing it in SQLite.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE orders (id INTEGER, \"order\" INTEGER, \"from\" TEXT);")
+            .unwrap();
+        conn.execute_batch(&body).unwrap();
+    }
+
+    #[test]
+    fn insert_quotes_schema_qualified_table() {
+        let columns = vec![ColumnHeader {
+            name: "id".into(),
+            data_type: "INT".into(),
+        }];
+        let rows = vec![Row(vec![Value::Int(1)])];
+        let table = QualifiedName {
+            schema: Some("public".into()),
+            table: "orders".into(),
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        write_insert(&mut buf, &table, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        assert!(
+            body.starts_with(r#"INSERT INTO "public"."orders""#),
+            "expected quoted schema.table, got: {body}"
+        );
+    }
+
+    #[test]
+    fn extract_source_table_unaliased_with_where() {
+        assert_eq!(
+            extract_source_table("SELECT * FROM users WHERE id > 5"),
+            Some(QualifiedName {
+                schema: None,
+                table: "users".into()
+            })
+        );
+    }
+
+    #[test]
+    fn extract_source_table_alias_with_where() {
+        // Single table with bare alias — should still extract the table.
+        assert_eq!(
+            extract_source_table("SELECT * FROM users u WHERE id > 5"),
+            Some(QualifiedName {
+                schema: None,
+                table: "users".into()
+            })
+        );
+    }
+
+    #[test]
+    fn extract_source_table_as_alias_join_returns_none() {
+        // Multi-table query with AS alias before JOIN.
+        assert_eq!(
+            extract_source_table("SELECT * FROM orders AS o JOIN users u ON o.uid = u.id"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_source_table_quoted_identifier() {
+        assert_eq!(
+            extract_source_table(r#"SELECT * FROM "public"."users""#),
+            Some(QualifiedName {
+                schema: Some("public".into()),
+                table: "users".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn csv_quotes_tab_character() {
+        let columns = vec![ColumnHeader {
+            name: "val".into(),
+            data_type: "TEXT".into(),
+        }];
+        let rows = vec![Row(vec![Value::String("a\tb".into())])];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.csv");
+        export_rows(&columns, &rows, ExportFormat::Csv, &path, None).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        // Tab-containing cell must be enclosed in double quotes.
+        assert!(
+            body.contains("\"a\tb\""),
+            "tab should trigger quoting, got: {body}"
         );
     }
 }
