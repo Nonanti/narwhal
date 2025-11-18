@@ -499,10 +499,8 @@ impl Connection for SqliteConnection {
     }
 
     async fn fetch_ddl(&mut self, _schema: &str, name: &str) -> Result<String> {
-        let escaped = name.replace('"', "\"\"");
-        let sql =
-            format!("SELECT sql FROM sqlite_master WHERE type='table' AND name = \"{escaped}\"");
-        let result = self.run(&sql, &[]).await?;
+        let sql = "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?";
+        let result = self.run(sql, &[Value::String(name.to_owned())]).await?;
         match result
             .rows
             .into_iter()
@@ -510,7 +508,7 @@ impl Connection for SqliteConnection {
             .and_then(|r| r.0.into_iter().next())
         {
             Some(Value::String(ddl)) => Ok(ddl),
-            _ => Err(Error::Schema(format!("DDL not found for table {name}"))),
+            _ => Err(Error::Schema(format!("DDL not found for {name}"))),
         }
     }
 
