@@ -51,11 +51,19 @@ impl SnippetStore {
 
     /// Save `sql` under `name`. Overwrites if the name already exists.
     /// Creates the root directory lazily on first write.
+    ///
+    /// Uses write-then-rename so the final `.sql` file is never
+    /// partially written: if the process crashes between the write and
+    /// the rename, only the `.tmp` file is left behind and the previous
+    /// content is intact. `rename` is atomic on POSIX within the same
+    /// filesystem.
     pub fn save(&self, name: &str, sql: &str) -> Result<()> {
         Self::validate_name(name)?;
         std::fs::create_dir_all(&self.root)?;
-        let path = self.root.join(format!("{name}.sql"));
-        std::fs::write(path, sql)?;
+        let tmp_path = self.root.join(format!(".{name}.sql.tmp"));
+        let final_path = self.root.join(format!("{name}.sql"));
+        std::fs::write(&tmp_path, sql)?;
+        std::fs::rename(&tmp_path, &final_path)?;
         Ok(())
     }
 

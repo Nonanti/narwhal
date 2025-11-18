@@ -101,7 +101,32 @@ fn remove_deletes_file() {
     );
 }
 
-/// 5. Tab-completion for `:load` includes snippet names.
+/// 5. Atomic write: save writes to a tmp file then renames.
+#[test]
+fn save_uses_atomic_rename() {
+    let dir = TempDir::new().unwrap();
+    let store = SnippetStore::new(dir.path().join("snippets"));
+
+    // First save
+    store.save("atomic", "SELECT 1").unwrap();
+    let loaded = store.load("atomic").unwrap();
+    assert_eq!(loaded, "SELECT 1");
+
+    // Overwrite — the file must contain the new content entirely, never
+    // a truncated intermediate state.
+    store.save("atomic", "SELECT 999").unwrap();
+    let loaded = store.load("atomic").unwrap();
+    assert_eq!(loaded, "SELECT 999");
+
+    // No leftover .tmp files after successful saves.
+    let tmp_path = dir.path().join("snippets").join(".atomic.sql.tmp");
+    assert!(
+        !tmp_path.exists(),
+        ".tmp file should not exist after successful save"
+    );
+}
+
+/// 6. Tab-completion for `:load` includes snippet names.
 #[test]
 fn tab_complete_includes_snippets() {
     let dir = TempDir::new().unwrap();

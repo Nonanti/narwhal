@@ -112,17 +112,26 @@ impl InvocationTimeout {
     }
 }
 
+/// Upper bound for a valid timeout budget (~31 years). Anything above
+/// this would overflow `Duration::from_secs_f64`; we treat it the same
+/// as "disable timeout" rather than panicking.
+const MAX_BUDGET_SECS: f64 = 1e9;
+
 /// Read the per-plugin timeout budget from `narwhal._timeout_budget`.
 /// Returns `None` when the plugin hasn't called `narwhal.set_timeout`
 /// (the caller should fall back to [`DEFAULT_TIMEOUT`]).
 fn read_timeout_budget(lua: &Lua) -> Option<Duration> {
     let narwhal: Table = lua.globals().get("narwhal").ok()?;
     let secs: f64 = narwhal.get("_timeout_budget").ok()?;
-    Some(if secs > 0.0 {
-        Duration::from_secs_f64(secs)
-    } else {
-        Duration::MAX // 0, negative, or NaN → disable timeout
-    })
+    // Guard against NaN, infinity, negative, and astronomically large
+    // values that would panic inside `Duration::from_secs_f64`.
+    Some(
+        if !secs.is_finite() || secs <= 0.0 || secs > MAX_BUDGET_SECS {
+            Duration::MAX
+        } else {
+            Duration::from_secs_f64(secs)
+        },
+    )
 }
 
 /// Lua-backed plugin. Wraps a single Lua VM together with the metadata
@@ -417,7 +426,7 @@ fn invoke_command(
         .map_err(|e| PluginError::Runtime(format!("handler '{name}' is not a function: {e}")))?;
 
     let budget = read_timeout_budget(lua).unwrap_or(DEFAULT_TIMEOUT);
-    let returned: LuaValue = call_handler_with_timeout(lua, &handler, argument, budget)?;
+    let returned: LuaValue = call_handler_with_timeout(lua, &handler, argument.to_owned(), budget)?;
 
     outcome_from_lua(returned).map_err(PluginError::Handler)
 }
@@ -433,15 +442,18 @@ fn invoke_command(
 ///
 /// The hook is always removed after the handler returns (or errors) so
 /// the next invocation doesn't inherit this one's budget.
-fn call_handler_with_timeout(
+///
+/// Generic over the argument type so both command dispatch (string arg)
+/// and transform dispatch (table arg) can share the timeout machinery.
+fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
     lua: &Lua,
     handler: &Function,
-    argument: &str,
+    argument: A,
     budget: Duration,
 ) -> PluginResult<LuaValue> {
     if budget == Duration::MAX {
         return handler
-            .call(argument.to_owned())
+            .call(argument)
             .map_err(|e| PluginError::Handler(e.to_string()));
     }
 
@@ -466,7 +478,7 @@ fn call_handler_with_timeout(
         }
     });
 
-    let result = handler.call(argument.to_owned());
+    let result = handler.call(argument);
     lua.remove_hook();
 
     // If the handler returned a value (even if the timeout flag is
@@ -542,6 +554,9 @@ fn invoke_transforms(
     if transforms.len().map(|n| n == 0).unwrap_or(true) {
         return (result, None);
     }
+    // Transform handlers are subject to the same timeout budget as
+    // command handlers — a buggy transform must not hang the TUI.
+    let budget = read_timeout_budget(lua).unwrap_or(DEFAULT_TIMEOUT);
     for handler in transforms.sequence_values::<Function>() {
         let handler = match handler {
             Ok(h) => h,
@@ -551,8 +566,8 @@ fn invoke_transforms(
             Ok(t) => t,
             Err(e) => return (result, Some(PluginError::Runtime(format!("encode: {e}")))),
         };
-        if let Err(e) = handler.call::<LuaValue>(table.clone()) {
-            return (result, Some(PluginError::Handler(e.to_string())));
+        if let Err(e) = call_handler_with_timeout(lua, &handler, table.clone(), budget) {
+            return (result, Some(e));
         }
         match result_from_lua(table) {
             Ok(r) => result = r,
