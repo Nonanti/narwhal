@@ -139,7 +139,7 @@ impl DatabaseDriver for ClickhouseDriver {
 
         // When using HTTPS, add the CA root certificate if provided.
         if config.params.ssl_mode != SslMode::Disable {
-            if let Some(path) = &config.params.ssl_root_cert {
+            let has_root_cert = if let Some(path) = &config.params.ssl_root_cert {
                 let bytes = std::fs::read(path).map_err(|e| {
                     Error::Config(format!(
                         "failed to read ssl_root_cert '{}': {e}",
@@ -149,14 +149,47 @@ impl DatabaseDriver for ClickhouseDriver {
                 let cert = reqwest::Certificate::from_pem(&bytes)
                     .map_err(|e| Error::Config(format!("failed to parse ssl_root_cert: {e}")))?;
                 client_builder = client_builder.add_root_certificate(cert);
+                true
+            } else {
+                false
+            };
+
+            // Determine certificate and hostname validation based on
+            // ssl_mode and whether an explicit CA was provided:
+            //
+            // | ssl_mode   | ssl_root_cert | accept_invalid_certs | accept_invalid_hostnames |
+            // |------------|---------------|----------------------|--------------------------|
+            // | Prefer     | None          | true                 | true                     |
+            // | Prefer     | Some          | false                | true                     |
+            // | Require    | None          | true                 | true                     |
+            // | Require    | Some          | false                | true                     |
+            // | VerifyCa   | *             | false                | true                     |
+            // | VerifyFull | *             | false                | false                    |
+            let accept_invalid_certs = match config.params.ssl_mode {
+                SslMode::VerifyCa | SslMode::VerifyFull => false,
+                // Prefer/Require: if user supplied a CA cert, honour it.
+                _ => !has_root_cert,
+            };
+            let accept_invalid_hostnames = !matches!(config.params.ssl_mode, SslMode::VerifyFull);
+
+            if has_root_cert && matches!(config.params.ssl_mode, SslMode::Prefer | SslMode::Require)
+            {
+                tracing::warn!(
+                    target: "narwhal::clickhouse",
+                    "ssl_root_cert is set with ssl_mode='{}'; \
+                     CA certificate will be validated but hostname will not — \
+                     use ssl_mode='verify-full' to also enforce hostname checking",
+                    match config.params.ssl_mode {
+                        SslMode::Prefer => "prefer",
+                        SslMode::Require => "require",
+                        _ => "unknown",
+                    }
+                );
             }
 
-            // For prefer/require, accept invalid certs; for verify-ca/verify-full, enforce.
-            let accept_invalid = !matches!(
-                config.params.ssl_mode,
-                SslMode::VerifyCa | SslMode::VerifyFull
-            );
-            client_builder = client_builder.danger_accept_invalid_certs(accept_invalid);
+            client_builder = client_builder
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .danger_accept_invalid_hostnames(accept_invalid_hostnames);
         }
 
         // Client identity (mTLS) is not directly supported by reqwest's

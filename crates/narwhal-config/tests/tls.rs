@@ -136,7 +136,84 @@ path = "/tmp/legacy.db"
     assert_eq!(file.connections[0].driver, "sqlite");
 }
 
-/// 4. TOML missing all SSL fields parses, ssl_mode defaults to Prefer
+/// 4a. Partial mTLS: only ssl_cert without ssl_key must be rejected.
+#[test]
+fn mtls_partial_cert_only_rejected() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440010"
+name = "partial-mtls"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+ssl_mode = "require"
+ssl_cert = "/etc/ssl/client-cert.pem"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(result.is_err(), "should reject ssl_cert without ssl_key");
+    match result.unwrap_err() {
+        ConfigError::Validation(msg) => {
+            assert!(
+                msg.contains("ssl_cert") && msg.contains("ssl_key"),
+                "error should mention both fields, got: {msg}"
+            );
+        }
+        other => panic!("expected ConfigError::Validation, got: {other}"),
+    }
+}
+
+/// 4b. Partial mTLS: only ssl_key without ssl_cert must be rejected.
+#[test]
+fn mtls_partial_key_only_rejected() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440011"
+name = "partial-mtls-key"
+driver = "clickhouse"
+
+[connection.params]
+host = "db.example.com"
+ssl_mode = "require"
+ssl_key = "/etc/ssl/client-key.pem"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(result.is_err(), "should reject ssl_key without ssl_cert");
+    match result.unwrap_err() {
+        ConfigError::Validation(msg) => {
+            assert!(
+                msg.contains("ssl_cert") && msg.contains("ssl_key"),
+                "error should mention both fields, got: {msg}"
+            );
+        }
+        other => panic!("expected ConfigError::Validation, got: {other}"),
+    }
+}
+
+/// 4c. Both ssl_cert and ssl_key set together passes validation.
+#[test]
+fn mtls_full_pair_accepted() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440012"
+name = "full-mtls"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+ssl_mode = "verify-full"
+ssl_root_cert = "/etc/ssl/certs/ca-bundle.crt"
+ssl_cert = "/etc/ssl/client-cert.pem"
+ssl_key = "/etc/ssl/client-key.pem"
+"#;
+
+    let file = ConnectionsFile::load_from_str(toml).expect("parse should succeed");
+    assert_eq!(file.connections.len(), 1);
+}
+
+/// 5. TOML missing all SSL fields parses, ssl_mode defaults to Prefer
 ///    for network drivers.
 #[test]
 fn default_ssl_mode_prefer_for_network() {

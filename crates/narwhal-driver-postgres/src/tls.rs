@@ -149,21 +149,21 @@ fn verified_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
 }
 
 fn insecure_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
-    let store = RootCertStore::empty();
-    let builder = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAny))
-        .with_no_client_auth();
-
-    // Even in require mode, if the user provides a client cert/key pair,
-    // we should send it. However, with a dangerous verifier we need to
-    // build the config differently.
-    // For simplicity in the insecure path, we skip client auth — the
-    // server isn't verifying our cert anyway if we're not verifying theirs.
-    let _ = params; // consumed for future use
-    let _ = store; // empty store needed for type inference
-
-    Ok(builder)
+    let verifier = Arc::new(AcceptAny);
+    // Even in require (insecure) mode, the server may demand a client
+    // certificate (mTLS). Honour ssl_cert + ssl_key when provided.
+    if let Some(key_pair) = load_client_cert_key(params)? {
+        ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_client_auth_cert(key_pair.certs, key_pair.key)
+            .map_err(|e| Error::Config(format!("invalid client cert/key pair: {e}")))
+    } else {
+        Ok(ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth())
+    }
 }
 
 #[derive(Debug)]
@@ -361,5 +361,76 @@ mod tests {
         assert!(err
             .to_string()
             .contains("ssl_cert is set but ssl_key is missing"));
+    }
+
+    /// Verify that `insecure_client_config` sends the client certificate
+    /// when `ssl_cert` and `ssl_key` are set (K1-C regression test).
+    ///
+    /// We cannot directly inspect `ClientConfig.client_auth_cert_resolver`
+    /// (it is private), but we can confirm that the function succeeds with
+    /// valid PEM files — prior to the fix it silently ignored them.
+    /// The complementary path (no cert/key → no client auth) is also tested.
+    #[test]
+    fn insecure_mode_sends_client_cert_when_provided() {
+        use std::io::Write;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        // Generate a self-signed cert+key via openssl-style PEM literals.
+        // These are syntactically valid but not signed by any real CA —
+        // that's fine because the insecure verifier accepts anything.
+        let cert_pem = include_str!("../tests/fixtures/client.crt");
+        let key_pem = include_str!("../tests/fixtures/client.key");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cert_path = dir.path().join("client.crt");
+        let key_path = dir.path().join("client.key");
+        std::fs::File::create(&cert_path)
+            .and_then(|mut f| f.write_all(cert_pem.as_bytes()))
+            .expect("write cert");
+        std::fs::File::create(&key_path)
+            .and_then(|mut f| f.write_all(key_pem.as_bytes()))
+            .expect("write key");
+
+        let params = ConnectionParams {
+            ssl_mode: SslMode::Require,
+            ssl_cert: Some(cert_path),
+            ssl_key: Some(key_path),
+            ..Default::default()
+        };
+
+        // This must succeed — before K1-C fix, the cert/key was ignored.
+        let config = insecure_client_config(&params)
+            .expect("insecure_client_config should succeed with valid cert+key");
+
+        // ClientConfig::client_auth_cert_resolver is private, but we can
+        // verify that the config was built with client auth by checking
+        // that the resolver is not the no-auth sentinel. The only way to
+        // do this without private API access is to compare against a
+        // known no-auth config.
+        let no_auth_params = ConnectionParams {
+            ssl_mode: SslMode::Require,
+            ..Default::default()
+        };
+        let no_auth_config = insecure_client_config(&no_auth_params)
+            .expect("insecure_client_config should succeed without cert");
+
+        // The configs should differ in their client auth setup.
+        // We verify this indirectly: format debug output differs.
+        let with_auth_debug = format!("{config:?}");
+        let without_auth_debug = format!("{no_auth_config:?}");
+        assert_ne!(
+            with_auth_debug, without_auth_debug,
+            "client auth config should differ between cert and no-cert paths"
+        );
+    }
+
+    /// Verify that `insecure_client_config` works without client cert.
+    #[test]
+    fn insecure_mode_works_without_client_cert() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let params = ConnectionParams::default();
+        let _config = insecure_client_config(&params)
+            .expect("insecure_client_config should succeed without cert");
     }
 }

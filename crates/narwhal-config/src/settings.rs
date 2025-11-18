@@ -131,6 +131,16 @@ impl ConnectionsFile {
 ///   config that landed before TLS fields existed.
 fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigError> {
     for conn in connections {
+        // ssl_cert and ssl_key must both be set or both absent.
+        let has_cert = conn.params.ssl_cert.is_some();
+        let has_key = conn.params.ssl_key.is_some();
+        if has_cert != has_key {
+            return Err(ConfigError::Validation(format!(
+                "connection '{}': ssl_cert and ssl_key must both be set or both absent",
+                conn.name
+            )));
+        }
+
         let is_file_driver = matches!(conn.driver.as_str(), "sqlite" | "duckdb");
 
         if is_file_driver
