@@ -460,6 +460,12 @@ pub struct AppCore {
     /// doesn't overwrite it silently. Cleared after it bubbles up.
     plugin_warning: Option<String>,
     running: bool,
+    /// Tab index that owns the in-flight run. Set to `Some(active_tab)`
+    /// when `dispatch_batch` fires; cleared to `None` on `AllDone`.
+    /// All `handle_run_update` / `finalize_statement` mutations target
+    /// this tab, not `active_tab`, so a mid-run tab switch cannot
+    /// corrupt a different tab's results.  (Bug K1-A fix.)
+    run_tab: Option<usize>,
     cancel_slot: ActiveCancel,
     should_quit: bool,
     wizard: Option<ConnectionWizard>,
@@ -590,6 +596,7 @@ impl AppCore {
             },
             plugin_warning: None,
             running: false,
+            run_tab: None,
             cancel_slot: Arc::new(Mutex::new(None)),
             should_quit: false,
             wizard: None,
@@ -717,6 +724,12 @@ impl AppCore {
 
     pub fn focus(&self) -> Pane {
         self.focus
+    }
+
+    /// Tab index that owns the in-flight run.  Falls back to
+    /// `active_tab` when no run is in progress (defensive default).
+    fn run_tab_index(&self) -> usize {
+        self.run_tab.unwrap_or(self.active_tab)
     }
 
     /// Read-only accessor for the most recent layout regions computed
@@ -3490,7 +3503,9 @@ impl AppCore {
     /// rescheduled. A migration with 50 DDL statements fires exactly
     /// one refresh.
     fn schedule_schema_refresh(&mut self) {
-        self.refresh_pending.store(true, Ordering::Relaxed);
+        // Release so the spawned task's Acquire swap sees this store
+        // even on weakly-ordered architectures (ARM64, POWER).  (Y4-B fix.)
+        self.refresh_pending.store(true, Ordering::Release);
         // Drop the previous task if any — aborting cancels its sleep.
         if let Some(handle) = self.refresh_task.take() {
             handle.abort();
@@ -3500,7 +3515,7 @@ impl AppCore {
         self.refresh_task = Some(
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                if pending.swap(false, Ordering::Relaxed) {
+                if pending.swap(false, Ordering::Acquire) {
                     let _ = tx.send(RunUpdate::SchemaRefresh).await;
                 }
             })
@@ -3566,6 +3581,7 @@ impl AppCore {
         };
         let request = RunRequest { statements, mode };
         self.running = true;
+        self.run_tab = Some(self.active_tab);
         self.pending_result_entries_states.clear();
         self.pending_result_entries_views.clear();
         self.tabs[self.active_tab].row_detail = None;
@@ -3974,6 +3990,10 @@ impl AppCore {
     }
 
     fn new_tab(&mut self) {
+        if self.running {
+            self.status.message = "cannot open a new tab while a query is running".into();
+            return;
+        }
         let name = format!("untitled-{}", self.next_tab_id);
         self.next_tab_id += 1;
         self.tabs.push(Tab::new(name));
@@ -3983,6 +4003,10 @@ impl AppCore {
     }
 
     fn close_tab(&mut self) {
+        if self.running {
+            self.status.message = "cannot close a tab while a query is running".into();
+            return;
+        }
         if self.tabs.len() == 1 {
             self.status.message = "last tab; use :q to quit".into();
             return;
@@ -3995,6 +4019,10 @@ impl AppCore {
     }
 
     fn cycle_tab(&mut self, delta: i32) {
+        if self.running {
+            self.status.message = "cannot switch tabs while a query is running".into();
+            return;
+        }
         if self.tabs.len() <= 1 {
             return;
         }
@@ -4204,10 +4232,13 @@ impl AppCore {
     }
 
     pub fn handle_run_update(&mut self, update: RunUpdate) {
+        // All mutations target the tab that *started* the run, not the
+        // tab the user may have switched to in the meantime (K1-A fix).
+        let rt = self.run_tab_index();
         match update {
             RunUpdate::StatementStarted { index, total, sql } => {
                 let streaming = matches!(
-                    self.tabs[self.active_tab].results.active_state(),
+                    self.tabs[rt].results.active_state(),
                     ResultState::Running {
                         streaming: true,
                         ..
@@ -4220,13 +4251,13 @@ impl AppCore {
                 // Note: `index` is 1-based, so index > 1 means we are
                 // past the first StatementStarted.
                 if index > 1 {
-                    let state = self.tabs[self.active_tab].results.states.swap_remove(0);
-                    let view = self.tabs[self.active_tab].results.views.swap_remove(0);
+                    let state = self.tabs[rt].results.states.swap_remove(0);
+                    let view = self.tabs[rt].results.views.swap_remove(0);
                     self.pending_result_entries_states.push(state);
                     self.pending_result_entries_views.push(view);
                 }
                 // Create a fresh entry for the new statement.
-                self.tabs[self.active_tab].results = ResultBundle::single(
+                self.tabs[rt].results = ResultBundle::single(
                     ResultState::Running {
                         sql: sql.clone(),
                         index,
@@ -4243,7 +4274,7 @@ impl AppCore {
             }
             RunUpdate::HeaderReady { columns: cols } => {
                 if let ResultState::Running { columns, .. } =
-                    self.tabs[self.active_tab].results.active_state_mut()
+                    self.tabs[rt].results.active_state_mut()
                 {
                     *columns = cols;
                 }
@@ -4254,7 +4285,7 @@ impl AppCore {
                     last_render,
                     streaming: true,
                     ..
-                } = self.tabs[self.active_tab].results.active_state_mut()
+                } = self.tabs[rt].results.active_state_mut()
                 {
                     rows.extend(new_rows);
                     let now = Instant::now();
@@ -4262,7 +4293,7 @@ impl AppCore {
                         *last_render = now;
                     }
                 } else if let ResultState::Running { rows, .. } =
-                    self.tabs[self.active_tab].results.active_state_mut()
+                    self.tabs[rt].results.active_state_mut()
                 {
                     rows.extend(new_rows);
                 }
@@ -4283,7 +4314,7 @@ impl AppCore {
                     streaming: true,
                     started_at,
                     ..
-                } = self.tabs[self.active_tab].results.active_state()
+                } = self.tabs[rt].results.active_state()
                 {
                     if error.contains("cancelled") {
                         let rows_so_far = rows.len();
@@ -4292,20 +4323,19 @@ impl AppCore {
                             .as_millis()
                             .try_into()
                             .unwrap_or(u64::MAX);
-                        *self.tabs[self.active_tab].results.active_state_mut() =
-                            ResultState::Cancelled {
-                                rows_so_far,
-                                elapsed_ms,
-                            };
-                        self.tabs[self.active_tab].results.active_mut().reset();
+                        *self.tabs[rt].results.active_state_mut() = ResultState::Cancelled {
+                            rows_so_far,
+                            elapsed_ms,
+                        };
+                        self.tabs[rt].results.active_mut().reset();
                         return;
                     }
                 }
-                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Error {
+                *self.tabs[rt].results.active_state_mut() = ResultState::Error {
                     message: error,
                     elapsed_ms,
                 };
-                self.tabs[self.active_tab].results.active_mut().reset();
+                self.tabs[rt].results.active_mut().reset();
             }
             RunUpdate::AllDone {
                 successes,
@@ -4313,18 +4343,19 @@ impl AppCore {
                 ddl,
             } => {
                 self.running = false;
+                self.run_tab = None;
 
                 // Build the final ResultBundle from collected entries.
                 // Push the current (last) active entry into the pending
                 // list first so everything is in order.
-                let current_state = self.tabs[self.active_tab].results.states.swap_remove(0);
-                let current_view = self.tabs[self.active_tab].results.views.swap_remove(0);
+                let current_state = self.tabs[rt].results.states.swap_remove(0);
+                let current_view = self.tabs[rt].results.views.swap_remove(0);
                 self.pending_result_entries_states.push(current_state);
                 self.pending_result_entries_views.push(current_view);
 
                 let states = std::mem::take(&mut self.pending_result_entries_states);
                 let views = std::mem::take(&mut self.pending_result_entries_views);
-                self.tabs[self.active_tab].results = if states.len() == 1 {
+                self.tabs[rt].results = if states.len() == 1 {
                     // Single result — no strip, behaviour-preserving.
                     ResultBundle::single(
                         states.into_iter().next().unwrap_or(ResultState::Empty),
@@ -4436,8 +4467,9 @@ impl AppCore {
         rows_affected: Option<u64>,
         streamed: bool,
     ) {
+        let rt = self.run_tab_index();
         let (columns, rows, index, total, sql) =
-            match std::mem::take(self.tabs[self.active_tab].results.active_state_mut()) {
+            match std::mem::take(self.tabs[rt].results.active_state_mut()) {
                 ResultState::Running {
                     columns,
                     rows,
@@ -4447,12 +4479,12 @@ impl AppCore {
                     ..
                 } => (columns, rows, index, total, sql),
                 other => {
-                    *self.tabs[self.active_tab].results.active_state_mut() = other;
+                    *self.tabs[rt].results.active_state_mut() = other;
                     return;
                 }
             };
         if columns.is_empty() {
-            *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Affected {
+            *self.tabs[rt].results.active_state_mut() = ResultState::Affected {
                 rows: rows_affected.unwrap_or(0),
                 elapsed_ms,
                 index,
@@ -4461,7 +4493,7 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Explain {
+                    *self.tabs[rt].results.active_state_mut() = ResultState::Explain {
                         lines: plan
                             .lines
                             .into_iter()
@@ -4477,7 +4509,7 @@ impl AppCore {
                     return;
                 }
                 Err(error) => {
-                    *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Error {
+                    *self.tabs[rt].results.active_state_mut() = ResultState::Error {
                         message: format!("explain parse failed: {error}"),
                         elapsed_ms,
                     };
@@ -4488,10 +4520,10 @@ impl AppCore {
             // Take the pending row source (set by preview_sidebar_selection)
             // and attach it to the result so cell edits can target the
             // originating table.
-            let source = self.tabs[self.active_tab].pending_source.take();
+            let source = self.tabs[rt].pending_source.take();
             let source_table = crate::export::extract_source_table(&sql);
             let (columns, rows) = self.apply_plugin_transforms(columns, rows, elapsed_ms);
-            *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Rows {
+            *self.tabs[rt].results.active_state_mut() = ResultState::Rows {
                 columns,
                 rows,
                 elapsed_ms,
