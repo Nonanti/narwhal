@@ -221,8 +221,8 @@ pub(crate) fn has_returning_clause(sql: &str) -> bool {
             continue;
         }
         if (c == b'R' || c == b'r')
-            && i + 9 <= bytes.len()
-            && sql[i..i + 9].eq_ignore_ascii_case("RETURNING")
+            && bytes.len() - i >= 9
+            && bytes[i..i + 9].eq_ignore_ascii_case(b"RETURNING")
             && is_word_boundary(bytes, i, i + 9)
         {
             return true;

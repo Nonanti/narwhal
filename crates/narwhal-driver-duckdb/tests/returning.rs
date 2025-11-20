@@ -42,12 +42,8 @@ fn returning_detection_handles_word_boundary() {
     assert!(!has_returning_clause(
         "INSERT INTO customer_returning VALUES (1)"
     ));
-    assert!(!has_returning_clause(
-        "SELECT returningish FROM t"
-    ));
-    assert!(!has_returning_clause(
-        "SELECT * FROM areturning"
-    ));
+    assert!(!has_returning_clause("SELECT returningish FROM t"));
+    assert!(!has_returning_clause("SELECT * FROM areturning"));
 }
 
 #[test]
@@ -59,9 +55,7 @@ fn returning_detection_finds_real_returning() {
         "DELETE FROM t WHERE id = 1 returning *"
     ));
     // Inside a string literal — must not match.
-    assert!(!has_returning_clause(
-        "INSERT INTO t VALUES ('RETURNING')"
-    ));
+    assert!(!has_returning_clause("INSERT INTO t VALUES ('RETURNING')"));
     assert!(!has_returning_clause(
         "INSERT INTO t VALUES (\"RETURNING\")"
     ));
