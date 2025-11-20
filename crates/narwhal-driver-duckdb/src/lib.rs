@@ -21,6 +21,16 @@
 
 mod types;
 
+#[doc(hidden)]
+pub mod __test_only {
+    //! Private helpers exposed for integration tests only. Not part of the
+    //! public API; do not depend on this module outside the crate's own
+    //! `tests/` directory.
+    pub fn has_returning_clause(sql: &str) -> bool {
+        super::has_returning_clause(sql)
+    }
+}
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -187,7 +197,7 @@ fn statement_returns_rows(sql: &str) -> bool {
 /// Case-insensitive search for a `RETURNING` keyword outside of any
 /// single- or double-quoted string literal. Word-boundary aware so an
 /// identifier like `customer_returning` doesn't trigger a false positive.
-fn has_returning_clause(sql: &str) -> bool {
+pub(crate) fn has_returning_clause(sql: &str) -> bool {
     let bytes = sql.as_bytes();
     let mut i = 0;
     let mut quote: Option<u8> = None;
