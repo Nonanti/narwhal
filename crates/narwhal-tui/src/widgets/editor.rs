@@ -12,6 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
@@ -119,10 +120,18 @@ impl EditorBuffer {
     }
 
     /// Set the cursor to the given (row, col) position, clamping
-    /// to valid bounds.
+    /// to valid bounds. `col` is interpreted as a byte offset; if it
+    /// lands inside a multibyte UTF-8 sequence it is snapped backwards
+    /// to the nearest char boundary so subsequent edits (`insert_char`,
+    /// `delete_char`, `insert_str("\n")`) cannot panic.
     pub fn set_cursor(&mut self, row: usize, col: usize) {
         self.cursor_row = row.min(self.lines.len().saturating_sub(1));
-        self.cursor_col = col.min(self.lines[self.cursor_row].len());
+        let line = &self.lines[self.cursor_row];
+        let mut col = col.min(line.len());
+        while col > 0 && !line.is_char_boundary(col) {
+            col -= 1;
+        }
+        self.cursor_col = col;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -644,12 +653,26 @@ pub fn render_editor(
     if focused && buffer.cursor_row >= buffer.scroll {
         let cursor_y = (buffer.cursor_row - buffer.scroll) as u16;
         if cursor_y < inner.height {
-            let cursor_x = (GUTTER_WIDTH + buffer.cursor_col) as u16;
+            let cursor_x = (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
             if cursor_x < inner.width {
                 frame.set_cursor_position((inner.x + cursor_x, inner.y + cursor_y));
             }
         }
     }
+}
+
+/// Width-aware display column for the current cursor position. Honours
+/// the East-Asian width tables so multibyte glyphs (Turkish 2-byte,
+/// CJK 3-byte, emoji 4-byte) render with the cursor sprite over the
+/// correct cell, not the byte index.
+fn cursor_display_col(buffer: &EditorBuffer) -> usize {
+    let row = buffer.cursor_row.min(buffer.lines.len().saturating_sub(1));
+    let line = &buffer.lines[row];
+    let mut col = buffer.cursor_col.min(line.len());
+    while col > 0 && !line.is_char_boundary(col) {
+        col -= 1;
+    }
+    line[..col].width()
 }
 
 /// Helper that turns the editor's outer rect plus the cursor offset into
@@ -659,7 +682,7 @@ pub fn render_editor(
 pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
     let inner_x = area.x + 1;
     let inner_y = area.y + 1;
-    let cursor_x = inner_x + (GUTTER_WIDTH + buffer.cursor_col) as u16;
+    let cursor_x = inner_x + (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
     let cursor_y = if buffer.cursor_row >= buffer.scroll {
         inner_y + (buffer.cursor_row - buffer.scroll) as u16
     } else {

@@ -36,7 +36,7 @@ fn cursor_x_respects_display_width_for_multibyte() {
 fn set_cursor_snaps_back_to_char_boundary() {
     let mut buf = EditorBuffer::new();
     buf.insert_str("aü"); // bytes: a(0) ü(1,2), len = 3
-    // Try to place the cursor in the middle of `ü` (byte 2).
+                          // Try to place the cursor in the middle of `ü` (byte 2).
     buf.set_cursor(0, 2);
     let (_, col) = buf.cursor();
     assert!(
@@ -49,7 +49,7 @@ fn set_cursor_snaps_back_to_char_boundary() {
 fn insert_char_after_set_cursor_does_not_panic() {
     let mut buf = EditorBuffer::new();
     buf.insert_str("aü"); // 3 bytes
-    // Land on a multibyte midpoint and then mutate.
+                          // Land on a multibyte midpoint and then mutate.
     buf.set_cursor(0, 2);
     buf.insert_char('x');
     // No panic = pass. Content sanity:
