@@ -520,6 +520,22 @@ fn escape_sql_string(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+#[doc(hidden)]
+pub mod __test_only {
+    //! Private helpers exposed for integration tests only. Not part of
+    //! the public API; do not depend on this module outside the crate's
+    //! own `tests/` directory.
+    use narwhal_core::Value;
+
+    pub fn replace_question_marks(sql: &str, params: &[Value]) -> String {
+        super::replace_question_marks(sql, params)
+    }
+
+    pub fn substitute_params(sql: &str, params: &[Value]) -> String {
+        super::substitute_params(sql, params)
+    }
+}
+
 /// Replace `?` placeholders left-to-right with parameter literals.
 fn replace_question_marks(sql: &str, params: &[Value]) -> String {
     let mut result = String::with_capacity(sql.len());
