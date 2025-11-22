@@ -1,22 +1,19 @@
 //! Conversion layer between [`narwhal_core::Value`] and `mysql_async`.
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use mysql_async::consts::ColumnType;
 use mysql_async::Value as MyValue;
 use mysql_common::packets::Column as MyColumn;
 use narwhal_core::{ColumnHeader, Error, Value};
 
-/// Fallible variant of [`value_to_my`]. Returns an error for inputs that
-/// the previous implementation silently corrupted (e.g. years outside
-/// the `u16` range). Used directly in the bind path; the infallible
-/// [`value_to_my`] is kept as a transitional shim during the C1 fix and
-/// will be removed once all callers route through `try_value_to_my`.
+/// Convert a [`Value`] into the `mysql_async` wire representation.
+///
+/// Returns an error for inputs MySQL cannot represent (years outside
+/// the `u16` range). Date/Time/DateTime components are read directly
+/// from the `chrono` value via the `Datelike`/`Timelike` traits — no
+/// `format("%Y").parse()` round-trip and no silent `unwrap_or(0)`.
 pub(crate) fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
-    Ok(value_to_my(value))
-}
-
-pub(crate) fn value_to_my(value: &Value) -> MyValue {
-    match value {
+    let v = match value {
         Value::Null => MyValue::NULL,
         Value::Bool(v) => MyValue::Int(i64::from(*v)),
         Value::Int(v) => MyValue::Int(*v),
@@ -24,9 +21,9 @@ pub(crate) fn value_to_my(value: &Value) -> MyValue {
         Value::String(v) => MyValue::Bytes(v.as_bytes().to_vec()),
         Value::Bytes(v) => MyValue::Bytes(v.clone()),
         Value::Date(v) => MyValue::Date(
-            v.format("%Y").to_string().parse().unwrap_or(0),
-            v.format("%m").to_string().parse().unwrap_or(0),
-            v.format("%d").to_string().parse().unwrap_or(0),
+            year_to_u16(v.year())?,
+            v.month() as u8,
+            v.day() as u8,
             0,
             0,
             0,
@@ -35,29 +32,45 @@ pub(crate) fn value_to_my(value: &Value) -> MyValue {
         Value::Time(v) => MyValue::Time(
             false,
             0,
-            v.format("%H").to_string().parse().unwrap_or(0),
-            v.format("%M").to_string().parse().unwrap_or(0),
-            v.format("%S").to_string().parse().unwrap_or(0),
-            0,
+            v.hour() as u8,
+            v.minute() as u8,
+            v.second() as u8,
+            v.nanosecond() / 1_000,
         ),
-        Value::DateTime(v) => {
-            let date = v.date();
-            let time = v.time();
+        Value::DateTime(v) => MyValue::Date(
+            year_to_u16(v.year())?,
+            v.month() as u8,
+            v.day() as u8,
+            v.hour() as u8,
+            v.minute() as u8,
+            v.second() as u8,
+            v.nanosecond() / 1_000,
+        ),
+        Value::Timestamp(v) => {
+            // Normalise to UTC and bind as a MySQL DATETIME literal
+            // (MyValue::Date with HH:MM:SS), not RFC3339 bytes which
+            // MySQL rejects because of the `T` separator and tz offset.
+            let naive = v.naive_utc();
             MyValue::Date(
-                date.format("%Y").to_string().parse().unwrap_or(0),
-                date.format("%m").to_string().parse().unwrap_or(0),
-                date.format("%d").to_string().parse().unwrap_or(0),
-                time.format("%H").to_string().parse().unwrap_or(0),
-                time.format("%M").to_string().parse().unwrap_or(0),
-                time.format("%S").to_string().parse().unwrap_or(0),
-                0,
+                year_to_u16(naive.year())?,
+                naive.month() as u8,
+                naive.day() as u8,
+                naive.hour() as u8,
+                naive.minute() as u8,
+                naive.second() as u8,
+                naive.nanosecond() / 1_000,
             )
         }
-        Value::Timestamp(v) => MyValue::Bytes(v.to_rfc3339().into_bytes()),
         Value::Uuid(v) => MyValue::Bytes(v.to_string().into_bytes()),
         Value::Json(v) => MyValue::Bytes(v.to_string().into_bytes()),
         Value::Unknown(v) => MyValue::Bytes(v.clone().into_bytes()),
-    }
+    };
+    Ok(v)
+}
+
+fn year_to_u16(year: i32) -> Result<u16, Error> {
+    u16::try_from(year)
+        .map_err(|_| Error::Other(format!("year out of MySQL range (0..=65535): {year}")))
 }
 
 pub(crate) fn value_from_my(value: &MyValue) -> Value {

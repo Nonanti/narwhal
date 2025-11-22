@@ -37,7 +37,7 @@ use narwhal_core::{
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
-use crate::types::{column_header, value_from_my, value_to_my};
+use crate::types::{column_header, try_value_to_my, value_from_my};
 
 #[derive(Debug, Default)]
 pub struct MysqlDriver;
@@ -283,7 +283,8 @@ impl MysqlConnection {
 #[async_trait]
 impl Connection for MysqlConnection {
     async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> {
-        let bound: Vec<mysql_async::Value> = params.iter().map(value_to_my).collect();
+        let bound: Vec<mysql_async::Value> =
+            params.iter().map(try_value_to_my).collect::<Result<_>>()?;
         let sql = sql.to_owned();
         let started = Instant::now();
 
