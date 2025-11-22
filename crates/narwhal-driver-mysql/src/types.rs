@@ -4,7 +4,16 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::consts::ColumnType;
 use mysql_async::Value as MyValue;
 use mysql_common::packets::Column as MyColumn;
-use narwhal_core::{ColumnHeader, Value};
+use narwhal_core::{ColumnHeader, Error, Value};
+
+/// Fallible variant of [`value_to_my`]. Returns an error for inputs that
+/// the previous implementation silently corrupted (e.g. years outside
+/// the `u16` range). Used directly in the bind path; the infallible
+/// [`value_to_my`] is kept as a transitional shim during the C1 fix and
+/// will be removed once all callers route through `try_value_to_my`.
+pub(crate) fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
+    Ok(value_to_my(value))
+}
 
 pub(crate) fn value_to_my(value: &Value) -> MyValue {
     match value {

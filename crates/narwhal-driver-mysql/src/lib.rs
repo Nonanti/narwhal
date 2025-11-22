@@ -9,6 +9,19 @@
 
 mod types;
 
+#[doc(hidden)]
+pub mod __test_only {
+    //! Private helpers exposed for integration tests only. Not part of the
+    //! public API; do not depend on this module outside the crate's own
+    //! `tests/` directory.
+    use mysql_async::Value as MyValue;
+    use narwhal_core::{Error, Value};
+
+    pub fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
+        super::types::try_value_to_my(value)
+    }
+}
+
 use std::sync::Arc;
 use std::time::Instant;
 
