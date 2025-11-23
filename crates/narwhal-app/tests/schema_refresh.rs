@@ -1,11 +1,12 @@
 //! Integration tests for the `:refresh` command and auto-refresh on DDL.
 //!
-//! Five tests:
+//! Six tests:
 //! 1. `manual_refresh_repopulates_sidebar`
 //! 2. `create_table_triggers_auto_refresh`
 //! 3. `drop_table_triggers_auto_refresh`
 //! 4. `non_ddl_no_refresh`
 //! 5. `batched_ddl_debounces`
+//! 6. `schema_refresh_skipped_when_session_changed` (bug C5)
 
 use std::path::PathBuf;
 
@@ -28,6 +29,37 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
                 ..Default::default()
             },
         }],
+    };
+    (registry, connections)
+}
+
+/// Two-connection fixture used by the session-mismatch test (C5).
+fn fixture_pair(
+    db_a: PathBuf,
+    db_b: PathBuf,
+) -> (DriverRegistry, ConnectionsFile) {
+    let registry = DriverRegistry::with_defaults();
+    let connections = ConnectionsFile {
+        connections: vec![
+            ConnectionConfig {
+                id: Uuid::from_u128(1),
+                name: "alpha".into(),
+                driver: "sqlite".into(),
+                params: ConnectionParams {
+                    path: Some(db_a.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            },
+            ConnectionConfig {
+                id: Uuid::from_u128(2),
+                name: "beta".into(),
+                driver: "sqlite".into(),
+                params: ConnectionParams {
+                    path: Some(db_b.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            },
+        ],
     };
     (registry, connections)
 }
@@ -195,5 +227,72 @@ async fn batched_ddl_debounces() {
             .contains("schema refreshed · 3 tables"),
         "expected single refreshed status, got: {}",
         core.status_message()
+    );
+}
+
+/// 6. (C5) DDL on session A schedules a debounced refresh; if the
+///    user switches to session B before the timer fires, B must NOT
+///    be refreshed on A's behalf. Previously the debounce task fired
+///    `RunUpdate::SchemaRefresh` and the handler blindly refreshed
+///    `self.session` — which had become B.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schema_refresh_skipped_when_session_changed() {
+    let dir = TempDir::new().unwrap();
+    let db_a = dir.path().join("alpha.db");
+    let db_b = dir.path().join("beta.db");
+    rusqlite::Connection::open(&db_a).unwrap();
+    // B has one table from the start; we'll watch the table count
+    // to detect any spurious refresh.
+    {
+        let conn = rusqlite::Connection::open(&db_b).unwrap();
+        conn.execute_batch("CREATE TABLE only_b (id INTEGER PRIMARY KEY)")
+            .unwrap();
+    }
+
+    let (registry, connections) = fixture_pair(db_a, db_b);
+    let mut core = AppCore::new(registry, connections, None);
+
+    core.execute_command("open alpha");
+    assert_eq!(table_count(&core), 0);
+
+    // Run a DDL on A and drain through AllDone but not through the
+    // debounce timer — the refresh is scheduled but has not yet
+    // fired.
+    core.insert_into_editor("CREATE TABLE on_alpha (id INTEGER PRIMARY KEY)");
+    core.execute_command("run");
+    core.drain_run_updates().await;
+    assert!(
+        core.refresh_task().is_some(),
+        "DDL on A should have scheduled a refresh"
+    );
+
+    // Switch to B *before* the debounce fires.
+    core.execute_command("open beta");
+    let active_id_after_switch = core.session().map(|s| s.config.id);
+    assert_eq!(active_id_after_switch, Some(Uuid::from_u128(2)));
+    let tables_b_initial = table_count(&core);
+    assert_eq!(tables_b_initial, 1, "B starts with one table");
+
+    let status_before = core.status_message().to_owned();
+
+    // Let the debounce fire and the stale SchemaRefresh arrive.
+    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+    while let Some(update) = core.try_recv_run_update() {
+        core.handle_run_update(update);
+    }
+
+    // B's table count must be unchanged — the refresh targeted A and
+    // should have been suppressed.
+    assert_eq!(
+        table_count(&core),
+        1,
+        "B's schema was refreshed on A's behalf"
+    );
+    // And the status must not advertise a fresh refresh.
+    assert!(
+        !core.status_message().contains("schema refreshed"),
+        "expected no \"schema refreshed\" status; was: {} (before: {})",
+        core.status_message(),
+        status_before
     );
 }

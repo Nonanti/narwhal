@@ -4231,6 +4231,14 @@ impl AppCore {
         self.run_rx.recv().await
     }
 
+    /// Non-blocking variant of [`Self::recv_run_update`] used by tests
+    /// that need to drain whatever has been queued without awaiting
+    /// new traffic.
+    #[doc(hidden)]
+    pub fn try_recv_run_update(&mut self) -> Option<RunUpdate> {
+        self.run_rx.try_recv().ok()
+    }
+
     pub fn handle_run_update(&mut self, update: RunUpdate) {
         // All mutations target the tab that *started* the run, not the
         // tab the user may have switched to in the meantime (K1-A fix).
