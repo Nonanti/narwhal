@@ -483,33 +483,81 @@ impl ClickhouseConnection {
     }
 }
 
-/// Substitute `?` placeholders with rendered SQL literals.
+/// Substitute `?` and `$N` placeholders with rendered SQL literals.
 ///
-/// This is a simple left-to-right replacement. Each `?` consumes the next
-/// parameter value. Dollar-number placeholders (`$1`, `$2`) are also
-/// supported for compatibility with other drivers.
+/// Left-to-right walk that respects single- and double-quoted string
+/// literals so a `?` or `$1` *inside* a literal is left untouched.
+/// Each `?` consumes the next parameter; each `$N` (1-based) selects
+/// `params[N-1]` directly so the two styles can be mixed.
 fn substitute_params(sql: &str, params: &[Value]) -> String {
-    if sql.contains('$') {
-        // Try $1, $2, ... style first. If any are present, substitute
-        // them by index; otherwise fall through to `?` substitution.
-        let mut result = sql.to_owned();
-        let mut any_dollar = false;
-        for (i, param) in params.iter().enumerate() {
-            let placeholder = format!("${}", i + 1);
-            if result.contains(&placeholder) {
-                any_dollar = true;
-                let literal = value_to_sql_literal(param);
-                result = result.replace(&placeholder, &literal);
+    let mut out = String::with_capacity(sql.len());
+    let mut quote: Option<char> = None;
+    let mut placeholder_idx = 0usize;
+    let mut chars = sql.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if let Some(q) = quote {
+            out.push(ch);
+            if ch == q {
+                if chars.peek() == Some(&q) {
+                    // Doubled quote = escaped literal quote.
+                    out.push(q);
+                    chars.next();
+                } else {
+                    quote = None;
+                }
             }
+            continue;
         }
-        if any_dollar {
-            // Still handle any remaining `?` placeholders with the
-            // leftover params.
-            return replace_question_marks(&result, params);
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            '?' => {
+                if let Some(p) = params.get(placeholder_idx) {
+                    out.push_str(&value_to_sql_literal(p));
+                    placeholder_idx += 1;
+                } else {
+                    out.push('?');
+                }
+            }
+            '$' => {
+                // Try to parse $N; if not a positive integer, copy the
+                // `$` literally so dollar-amount strings outside a
+                // literal (rare) survive.
+                let mut digits = String::new();
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        digits.push(next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if digits.is_empty() {
+                    out.push('$');
+                    continue;
+                }
+                match digits.parse::<usize>() {
+                    Ok(n) if n >= 1 => {
+                        if let Some(p) = params.get(n - 1) {
+                            out.push_str(&value_to_sql_literal(p));
+                        } else {
+                            out.push('$');
+                            out.push_str(&digits);
+                        }
+                    }
+                    _ => {
+                        out.push('$');
+                        out.push_str(&digits);
+                    }
+                }
+            }
+            other => out.push(other),
         }
     }
-
-    replace_question_marks(sql, params)
+    out
 }
 
 /// Escape a string for use inside single-quoted SQL literals. Used for
@@ -537,49 +585,45 @@ pub mod __test_only {
 }
 
 /// Replace `?` placeholders left-to-right with parameter literals.
+///
+/// Char-based walk so multi-byte UTF-8 sequences in identifiers and
+/// string literals survive intact. Single- and double-quoted regions
+/// are tracked with doubled-quote escape detection (`''`, `""`).
 fn replace_question_marks(sql: &str, params: &[Value]) -> String {
-    let mut result = String::with_capacity(sql.len());
+    let mut out = String::with_capacity(sql.len());
     let mut param_iter = params.iter();
-    let mut in_string = false;
-    let mut string_quote = b'\0';
-    let bytes = sql.as_bytes();
-    let mut i = 0;
+    let mut quote: Option<char> = None;
+    let mut chars = sql.chars().peekable();
 
-    while i < bytes.len() {
-        let c = bytes[i];
-        if in_string {
-            result.push(c as char);
-            if c == string_quote {
-                // Check for escaped quote (doubled).
-                if i + 1 < bytes.len() && bytes[i + 1] == c {
-                    result.push(c as char);
-                    i += 2;
-                    continue;
+    while let Some(ch) = chars.next() {
+        if let Some(q) = quote {
+            out.push(ch);
+            if ch == q {
+                if chars.peek() == Some(&q) {
+                    out.push(q);
+                    chars.next();
+                } else {
+                    quote = None;
                 }
-                in_string = false;
             }
-            i += 1;
             continue;
         }
-        if c == b'\'' || c == b'"' {
-            in_string = true;
-            string_quote = c;
-            result.push(c as char);
-            i += 1;
-            continue;
-        }
-        if c == b'?' {
-            if let Some(param) = param_iter.next() {
-                result.push_str(&value_to_sql_literal(param));
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                out.push(ch);
             }
-            i += 1;
-            continue;
+            '?' => {
+                if let Some(p) = param_iter.next() {
+                    out.push_str(&value_to_sql_literal(p));
+                } else {
+                    out.push('?');
+                }
+            }
+            other => out.push(other),
         }
-        result.push(c as char);
-        i += 1;
     }
-
-    result
+    out
 }
 
 #[async_trait]
