@@ -95,8 +95,11 @@ pub enum RunUpdate {
         ddl: bool,
     },
     /// A debounced schema refresh is due. Sent by the debounce timer
-    /// task, not by the run worker.
-    SchemaRefresh,
+    /// task, not by the run worker. `session_id` is the connection id
+    /// that owned the DDL batch — the handler must discard the
+    /// notification if the user has since switched to a different
+    /// session (bug C5).
+    SchemaRefresh { session_id: Uuid },
 }
 
 /// Handle to the in-flight statement.

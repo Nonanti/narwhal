@@ -3498,11 +3498,16 @@ impl AppCore {
             .count()
     }
 
-    /// Schedule a debounced schema refresh. Each call resets the 200ms
-    /// timer; the refresh fires once the timer expires without being
-    /// rescheduled. A migration with 50 DDL statements fires exactly
-    /// one refresh.
-    fn schedule_schema_refresh(&mut self) {
+    /// Schedule a debounced schema refresh against `session_id`. Each
+    /// call resets the 200ms timer; the refresh fires once the timer
+    /// expires without being rescheduled. A migration with 50 DDL
+    /// statements fires exactly one refresh.
+    ///
+    /// The `session_id` is round-tripped through the
+    /// [`RunUpdate::SchemaRefresh`] payload so the handler can drop
+    /// the notification if the user has switched sessions in the
+    /// meantime (bug C5).
+    fn schedule_schema_refresh(&mut self, session_id: Uuid) {
         // Release so the spawned task's Acquire swap sees this store
         // even on weakly-ordered architectures (ARM64, POWER).  (Y4-B fix.)
         self.refresh_pending.store(true, Ordering::Release);
@@ -3516,7 +3521,7 @@ impl AppCore {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 if pending.swap(false, Ordering::Acquire) {
-                    let _ = tx.send(RunUpdate::SchemaRefresh).await;
+                    let _ = tx.send(RunUpdate::SchemaRefresh { session_id }).await;
                 }
             })
             .abort_handle(),
@@ -4391,13 +4396,27 @@ impl AppCore {
                 };
 
                 // If any successful statement was DDL, schedule a
-                // debounced schema refresh so the sidebar stays in sync.
+                // debounced schema refresh so the sidebar stays in
+                // sync. The current session id is captured so the
+                // refresh is suppressed if the user switches before
+                // the debounce fires (bug C5).
                 if ddl {
-                    self.schedule_schema_refresh();
+                    if let Some(id) = self.session.as_ref().map(|s| s.config.id) {
+                        self.schedule_schema_refresh(id);
+                    }
                 }
             }
-            RunUpdate::SchemaRefresh => {
-                self.refresh_schema();
+            RunUpdate::SchemaRefresh { session_id } => {
+                let current = self.session.as_ref().map(|s| s.config.id);
+                if current == Some(session_id) {
+                    self.refresh_schema();
+                } else {
+                    tracing::debug!(
+                        target = ?session_id,
+                        current = ?current,
+                        "discarding stale schema refresh; session changed"
+                    );
+                }
             }
         }
     }

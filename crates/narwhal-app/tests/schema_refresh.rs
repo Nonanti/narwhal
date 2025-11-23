@@ -34,10 +34,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 }
 
 /// Two-connection fixture used by the session-mismatch test (C5).
-fn fixture_pair(
-    db_a: PathBuf,
-    db_b: PathBuf,
-) -> (DriverRegistry, ConnectionsFile) {
+fn fixture_pair(db_a: PathBuf, db_b: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
         connections: vec![
