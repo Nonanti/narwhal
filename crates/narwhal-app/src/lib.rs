@@ -9,6 +9,7 @@ pub mod commands;
 pub mod completion;
 pub mod core;
 pub mod ddl;
+pub mod draw_scheduler;
 pub mod edit;
 pub mod explain;
 pub mod export;
