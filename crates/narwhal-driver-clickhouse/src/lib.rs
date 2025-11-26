@@ -564,8 +564,22 @@ fn substitute_params(sql: &str, params: &[Value]) -> String {
 /// internal queries against `system.tables` etc. where we splice schema
 /// or table names into the SQL by hand instead of going through the
 /// regular parameter binding path.
+///
+/// ClickHouse honours backslash escapes inside string literals, so a
+/// lone backslash would be interpreted as an escape leader (potentially
+/// swallowing a subsequent closing quote). Both backslash-to-doubled-backslash
+/// and single-quote-to-doubled-quote are applied to prevent injection
+/// and misinterpretation.
 fn escape_sql_string(s: &str) -> String {
-    s.replace('\'', "''")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("''"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[doc(hidden)]
