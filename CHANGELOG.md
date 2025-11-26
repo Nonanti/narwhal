@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **MySQL Date/Time bind round-trip** (C1): years outside `u16`,
+  dropped microseconds, and `Value::Timestamp` rejected as RFC3339 are
+  all fixed. The bind path now uses `chrono::Datelike`/`Timelike`
+  directly and returns a typed error on out-of-range years instead of
+  silently storing `0000-00-00`. (Also fixes H6.)
+- **ClickHouse parameter substitution UTF-8** (C2): non-ASCII
+  identifiers (`"kullanıcılar"`) and string literals (`'çöğşüı'`,
+  `'🦀 narwhal'`) survive parameter substitution intact. Also closes a
+  dollar-misfire where `'$1.99'` literals tripped the `$N` placeholder
+  path.
+- **DuckDB `RETURNING` detection no longer panics** on multibyte SQL
+  (C3). The 9-byte window comparison switched from `&str` slicing to
+  byte-slice `eq_ignore_ascii_case`.
+- **Editor cursor on Turkish / CJK / emoji input** (C4). `cursor_x`
+  now reflects East-Asian display width and `EditorBuffer::set_cursor`
+  snaps back to a UTF-8 char boundary before storing the column.
+- **Schema refresh after DDL targets the originating session** (C5).
+  `RunUpdate::SchemaRefresh` carries a `session_id`; the handler drops
+  the notification if the user has switched sessions during the
+  200 ms debounce window.
+- **Streaming render throttle re-engaged** (C6). `App::run` now gates
+  redraws through a `DrawScheduler` that coalesces `RowsAppended`
+  events into one draw per 100 ms window, with a deadline tick to
+  flush the trailing batch. Force events (key, mouse, non-stream
+  updates) bypass the throttle.
+
 ## [1.0.0] — 2026-05-20
 
 ### Added

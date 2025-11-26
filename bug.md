@@ -20,7 +20,7 @@
 
 # CRITICAL
 
-## C1 — MySQL Date/Time bind: `format().parse()` round-trip, tarihleri sessizce `0000-00-00` yapıyor
+## C1 ✅ — MySQL Date/Time bind: `format().parse()` round-trip, tarihleri sessizce `0000-00-00` yapıyor
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/types.rs:15-44`
 - **Tetik:** Herhangi bir `Value::Date` / `Value::Time` / `Value::DateTime` parametresi.
@@ -68,7 +68,7 @@
 
 ---
 
-## C2 — ClickHouse `replace_question_marks`: UTF-8 dizisi Latin-1 olarak bozuluyor
+## C2 ✅ — ClickHouse `replace_question_marks`: UTF-8 dizisi Latin-1 olarak bozuluyor
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:520-563`
 - **Tetik:** `params` boş değil **ve** SQL non-ASCII içeriyor (Türkçe identifier,
@@ -118,7 +118,7 @@
 
 ---
 
-## C3 — DuckDB `has_returning_clause` `&str` slice panik
+## C3 ✅ — DuckDB `has_returning_clause` `&str` slice panik
 
 - **Dosya:** `crates/narwhal-driver-duckdb/src/lib.rs:194-203`
 - **Tetik:** Non-ASCII SQL; `r/R` byte'ından sonraki 9. pozisyon multibyte char'ın
@@ -153,7 +153,7 @@
 
 ---
 
-## C4 — Editor cursor unicode-uyumsuz + `EditorBuffer::set_cursor` char-boundary doğrulamıyor
+## C4 ✅ — Editor cursor unicode-uyumsuz + `EditorBuffer::set_cursor` char-boundary doğrulamıyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:127-130, 610-614, 649-657`
 - **Tetik:**
@@ -192,7 +192,7 @@
 
 ---
 
-## C5 — Schema refresh yanlış oturumu tazeler (oturum değişimi sırasında)
+## C5 ✅ — Schema refresh yanlış oturumu tazeler (oturum değişimi sırasında)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:4346, 3505-3525, 3399-3470`
 - **Senaryo:**
@@ -214,7 +214,7 @@
 
 ---
 
-## C6 — Streaming render throttle ölü kod (UI 1M rows/sn'de kilitlenir)
+## C6 ✅ — Streaming render throttle ölü kod (UI 1M rows/sn'de kilitlenir)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:4283-4295`, `crates/narwhal-app/src/app.rs:84-103`
 - **Mevcut:** `ResultState::Running.last_render` 100ms throttle vaat ediyor,
@@ -415,7 +415,7 @@
 
 ---
 
-## H6 — MySQL `Value::Timestamp` bind formatı kabul edilmiyor
+## H6 ✅ — MySQL `Value::Timestamp` bind formatı kabul edilmiyor (C1 ile birlikte düzeltildi)
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/types.rs:46-49`
 - **Mevcut:**
