@@ -141,6 +141,17 @@ fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigEr
             )));
         }
 
+        // M3: ssl_mode = disable contradicts having TLS files set.
+        let has_tls_files = conn.params.ssl_root_cert.is_some()
+            || conn.params.ssl_cert.is_some()
+            || conn.params.ssl_key.is_some();
+        if conn.params.ssl_mode == SslMode::Disable && has_tls_files {
+            return Err(ConfigError::Validation(format!(
+                "connection '{}': ssl_root_cert/ssl_cert/ssl_key set but ssl_mode = disable",
+                conn.name
+            )));
+        }
+
         let is_file_driver = matches!(conn.driver.as_str(), "sqlite" | "duckdb");
 
         if is_file_driver
