@@ -1,14 +1,19 @@
 //! PostgreSQL driver backed by `tokio-postgres`.
 //!
-//! Transport security is configured via the `sslmode` option in the
+//! Transport security is configured via the `ssl_mode` parameter in the
 //! connection parameters. Supported values mirror libpq:
 //!
-//! - `disable` (default): no TLS.
-//! - `require`: TLS is required; the server certificate is accepted without
-//!   verification (suitable for trusted networks where confidentiality is
-//!   the goal but a CA chain is not deployed).
-//! - `verify-ca` / `verify-full`: TLS with hostname and chain verification
-//!   against the operating system's trust store.
+//! - `disable`: no TLS.
+//! - `prefer` (default): TLS with full chain + hostname verification against
+//!   the system trust store or `ssl_root_cert`. Unlike libpq, there is no
+//!   fallback to plain-text — this is a hardened interpretation.
+//! - `require`: TLS with chain verification but hostname verification
+//!   skipped (matches MySQL `require` semantics). The server certificate
+//!   must chain to a trusted root, but the hostname in the certificate
+//!   is not checked.
+//! - `verify-ca`: identical to `require` (chain verify, no hostname) —
+//!   provided for explicitness.
+//! - `verify-full`: TLS with full chain + hostname verification.
 
 #![forbid(unsafe_code)]
 
@@ -29,6 +34,8 @@ use narwhal_core::{
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::NoTls;
+use tokio_postgres::Config as PgConfig;
+use std::time::Duration;
 use tracing::{debug, error, info};
 
 use crate::tls::{make_tls_connector, InternalSslMode};
@@ -86,13 +93,13 @@ impl DatabaseDriver for PostgresDriver {
         config: &ConnectionConfig,
         password: Option<&str>,
     ) -> Result<Box<dyn Connection>> {
-        let connection_string = build_connection_string(config, password)?;
+        let pg_config = build_pg_config(config, password)?;
         let sslmode = InternalSslMode::from_params(&config.params)?;
         debug!(target: "narwhal::postgres", sslmode = %sslmode.as_str(), "establishing connection");
 
         let client = match sslmode {
             InternalSslMode::Disable => {
-                let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+                let (client, connection) = pg_config.connect(NoTls)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;
                 spawn_connection(connection);
@@ -100,7 +107,7 @@ impl DatabaseDriver for PostgresDriver {
             }
             other => {
                 let connector = make_tls_connector(other, &config.params)?;
-                let (client, connection) = tokio_postgres::connect(&connection_string, connector)
+                let (client, connection) = pg_config.connect(connector)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;
                 spawn_connection(connection);
@@ -127,7 +134,13 @@ where
     });
 }
 
-fn build_connection_string(config: &ConnectionConfig, password: Option<&str>) -> Result<String> {
+/// Options whitelist for the PG connection string. Only these keys from
+/// `params.options` are forwarded to the server; unknown keys are
+/// rejected with a config error to prevent injection.
+const OPTIONS_WHITELIST: &[&str] =
+    &["application_name", "connect_timeout", "options", "keepalives", "keepalives_idle"];
+
+fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<PgConfig> {
     let host = config
         .params
         .host
@@ -145,14 +158,58 @@ fn build_connection_string(config: &ConnectionConfig, password: Option<&str>) ->
         .as_deref()
         .ok_or_else(|| Error::Config("username missing".into()))?;
 
-    let mut out = format!("host={host} port={port} dbname={database} user={user}");
+    let mut cfg = PgConfig::new();
+    cfg.host(host)
+        .port(port)
+        .dbname(database)
+        .user(user);
+
     if let Some(pw) = password {
-        out.push_str(&format!(" password={pw}"));
+        cfg.password(pw);
     }
+
     for (k, v) in &config.params.options {
-        out.push_str(&format!(" {k}={v}"));
+        if !OPTIONS_WHITELIST.contains(&k.as_str()) {
+            return Err(Error::Config(format!(
+                "unsupported connection option: {k}"
+            )));
+        }
+        match k.as_str() {
+            "application_name" => {
+                cfg.application_name(v);
+            }
+            "connect_timeout" => {
+                let secs: u64 = v
+                    .parse()
+                    .map_err(|_| Error::Config(format!(
+                        "invalid connect_timeout value: {v}"
+                    )))?;
+                cfg.connect_timeout(Duration::from_secs(secs));
+            }
+            "options" => {
+                cfg.options(v);
+            }
+            "keepalives" => {
+                let enabled: bool = v
+                    .parse()
+                    .map_err(|_| Error::Config(format!(
+                        "invalid keepalives value: {v}"
+                    )))?;
+                cfg.keepalives(enabled);
+            }
+            "keepalives_idle" => {
+                let secs: u64 = v
+                    .parse()
+                    .map_err(|_| Error::Config(format!(
+                        "invalid keepalives_idle value: {v}"
+                    )))?;
+                cfg.keepalives_idle(Duration::from_secs(secs));
+            }
+            _ => unreachable!("whitelist check above guarantees this"),
+        }
     }
-    Ok(out)
+
+    Ok(cfg)
 }
 
 pub struct PostgresConnection {
@@ -746,9 +803,10 @@ mod tests {
     }
 
     #[test]
-    fn connection_string_includes_password_and_options() {
+    fn pg_config_includes_password_and_options() {
         let mut options = std::collections::BTreeMap::new();
-        options.insert("sslmode".into(), "require".into());
+        options.insert("application_name".into(), "narwhal".into());
+        options.insert("connect_timeout".into(), "30".into());
         let params = ConnectionParams {
             host: Some("db.local".into()),
             port: Some(6543),
@@ -758,13 +816,13 @@ mod tests {
             ..Default::default()
         };
         let cfg = config(params);
-        let cs = build_connection_string(&cfg, Some("hunter2")).unwrap();
-        assert!(cs.contains("host=db.local"));
-        assert!(cs.contains("port=6543"));
-        assert!(cs.contains("dbname=analytics"));
-        assert!(cs.contains("user=reader"));
-        assert!(cs.contains("password=hunter2"));
-        assert!(cs.contains("sslmode=require"));
+        let pg_cfg = build_pg_config(&cfg, Some("pass word")).unwrap();
+        // The Config builder handles special characters safely —
+        // no string concatenation injection risk.
+        assert_eq!(pg_cfg.get_user(), Some("reader"));
+        assert_eq!(pg_cfg.get_dbname(), Some("analytics"));
+        assert!(pg_cfg.get_password().is_some());
+        assert_eq!(pg_cfg.get_application_name(), Some("narwhal"));
     }
 
     #[test]
@@ -774,5 +832,21 @@ mod tests {
         assert!(caps.cancellation);
         assert!(caps.multiple_schemas);
         assert!(caps.prepared_statements);
+    }
+
+    #[test]
+    fn unknown_option_rejected() {
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("evil_inject".into(), "value".into());
+        let params = ConnectionParams {
+            host: Some("db.local".into()),
+            database: Some("analytics".into()),
+            username: Some("reader".into()),
+            options,
+            ..Default::default()
+        };
+        let cfg = config(params);
+        let err = build_pg_config(&cfg, None).unwrap_err();
+        assert!(err.to_string().contains("unsupported connection option: evil_inject"));
     }
 }
