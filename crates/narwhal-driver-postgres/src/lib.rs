@@ -27,8 +27,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use narwhal_core::{
-    CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
+    CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, ConnectionParams,
+    DatabaseDriver, Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
     Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
 };
 use tokio_postgres::error::SqlState;
@@ -38,7 +38,7 @@ use tokio_postgres::Config as PgConfig;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
-use crate::tls::{make_tls_connector, InternalSslMode};
+use crate::tls::{make_tls_connector, InternalSslMode, MakeRustlsConnect};
 use crate::types::{column_to_value, Param};
 
 /// PostgreSQL driver. The current implementation uses `NoTls`; configurable
@@ -118,6 +118,8 @@ impl DatabaseDriver for PostgresDriver {
         info!(target: "narwhal::postgres", "connection established");
         Ok(Box::new(PostgresConnection {
             client: Arc::new(client),
+            tls_mode: sslmode,
+            params: Arc::new(config.params.clone()),
         }))
     }
 }
@@ -214,6 +216,10 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
 
 pub struct PostgresConnection {
     client: Arc<tokio_postgres::Client>,
+    /// TLS mode used for the original connection, needed by cancel handle
+    /// so it can use the same TLS configuration.
+    tls_mode: InternalSslMode,
+    params: Arc<ConnectionParams>,
 }
 
 fn map_pg_error(error: tokio_postgres::Error) -> Error {
@@ -719,8 +725,18 @@ impl Connection for PostgresConnection {
     }
 
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
+        let tls_factory: Arc<dyn Fn() -> Result<MakeRustlsConnect> + Send + Sync> =
+            if self.tls_mode == InternalSslMode::Disable {
+                Arc::new(|| Err(Error::Config("cancel not available in disable TLS mode".into())))
+            } else {
+                let mode = self.tls_mode;
+                let params = Arc::clone(&self.params);
+                Arc::new(move || make_tls_connector(mode, &params))
+            };
         Some(Box::new(PostgresCancelHandle {
             token: self.client.cancel_token(),
+            tls_mode: self.tls_mode,
+            tls_factory,
         }))
     }
 
@@ -768,15 +784,26 @@ impl RowStream for PostgresRowStream {
 
 struct PostgresCancelHandle {
     token: tokio_postgres::CancelToken,
+    tls_mode: InternalSslMode,
+    tls_factory: Arc<dyn Fn() -> Result<MakeRustlsConnect> + Send + Sync>,
 }
 
 #[async_trait]
 impl CancelHandle for PostgresCancelHandle {
     async fn cancel(&self) -> Result<()> {
-        self.token
-            .cancel_query::<NoTls>(NoTls)
-            .await
-            .map_err(|e| Error::Connection(e.to_string()))
+        if self.tls_mode == InternalSslMode::Disable {
+            self.token
+                .cancel_query::<NoTls>(NoTls)
+                .await
+                .map_err(|e| Error::Connection(e.to_string()))
+        } else {
+            let connector = (self.tls_factory)()
+                .map_err(|e| Error::Connection(format!("failed to create TLS connector for cancel: {e}")))?;
+            self.token
+                .cancel_query(connector)
+                .await
+                .map_err(|e| Error::Connection(e.to_string()))
+        }
     }
 }
 

@@ -23,7 +23,7 @@ use narwhal_core::{ConnectionParams, Error, Result, SslMode};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
-use tokio_postgres_rustls::MakeRustlsConnect;
+pub(crate) use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Internal representation that maps the public [`SslMode`] onto the
 /// TLS behaviours rustls supports.
