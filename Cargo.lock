@@ -2782,6 +2782,8 @@ name = "narwhal-history"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "once_cell",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
