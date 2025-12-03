@@ -27,15 +27,16 @@ use std::time::Instant;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use narwhal_core::{
-    CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, ConnectionParams,
-    DatabaseDriver, Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
-    Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
+    CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig,
+    ConnectionParams, DatabaseDriver, Error, ForeignKey, Index, IsolationLevel, QueryResult,
+    ReferentialAction, Result, Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema,
+    UniqueConstraint, Value,
 };
+use std::time::Duration;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{ToSql, Type};
-use tokio_postgres::NoTls;
 use tokio_postgres::Config as PgConfig;
-use std::time::Duration;
+use tokio_postgres::NoTls;
 use tracing::{debug, error, info};
 
 use crate::tls::{make_tls_connector, InternalSslMode, MakeRustlsConnect};
@@ -99,7 +100,8 @@ impl DatabaseDriver for PostgresDriver {
 
         let client = match sslmode {
             InternalSslMode::Disable => {
-                let (client, connection) = pg_config.connect(NoTls)
+                let (client, connection) = pg_config
+                    .connect(NoTls)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;
                 spawn_connection(connection);
@@ -107,7 +109,8 @@ impl DatabaseDriver for PostgresDriver {
             }
             other => {
                 let connector = make_tls_connector(other, &config.params)?;
-                let (client, connection) = pg_config.connect(connector)
+                let (client, connection) = pg_config
+                    .connect(connector)
                     .await
                     .map_err(|e| Error::Connection(e.to_string()))?;
                 spawn_connection(connection);
@@ -139,8 +142,13 @@ where
 /// Options whitelist for the PG connection string. Only these keys from
 /// `params.options` are forwarded to the server; unknown keys are
 /// rejected with a config error to prevent injection.
-const OPTIONS_WHITELIST: &[&str] =
-    &["application_name", "connect_timeout", "options", "keepalives", "keepalives_idle"];
+const OPTIONS_WHITELIST: &[&str] = &[
+    "application_name",
+    "connect_timeout",
+    "options",
+    "keepalives",
+    "keepalives_idle",
+];
 
 fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<PgConfig> {
     let host = config
@@ -161,10 +169,7 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
         .ok_or_else(|| Error::Config("username missing".into()))?;
 
     let mut cfg = PgConfig::new();
-    cfg.host(host)
-        .port(port)
-        .dbname(database)
-        .user(user);
+    cfg.host(host).port(port).dbname(database).user(user);
 
     if let Some(pw) = password {
         cfg.password(pw);
@@ -172,9 +177,7 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
 
     for (k, v) in &config.params.options {
         if !OPTIONS_WHITELIST.contains(&k.as_str()) {
-            return Err(Error::Config(format!(
-                "unsupported connection option: {k}"
-            )));
+            return Err(Error::Config(format!("unsupported connection option: {k}")));
         }
         match k.as_str() {
             "application_name" => {
@@ -183,9 +186,7 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
             "connect_timeout" => {
                 let secs: u64 = v
                     .parse()
-                    .map_err(|_| Error::Config(format!(
-                        "invalid connect_timeout value: {v}"
-                    )))?;
+                    .map_err(|_| Error::Config(format!("invalid connect_timeout value: {v}")))?;
                 cfg.connect_timeout(Duration::from_secs(secs));
             }
             "options" => {
@@ -194,17 +195,13 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
             "keepalives" => {
                 let enabled: bool = v
                     .parse()
-                    .map_err(|_| Error::Config(format!(
-                        "invalid keepalives value: {v}"
-                    )))?;
+                    .map_err(|_| Error::Config(format!("invalid keepalives value: {v}")))?;
                 cfg.keepalives(enabled);
             }
             "keepalives_idle" => {
                 let secs: u64 = v
                     .parse()
-                    .map_err(|_| Error::Config(format!(
-                        "invalid keepalives_idle value: {v}"
-                    )))?;
+                    .map_err(|_| Error::Config(format!("invalid keepalives_idle value: {v}")))?;
                 cfg.keepalives_idle(Duration::from_secs(secs));
             }
             _ => unreachable!("whitelist check above guarantees this"),
@@ -727,7 +724,11 @@ impl Connection for PostgresConnection {
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         let tls_factory: Arc<dyn Fn() -> Result<MakeRustlsConnect> + Send + Sync> =
             if self.tls_mode == InternalSslMode::Disable {
-                Arc::new(|| Err(Error::Config("cancel not available in disable TLS mode".into())))
+                Arc::new(|| {
+                    Err(Error::Config(
+                        "cancel not available in disable TLS mode".into(),
+                    ))
+                })
             } else {
                 let mode = self.tls_mode;
                 let params = Arc::clone(&self.params);
@@ -797,8 +798,9 @@ impl CancelHandle for PostgresCancelHandle {
                 .await
                 .map_err(|e| Error::Connection(e.to_string()))
         } else {
-            let connector = (self.tls_factory)()
-                .map_err(|e| Error::Connection(format!("failed to create TLS connector for cancel: {e}")))?;
+            let connector = (self.tls_factory)().map_err(|e| {
+                Error::Connection(format!("failed to create TLS connector for cancel: {e}"))
+            })?;
             self.token
                 .cancel_query(connector)
                 .await
@@ -874,6 +876,8 @@ mod tests {
         };
         let cfg = config(params);
         let err = build_pg_config(&cfg, None).unwrap_err();
-        assert!(err.to_string().contains("unsupported connection option: evil_inject"));
+        assert!(err
+            .to_string()
+            .contains("unsupported connection option: evil_inject"));
     }
 }

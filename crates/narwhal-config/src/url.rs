@@ -50,7 +50,10 @@ impl fmt::Display for UrlError {
             Self::MissingHost => f.write_str("connection url missing host"),
             Self::MissingDatabase => f.write_str("connection url missing database"),
             Self::EmptyPath => f.write_str("connection url missing path"),
-            Self::InvalidSslMode(v) => write!(f, "invalid sslmode: {v} (expected disable|prefer|require|verify-ca|verify-full)"),
+            Self::InvalidSslMode(v) => write!(
+                f,
+                "invalid sslmode: {v} (expected disable|prefer|require|verify-ca|verify-full)"
+            ),
         }
     }
 }
@@ -126,8 +129,13 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
 
     // Extract TLS-specific query params into struct fields instead of
     // leaving them in the generic options map.
-    let (options, ssl_mode, ssl_root_cert, ssl_cert, ssl_key) =
-        extract_ssl_params(options)?;
+    let ExtractedSslParams {
+        options,
+        ssl_mode,
+        ssl_root_cert,
+        ssl_cert,
+        ssl_key,
+    } = extract_ssl_params(options)?;
 
     let port_segment = port.map(|p| format!(":{p}")).unwrap_or_default();
     let name = format!("{host}{port_segment}/{database}");
@@ -243,11 +251,20 @@ fn parse_ssl_mode(value: &str) -> Result<SslMode, UrlError> {
     }
 }
 
+/// Result of extracting TLS-specific query params from the options map.
+struct ExtractedSslParams {
+    options: BTreeMap<String, String>,
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<PathBuf>,
+    ssl_cert: Option<PathBuf>,
+    ssl_key: Option<PathBuf>,
+}
+
 /// Remove TLS-specific keys from the generic options map and return them
 /// as typed struct fields.
 fn extract_ssl_params(
     mut options: BTreeMap<String, String>,
-) -> Result<(BTreeMap<String, String>, SslMode, Option<PathBuf>, Option<PathBuf>, Option<PathBuf>), UrlError> {
+) -> Result<ExtractedSslParams, UrlError> {
     let ssl_mode = match options.remove("sslmode") {
         Some(v) => parse_ssl_mode(&v)?,
         None => SslMode::Prefer,
@@ -255,7 +272,13 @@ fn extract_ssl_params(
     let ssl_root_cert = options.remove("sslrootcert").map(PathBuf::from);
     let ssl_cert = options.remove("sslcert").map(PathBuf::from);
     let ssl_key = options.remove("sslkey").map(PathBuf::from);
-    Ok((options, ssl_mode, ssl_root_cert, ssl_cert, ssl_key))
+    Ok(ExtractedSslParams {
+        options,
+        ssl_mode,
+        ssl_root_cert,
+        ssl_cert,
+        ssl_key,
+    })
 }
 
 #[cfg(test)]
@@ -278,7 +301,7 @@ mod tests {
         assert_eq!(parsed.password.as_deref(), Some("s@fe"));
         // sslmode is now a struct field, not in options
         assert_eq!(parsed.config.params.ssl_mode, SslMode::Require);
-        assert!(parsed.config.params.options.get("sslmode").is_none());
+        assert!(!parsed.config.params.options.contains_key("sslmode"));
         assert_eq!(
             parsed.config.params.options.get("app").map(String::as_str),
             Some("narwhal")
@@ -348,10 +371,9 @@ mod tests {
 
     #[test]
     fn url_parses_sslmode_to_struct_field() {
-        let parsed =
-            parse("postgres://h/db?sslmode=require").unwrap();
+        let parsed = parse("postgres://h/db?sslmode=require").unwrap();
         assert_eq!(parsed.config.params.ssl_mode, SslMode::Require);
-        assert!(parsed.config.params.options.get("sslmode").is_none());
+        assert!(!parsed.config.params.options.contains_key("sslmode"));
     }
 
     #[test]
@@ -371,34 +393,23 @@ mod tests {
 
     #[test]
     fn url_parses_sslrootcert_path() {
-        let parsed = parse(
-            "postgres://h/db?sslrootcert=/etc/ssl/ca.pem&sslmode=verify-full",
-        )
-        .unwrap();
+        let parsed =
+            parse("postgres://h/db?sslrootcert=/etc/ssl/ca.pem&sslmode=verify-full").unwrap();
         assert_eq!(
             parsed.config.params.ssl_root_cert,
             Some(PathBuf::from("/etc/ssl/ca.pem"))
         );
         // Should NOT appear in options
-        assert!(parsed.config.params.options.get("sslrootcert").is_none());
+        assert!(!parsed.config.params.options.contains_key("sslrootcert"));
     }
 
     #[test]
     fn url_parses_sslcert_and_sslkey() {
-        let parsed = parse(
-            "postgres://h/db?sslcert=/c.pem&sslkey=/k.pem",
-        )
-        .unwrap();
-        assert_eq!(
-            parsed.config.params.ssl_cert,
-            Some(PathBuf::from("/c.pem"))
-        );
-        assert_eq!(
-            parsed.config.params.ssl_key,
-            Some(PathBuf::from("/k.pem"))
-        );
-        assert!(parsed.config.params.options.get("sslcert").is_none());
-        assert!(parsed.config.params.options.get("sslkey").is_none());
+        let parsed = parse("postgres://h/db?sslcert=/c.pem&sslkey=/k.pem").unwrap();
+        assert_eq!(parsed.config.params.ssl_cert, Some(PathBuf::from("/c.pem")));
+        assert_eq!(parsed.config.params.ssl_key, Some(PathBuf::from("/k.pem")));
+        assert!(!parsed.config.params.options.contains_key("sslcert"));
+        assert!(!parsed.config.params.options.contains_key("sslkey"));
     }
 
     #[test]
