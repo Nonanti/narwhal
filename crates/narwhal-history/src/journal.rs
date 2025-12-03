@@ -1,14 +1,55 @@
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+/// Statically-compiled regex patterns that match secret literals in SQL.
+///
+/// Each pattern captures the keyword prefix (group 1) and the quoted
+/// secret value (group 2) so the replacement preserves the keyword and
+/// only masks the secret. Patterns are compiled once at first use via
+/// `once_cell::sync::Lazy` to avoid per-call compilation cost.
+///
+/// **Note:** Only *newly written* entries are redacted. Existing history
+/// files with cleartext secrets are **not** automatically retrofitted —
+/// users should delete or manually redact old files if they contain
+/// sensitive data.
+static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        // CREATE/ALTER USER ... PASSWORD '...'
+        Regex::new(r"(?i)(\bpassword\s+)'[^']*'").unwrap(),
+        // CREATE USER ... IDENTIFIED BY '...'
+        Regex::new(r"(?i)(\bidentified\s+by\s+)'[^']*'").unwrap(),
+        // COPY ... CREDENTIALS '...'
+        Regex::new(r"(?i)(\bcredentials\s+)'[^']*'").unwrap(),
+        // SET PASSWORD = '...'
+        Regex::new(r"(?i)(\bset\s+password\s*=\s+)'[^']*'").unwrap(),
+    ]
+});
+
+/// Redact known secret patterns from a SQL string.
+///
+/// Returns `Cow::Borrowed` when no patterns match (avoiding allocation),
+/// or `Cow::Owned` with all secret values replaced by `'***'`.
+fn redact_secrets(sql: &str) -> Cow<'_, str> {
+    let mut result = Cow::Borrowed(sql);
+    for re in REDACT_PATTERNS.iter() {
+        if re.is_match(&result) {
+            result = Cow::Owned(re.replace_all(&result, "${1}'***'").to_string());
+        }
+    }
+    result
+}
 
 #[derive(Debug, Error)]
 pub enum HistoryError {
@@ -119,11 +160,26 @@ impl Journal {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .await?;
+
+        #[cfg(unix)]
+        let file = {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(&path)
+                .await?
+        };
+
+        #[cfg(not(unix))]
+        let file = {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .await?
+        };
+
         Ok(Self {
             path,
             file: Mutex::new(file),
@@ -135,8 +191,24 @@ impl Journal {
     }
 
     /// Serialise `entry` to a single line and flush to disk.
+    ///
+    /// Secret patterns in the `sql` field (e.g. `PASSWORD '...'`,
+    /// `IDENTIFIED BY '...'`) are automatically redacted to `'***'`
+    /// before writing. Only *newly appended* entries are redacted;
+    /// pre-existing entries in the history file are left untouched.
     pub async fn append(&self, entry: &HistoryEntry) -> Result<(), HistoryError> {
-        let mut line = serde_json::to_vec(entry)?;
+        // Redact secrets before serialising. Clone only if redaction
+        // changes the string (Cow::Owned); otherwise borrow the original.
+        let redacted_sql = redact_secrets(&entry.sql);
+        let entry = if matches!(redacted_sql, Cow::Owned(_)) {
+            let mut e = entry.clone();
+            e.sql = redacted_sql.into_owned();
+            e
+        } else {
+            entry.clone()
+        };
+
+        let mut line = serde_json::to_vec(&entry)?;
         line.push(b'\n');
         let mut guard = self.file.lock().await;
         guard.write_all(&line).await?;
@@ -331,5 +403,30 @@ mod tests {
         assert_eq!(entries[0].outcome, Outcome::Failed);
         assert_eq!(entries[0].error.as_deref(), Some("boom"));
         assert_eq!(entries[1].outcome, Outcome::Cancelled);
+    }
+
+    // ---- redact_secrets unit tests ----
+
+    #[test]
+    fn redact_password_literal() {
+        assert_eq!(
+            redact_secrets("CREATE USER x PASSWORD 'secret'"),
+            "CREATE USER x PASSWORD '***'"
+        );
+    }
+
+    #[test]
+    fn redact_identified_by() {
+        assert_eq!(
+            redact_secrets("CREATE USER x IDENTIFIED BY 'pw'"),
+            "CREATE USER x IDENTIFIED BY '***'"
+        );
+    }
+
+    #[test]
+    fn redact_no_match_returns_borrowed() {
+        let sql = "SELECT 1";
+        let result = redact_secrets(sql);
+        assert!(matches!(result, Cow::Borrowed(_)));
     }
 }

@@ -228,6 +228,23 @@ fn is_nullable_type(ch_type: &str) -> bool {
     ch_type.trim().starts_with("Nullable(")
 }
 
+/// Escape a string for embedding in a single-quoted ClickHouse SQL literal.
+///
+/// ClickHouse honours backslash escapes inside string literals, so both
+/// backslash and single-quote must be escaped. Backslash is doubled
+/// (`\\` → `\\\\`) and single-quote is doubled (`'` → `''`).
+pub(crate) fn escape_sql_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("''"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Render a [`Value`] as a SQL literal safe for embedding in a ClickHouse
 /// HTTP query string.
 ///
@@ -256,7 +273,7 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
                 format!("{s}.0")
             }
         }
-        Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        Value::String(s) => format!("'{}'", escape_sql_string(s)),
         Value::Bytes(b) => {
             let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
             format!("unhex('{hex}')")
@@ -266,8 +283,8 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
         Value::DateTime(dt) => format!("'{dt}'"),
         Value::Timestamp(ts) => format!("'{}'", ts.to_rfc3339()),
         Value::Uuid(u) => format!("'{u}'"),
-        Value::Json(v) => format!("'{}'", v.to_string().replace('\'', "''")),
-        Value::Unknown(s) => format!("'{}'", s.replace('\'', "''")),
+        Value::Json(v) => format!("'{}'", escape_sql_string(&v.to_string())),
+        Value::Unknown(s) => format!("'{}'", escape_sql_string(s)),
     }
 }
 
@@ -494,6 +511,30 @@ mod tests {
         assert_eq!(
             value_to_sql_literal(&Value::String("it's here".into())),
             "'it''s here'"
+        );
+    }
+
+    #[test]
+    fn sql_literal_string_escapes_backslash() {
+        assert_eq!(
+            value_to_sql_literal(&Value::String(r"C:\Users".into())),
+            r"'C:\\Users'"
+        );
+    }
+
+    #[test]
+    fn sql_literal_string_escapes_trailing_backslash() {
+        assert_eq!(
+            value_to_sql_literal(&Value::String(r"path\".into())),
+            r"'path\\'"
+        );
+    }
+
+    #[test]
+    fn sql_literal_unknown_escapes_backslash() {
+        assert_eq!(
+            value_to_sql_literal(&Value::Unknown(r"x\y".into())),
+            r"'x\\y'"
         );
     }
 
