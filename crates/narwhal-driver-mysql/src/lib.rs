@@ -136,13 +136,11 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
             ssl_opts = ssl_opts.with_client_identity(Some(identity));
         }
 
-        // For verify-ca / verify-full, enforce server certificate
-        // verification. For prefer/require, skip it.
-        let skip_domain = !matches!(
-            config.params.ssl_mode,
-            SslMode::VerifyCa | SslMode::VerifyFull
-        );
-        let accept_invalid_certs = matches!(config.params.ssl_mode, SslMode::Prefer);
+        // M2: For verify-ca / verify-full, enforce server certificate
+        // verification. For prefer/require, chain-verify but skip hostname.
+        // Neither prefer nor require accepts invalid (self-signed) certs.
+        let skip_domain = !matches!(config.params.ssl_mode, SslMode::VerifyFull);
+        let accept_invalid_certs = false;
 
         ssl_opts = ssl_opts.with_danger_skip_domain_validation(skip_domain);
         ssl_opts = ssl_opts.with_danger_accept_invalid_certs(accept_invalid_certs);

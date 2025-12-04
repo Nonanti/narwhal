@@ -16,8 +16,9 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 
-use narwhal_core::{ConnectionConfig, ConnectionParams};
+use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use uuid::Uuid;
 
 /// Outcome of [`parse`].
@@ -36,6 +37,7 @@ pub enum UrlError {
     MissingHost,
     MissingDatabase,
     EmptyPath,
+    InvalidSslMode(String),
 }
 
 impl fmt::Display for UrlError {
@@ -48,6 +50,10 @@ impl fmt::Display for UrlError {
             Self::MissingHost => f.write_str("connection url missing host"),
             Self::MissingDatabase => f.write_str("connection url missing database"),
             Self::EmptyPath => f.write_str("connection url missing path"),
+            Self::InvalidSslMode(v) => write!(
+                f,
+                "invalid sslmode: {v} (expected disable|prefer|require|verify-ca|verify-full)"
+            ),
         }
     }
 }
@@ -121,6 +127,16 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
 
     let options = parse_query(query)?;
 
+    // Extract TLS-specific query params into struct fields instead of
+    // leaving them in the generic options map.
+    let ExtractedSslParams {
+        options,
+        ssl_mode,
+        ssl_root_cert,
+        ssl_cert,
+        ssl_key,
+    } = extract_ssl_params(options)?;
+
     let port_segment = port.map(|p| format!(":{p}")).unwrap_or_default();
     let name = format!("{host}{port_segment}/{database}");
 
@@ -135,6 +151,10 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
                 database: Some(database),
                 username,
                 options,
+                ssl_mode,
+                ssl_root_cert,
+                ssl_cert,
+                ssl_key,
                 ..Default::default()
             },
         },
@@ -219,9 +239,52 @@ fn hex_digit(b: u8) -> Option<u8> {
     }
 }
 
+/// Parse a libpq-style sslmode string into [`SslMode`].
+fn parse_ssl_mode(value: &str) -> Result<SslMode, UrlError> {
+    match value.to_ascii_lowercase().as_str() {
+        "disable" => Ok(SslMode::Disable),
+        "prefer" => Ok(SslMode::Prefer),
+        "require" => Ok(SslMode::Require),
+        "verify-ca" => Ok(SslMode::VerifyCa),
+        "verify-full" => Ok(SslMode::VerifyFull),
+        other => Err(UrlError::InvalidSslMode(other.to_owned())),
+    }
+}
+
+/// Result of extracting TLS-specific query params from the options map.
+struct ExtractedSslParams {
+    options: BTreeMap<String, String>,
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<PathBuf>,
+    ssl_cert: Option<PathBuf>,
+    ssl_key: Option<PathBuf>,
+}
+
+/// Remove TLS-specific keys from the generic options map and return them
+/// as typed struct fields.
+fn extract_ssl_params(
+    mut options: BTreeMap<String, String>,
+) -> Result<ExtractedSslParams, UrlError> {
+    let ssl_mode = match options.remove("sslmode") {
+        Some(v) => parse_ssl_mode(&v)?,
+        None => SslMode::Prefer,
+    };
+    let ssl_root_cert = options.remove("sslrootcert").map(PathBuf::from);
+    let ssl_cert = options.remove("sslcert").map(PathBuf::from);
+    let ssl_key = options.remove("sslkey").map(PathBuf::from);
+    Ok(ExtractedSslParams {
+        options,
+        ssl_mode,
+        ssl_root_cert,
+        ssl_cert,
+        ssl_key,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn postgres_with_password_and_options() {
@@ -236,15 +299,9 @@ mod tests {
         assert_eq!(parsed.config.params.database.as_deref(), Some("inventory"));
         assert_eq!(parsed.config.params.username.as_deref(), Some("alice"));
         assert_eq!(parsed.password.as_deref(), Some("s@fe"));
-        assert_eq!(
-            parsed
-                .config
-                .params
-                .options
-                .get("sslmode")
-                .map(String::as_str),
-            Some("require")
-        );
+        // sslmode is now a struct field, not in options
+        assert_eq!(parsed.config.params.ssl_mode, SslMode::Require);
+        assert!(!parsed.config.params.options.contains_key("sslmode"));
         assert_eq!(
             parsed.config.params.options.get("app").map(String::as_str),
             Some("narwhal")
@@ -310,5 +367,61 @@ mod tests {
         assert_eq!(percent_decode("hello+world").unwrap(), "hello world");
         assert_eq!(percent_decode("a%2Fb").unwrap(), "a/b");
         assert!(percent_decode("a%ZZ").is_err());
+    }
+
+    #[test]
+    fn url_parses_sslmode_to_struct_field() {
+        let parsed = parse("postgres://h/db?sslmode=require").unwrap();
+        assert_eq!(parsed.config.params.ssl_mode, SslMode::Require);
+        assert!(!parsed.config.params.options.contains_key("sslmode"));
+    }
+
+    #[test]
+    fn url_parses_all_ssl_modes() {
+        for (value, expected) in [
+            ("disable", SslMode::Disable),
+            ("prefer", SslMode::Prefer),
+            ("require", SslMode::Require),
+            ("verify-ca", SslMode::VerifyCa),
+            ("verify-full", SslMode::VerifyFull),
+        ] {
+            let url = format!("postgres://h/db?sslmode={value}");
+            let parsed = parse(&url).unwrap();
+            assert_eq!(parsed.config.params.ssl_mode, expected, "sslmode={value}");
+        }
+    }
+
+    #[test]
+    fn url_parses_sslrootcert_path() {
+        let parsed =
+            parse("postgres://h/db?sslrootcert=/etc/ssl/ca.pem&sslmode=verify-full").unwrap();
+        assert_eq!(
+            parsed.config.params.ssl_root_cert,
+            Some(PathBuf::from("/etc/ssl/ca.pem"))
+        );
+        // Should NOT appear in options
+        assert!(!parsed.config.params.options.contains_key("sslrootcert"));
+    }
+
+    #[test]
+    fn url_parses_sslcert_and_sslkey() {
+        let parsed = parse("postgres://h/db?sslcert=/c.pem&sslkey=/k.pem").unwrap();
+        assert_eq!(parsed.config.params.ssl_cert, Some(PathBuf::from("/c.pem")));
+        assert_eq!(parsed.config.params.ssl_key, Some(PathBuf::from("/k.pem")));
+        assert!(!parsed.config.params.options.contains_key("sslcert"));
+        assert!(!parsed.config.params.options.contains_key("sslkey"));
+    }
+
+    #[test]
+    fn url_rejects_unknown_sslmode() {
+        let err = parse("postgres://h/db?sslmode=magic").unwrap_err();
+        assert!(matches!(err, UrlError::InvalidSslMode(_)));
+        assert!(err.to_string().contains("magic"));
+    }
+
+    #[test]
+    fn url_no_sslmode_defaults_to_prefer() {
+        let parsed = parse("postgres://h/db?app=test").unwrap();
+        assert_eq!(parsed.config.params.ssl_mode, SslMode::Prefer);
     }
 }

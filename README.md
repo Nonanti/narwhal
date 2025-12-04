@@ -101,6 +101,26 @@ drivers (`postgres`, `mysql`, `clickhouse`) accept any of the five
 `ssl_mode` values plus optional `ssl_root_cert`, `ssl_cert`, `ssl_key`
 paths for mutual TLS.
 
+### TLS defaults changed (v0.2)
+
+**Breaking change:** `ssl_mode = prefer` and `ssl_mode = require` now
+perform full CA chain verification instead of accepting any server
+certificate. Self-signed certificates will be rejected unless the CA
+is explicitly trusted via `ssl_root_cert`.
+
+If you were relying on the previous insecure behaviour:
+
+- **Self-signed servers:** add `ssl_root_cert = "/path/to/ca.pem"` to
+  the connection params, or set `ssl_mode = "disable"` if TLS is not
+  needed.
+- **Hostname mismatch:** use `ssl_mode = "require"` or
+  `ssl_mode = "verify-ca"` (chain verified, hostname skipped).
+- **Full verification:** `ssl_mode = "verify-full"` (unchanged).
+
+Query-string TLS params (`?sslmode=...`, `?sslrootcert=...`, etc.)
+are now parsed into dedicated struct fields instead of being left in
+the generic `options` map.
+
 ## Keymap
 
 ### Global

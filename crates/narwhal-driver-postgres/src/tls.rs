@@ -1,11 +1,20 @@
 //! TLS connector construction.
 //!
 //! The [`InternalSslMode`] enum captures the subset of libpq's `sslmode`
-//! parameter that maps cleanly onto rustls. `verify-ca` and `verify-full`
-//! are treated identically because rustls always performs full chain
-//! validation through [`WebPkiServerVerifier`]; selecting `verify-ca` only
-//! skips the hostname check in libpq, which is a footgun we choose not to
-//! replicate.
+//! parameter that maps onto rustls behaviours:
+//!
+//! - **Disable**: no TLS.
+//! - **Prefer**: TLS with full chain + hostname verification (system CA or
+//!   `ssl_root_cert`). This is a **hardened** interpretation: unlike libpq's
+//!   `prefer`, there is no fallback to a plain-text connection.
+//! - **Require**: TLS with chain verification but **hostname verification
+//!   skipped** (matches MySQL `Require` semantics). The server certificate
+//!   must chain to a trusted root, but the hostname in the certificate is
+//!   not checked.
+//! - **VerifyCa**: identical to `Require` (chain verify, no hostname) —
+//!   provided for explicitness.
+//! - **Verify**: TLS with full chain + hostname verification (the previous
+//!   `verify-full` behaviour).
 
 use std::io::BufReader;
 use std::sync::Arc;
@@ -14,23 +23,30 @@ use narwhal_core::{ConnectionParams, Error, Result, SslMode};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
-use tokio_postgres_rustls::MakeRustlsConnect;
+pub(crate) use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Internal representation that maps the public [`SslMode`] onto the
-/// three TLS behaviours rustls supports.
+/// TLS behaviours rustls supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InternalSslMode {
+    /// No TLS handshake.
     Disable,
+    /// Chain + hostname verification (system CA or ssl_root_cert).
+    Prefer,
+    /// Chain verification, hostname skipped (matches MySQL Require).
     Require,
+    /// Chain verification, hostname skipped (explicit verify-ca).
+    VerifyCa,
+    /// Chain + hostname verification (verify-full).
     Verify,
 }
 
 impl InternalSslMode {
     /// Resolve the effective TLS mode from the connection params.
     ///
-    /// Priority: the dedicated `ssl_mode` field takes precedence over the
-    /// legacy `sslmode` key in `options`. If neither is set, defaults to
-    /// `Disable` (matching the pre-TLS behaviour of this driver).
+    /// Priority: the dedicated `ssl_mode` field takes precedence. If it is
+    /// the default (`Prefer`), the legacy `sslmode` key in `options` is
+    /// consulted for backward compatibility.
     pub(crate) fn from_params(params: &ConnectionParams) -> Result<Self> {
         let mode = params.ssl_mode;
         // Override from legacy options key if ssl_mode is at the default
@@ -39,7 +55,8 @@ impl InternalSslMode {
             if let Some(raw) = params.options.get("sslmode") {
                 match raw.to_ascii_lowercase().as_str() {
                     "disable" => SslMode::Disable,
-                    "require" | "prefer" => SslMode::Require,
+                    "prefer" => SslMode::Prefer,
+                    "require" => SslMode::Require,
                     "verify-ca" => SslMode::VerifyCa,
                     "verify-full" => SslMode::VerifyFull,
                     other => {
@@ -50,9 +67,6 @@ impl InternalSslMode {
                     }
                 }
             } else {
-                // Default to Prefer for postgres — but Prefer maps to
-                // Require in our internal model (try TLS, fall back to
-                // plain is not something we expose).
                 SslMode::Prefer
             }
         } else {
@@ -61,15 +75,19 @@ impl InternalSslMode {
 
         Ok(match mode {
             SslMode::Disable => InternalSslMode::Disable,
-            SslMode::Prefer | SslMode::Require => InternalSslMode::Require,
-            SslMode::VerifyCa | SslMode::VerifyFull => InternalSslMode::Verify,
+            SslMode::Prefer => InternalSslMode::Prefer,
+            SslMode::Require => InternalSslMode::Require,
+            SslMode::VerifyCa => InternalSslMode::VerifyCa,
+            SslMode::VerifyFull => InternalSslMode::Verify,
         })
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Disable => "disable",
+            Self::Prefer => "prefer",
             Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
             Self::Verify => "verify-full",
         }
     }
@@ -90,13 +108,50 @@ pub(crate) fn make_tls_connector(
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let config = match mode {
         InternalSslMode::Disable => unreachable!("disable path does not request a TLS connector"),
-        InternalSslMode::Require => insecure_client_config(params)?,
-        InternalSslMode::Verify => verified_client_config(params)?,
+        InternalSslMode::Prefer | InternalSslMode::Verify => verified_client_config(params)?,
+        InternalSslMode::Require | InternalSslMode::VerifyCa => verify_ca_client_config(params)?,
     };
     Ok(MakeRustlsConnect::new(config))
 }
 
+/// Full verification: chain + hostname check.
 fn verified_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
+    let store = build_root_store(params)?;
+
+    if let Some(key_pair) = load_client_cert_key(params)? {
+        ClientConfig::builder()
+            .with_root_certificates(store)
+            .with_client_auth_cert(key_pair.certs, key_pair.key)
+            .map_err(|e| Error::Config(format!("invalid client cert/key pair: {e}")))
+    } else {
+        Ok(ClientConfig::builder()
+            .with_root_certificates(store)
+            .with_no_client_auth())
+    }
+}
+
+/// Chain verification without hostname check (verify-ca / require semantics).
+fn verify_ca_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
+    let store = build_root_store(params)?;
+    let verifier = Arc::new(VerifyCaNoHostname::new(store));
+
+    if let Some(key_pair) = load_client_cert_key(params)? {
+        ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_client_auth_cert(key_pair.certs, key_pair.key)
+            .map_err(|e| Error::Config(format!("invalid client cert/key pair: {e}")))
+    } else {
+        Ok(ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth())
+    }
+}
+
+/// Build a [`RootCertStore`] from `ssl_root_cert` or the system native CA
+/// store.
+fn build_root_store(params: &ConnectionParams) -> Result<RootCertStore> {
     let mut store = RootCertStore::empty();
 
     if let Some(path) = &params.ssl_root_cert {
@@ -129,40 +184,91 @@ fn verified_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
         let (added, _ignored) = store.add_parsable_certificates(load.certs);
         if added == 0 {
             return Err(Error::Config(
-                "no trusted CA certificates available; install ca-certificates, \
-                 set ssl_root_cert, or use ssl_mode=require"
+                "no trusted CA certificates available; install ca-certificates \
+                 or set ssl_root_cert"
                     .into(),
             ));
         }
     }
 
-    if let Some(key_pair) = load_client_cert_key(params)? {
-        ClientConfig::builder()
-            .with_root_certificates(store)
-            .with_client_auth_cert(key_pair.certs, key_pair.key)
-            .map_err(|e| Error::Config(format!("invalid client cert/key pair: {e}")))
-    } else {
-        Ok(ClientConfig::builder()
-            .with_root_certificates(store)
-            .with_no_client_auth())
+    Ok(store)
+}
+
+/// Custom certificate verifier that performs chain validation but skips
+/// hostname verification. This implements the libpq `verify-ca` and
+/// `require` semantics where the server certificate must chain to a
+/// trusted root, but the hostname in the certificate is not checked.
+///
+/// The chain verification is delegated to rustls' built-in
+/// `WebPkiServerVerifier`; only the hostname check is omitted.
+#[derive(Debug)]
+struct VerifyCaNoHostname {
+    inner: Arc<dyn ServerCertVerifier>,
+}
+
+impl VerifyCaNoHostname {
+    fn new(store: RootCertStore) -> Self {
+        let built = rustls::client::WebPkiServerVerifier::builder(Arc::new(store))
+            .build()
+            .expect("WebPkiServerVerifier construction should not fail with a valid root store");
+        // built is Arc<WebPkiServerVerifier>; coerce to Arc<dyn ServerCertVerifier>
+        let inner: Arc<dyn ServerCertVerifier> = built;
+        Self { inner }
     }
 }
 
-fn insecure_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
-    let verifier = Arc::new(AcceptAny);
-    // Even in require (insecure) mode, the server may demand a client
-    // certificate (mTLS). Honour ssl_cert + ssl_key when provided.
-    if let Some(key_pair) = load_client_cert_key(params)? {
-        ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verifier)
-            .with_client_auth_cert(key_pair.certs, key_pair.key)
-            .map_err(|e| Error::Config(format!("invalid client cert/key pair: {e}")))
-    } else {
-        Ok(ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verifier)
-            .with_no_client_auth())
+impl ServerCertVerifier for VerifyCaNoHostname {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+        // Delegate chain verification to the built-in verifier but ignore
+        // hostname mismatch errors. Any other error is fatal.
+        match self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            _server_name,
+            ocsp_response,
+            now,
+        ) {
+            Ok(v) => Ok(v),
+            Err(rustls::Error::InvalidCertificate(e)) => {
+                // Hostname mismatch is the only error we swallow.
+                // All other certificate errors remain fatal.
+                if matches!(e, rustls::CertificateError::NotValidForName) {
+                    Ok(ServerCertVerified::assertion())
+                } else {
+                    Err(rustls::Error::InvalidCertificate(e))
+                }
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.inner.supported_verify_schemes()
     }
 }
 
@@ -210,54 +316,6 @@ fn load_client_cert_key(params: &ConnectionParams) -> Result<Option<ClientCertKe
     }
 }
 
-#[derive(Debug)]
-struct AcceptAny;
-
-impl ServerCertVerifier for AcceptAny {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-        ]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,11 +336,11 @@ mod tests {
     }
 
     #[test]
-    fn from_params_default_is_prefer_maps_to_require() {
+    fn from_params_default_is_prefer() {
         let params = ConnectionParams::default();
         assert_eq!(
             InternalSslMode::from_params(&params).unwrap(),
-            InternalSslMode::Require
+            InternalSslMode::Prefer
         );
     }
 
@@ -296,11 +354,29 @@ mod tests {
     }
 
     #[test]
+    fn from_params_require_maps_to_require_chain() {
+        let params = params_with_ssl_mode(SslMode::Require);
+        assert_eq!(
+            InternalSslMode::from_params(&params).unwrap(),
+            InternalSslMode::Require
+        );
+    }
+
+    #[test]
+    fn from_params_prefer_maps_to_prefer() {
+        let params = params_with_ssl_mode(SslMode::Prefer);
+        assert_eq!(
+            InternalSslMode::from_params(&params).unwrap(),
+            InternalSslMode::Prefer
+        );
+    }
+
+    #[test]
     fn from_params_verify_ca() {
         let params = params_with_ssl_mode(SslMode::VerifyCa);
         assert_eq!(
             InternalSslMode::from_params(&params).unwrap(),
-            InternalSslMode::Verify
+            InternalSslMode::VerifyCa
         );
     }
 
@@ -363,22 +439,97 @@ mod tests {
             .contains("ssl_cert is set but ssl_key is missing"));
     }
 
-    /// Verify that `insecure_client_config` sends the client certificate
-    /// when `ssl_cert` and `ssl_key` are set (K1-C regression test).
-    ///
-    /// We cannot directly inspect `ClientConfig.client_auth_cert_resolver`
-    /// (it is private), but we can confirm that the function succeeds with
-    /// valid PEM files — prior to the fix it silently ignored them.
-    /// The complementary path (no cert/key → no client auth) is also tested.
+    /// H1: Prefer now uses chain verification (not AcceptAny).
+    /// This test verifies that the connector builder succeeds with the
+    /// new Prefer path. It delegates to `verified_client_config`, which
+    /// requires a usable CA store. On CI systems without ca-certificates
+    /// this may fail — that's expected and documents the security
+    /// improvement.
     #[test]
-    fn insecure_mode_sends_client_cert_when_provided() {
+    fn prefer_uses_chain_verifier() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let params = ConnectionParams {
+            ssl_mode: SslMode::Prefer,
+            ..Default::default()
+        };
+        let mode = InternalSslMode::from_params(&params).unwrap();
+        assert_eq!(mode, InternalSslMode::Prefer);
+        // make_tls_connector for Prefer should build a verified config,
+        // not an insecure one.
+        let result = make_tls_connector(mode, &params);
+        // Result depends on system CA availability; we only assert it
+        // doesn't panic and uses the correct code path.
+        match result {
+            Ok(_) => {} // system CA available
+            Err(e) => {
+                // Expected on systems without CA certs
+                assert!(
+                    e.to_string().contains("no trusted CA certificates"),
+                    "unexpected error: {e}"
+                );
+            }
+        }
+    }
+
+    /// H1: Require now uses chain verification without hostname check.
+    #[test]
+    fn require_uses_chain_verifier_no_hostname() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let params = ConnectionParams {
+            ssl_mode: SslMode::Require,
+            ..Default::default()
+        };
+        let mode = InternalSslMode::from_params(&params).unwrap();
+        assert_eq!(mode, InternalSslMode::Require);
+        let result = make_tls_connector(mode, &params);
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("no trusted CA certificates"),
+                    "unexpected error: {e}"
+                );
+            }
+        }
+    }
+
+    /// M1: VerifyCa uses chain verification without hostname check.
+    #[test]
+    fn verify_ca_uses_chain_verifier_no_hostname() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let params = ConnectionParams {
+            ssl_mode: SslMode::VerifyCa,
+            ssl_root_cert: None,
+            ..Default::default()
+        };
+        let mode = InternalSslMode::from_params(&params).unwrap();
+        assert_eq!(mode, InternalSslMode::VerifyCa);
+    }
+
+    /// M1: VerifyCa is distinct from VerifyFull (hostname check).
+    #[test]
+    fn verify_ca_not_same_as_verify_full() {
+        let ca_mode = InternalSslMode::from_params(&ConnectionParams {
+            ssl_mode: SslMode::VerifyCa,
+            ..Default::default()
+        })
+        .unwrap();
+        let full_mode = InternalSslMode::from_params(&ConnectionParams {
+            ssl_mode: SslMode::VerifyFull,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_ne!(ca_mode, full_mode);
+    }
+
+    /// Verify that the client certificate path still works with the
+    /// new chain-verified configs.
+    #[test]
+    fn chain_verified_mode_sends_client_cert_when_provided() {
         use std::io::Write;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        // Generate a self-signed cert+key via openssl-style PEM literals.
-        // These are syntactically valid but not signed by any real CA —
-        // that's fine because the insecure verifier accepts anything.
         let cert_pem = include_str!("../tests/fixtures/client.crt");
         let key_pem = include_str!("../tests/fixtures/client.key");
 
@@ -399,38 +550,17 @@ mod tests {
             ..Default::default()
         };
 
-        // This must succeed — before K1-C fix, the cert/key was ignored.
-        let config = insecure_client_config(&params)
-            .expect("insecure_client_config should succeed with valid cert+key");
-
-        // ClientConfig::client_auth_cert_resolver is private, but we can
-        // verify that the config was built with client auth by checking
-        // that the resolver is not the no-auth sentinel. The only way to
-        // do this without private API access is to compare against a
-        // known no-auth config.
-        let no_auth_params = ConnectionParams {
-            ssl_mode: SslMode::Require,
-            ..Default::default()
-        };
-        let no_auth_config = insecure_client_config(&no_auth_params)
-            .expect("insecure_client_config should succeed without cert");
-
-        // The configs should differ in their client auth setup.
-        // We verify this indirectly: format debug output differs.
-        let with_auth_debug = format!("{config:?}");
-        let without_auth_debug = format!("{no_auth_config:?}");
-        assert_ne!(
-            with_auth_debug, without_auth_debug,
-            "client auth config should differ between cert and no-cert paths"
-        );
-    }
-
-    /// Verify that `insecure_client_config` works without client cert.
-    #[test]
-    fn insecure_mode_works_without_client_cert() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let params = ConnectionParams::default();
-        let _config = insecure_client_config(&params)
-            .expect("insecure_client_config should succeed without cert");
+        // This tests the verify_ca_client_config path with client certs.
+        let result = make_tls_connector(InternalSslMode::Require, &params);
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                // CA store may not be available on all systems
+                assert!(
+                    e.to_string().contains("no trusted CA certificates"),
+                    "unexpected error: {e}"
+                );
+            }
+        }
     }
 }

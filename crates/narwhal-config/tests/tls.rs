@@ -237,3 +237,62 @@ username = "root"
     assert!(conn.params.ssl_cert.is_none());
     assert!(conn.params.ssl_key.is_none());
 }
+
+/// M3: ssl_mode=disable with ssl_root_cert set should be rejected at
+///    config load time (contradictory — user misconfiguration).
+#[test]
+fn disable_mode_with_ssl_files_rejected() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440004"
+name = "misconfig"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+database = "analytics"
+username = "reader"
+ssl_mode = "disable"
+ssl_root_cert = "/etc/ssl/certs/ca-bundle.crt"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(
+        result.is_err(),
+        "should reject ssl_mode=disable with ssl_root_cert set"
+    );
+    match result.unwrap_err() {
+        ConfigError::Validation(msg) => {
+            assert!(
+                msg.contains("disable") && msg.contains("ssl_root_cert"),
+                "error should mention disable and ssl_root_cert, got: {msg}"
+            );
+        }
+        other => panic!("expected ConfigError::Validation, got: {other}"),
+    }
+}
+
+/// M3 variant: ssl_mode=disable with ssl_cert set should also be rejected.
+#[test]
+fn disable_mode_with_ssl_cert_rejected() {
+    let toml = r#"
+[[connection]]
+id = "550e8400-e29b-41d4-a716-446655440005"
+name = "misconfig-cert"
+driver = "postgres"
+
+[connection.params]
+host = "db.example.com"
+database = "analytics"
+username = "reader"
+ssl_mode = "disable"
+ssl_cert = "/etc/ssl/client-cert.pem"
+ssl_key = "/etc/ssl/client-key.pem"
+"#;
+
+    let result = ConnectionsFile::load_from_str(toml);
+    assert!(
+        result.is_err(),
+        "should reject ssl_mode=disable with ssl_cert/ssl_key set"
+    );
+}
