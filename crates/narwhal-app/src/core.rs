@@ -26,6 +26,7 @@ use narwhal_tui::{
 use narwhal_vim::{Action, Mode, SearchDirection, Vim};
 use ratatui::layout::Rect;
 use ratatui::Frame;
+use secrecy::ExposeSecret;
 use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
 use uuid::Uuid;
@@ -1146,7 +1147,7 @@ impl AppCore {
                     .iter()
                     .map(|f| WizardFieldView {
                         label: f.label,
-                        value: &f.value,
+                        value: f.value.expose(),
                         secret: f.secret,
                     })
                     .collect(),
@@ -3394,14 +3395,21 @@ impl AppCore {
     }
 
     fn open_connection(&mut self, config: ConnectionConfig) {
-        let password = match self.credentials.get(config.id) {
+        let password = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.credentials.get(config.id))
+        });
+        let password = match password {
             Ok(secret) => secret,
             Err(error) => {
                 debug!(target: "narwhal::app", error = %error, "keyring lookup failed; continuing without password");
                 None
             }
         };
-        self.open_connection_with_password(config, password);
+        // Convert SecretString → Option<String> for the Session::open API.
+        // The driver layer still expects plain String; we expose the secret
+        // only here and let it drop naturally after the call.
+        let plain_password = password.map(|s| s.expose_secret().to_owned());
+        self.open_connection_with_password(config, plain_password);
     }
 
     fn open_connection_with_password(
@@ -3872,7 +3880,9 @@ impl AppCore {
                 return;
             }
         }
-        if let Err(error) = self.credentials.delete(removed.id) {
+        if let Err(error) = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.credentials.delete(removed.id))
+        }) {
             debug!(target: "narwhal::app", error = %error, "keyring delete failed during remove");
         }
         if let Some(session) = self.session.as_ref() {
@@ -3892,7 +3902,9 @@ impl AppCore {
             self.status.message = format!("forget: no connection named '{name}'");
             return;
         };
-        match self.credentials.delete(config.id) {
+        match tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.credentials.delete(config.id))
+        }) {
             Ok(()) => {
                 self.status.message = format!("forgot password for '{name}'");
             }
@@ -3943,7 +3955,10 @@ impl AppCore {
                     }
                 }
                 if let Some(secret) = secret {
-                    if let Err(error) = self.credentials.set(connection_id, &secret) {
+                    if let Err(error) = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current()
+                            .block_on(self.credentials.set(connection_id, secret))
+                    }) {
                         // The connection is still saved; just warn the user
                         // that the secret didn't make it to the keyring.
                         self.wizard_error = Some(format!(
