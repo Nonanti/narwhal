@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Postgres `Prefer`/`Require` no longer skip certificate verification**
+  (H1, M1, M2). The default `Prefer` and `Require` modes now use the
+  system root store with chain verification; `verify-ca` uses a custom
+  verifier that skips only the hostname check. **Breaking:** existing
+  self-signed servers reached via `Prefer`/`Require` will now be
+  rejected — see README “TLS defaults changed” for migration.
+- **Postgres connection-string injection closed** (H2). The driver no
+  longer concatenates user-supplied values into a libpq string; it
+  uses `tokio_postgres::Config` builder with a whitelisted `options`
+  set.
+- **Postgres cancel handle now uses the same TLS connector** (H3) as
+  the live connection, so cancellation works on TLS-only servers.
+- **History JSONL redacts secrets and is created mode 0600** (H7).
+  `PASSWORD '...'`, `IDENTIFIED BY '...'`, `CREDENTIALS '...'`, and
+  `SET PASSWORD = '...'` are masked before the line is written. File
+  mode is enforced on Unix; pre-existing history files are left
+  untouched.
+- **Keyring access moved off the tokio runtime thread** (H8).
+  `CredentialStore` is now an async trait backed by
+  `spawn_blocking`; a locked or unresponsive Secret Service no longer
+  stalls UI tasks.
+- **URL query parser routes `sslmode`/`sslrootcert`/`sslcert`/`sslkey`
+  into struct fields** (H9) instead of dropping them into the generic
+  `options` map. Unknown `sslmode` values now produce a typed error.
+- **Wizard passwords are kept in `SecretString` and zeroized on
+  drop** (H13). `secrecy` / `zeroize` added as workspace deps;
+  `commit_wizard` exposes the secret exactly once when handing it to
+  the keyring.
+- **Config rejects `ssl_mode = disable` with `ssl_root_cert`/`ssl_cert`/`ssl_key` set**
+  (M3). Misconfiguration that previously degraded silently to plain
+  TCP now surfaces a validation error.
+- **ClickHouse `escape_sql_string` escapes backslashes** (M4), closing
+  a literal-injection edge case where `\'` could prematurely close a
+  string.
+
 ### Fixed
 
 - **MySQL Date/Time bind round-trip** (C1): years outside `u16`,

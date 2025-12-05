@@ -249,7 +249,7 @@
 
 # HIGH / MAJOR
 
-## H1 — Postgres `SslMode::Prefer` (default!) sertifika doğrulamasız TLS'e dönüşüyor
+## H1 ✅ — Postgres `SslMode::Prefer` (default!) sertifika doğrulamasız TLS'e dönüşüyor
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/tls.rs:62-67`
 - **Mevcut:**
@@ -279,7 +279,7 @@
 
 ---
 
-## H2 — Postgres connection-string injection (şifre/options libpq escape edilmemiş)
+## H2 ✅ — Postgres connection-string injection (şifre/options libpq escape edilmemiş)
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/lib.rs:135-149`
 - **Mevcut:**
@@ -328,7 +328,7 @@
 
 ---
 
-## H3 — Postgres cancel handle her zaman `NoTls` (TLS bağlantılarda iptal kırık)
+## H3 ✅ — Postgres cancel handle her zaman `NoTls` (TLS bağlantılarda iptal kırık)
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/lib.rs:730-740`
 - **Mevcut:**
@@ -445,7 +445,7 @@
 
 ---
 
-## H7 — History JSONL secret leak + dosya izni umask'a tabi
+## H7 ✅ — History JSONL secret leak + dosya izni umask'a tabi
 
 - **Dosya:** `crates/narwhal-history/src/journal.rs:32-46, 142-151`
 - **Etki:**
@@ -488,7 +488,7 @@
 
 ---
 
-## H8 — Keyring çağrıları async runtime'da bloklayıcı
+## H8 ✅ — Keyring çağrıları async runtime'da bloklayıcı
 
 - **Dosya:** `crates/narwhal-config/src/credentials.rs:38-72`
 - **Etki:** `CredentialStore` trait sync; `keyring 3.x` Secret Service / DBus
@@ -515,7 +515,7 @@
 
 ---
 
-## H9 — URL parser `?sslmode=require` yutuluyor
+## H9 ✅ — URL parser `?sslmode=require` yutuluyor
 
 - **Dosya:** `crates/narwhal-config/src/url.rs:140-149`
 - **Etki:** Kullanıcı `postgres://...?sslmode=require&sslrootcert=/x.pem` yazsa
@@ -638,7 +638,7 @@
 
 ---
 
-## H13 — Wizard password belleği zeroize edilmiyor
+## H13 ✅ — Wizard password belleği zeroize edilmiyor
 
 - **Dosya:** `crates/narwhal-app/src/wizard.rs:177-285`, `core.rs:3879-3915`
 - **Etki:** `WizardField.value: String` parola tutar; `build()` `to_owned()` ile
@@ -905,7 +905,7 @@
 
 # MEDIUM
 
-## M1 — Postgres `verify-ca` sessizce `verify-full`'a eşleniyor
+## M1 ✅ — Postgres `verify-ca` sessizce `verify-full`'a eşleniyor
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/tls.rs:7-13, 65`
 - **Etki:** libpq `verify-ca` = "chain doğrula, hostname kontrolünü atla".
@@ -926,7 +926,7 @@
 
 ---
 
-## M2 — PG/MySQL `Require` TLS davranışı farklı
+## M2 ✅ — PG/MySQL `Require` TLS davranışı farklı
 
 - **Dosya:**
   - `crates/narwhal-driver-postgres/src/tls.rs:62-67`
@@ -941,7 +941,7 @@
 
 ---
 
-## M3 — `ssl_root_cert` set ama `ssl_mode == Disable` → sessiz yoksay
+## M3 ✅ — `ssl_root_cert` set ama `ssl_mode == Disable` → sessiz yoksay
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:113-115`,
   `crates/narwhal-driver-postgres/src/tls.rs` (benzer durum)
@@ -960,7 +960,7 @@
 
 ---
 
-## M4 — ClickHouse `escape_sql_string` backslash escape'lemiyor
+## M4 ✅ — ClickHouse `escape_sql_string` backslash escape'lemiyor
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:496-498`
 - **Etki:** ClickHouse `\'` escape'i onurlandırır; `'\\''` görüldüğünde string
