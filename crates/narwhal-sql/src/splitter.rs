@@ -47,7 +47,11 @@ enum State {
     Normal,
     LineComment,
     BlockComment(u32),
-    StringLiteral,
+    /// Single-quoted string literal. `backslash_escape` controls whether
+    /// a `\` consumes the next byte (MySQL default mode, PostgreSQL
+    /// `E'...'` escape strings). Standard SQL and PG plain literals use
+    /// `false` and treat `\` as an ordinary character.
+    StringLiteral { backslash_escape: bool },
     QuotedIdentifier,
     Backtick,
 }
@@ -79,6 +83,37 @@ impl<'a> Splitter<'a> {
 
     fn current(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
+    }
+
+    /// Decide whether the literal opening at `self.pos` should honour
+    /// backslash escapes. MySQL applies them unconditionally to single-quoted
+    /// strings; PostgreSQL only inside `E'...'` (`e'...'`) where the prefix
+    /// stands as its own token.
+    fn opening_uses_backslash_escape(&self) -> bool {
+        match self.dialect {
+            Dialect::MySql => true,
+            Dialect::Postgres => self.postgres_e_prefix_at_open(),
+            Dialect::Sqlite | Dialect::Generic => false,
+        }
+    }
+
+    /// True when the byte immediately before the current `'` is an `E`/`e`
+    /// that is itself preceded by a non-identifier byte (or start of input),
+    /// i.e. the `E` is the entire previous token rather than the tail of
+    /// some identifier like `name`.
+    fn postgres_e_prefix_at_open(&self) -> bool {
+        if self.pos == 0 {
+            return false;
+        }
+        let prev = self.bytes[self.pos - 1];
+        if prev != b'E' && prev != b'e' {
+            return false;
+        }
+        if self.pos < 2 {
+            return true;
+        }
+        let before = self.bytes[self.pos - 2];
+        !(before.is_ascii_alphanumeric() || before == b'_')
     }
 
     /// Tries to recognise a dollar-quote opener at the current position and
@@ -178,7 +213,8 @@ impl<'a> Iterator for Splitter<'a> {
                     }
 
                     if byte == b'\'' {
-                        state = State::StringLiteral;
+                        let backslash_escape = self.opening_uses_backslash_escape();
+                        state = State::StringLiteral { backslash_escape };
                         self.pos += 1;
                         continue;
                     }
@@ -238,10 +274,19 @@ impl<'a> Iterator for Splitter<'a> {
                     }
                     self.pos += 1;
                 }
-                State::StringLiteral => {
+                State::StringLiteral { backslash_escape } => {
+                    if backslash_escape && byte == b'\\' {
+                        // Skip the escape byte and whatever follows. If the
+                        // input ends right after a backslash the outer loop
+                        // condition handles termination.
+                        self.pos += if self.peek(1).is_some() { 2 } else { 1 };
+                        continue;
+                    }
                     if byte == b'\'' {
                         if self.peek(1) == Some(b'\'') {
-                            // Escaped single quote inside the literal.
+                            // Escaped single quote inside the literal
+                            // (`''` is the SQL-standard escape and works
+                            // in every dialect).
                             self.pos += 2;
                             continue;
                         }
