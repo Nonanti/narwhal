@@ -382,6 +382,75 @@ mod tests {
     }
 
     #[test]
+    fn mysql_backslash_escapes_quote_in_string_literal() {
+        // In MySQL the default SQL mode does NOT include NO_BACKSLASH_ESCAPES,
+        // so `\'` inside a string literal is an escaped quote that does not
+        // close the literal. The next `'` closes it.
+        // Input SQL: INSERT INTO t VALUES ('\'); SELECT 1
+        //   - Standard splitter (wrong for MySQL): sees `'\'` as a 3-char
+        //     literal closing at byte 7, then the `;` ends the statement,
+        //     leaving `'; SELECT 1` as broken second statement.
+        //   - MySQL-aware splitter (this test): `\'` is escaped quote,
+        //     literal never closes before EOF → the whole input is one
+        //     (syntactically incomplete) statement.
+        let input = r"INSERT INTO t VALUES ('\'); SELECT 1";
+        let stmts = texts(input, Dialect::MySql);
+        assert_eq!(stmts.len(), 1, "expected 1 statement, got: {stmts:?}");
+        assert_eq!(stmts[0], input);
+    }
+
+    #[test]
+    fn mysql_backslash_escapes_backslash_in_string_literal() {
+        // `\\` is a literal backslash; the literal is closed by the
+        // following `'`. The semicolon then splits cleanly.
+        let input = r"SELECT '\\'; SELECT 2";
+        assert_eq!(
+            texts(input, Dialect::MySql),
+            vec![r"SELECT '\\';", "SELECT 2"]
+        );
+    }
+
+    #[test]
+    fn generic_dialect_does_not_treat_backslash_as_escape() {
+        // Regression: in Generic/Postgres (non-E) dialect, `\` is an
+        // ordinary character. `'\'` is a complete 3-char literal.
+        let input = r"INSERT INTO t VALUES ('\'); SELECT 1";
+        let stmts = texts(input, Dialect::Generic);
+        assert_eq!(stmts.len(), 2, "expected 2 statements, got: {stmts:?}");
+    }
+
+    #[test]
+    fn postgres_e_string_treats_backslash_as_escape() {
+        // PG `E'...'` (escape-string) honours backslash escapes.
+        // `E'\''` => string containing a single `'`; literal closes at the
+        // third `'`. The trailing `;` splits the statement.
+        let input = r"SELECT E'\''; SELECT 2";
+        let stmts = texts(input, Dialect::Postgres);
+        assert_eq!(stmts.len(), 2, "expected 2 statements, got: {stmts:?}");
+    }
+
+    #[test]
+    fn postgres_plain_string_does_not_treat_backslash_as_escape() {
+        // Without the `E` prefix PG follows standard SQL: `\` is ordinary.
+        // `'\''` => `'\'` literal, then `'` opens another literal that
+        // never closes → 1 statement consuming the rest of input.
+        let input = r"SELECT '\''; SELECT 2";
+        let stmts = texts(input, Dialect::Postgres);
+        assert_eq!(stmts.len(), 1, "expected 1 statement, got: {stmts:?}");
+    }
+
+    #[test]
+    fn postgres_e_prefix_only_recognised_at_token_boundary() {
+        // `name='value'` should NOT trigger E-string mode just because an
+        // identifier happens to end in `e`. The `e` here is part of the
+        // identifier `name`, not an escape-string prefix.
+        let input = r"SELECT name='\'' ; SELECT 2";
+        let stmts = texts(input, Dialect::Postgres);
+        // Standard parsing applies → 1 statement (unterminated literal).
+        assert_eq!(stmts.len(), 1, "expected 1 statement, got: {stmts:?}");
+    }
+
+    #[test]
     fn offsets_point_to_original_source() {
         let src = "  SELECT 1; SELECT 2;";
         let stmts = split_with(src, Dialect::Generic);
