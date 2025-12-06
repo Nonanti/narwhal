@@ -14,11 +14,16 @@ pub mod __test_only {
     //! Private helpers exposed for integration tests only. Not part of the
     //! public API; do not depend on this module outside the crate's own
     //! `tests/` directory.
+    use mysql_async::consts::ColumnType;
     use mysql_async::Value as MyValue;
     use narwhal_core::{Error, Value};
 
     pub fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
         super::types::try_value_to_my(value)
+    }
+
+    pub fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
+        super::types::value_from_my(value, ty)
     }
 }
 
@@ -26,6 +31,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use mysql_async::consts::ColumnType;
 use mysql_async::prelude::*;
 use mysql_async::{ClientIdentity, Conn, Opts, OptsBuilder, Params, SslOpts};
 use narwhal_core::{
@@ -616,9 +622,23 @@ async fn collect_binary(
 fn map_rows(rows: Vec<mysql_async::Row>, column_count: usize) -> Vec<CoreRow> {
     rows.into_iter()
         .map(|row| {
+            // Capture per-column types before consuming the row so we can
+            // honour BLOB/VARBINARY in the decoder (bug L29).
+            let types: Vec<ColumnType> = row
+                .columns_ref()
+                .iter()
+                .map(|c| c.column_type())
+                .collect();
             let mut values = Vec::with_capacity(column_count);
-            for value in row.unwrap_raw() {
-                values.push(value_from_my(&value.unwrap_or(mysql_async::Value::NULL)));
+            for (idx, value) in row.unwrap_raw().into_iter().enumerate() {
+                let ty = types
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(ColumnType::MYSQL_TYPE_NULL);
+                values.push(value_from_my(
+                    &value.unwrap_or(mysql_async::Value::NULL),
+                    ty,
+                ));
             }
             CoreRow(values)
         })
