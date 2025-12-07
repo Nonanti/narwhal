@@ -25,6 +25,12 @@ pub mod __test_only {
     pub fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
         super::types::value_from_my(value, ty)
     }
+
+    pub fn unique_constraints_from_indexes(
+        indexes: &[narwhal_core::Index],
+    ) -> Vec<narwhal_core::UniqueConstraint> {
+        super::unique_constraints_from_indexes(indexes)
+    }
 }
 
 use std::sync::Arc;
@@ -476,14 +482,7 @@ impl Connection for MysqlConnection {
             .list_foreign_keys(schema, name)
             .await
             .unwrap_or_default();
-        let unique_constraints = indexes
-            .iter()
-            .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
-            .map(|i| UniqueConstraint {
-                name: i.name.clone(),
-                columns: i.columns.clone(),
-            })
-            .collect();
+        let unique_constraints = unique_constraints_from_indexes(&indexes);
 
         Ok(TableSchema {
             table: Table {
@@ -617,6 +616,22 @@ async fn collect_binary(
         rows_affected: None,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Pure helper used by [`MysqlConnection::describe_table`] so the
+/// filter logic can be unit-tested without an integration database.
+///
+/// NOTE: until M10 is fixed, single-column UNIQUE indexes are dropped
+/// here, breaking parity with the Postgres driver.
+fn unique_constraints_from_indexes(indexes: &[Index]) -> Vec<UniqueConstraint> {
+    indexes
+        .iter()
+        .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+        .map(|i| UniqueConstraint {
+            name: i.name.clone(),
+            columns: i.columns.clone(),
+        })
+        .collect()
 }
 
 fn map_rows(rows: Vec<mysql_async::Row>, column_count: usize) -> Vec<CoreRow> {
