@@ -621,12 +621,13 @@ async fn collect_binary(
 /// Pure helper used by [`MysqlConnection::describe_table`] so the
 /// filter logic can be unit-tested without an integration database.
 ///
-/// NOTE: until M10 is fixed, single-column UNIQUE indexes are dropped
-/// here, breaking parity with the Postgres driver.
+/// All UNIQUE indexes are surfaced (single-column UNIQUE included);
+/// the implicit PRIMARY KEY index is excluded because it is reported
+/// separately via [`Column::primary_key`].
 fn unique_constraints_from_indexes(indexes: &[Index]) -> Vec<UniqueConstraint> {
     indexes
         .iter()
-        .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+        .filter(|i| i.unique && !i.primary)
         .map(|i| UniqueConstraint {
             name: i.name.clone(),
             columns: i.columns.clone(),
