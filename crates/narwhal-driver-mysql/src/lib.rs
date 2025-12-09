@@ -172,6 +172,28 @@ pub struct MysqlConnection {
 }
 
 impl MysqlConnection {
+    async fn fetch_table_kind(&mut self, schema: &str, name: &str) -> Result<TableKind> {
+        let result = self
+            .execute(
+                "SELECT table_type FROM information_schema.tables \
+                 WHERE table_schema = ? AND table_name = ? LIMIT 1",
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(name.to_owned()),
+                ],
+            )
+            .await?;
+        let table_type = result
+            .rows
+            .into_iter()
+            .next()
+            .and_then(|r| match r.0.into_iter().next() {
+                Some(Value::String(s)) => Some(s),
+                _ => None,
+            });
+        Ok(map_table_kind(table_type.as_deref()))
+    }
+
     async fn list_indexes(&mut self, schema: &str, table: &str) -> Result<Vec<Index>> {
         let rows = self
             .execute(
@@ -416,12 +438,8 @@ impl Connection for MysqlConnection {
                 _ => continue,
             };
             let kind = match iter.next() {
-                Some(Value::String(s)) => match s.as_str() {
-                    "VIEW" => TableKind::View,
-                    "SYSTEM VIEW" | "SYSTEM TABLE" => TableKind::SystemTable,
-                    _ => TableKind::Table,
-                },
-                _ => TableKind::Table,
+                Some(Value::String(s)) => map_table_kind(Some(s.as_str())),
+                _ => map_table_kind(None),
             };
             out.push(Table {
                 schema: schema.to_owned(),
@@ -487,12 +505,16 @@ impl Connection for MysqlConnection {
             .await
             .unwrap_or_default();
         let unique_constraints = unique_constraints_from_indexes(&indexes);
+        let kind = self
+            .fetch_table_kind(schema, name)
+            .await
+            .unwrap_or(TableKind::Table);
 
         Ok(TableSchema {
             table: Table {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes,
@@ -624,13 +646,14 @@ async fn collect_binary(
 
 /// Maps the `information_schema.tables.TABLE_TYPE` string into
 /// [`TableKind`]. Returns [`TableKind::Table`] for anything unknown or
-/// missing.
-///
-/// NOTE: until L30 is fixed, this helper always returns
-/// [`TableKind::Table`] regardless of input so describe_table's bug
-/// remains observable in regression tests.
-fn map_table_kind(_table_type: Option<&str>) -> TableKind {
-    TableKind::Table
+/// missing so `describe_table` degrades gracefully on dialects whose
+/// catalogue we have not catalogued yet.
+fn map_table_kind(table_type: Option<&str>) -> TableKind {
+    match table_type {
+        Some("VIEW") => TableKind::View,
+        Some("SYSTEM VIEW" | "SYSTEM TABLE") => TableKind::SystemTable,
+        _ => TableKind::Table,
+    }
 }
 
 /// Pure helper used by [`MysqlConnection::describe_table`] so the
