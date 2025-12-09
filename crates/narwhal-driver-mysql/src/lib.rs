@@ -31,6 +31,10 @@ pub mod __test_only {
     ) -> Vec<narwhal_core::UniqueConstraint> {
         super::unique_constraints_from_indexes(indexes)
     }
+
+    pub fn map_table_kind(table_type: Option<&str>) -> narwhal_core::TableKind {
+        super::map_table_kind(table_type)
+    }
 }
 
 use std::sync::Arc;
@@ -616,6 +620,17 @@ async fn collect_binary(
         rows_affected: None,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Maps the `information_schema.tables.TABLE_TYPE` string into
+/// [`TableKind`]. Returns [`TableKind::Table`] for anything unknown or
+/// missing.
+///
+/// NOTE: until L30 is fixed, this helper always returns
+/// [`TableKind::Table`] regardless of input so describe_table's bug
+/// remains observable in regression tests.
+fn map_table_kind(_table_type: Option<&str>) -> TableKind {
+    TableKind::Table
 }
 
 /// Pure helper used by [`MysqlConnection::describe_table`] so the
