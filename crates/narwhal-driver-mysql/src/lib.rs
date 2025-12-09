@@ -35,6 +35,10 @@ pub mod __test_only {
     pub fn map_table_kind(table_type: Option<&str>) -> narwhal_core::TableKind {
         super::map_table_kind(table_type)
     }
+
+    pub fn uses_text_protocol(sql: &str) -> bool {
+        super::uses_text_protocol(sql)
+    }
 }
 
 use std::sync::Arc;
@@ -642,6 +646,22 @@ async fn collect_binary(
         rows_affected: None,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Decides whether an SQL statement must travel over MySQL's *text*
+/// protocol rather than the binary prepared-statement protocol.
+///
+/// MySQL refuses to prepare a handful of administrative statements
+/// (transaction control, session state, catalogue queries, lock
+/// management, bulk load). Without this guard those statements would
+/// have to be sent without parameters via `exec_iter`, which the
+/// server then rejects with a protocol-level error. Returning `true`
+/// keeps `query_iter` (text protocol) for those leading keywords.
+///
+/// NOTE: until H4 is fixed, this helper always returns `true` so the
+/// existing "no params → text protocol" behaviour is preserved.
+fn uses_text_protocol(_sql: &str) -> bool {
+    true
 }
 
 /// Maps the `information_schema.tables.TABLE_TYPE` string into
