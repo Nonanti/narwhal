@@ -20,6 +20,15 @@ pub struct Capabilities {
     pub savepoints: bool,
     /// Driver can report row counts for `UPDATE`/`DELETE` statements.
     pub rows_affected: bool,
+    /// Driver returns rows progressively from [`Connection::stream`] —
+    /// i.e. the stream yields rows as the server produces them, without
+    /// materialising the entire result set in memory first.
+    ///
+    /// Drivers that currently buffer the full result before exposing the
+    /// stream (notably MySQL, which is awaiting a real `stream_and_drop`
+    /// implementation) must leave this `false` so the UI can warn the
+    /// user and refuse to launch open-ended streams over large tables.
+    pub streaming: bool,
 }
 
 impl Capabilities {
@@ -57,6 +66,12 @@ impl Capabilities {
     #[must_use]
     pub const fn with_rows_affected(mut self, value: bool) -> Self {
         self.rows_affected = value;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_streaming(mut self, value: bool) -> Self {
+        self.streaming = value;
         self
     }
 }
