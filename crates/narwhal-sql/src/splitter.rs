@@ -51,7 +51,9 @@ enum State {
     /// a `\` consumes the next byte (MySQL default mode, PostgreSQL
     /// `E'...'` escape strings). Standard SQL and PG plain literals use
     /// `false` and treat `\` as an ordinary character.
-    StringLiteral { backslash_escape: bool },
+    StringLiteral {
+        backslash_escape: bool,
+    },
     QuotedIdentifier,
     Backtick,
 }

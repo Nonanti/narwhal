@@ -33,10 +33,7 @@ fn system_view_maps_to_system_table_kind() {
 
 #[test]
 fn system_table_maps_to_system_table_kind() {
-    assert_eq!(
-        map_table_kind(Some("SYSTEM TABLE")),
-        TableKind::SystemTable
-    );
+    assert_eq!(map_table_kind(Some("SYSTEM TABLE")), TableKind::SystemTable);
 }
 
 #[test]

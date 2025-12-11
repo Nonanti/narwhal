@@ -62,6 +62,9 @@ impl PostgresDriver {
             .with_prepared_statements(true)
             .with_savepoints(true)
             .with_rows_affected(true)
+            // tokio_postgres::Client::query_raw exposes a server-side
+            // cursor; rows arrive incrementally without buffering.
+            .with_streaming(true)
     }
 }
 

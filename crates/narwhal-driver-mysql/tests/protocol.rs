@@ -66,7 +66,9 @@ fn use_uses_text_protocol() {
 
 #[test]
 fn set_uses_text_protocol() {
-    assert!(uses_text_protocol("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"));
+    assert!(uses_text_protocol(
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+    ));
 }
 
 #[test]

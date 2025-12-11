@@ -77,6 +77,10 @@ impl MysqlDriver {
             .with_prepared_statements(true)
             .with_savepoints(true)
             .with_rows_affected(true)
+            // MySQL's `stream` currently materialises the full result
+            // into `BufferedRowStream`; advertise that until a real
+            // `stream_and_drop` implementation lands (bug H5).
+            .with_streaming(false)
     }
 }
 
@@ -187,14 +191,15 @@ impl MysqlConnection {
                 ],
             )
             .await?;
-        let table_type = result
-            .rows
-            .into_iter()
-            .next()
-            .and_then(|r| match r.0.into_iter().next() {
-                Some(Value::String(s)) => Some(s),
-                _ => None,
-            });
+        let table_type =
+            result
+                .rows
+                .into_iter()
+                .next()
+                .and_then(|r| match r.0.into_iter().next() {
+                    Some(Value::String(s)) => Some(s),
+                    _ => None,
+                });
         Ok(map_table_kind(table_type.as_deref()))
     }
 
@@ -779,11 +784,8 @@ fn map_rows(rows: Vec<mysql_async::Row>, column_count: usize) -> Vec<CoreRow> {
         .map(|row| {
             // Capture per-column types before consuming the row so we can
             // honour BLOB/VARBINARY in the decoder (bug L29).
-            let types: Vec<ColumnType> = row
-                .columns_ref()
-                .iter()
-                .map(|c| c.column_type())
-                .collect();
+            let types: Vec<ColumnType> =
+                row.columns_ref().iter().map(|c| c.column_type()).collect();
             let mut values = Vec::with_capacity(column_count);
             for (idx, value) in row.unwrap_raw().into_iter().enumerate() {
                 let ty = types

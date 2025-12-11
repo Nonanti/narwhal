@@ -79,10 +79,7 @@ fn long_blob_column_keeps_bytes() {
 #[test]
 fn varchar_column_decodes_utf8_string() {
     let v = MyValue::Bytes("naïveté".as_bytes().to_vec());
-    expect_string(
-        value_from_my(&v, ColumnType::MYSQL_TYPE_VARCHAR),
-        "naïveté",
-    );
+    expect_string(value_from_my(&v, ColumnType::MYSQL_TYPE_VARCHAR), "naïveté");
 }
 
 #[test]
@@ -106,7 +103,10 @@ fn var_string_column_decodes_utf8_string() {
 #[test]
 fn null_value_decodes_as_null_regardless_of_column_type() {
     expect_null(value_from_my(&MyValue::NULL, ColumnType::MYSQL_TYPE_BLOB));
-    expect_null(value_from_my(&MyValue::NULL, ColumnType::MYSQL_TYPE_VARCHAR));
+    expect_null(value_from_my(
+        &MyValue::NULL,
+        ColumnType::MYSQL_TYPE_VARCHAR,
+    ));
 }
 
 #[test]

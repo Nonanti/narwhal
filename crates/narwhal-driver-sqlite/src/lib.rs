@@ -48,6 +48,9 @@ impl SqliteDriver {
             .with_prepared_statements(true)
             .with_savepoints(true)
             .with_rows_affected(true)
+            // rusqlite::Statement::query yields rows lazily from the
+            // SQLite VM step-by-step, so the stream is genuine.
+            .with_streaming(true)
     }
 }
 

@@ -68,6 +68,8 @@ impl DuckdbDriver {
             .with_prepared_statements(true)
             .with_savepoints(true)
             .with_rows_affected(true)
+            // DuckDB returns Arrow chunks lazily through PreparedStatement::query.
+            .with_streaming(true)
     }
 }
 
