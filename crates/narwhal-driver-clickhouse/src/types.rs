@@ -263,6 +263,14 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
             }
         }
         Value::Int(i) => i.to_string(),
+        Value::Float(f) if f.is_nan() => "nan()".to_owned(),
+        Value::Float(f) if f.is_infinite() => {
+            if *f > 0.0 {
+                "inf()".to_owned()
+            } else {
+                "-inf()".to_owned()
+            }
+        }
         Value::Float(f) => {
             let s = f.to_string();
             // Ensure the float literal has a decimal point so ClickHouse
