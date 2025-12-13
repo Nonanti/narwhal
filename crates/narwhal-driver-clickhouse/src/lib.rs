@@ -1399,6 +1399,37 @@ mod cancel_tests {
         assert!(active.lock().await.is_empty());
     }
 
+    /// Verify that cancel() is idempotent — a second call on the same
+    /// handle still sees the same query IDs (they are cloned, not drained).
+    #[tokio::test]
+    async fn cancel_reads_cloned_not_drained() {
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        active.lock().await.insert("qid-1".to_owned());
+        active.lock().await.insert("qid-2".to_owned());
+
+        // First cancel should read the IDs without draining.
+        let client = reqwest::Client::new();
+        let base_url = Url::parse("http://127.0.0.1:1/").expect("url");
+        let state = Arc::new(SharedState {
+            client,
+            base_url,
+            user: "default".to_owned(),
+            password: String::new(),
+            database: "default".to_owned(),
+            active_queries: active.clone(),
+        });
+        let cancel = ClickhouseCancel { state };
+
+        // Cancel will try to POST KILL QUERY — this will fail since no
+        // server, but the important thing is we don't drain the set.
+        let _ = cancel.cancel().await;
+
+        // The active_queries set should still contain the query IDs.
+        let remaining = active.lock().await;
+        assert!(remaining.contains("qid-1"), "qid-1 should still be present after cancel");
+        assert!(remaining.contains("qid-2"), "qid-2 should still be present after cancel");
+    }
+
     /// Verify that calling cancel with no active queries returns Ok(())
     /// and doesn't attempt an HTTP request (no server to contact).
     #[tokio::test]
