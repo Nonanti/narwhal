@@ -122,12 +122,15 @@ impl InvocationTimeout {
 /// as "disable timeout" rather than panicking.
 const MAX_BUDGET_SECS: f64 = 1e9;
 
-/// Read the per-plugin timeout budget from `narwhal._timeout_budget`.
+/// Read the per-plugin timeout budget from the Lua registry.
 /// Returns `None` when the plugin hasn't called `narwhal.set_timeout`
 /// (the caller should fall back to [`DEFAULT_TIMEOUT`]).
+///
+/// The budget is stored in the registry (not on the `narwhal` global
+/// table) so scripts cannot accidentally clear or corrupt it by
+/// assigning to `narwhal._timeout_budget`.
 fn read_timeout_budget(lua: &Lua) -> Option<Duration> {
-    let narwhal: Table = lua.globals().get("narwhal").ok()?;
-    let secs: f64 = narwhal.get("_timeout_budget").ok()?;
+    let secs: f64 = lua.named_registry_value("narwhal_timeout_budget").ok()?;
     // Guard against NaN, infinity, negative, and astronomically large
     // values that would panic inside `Duration::from_secs_f64`.
     Some(
@@ -375,8 +378,7 @@ fn install_api(
     // top level of the script (not inside a handler) so the budget
     // takes effect on the next invocation.
     let set_timeout = lua.create_function(|lua, secs: f64| {
-        let narwhal: Table = lua.globals().get("narwhal")?;
-        narwhal.set("_timeout_budget", secs)?;
+        lua.set_named_registry_value("narwhal_timeout_budget", secs)?;
         Ok(())
     })?;
     narwhal.set("set_timeout", set_timeout)?;
@@ -1010,5 +1012,39 @@ mod tests {
             CommandOutcome::Status { message } => assert_eq!(message, "pong"),
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    /// M18: Scripts cannot tamper with the timeout budget because it is
+    /// stored in the Lua registry, not on the `narwhal` global table.
+    #[tokio::test]
+    async fn script_cannot_clear_timeout_budget() {
+        // The script tries to nil out `narwhal._timeout_budget` (old
+        // location) and also tries to delete it from the registry. The
+        // registry is not accessible from Lua, so the budget should
+        // survive.
+        let script = r#"
+            narwhal.set_timeout(0.5)
+            -- Try to clear the old location (no-op if field doesn't exist)
+            if narwhal._timeout_budget then
+                narwhal._timeout_budget = nil
+            end
+            narwhal.register_command("check", "check", function(_)
+                -- Run a long loop; with the 0.5s budget still active
+                -- it should time out.
+                local x = 0
+                for i = 1, 1e9 do x = x + i end
+                return "done"
+            end)
+        "#;
+        let plugin = LuaPlugin::from_script("tamper-test", script).unwrap();
+        let err = plugin
+            .dispatch("check", CommandContext::default())
+            .await
+            .unwrap_err();
+        // Budget survived the script's attempt to clear it.
+        assert!(
+            matches!(err, PluginError::Timeout { .. }),
+            "expected Timeout, got: {err:?}"
+        );
     }
 }
