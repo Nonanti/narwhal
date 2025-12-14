@@ -561,6 +561,18 @@ fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Snap a byte index backwards to the nearest UTF-8 char boundary.
+/// Clamps to `s.len()` if the index is past the end. Stable Rust
+/// does not expose `str::floor_char_boundary` yet, so we implement
+/// it manually.
+fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+    idx = idx.min(s.len());
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 pub fn render_editor(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -616,11 +628,16 @@ pub fn render_editor(
                 let mut spans = vec![gutter];
                 let mut pos = 0usize;
                 for &(col, is_current) in matches_on_line {
-                    if col > pos && col <= line_text.len() {
-                        spans.push(Span::raw(line_text[pos..col].to_owned()));
+                    let start = floor_char_boundary(line_text, col);
+                    let hl_end_raw = col.saturating_add(needle_len);
+                    let end = floor_char_boundary(line_text, hl_end_raw);
+                    if start > pos {
+                        let seg_end = start.min(line_text.len());
+                        if pos < seg_end {
+                            spans.push(Span::raw(line_text[pos..seg_end].to_owned()));
+                        }
                     }
-                    let hl_end = (col + needle_len).min(line_text.len());
-                    if col < line_text.len() && hl_end > col {
+                    if start < line_text.len() && end > start {
                         let style = if is_current {
                             Style::default()
                                 .fg(theme.background)
@@ -629,12 +646,9 @@ pub fn render_editor(
                         } else {
                             Style::default().fg(theme.foreground).bg(theme.muted)
                         };
-                        spans.push(Span::styled(line_text[col..hl_end].to_owned(), style));
+                        spans.push(Span::styled(line_text[start..end].to_owned(), style));
                     }
-                    pos = hl_end.max(col + 1); // advance past the match
-                    if pos < col + 1 {
-                        pos = col + 1;
-                    }
+                    pos = end.max(start.saturating_add(1)); // advance past the match
                 }
                 if pos < line_text.len() {
                     spans.push(Span::raw(line_text[pos..].to_owned()));
@@ -889,5 +903,24 @@ mod tests {
         assert_eq!(buf.cursor_col, 8);
         buf.apply_motion(Motion::WordBackward, 1);
         assert_eq!(buf.cursor_col, 4);
+    }
+
+    /// H16 regression: search highlight slicing must not panic on
+    /// multibyte char boundaries. The highlight code receives byte
+    /// offsets in `EditorSearchHighlight.matches`; if a match
+    /// starts or ends inside a multibyte sequence the old code
+    /// sliced directly and panicked.
+    #[test]
+    fn search_highlight_handles_multibyte_match() {
+        // "şahin" — ş is 2 bytes, so byte positions: ş(0,1) a(2) h(3) i(4) n(5)
+        // A match at byte 0 with needle_len=2 would try to slice [0..2]
+        // which is inside `ş` — without floor_char_boundary this panics.
+        let line = "şahin";
+        // Verify that the helper correctly snaps boundaries.
+        assert_eq!(floor_char_boundary(line, 0), 0);
+        assert_eq!(floor_char_boundary(line, 1), 0); // inside ş → snap to 0
+        assert_eq!(floor_char_boundary(line, 2), 2); // 'a' start
+        assert_eq!(floor_char_boundary(line, 6), 6); // at end
+        assert_eq!(floor_char_boundary(line, 99), 6); // past end → clamp to len
     }
 }
