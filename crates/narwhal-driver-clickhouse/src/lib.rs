@@ -663,8 +663,14 @@ impl Connection for ClickhouseConnection {
 
         let query_id = Self::new_query_id();
 
-        // Register query ID for cancellation tracking.
+        // Register query ID for cancellation tracking. The QueryGuard
+        // ensures the ID is removed when the scope exits, even on error
+        // or task abort (M7 RAII pattern).
         state.active_queries.lock().await.insert(query_id.clone());
+        let _guard = QueryGuard {
+            active: Arc::clone(&state.active_queries),
+            qid: query_id.clone(),
+        };
 
         if !statement_returns_rows(&formatted_sql) {
             // Non-row-returning: execute and return an empty stream.
@@ -677,13 +683,7 @@ impl Connection for ClickhouseConnection {
                 pairs.append_pair("query_id", &query_id);
             }
 
-            let response = match state.build_request(&url, formatted_sql).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    state.active_queries.lock().await.remove(&query_id);
-                    return Err(Error::Query(e.to_string()));
-                }
-            };
+            let response = state.build_request(&url, formatted_sql).send().await.map_err(|e| Error::Query(e.to_string()))?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -691,14 +691,12 @@ impl Connection for ClickhouseConnection {
                     .text()
                     .await
                     .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
-                state.active_queries.lock().await.remove(&query_id);
                 return Err(Error::Query(format!(
                     "ClickHouse returned {status}: {body}"
                 )));
             }
 
-            // Deregister on success.
-            state.active_queries.lock().await.remove(&query_id);
+            // _guard is dropped here, cleaning up the query ID.
 
             // Drop the sender immediately so the receiver yields
             // `Ok(None)` on first poll — a clean empty stream. No task
@@ -722,13 +720,7 @@ impl Connection for ClickhouseConnection {
             pairs.append_pair("query_id", &query_id);
         }
 
-        let response = match state.build_request(&url, full_sql).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                state.active_queries.lock().await.remove(&query_id);
-                return Err(Error::Query(e.to_string()));
-            }
-        };
+        let response = state.build_request(&url, full_sql).send().await.map_err(|e| Error::Query(e.to_string()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -736,7 +728,6 @@ impl Connection for ClickhouseConnection {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
-            state.active_queries.lock().await.remove(&query_id);
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
             )));
@@ -746,16 +737,19 @@ impl Connection for ClickhouseConnection {
         // as they arrive and feed a small line buffer. Rows are emitted
         // through the mpsc channel as soon as their line is complete.
         //
-        // The query ID is deregistered when the spawned task completes.
+        // The query ID is deregistered by the QueryGuard when the stream
+        // task completes or when the stream is dropped/aborted.
         let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
         let (row_tx, row_rx) = mpsc::channel::<Result<CoreRow>>(64);
-        let active_queries = state.active_queries.clone();
-        let qid = query_id.clone();
 
+        // Move the guard into the spawned task so it is dropped when
+        // the streaming work finishes (success or error), cleaning up
+        // the query ID.
+        let guard = _guard;
         let task = tokio::spawn(async move {
             stream_tsv_chunks(response.bytes_stream(), header_tx, row_tx).await;
-            // Deregister the query ID now that the stream is complete.
-            active_queries.lock().await.remove(&qid);
+            // guard is dropped here → query ID removed from active set.
+            drop(guard);
         });
 
         let columns = match header_rx.await {
@@ -995,6 +989,34 @@ impl ClickhouseConnection {
             },
             None => Ok(Vec::new()),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Query ID RAII Guard
+// ---------------------------------------------------------------------------
+
+/// RAII guard that ensures a query ID is removed from the active-queries
+/// set when the guard is dropped, regardless of how the scope exits.
+///
+/// This prevents query ID leaks on error paths and task aborts.
+/// The drop implementation uses `tokio::spawn` to perform the async
+/// removal because the `Drop` trait cannot be async. This is acceptable
+/// because the removal is a brief lock + hash-set remove operation.
+struct QueryGuard {
+    active: Arc<Mutex<HashSet<String>>>,
+    qid: String,
+}
+
+impl Drop for QueryGuard {
+    fn drop(&mut self) {
+        let active = self.active.clone();
+        let qid = std::mem::take(&mut self.qid);
+        // Spawn a tiny async task to remove the query ID. The lock is
+        // held only for the brief remove() call.
+        tokio::spawn(async move {
+            active.lock().await.remove(&qid);
+        });
     }
 }
 
@@ -1428,6 +1450,31 @@ mod cancel_tests {
         let remaining = active.lock().await;
         assert!(remaining.contains("qid-1"), "qid-1 should still be present after cancel");
         assert!(remaining.contains("qid-2"), "qid-2 should still be present after cancel");
+    }
+
+    /// Verify that the RAII query guard removes the query ID on drop.
+    #[tokio::test]
+    async fn stream_error_path_clears_active_query() {
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let qid = "test-qid-guard".to_owned();
+        active.lock().await.insert(qid.clone());
+        assert!(active.lock().await.contains(&qid));
+
+        // Simulate the RAII guard being dropped.
+        {
+            let guard_active = active.clone();
+            let guard_qid = qid.clone();
+            let _guard = QueryGuard {
+                active: guard_active,
+                qid: guard_qid,
+            };
+            // Guard is dropped here — spawns an async task to remove.
+        }
+
+        // Yield to allow the spawned removal task to complete.
+        tokio::task::yield_now().await;
+
+        assert!(!active.lock().await.contains(&qid), "query ID should be removed after guard drops");
     }
 
     /// Verify that calling cancel with no active queries returns Ok(())
