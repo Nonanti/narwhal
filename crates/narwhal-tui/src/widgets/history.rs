@@ -12,6 +12,7 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::help::centred;
+use crate::widgets::results::sanitize_for_display;
 use unicode_width::UnicodeWidthStr;
 
 /// View model passed from AppCore to the render path. Owns only the
@@ -115,7 +116,7 @@ pub fn render_history_modal(
         } else {
             normal_style
         };
-        let sql_truncated = truncate_display(row.sql, sql_width);
+        let sql_truncated = truncate_display(&sanitize_for_display(row.sql), sql_width);
         let ts = pad_to_width(row.timestamp, timestamp_width);
         let conn = pad_to_width(row.connection, connection_width);
         lines.push(Line::from(vec![

@@ -12,6 +12,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::theme::Theme;
+use crate::widgets::results::sanitize_for_display;
 
 /// Backwards-compatible alias kept so existing callers can keep building
 /// schema listings the way they did before the sidebar refactor.
@@ -113,7 +114,7 @@ pub fn render_sidebar(
                 Span::raw(format!(" {cursor} ")),
                 Span::raw(indent),
                 Span::raw(format!("{glyph} ")),
-                Span::styled(row.label.to_owned(), style),
+                Span::styled(sanitize_for_display(row.label).into_owned(), style),
             ])
         })
         .collect();
