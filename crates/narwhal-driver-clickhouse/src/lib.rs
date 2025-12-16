@@ -854,6 +854,10 @@ impl Connection for ClickhouseConnection {
             return Err(Error::Schema(format!("table {schema}.{name} not found")));
         }
 
+        // Look up the table kind (Table/View/MaterializedView) from
+        // system.tables.engine — M11.
+        let kind = self.lookup_table_kind(schema, name).await?;
+
         // ClickHouse DESCRIBE TABLE returns:
         // name, type, default_type, default_expression, comment, codec_expression, ttl_expression
         let columns: Vec<Column> = result
@@ -914,7 +918,7 @@ impl Connection for ClickhouseConnection {
             table: Table {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes: Vec::new(),
@@ -969,6 +973,33 @@ impl Connection for ClickhouseConnection {
 }
 
 impl ClickhouseConnection {
+    /// Look up the table kind (Table/View/MaterializedView) from
+    /// `system.tables.engine`.
+    async fn lookup_table_kind(&self, schema: &str, name: &str) -> Result<TableKind> {
+        let sql = format!(
+            "SELECT engine FROM system.tables WHERE database = '{}' AND name = '{}'",
+            escape_sql_string(schema),
+            escape_sql_string(name)
+        );
+        let result = self.query_tsv(&sql, &[]).await?;
+        match result.rows.into_iter().next() {
+            Some(row) => match row.0.into_iter().next() {
+                Some(Value::String(engine)) => {
+                    let engine = engine.to_ascii_lowercase();
+                    Ok(if engine == "view" {
+                        TableKind::View
+                    } else if engine == "materializedview" {
+                        TableKind::MaterializedView
+                    } else {
+                        TableKind::Table
+                    })
+                }
+                _ => Ok(TableKind::Table),
+            },
+            None => Ok(TableKind::Table),
+        }
+    }
+
     /// Look up the primary key columns for a table from `system.tables`.
     async fn lookup_primary_key(&mut self, schema: &str, name: &str) -> Result<Vec<String>> {
         // Both identifiers reach SQL as quoted literals; escape `'` to
