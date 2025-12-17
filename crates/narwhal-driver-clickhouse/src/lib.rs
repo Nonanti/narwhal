@@ -844,6 +844,61 @@ impl Connection for ClickhouseConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT database, name, engine
+              FROM system.tables
+             WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+             ORDER BY database, name";
+        let result = self.query_tsv(SQL, &[]).await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let engine = match iter.next() {
+                Some(Value::String(s)) => s.to_ascii_lowercase(),
+                _ => String::new(),
+            };
+            let kind = if engine == "view" {
+                TableKind::View
+            } else if engine == "materializedview" {
+                TableKind::MaterializedView
+            } else {
+                TableKind::Table
+            };
+            map.entry(schema.clone())
+                .or_default()
+                .push(Table {
+                    schema,
+                    name,
+                    kind,
+                });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        // Append any schemas that appeared in system.tables but not in
+        // list_schemas (shouldn't happen, but defensive).
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
+        }
+        Ok(out)
+    }
+
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
         let escaped_schema = quote_ident(schema);
         let escaped_name = quote_ident(name);
