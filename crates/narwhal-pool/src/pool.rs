@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use narwhal_core::{Connection, ConnectionConfig, DatabaseDriver};
+use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
@@ -45,6 +46,10 @@ struct Inner {
     config: ConnectionConfig,
     password: Option<String>,
     settings: PoolConfig,
+    /// Idle connections. `parking_lot::Mutex` is used instead of
+    /// `std::sync::Mutex` because it is unpoisonable — a panic inside a
+    /// lock holder does not prevent subsequent lock acquisition. This
+    /// eliminates the need for `.expect("poisoned")` on every lock call.
     idle: Mutex<Vec<Box<dyn Connection>>>,
     semaphore: Arc<Semaphore>,
 }
@@ -78,7 +83,7 @@ impl Pool {
 
     /// Number of currently idle, ready-to-hand-out connections.
     pub fn idle_count(&self) -> usize {
-        self.inner.idle.lock().map(|g| g.len()).unwrap_or(0)
+        self.inner.idle.lock().len()
     }
 
     /// Acquire a connection from the pool. The returned guard returns the
@@ -90,7 +95,7 @@ impl Pool {
             .map_err(|_| PoolError::Closed)?;
 
         let reused = {
-            let mut idle = self.inner.idle.lock().expect("idle lock poisoned");
+            let mut idle = self.inner.idle.lock();
             idle.pop()
         };
 
@@ -132,7 +137,7 @@ impl Pool {
     /// remains usable.
     pub async fn drain(&self) {
         let drained: Vec<Box<dyn Connection>> = {
-            let mut idle = self.inner.idle.lock().expect("idle lock poisoned");
+            let mut idle = self.inner.idle.lock();
             std::mem::take(&mut *idle)
         };
         for conn in drained {
@@ -154,8 +159,7 @@ impl Drop for Inner {
         // outside any runtime the connections are dropped synchronously,
         // which is the same behaviour the underlying drivers exhibit when
         // their handles fall out of scope.
-        let connections: Vec<Box<dyn Connection>> =
-            self.idle.get_mut().map(std::mem::take).unwrap_or_default();
+        let connections: Vec<Box<dyn Connection>> = std::mem::take(self.idle.get_mut());
         if connections.is_empty() {
             return;
         }
@@ -176,6 +180,12 @@ impl Drop for Inner {
 }
 
 /// RAII guard that returns its [`Connection`] to the pool on drop.
+///
+/// # Invariant
+///
+/// `connection` is `Some` from construction until `Drop::drop` takes it.
+/// `Deref` / `DerefMut` rely on this invariant and will panic if it is
+/// violated (which should be impossible through the public API).
 pub struct PooledConnection {
     connection: Option<Box<dyn Connection>>,
     inner: Arc<Inner>,
@@ -186,17 +196,21 @@ impl Deref for PooledConnection {
     type Target = dyn Connection;
 
     fn deref(&self) -> &Self::Target {
-        self.connection
-            .as_deref()
-            .expect("connection must be present until drop")
+        let conn = self
+            .connection
+            .as_ref()
+            .expect("PooledConnection::connection invariant: must be Some until drop");
+        conn.as_ref()
     }
 }
 
 impl DerefMut for PooledConnection {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.connection
-            .as_deref_mut()
-            .expect("connection must be present until drop")
+        let conn = self
+            .connection
+            .as_mut()
+            .expect("PooledConnection::connection invariant: must be Some until drop");
+        conn.as_mut()
     }
 }
 
@@ -205,14 +219,8 @@ impl Drop for PooledConnection {
         let Some(connection) = self.connection.take() else {
             return;
         };
-        if let Ok(mut idle) = self.inner.idle.lock() {
-            idle.push(connection);
-        } else {
-            warn!(
-                target: "narwhal::pool",
-                "idle lock poisoned; dropping connection",
-            );
-        }
+        let mut idle = self.inner.idle.lock();
+        idle.push(connection);
     }
 }
 
@@ -296,5 +304,42 @@ mod tests {
         let mut conn = pool.acquire().await.unwrap();
         let row = conn.execute("SELECT ?1", &[Value::Int(42)]).await.unwrap();
         assert_eq!(row.rows[0].get(0).map(Value::render), Some("42".into()));
+    }
+
+    /// H19: Drop runs close on inner connections (no panic).
+    #[tokio::test]
+    async fn pool_drop_runs_close_on_inner() {
+        let pool = pool();
+        // Acquire and release a connection so it goes idle.
+        {
+            let conn = pool.acquire().await.unwrap();
+            drop(conn);
+        }
+        assert_eq!(pool.idle_count(), 1);
+        // Drop the pool; the idle connection's close() should run without
+        // panicking.
+        drop(pool);
+    }
+
+    /// H19: idle_count does not panic under load (parking_lot Mutex has
+    /// no poison).
+    #[tokio::test]
+    async fn idle_count_does_not_panic_under_load() {
+        let pool = pool();
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let p = pool.clone();
+            handles.push(tokio::spawn(async move {
+                let conn = p.acquire().await.unwrap();
+                // Small delay to hold the connection
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                drop(conn);
+                // idle_count should not panic even under contention
+                let _ = p.idle_count();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
     }
 }

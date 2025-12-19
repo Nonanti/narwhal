@@ -2832,6 +2832,7 @@ dependencies = [
  "async-trait",
  "narwhal-core",
  "narwhal-driver-sqlite",
+ "parking_lot",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
