@@ -143,19 +143,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         // the host app doesn't need to mirror our layout maths.
         popup.anchor = editor_cursor_anchor(editor_area, view.editor);
         let regions = render_completion_popup(frame, area, &popup, view.theme);
-        Some((
-            Rect {
-                x: popup.anchor.0.saturating_sub(1),
-                y: popup
-                    .anchor
-                    .1
-                    .saturating_add(1)
-                    .saturating_sub(popup.items.len() as u16 + 2),
-                width: 40, // approximate; not used for hit-testing
-                height: (popup.items.len() as u16 + 2).min(10),
-            },
-            regions,
-        ))
+        Some(regions)
     } else {
         None
     };
@@ -168,13 +156,13 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         editor: editor_area,
         results: main[1],
         status: outer[1],
-        completion: completion_regions.as_ref().map(|(rect, _)| *rect),
+        completion: completion_regions.as_ref().and_then(|r| r.popup_rect),
         sidebar_tables,
         result_headers: result_regions.headers,
         result_rows: result_regions.rows,
         result_tabs: result_regions.tabs,
         completion_items: completion_regions
-            .map(|(_, regions)| regions.items)
+            .map(|regions| regions.items)
             .unwrap_or_default(),
     }
 }
