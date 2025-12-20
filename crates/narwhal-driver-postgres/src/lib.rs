@@ -304,11 +304,11 @@ impl PostgresConnection {
                    con.confkey,
                    con.confupdtype::text,
                    con.confdeltype::text,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.conrelid AND a.attnum = k.num) AS cols,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.confkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.confrelid AND a.attnum = k.num) AS refcols
@@ -372,7 +372,7 @@ impl PostgresConnection {
     ) -> Result<Vec<UniqueConstraint>> {
         const SQL: &str = "
             SELECT con.conname,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.conrelid AND a.attnum = k.num)
@@ -406,10 +406,11 @@ impl PostgresConnection {
 }
 
 fn extract_csv(value: Option<&Value>) -> Vec<String> {
-    // The schema queries above use `string_agg(..., ',')` to flatten
-    // multi-column constraints into a plain text value, so we just split on
-    // commas here. Identifiers cannot contain a comma without quoting, and
-    // the engine catalogue never exposes the quoted form.
+    // The schema queries above use `string_agg(..., E'\x1F')` to flatten
+    // multi-column constraints into a text value separated by the unit
+    // separator character (U+001F). This avoids breakage when identifiers
+    // themselves contain commas (bug M8). We fall back to comma-splitting
+    // for values produced by older queries that haven't been migrated yet.
     let raw = match value {
         Some(Value::String(s) | Value::Unknown(s)) => s,
         _ => return Vec::new(),
@@ -417,7 +418,11 @@ fn extract_csv(value: Option<&Value>) -> Vec<String> {
     if raw.is_empty() {
         return Vec::new();
     }
-    raw.split(',').map(|s| s.to_owned()).collect()
+    if raw.contains('\x1F') {
+        raw.split('\x1F').map(|s| s.to_owned()).collect()
+    } else {
+        raw.split(',').map(|s| s.to_owned()).collect()
+    }
 }
 
 impl PostgresConnection {
