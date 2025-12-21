@@ -120,16 +120,22 @@ async fn sidebar_table_click_injects_preview() {
     let (rect, _idx) = &table_rects[0];
     core.handle_mouse(click_at(rect.x + 2, rect.y));
 
-    // The editor should now contain a SELECT * FROM ... statement
-    // and a query should have been dispatched.
-    let editor_text = core.editor().entire_text();
-    assert!(
-        editor_text.contains("SELECT * FROM"),
-        "editor should contain preview query, got: {editor_text:?}"
-    );
+    // The click should have dispatched a preview query via
+    // run_preview (same as keyboard `o`). The core should be
+    // in a running state.
+    assert!(core.is_running(), "clicking sidebar table should dispatch a query");
 
     // Drain the run so we don't leave the core in a running state.
     core.drain_run_updates().await;
+
+    // After draining, the result should contain data from the table.
+    use narwhal_app::core::ResultState;
+    match core.result() {
+        ResultState::Rows { rows, .. } => {
+            assert!(!rows.is_empty(), "preview should return rows");
+        }
+        other => panic!("expected Rows after sidebar click, got {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -240,5 +246,52 @@ async fn scroll_in_results_pane_moves_view() {
         (Some(a), Some(b)) if b > a => {}  // moved down
         (Some(a), Some(b)) if a == b => {} // stayed put (already at boundary)
         other => panic!("expected selection to move down or stay, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_click_preview_enables_cell_edit() {
+    // M15 regression: clicking a sidebar table must produce a result
+    // with a `RowSource` (pending_source), just like the keyboard-driven
+    // `o` path. Without it, pressing `e` to cell-edit would find
+    // `pending_source = None` and refuse.
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("cell_edit_mouse.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);
+             INSERT INTO items VALUES (1, 'alpha'), (2, 'beta');",
+        )
+        .unwrap();
+    }
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+    core.execute_command("open mouse-test");
+
+    render(&mut core);
+
+    // Click on the sidebar table entry.
+    let table_rects = core.last_layout().sidebar_tables.clone();
+    assert!(
+        !table_rects.is_empty(),
+        "sidebar should have at least one table entry"
+    );
+    let (rect, _idx) = &table_rects[0];
+    core.handle_mouse(click_at(rect.x + 2, rect.y));
+
+    // Drain the run so the result is materialised.
+    core.drain_run_updates().await;
+
+    // The result state should be Rows with a source (enabling cell edit).
+    use narwhal_app::core::ResultState;
+    match core.result() {
+        ResultState::Rows { source, .. } => {
+            assert!(
+                source.is_some(),
+                "mouse-clicked table preview should have a RowSource for cell edit"
+            );
+        }
+        other => panic!("expected Rows after sidebar click, got {other:?}"),
     }
 }
