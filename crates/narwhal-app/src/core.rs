@@ -1417,7 +1417,9 @@ impl AppCore {
     }
 
     /// Click on a sidebar table row: navigate the sidebar to that index
-    /// and inject a preview query.
+    /// and run a preview query. Uses `run_preview` (same as the
+    /// keyboard-driven `o` path) so that `pending_source` is set and
+    /// cell editing (`e`) works on mouse-previewed tables (M15).
     fn click_sidebar_table(&mut self, sidebar_idx: usize) {
         let Some(item) = self.sidebar_items.get(sidebar_idx).cloned() else {
             return;
@@ -1426,7 +1428,7 @@ impl AppCore {
             return;
         };
         self.sidebar_index = sidebar_idx;
-        self.inject_table_preview(&schema, &name);
+        self.run_preview(&schema, &name, 0);
     }
 
     /// Click on a result tab: switch to that result index.
@@ -1439,22 +1441,6 @@ impl AppCore {
         }
     }
 
-    /// Inject a `SELECT * FROM <schema>.<table> LIMIT 100;` into the
-    /// editor and dispatch it. This mirrors the keyboard-driven
-    /// `preview_sidebar_selection` but injects the SQL into the editor
-    /// so the user can see what ran.
-    fn inject_table_preview(&mut self, schema: &str, table: &str) {
-        let dialect = self
-            .session
-            .as_ref()
-            .map(|s| s.dialect())
-            .unwrap_or(narwhal_sql::Dialect::Generic);
-        let sql =
-            crate::ddl::preview_query(schema, table, self.tabs[self.active_tab].page_size, dialect);
-        self.tabs[self.active_tab].editor.clear();
-        self.tabs[self.active_tab].editor.insert_str(&sql);
-        self.dispatch_current_statement(RunMode::Execute);
-    }
 
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         // Terminal-agnostic function keys first. Most terminal emulators
