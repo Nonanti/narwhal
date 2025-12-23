@@ -19,6 +19,7 @@ async-trait.workspace = true
 tokio.workspace = true
 duckdb.workspace = true
 tracing.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
