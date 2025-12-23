@@ -651,6 +651,64 @@ impl Connection for PostgresConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT n.nspname, c.relname, c.relkind::text
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+               AND n.nspname NOT LIKE 'pg_temp_%'
+               AND n.nspname NOT LIKE 'pg_toast_temp_%'
+               AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+             ORDER BY n.nspname, c.relname";
+        let result = self.run(SQL, &[]).await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) => match s.as_str() {
+                    "r" | "p" => TableKind::Table,
+                    "v" => TableKind::View,
+                    "m" => TableKind::MaterializedView,
+                    "f" => TableKind::Table,
+                    _ => TableKind::Table,
+                },
+                _ => TableKind::Table,
+            };
+            map.entry(schema.clone())
+                .or_default()
+                .push(Table {
+                    schema: schema.clone(),
+                    name,
+                    kind,
+                });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        // Append any schemas that appeared in the query but not in
+        // list_schemas (defensive).
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
+        }
+        Ok(out)
+    }
+
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
         const SQL: &str = "
             SELECT
