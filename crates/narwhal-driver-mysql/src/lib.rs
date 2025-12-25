@@ -473,6 +473,56 @@ impl Connection for MysqlConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        let result = self
+            .execute(
+                "SELECT table_schema, table_name, table_type \
+                 FROM information_schema.tables \
+                 WHERE table_schema NOT IN ('mysql', 'information_schema', \
+                 'performance_schema', 'sys') \
+                 ORDER BY table_schema, table_name",
+                &[],
+            )
+            .await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) => map_table_kind(Some(s.as_str())),
+                _ => map_table_kind(None),
+            };
+            map.entry(schema.clone())
+                .or_default()
+                .push(Table {
+                    schema: schema.clone(),
+                    name,
+                    kind,
+                });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
+        }
+        Ok(out)
+    }
+
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
         let result = self
             .execute(
