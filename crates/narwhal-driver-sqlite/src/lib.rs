@@ -446,6 +446,37 @@ impl Connection for SqliteConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT name, type
+            FROM sqlite_master
+            WHERE type IN ('table', 'view')
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name";
+        let result = self.run(SQL, &[]).await?;
+
+        let mut tables = Vec::with_capacity(result.rows.len());
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) if s == "view" => TableKind::View,
+                _ => TableKind::Table,
+            };
+            tables.push(Table {
+                schema: "main".into(),
+                name,
+                kind,
+            });
+        }
+        Ok(vec![(Schema {
+            name: "main".into(),
+        }, tables)])
+    }
+
     async fn describe_table(&mut self, _schema: &str, name: &str) -> Result<TableSchema> {
         // `PRAGMA table_info` does not accept bound parameters; quote the
         // identifier so embedded special characters do not break the
