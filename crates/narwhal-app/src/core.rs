@@ -2987,11 +2987,14 @@ impl AppCore {
                     Mode::Command => ":".into(),
                     Mode::Visual => "-- VISUAL --".into(),
                     Mode::VisualLine => "-- V-LINE --".into(),
-                    Mode::OperatorPending(op) => format!("-- {} --", match op {
-                        Operator::Delete => "OPERATOR DELETE",
-                        Operator::Yank => "OPERATOR YANK",
-                        Operator::Change => "OPERATOR CHANGE",
-                    }),
+                    Mode::OperatorPending(op) => format!(
+                        "-- {} --",
+                        match op {
+                            Operator::Delete => "OPERATOR DELETE",
+                            Operator::Yank => "OPERATOR YANK",
+                            Operator::Change => "OPERATOR CHANGE",
+                        }
+                    ),
                 };
             }
             Action::SubmitCommand(cmd) => self.execute_command(&cmd),

@@ -209,7 +209,7 @@ impl Vim {
                 count: 1,
             },
             // Operators in visual mode apply to the selection
-            KeyCode::Char('d') | KeyCode::Char('x') => {
+            KeyCode::Char('d' | 'x') => {
                 let op = Operator::Delete;
                 self.mode = Mode::Normal;
                 Action::Operate {

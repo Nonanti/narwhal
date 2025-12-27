@@ -234,9 +234,7 @@ impl Journal {
                 if out.len() >= n {
                     break;
                 }
-                let line = line.map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-                })?;
+                let line = line.map_err(|e| std::io::Error::other(e.to_string()))?;
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
@@ -258,7 +256,7 @@ impl Journal {
             Ok(out)
         })
         .await
-        .map_err(|e| HistoryError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+        .map_err(|e| HistoryError::Io(std::io::Error::other(e.to_string())))?
     }
 }
 
@@ -476,7 +474,10 @@ mod tests {
 
         // Append a corrupt line
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         f.write_all(b"THIS IS NOT JSON\n").unwrap();
         f.write_all(b"\n").unwrap(); // blank line
         drop(f);
