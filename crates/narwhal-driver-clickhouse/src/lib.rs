@@ -683,7 +683,11 @@ impl Connection for ClickhouseConnection {
                 pairs.append_pair("query_id", &query_id);
             }
 
-            let response = state.build_request(&url, formatted_sql).send().await.map_err(|e| Error::Query(e.to_string()))?;
+            let response = state
+                .build_request(&url, formatted_sql)
+                .send()
+                .await
+                .map_err(|e| Error::Query(e.to_string()))?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -720,7 +724,11 @@ impl Connection for ClickhouseConnection {
             pairs.append_pair("query_id", &query_id);
         }
 
-        let response = state.build_request(&url, full_sql).send().await.map_err(|e| Error::Query(e.to_string()))?;
+        let response = state
+            .build_request(&url, full_sql)
+            .send()
+            .await
+            .map_err(|e| Error::Query(e.to_string()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -877,11 +885,7 @@ impl Connection for ClickhouseConnection {
             };
             map.entry(schema.clone())
                 .or_default()
-                .push(Table {
-                    schema,
-                    name,
-                    kind,
-                });
+                .push(Table { schema, name, kind });
         }
 
         // Preserve the order of schemas from list_schemas.
@@ -1122,7 +1126,14 @@ struct ClickhouseCancel {
 #[async_trait]
 impl CancelHandle for ClickhouseCancel {
     async fn cancel(&self) -> Result<()> {
-        let query_ids: Vec<String> = self.state.active_queries.lock().await.iter().cloned().collect();
+        let query_ids: Vec<String> = self
+            .state
+            .active_queries
+            .lock()
+            .await
+            .iter()
+            .cloned()
+            .collect();
 
         if query_ids.is_empty() {
             // No active queries — nothing to cancel.
@@ -1534,8 +1545,14 @@ mod cancel_tests {
 
         // The active_queries set should still contain the query IDs.
         let remaining = active.lock().await;
-        assert!(remaining.contains("qid-1"), "qid-1 should still be present after cancel");
-        assert!(remaining.contains("qid-2"), "qid-2 should still be present after cancel");
+        assert!(
+            remaining.contains("qid-1"),
+            "qid-1 should still be present after cancel"
+        );
+        assert!(
+            remaining.contains("qid-2"),
+            "qid-2 should still be present after cancel"
+        );
     }
 
     /// Verify that the RAII query guard removes the query ID on drop.
@@ -1560,7 +1577,10 @@ mod cancel_tests {
         // Yield to allow the spawned removal task to complete.
         tokio::task::yield_now().await;
 
-        assert!(!active.lock().await.contains(&qid), "query ID should be removed after guard drops");
+        assert!(
+            !active.lock().await.contains(&qid),
+            "query ID should be removed after guard drops"
+        );
     }
 
     /// Verify that calling cancel with no active queries returns Ok(())

@@ -472,9 +472,12 @@ impl Connection for SqliteConnection {
                 kind,
             });
         }
-        Ok(vec![(Schema {
-            name: "main".into(),
-        }, tables)])
+        Ok(vec![(
+            Schema {
+                name: "main".into(),
+            },
+            tables,
+        )])
     }
 
     async fn describe_table(&mut self, _schema: &str, name: &str) -> Result<TableSchema> {

@@ -585,13 +585,11 @@ impl Connection for DuckdbConnection {
                 Some(Value::String(s)) if s.eq_ignore_ascii_case("VIEW") => TableKind::View,
                 _ => TableKind::Table,
             };
-            map.entry(schema.clone())
-                .or_default()
-                .push(Table {
-                    schema: schema.clone(),
-                    name,
-                    kind,
-                });
+            map.entry(schema.clone()).or_default().push(Table {
+                schema: schema.clone(),
+                name,
+                kind,
+            });
         }
 
         // Preserve the order of schemas from list_schemas.
