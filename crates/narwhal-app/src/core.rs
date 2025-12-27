@@ -23,7 +23,7 @@ use narwhal_tui::{
     SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, SnippetsModalState, SortDir,
     StatusBarView, Theme, WizardFieldView, WizardView,
 };
-use narwhal_vim::{Action, Mode, SearchDirection, Vim};
+use narwhal_vim::{Action, Mode, Operator, SearchDirection, Vim};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use secrecy::ExposeSecret;
@@ -833,7 +833,7 @@ impl AppCore {
         let entries = if let Some(j) = &self.history_journal {
             let j = Arc::clone(j);
             match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async { j.recent(200) })
+                tokio::runtime::Handle::current().block_on(async { j.recent(200).await })
             }) {
                 Ok(e) => e,
                 Err(err) => {
@@ -2987,6 +2987,11 @@ impl AppCore {
                     Mode::Command => ":".into(),
                     Mode::Visual => "-- VISUAL --".into(),
                     Mode::VisualLine => "-- V-LINE --".into(),
+                    Mode::OperatorPending(op) => format!("-- {} --", match op {
+                        Operator::Delete => "OPERATOR DELETE",
+                        Operator::Yank => "OPERATOR YANK",
+                        Operator::Change => "OPERATOR CHANGE",
+                    }),
                 };
             }
             Action::SubmitCommand(cmd) => self.execute_command(&cmd),

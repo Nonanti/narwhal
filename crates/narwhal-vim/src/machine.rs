@@ -1,6 +1,10 @@
-use crate::action::{Action, Motion, SearchDirection};
+use crate::action::{Action, Motion, Operator, SearchDirection};
 use crate::key::{Key, KeyCode};
 use crate::mode::Mode;
+
+/// Maximum count value. Prevents overflow from sticky keys or malicious
+/// scripts. Vim's real-world practical cap is well below this.
+const MAX_COUNT: usize = 999_999;
 
 /// Modal keystroke processor.
 #[derive(Debug, Default)]
@@ -40,6 +44,7 @@ impl Vim {
             Mode::Insert => self.handle_insert(key),
             Mode::Command => self.handle_command(key),
             Mode::Visual | Mode::VisualLine => self.handle_visual(key),
+            Mode::OperatorPending(_) => self.handle_operator_pending(key),
         }
     }
 
@@ -47,11 +52,23 @@ impl Vim {
         self.pending_count.take().unwrap_or(1)
     }
 
+    /// Accumulate a digit into the pending count, clamping to MAX_COUNT.
+    fn push_count_digit(&mut self, digit: usize) {
+        let next = self
+            .pending_count
+            .unwrap_or(0)
+            .checked_mul(10)
+            .and_then(|v| v.checked_add(digit))
+            .unwrap_or(MAX_COUNT)
+            .min(MAX_COUNT);
+        self.pending_count = Some(next);
+    }
+
     fn handle_normal(&mut self, key: Key) -> Action {
         match key.code {
             KeyCode::Char(c @ '0'..='9') if !(c == '0' && self.pending_count.is_none()) => {
                 let digit = c.to_digit(10).unwrap_or(0) as usize;
-                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + digit);
+                self.push_count_digit(digit);
                 Action::Pending
             }
             KeyCode::Char('h') | KeyCode::Left => Action::Move {
@@ -78,10 +95,13 @@ impl Vim {
                 motion: Motion::WordBackward,
                 count: self.take_count(),
             },
-            KeyCode::Char('0') => Action::Move {
-                motion: Motion::LineStart,
-                count: 1,
-            },
+            KeyCode::Char('0') => {
+                self.pending_count = None;
+                Action::Move {
+                    motion: Motion::LineStart,
+                    count: 1,
+                }
+            }
             KeyCode::Char('$') => Action::Move {
                 motion: Motion::LineEnd,
                 count: 1,
@@ -110,6 +130,19 @@ impl Vim {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
                 Action::EnterMode(Mode::Command)
+            }
+            // Operators — enter OperatorPending mode
+            KeyCode::Char('d') => {
+                self.mode = Mode::OperatorPending(Operator::Delete);
+                Action::Pending
+            }
+            KeyCode::Char('y') => {
+                self.mode = Mode::OperatorPending(Operator::Yank);
+                Action::Pending
+            }
+            KeyCode::Char('c') => {
+                self.mode = Mode::OperatorPending(Operator::Change);
+                Action::Pending
             }
             _ => Action::Pending,
         }
@@ -175,7 +208,218 @@ impl Vim {
                 motion: Motion::Up,
                 count: 1,
             },
+            // Operators in visual mode apply to the selection
+            KeyCode::Char('d') | KeyCode::Char('x') => {
+                let op = Operator::Delete;
+                self.mode = Mode::Normal;
+                Action::Operate {
+                    op,
+                    motion: Motion::CurrentLine,
+                    count: 1,
+                }
+            }
+            KeyCode::Char('y') => {
+                let op = Operator::Yank;
+                self.mode = Mode::Normal;
+                Action::Operate {
+                    op,
+                    motion: Motion::CurrentLine,
+                    count: 1,
+                }
+            }
+            KeyCode::Char('c') => {
+                let op = Operator::Change;
+                self.mode = Mode::Insert;
+                Action::Operate {
+                    op,
+                    motion: Motion::CurrentLine,
+                    count: 1,
+                }
+            }
             _ => Action::Pending,
+        }
+    }
+
+    /// Handle keys in OperatorPending mode. After an operator (d/y/c) is
+    /// pressed, we wait for a motion or a doubled operator (dd/yy/cc for
+    /// line-wise).
+    fn handle_operator_pending(&mut self, key: Key) -> Action {
+        let op = match self.mode {
+            Mode::OperatorPending(op) => op,
+            _ => unreachable!("handle_operator_pending called outside OperatorPending"),
+        };
+
+        match key.code {
+            // Digit accumulation continues into operator-pending
+            KeyCode::Char(c @ '0'..='9') if !(c == '0' && self.pending_count.is_none()) => {
+                let digit = c.to_digit(10).unwrap_or(0) as usize;
+                self.push_count_digit(digit);
+                Action::Pending
+            }
+            // Doubled operator: line-wise (dd, yy, cc)
+            KeyCode::Char('d') if op == Operator::Delete => {
+                let count = self.take_count();
+                self.mode = Mode::Normal;
+                Action::Operate {
+                    op: Operator::Delete,
+                    motion: Motion::CurrentLine,
+                    count,
+                }
+            }
+            KeyCode::Char('y') if op == Operator::Yank => {
+                let count = self.take_count();
+                self.mode = Mode::Normal;
+                Action::Operate {
+                    op: Operator::Yank,
+                    motion: Motion::CurrentLine,
+                    count,
+                }
+            }
+            KeyCode::Char('c') if op == Operator::Change => {
+                let count = self.take_count();
+                self.mode = Mode::Insert;
+                Action::Operate {
+                    op: Operator::Change,
+                    motion: Motion::CurrentLine,
+                    count,
+                }
+            }
+            // Motions
+            KeyCode::Char('w') => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::WordForward,
+                    count,
+                }
+            }
+            KeyCode::Char('b') => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::WordBackward,
+                    count,
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::Left,
+                    count,
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::Right,
+                    count,
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::Down,
+                    count,
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::Up,
+                    count,
+                }
+            }
+            KeyCode::Char('0') => {
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::LineStart,
+                    count: 1,
+                }
+            }
+            KeyCode::Char('$') => {
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::LineEnd,
+                    count: 1,
+                }
+            }
+            KeyCode::Char('G') => {
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::FileEnd,
+                    count: 1,
+                }
+            }
+            // Escape cancels the operator
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                self.pending_count = None;
+                Action::EnterMode(Mode::Normal)
+            }
+            _ => {
+                // Unknown key cancels the operator and returns to Normal
+                self.mode = Mode::Normal;
+                self.pending_count = None;
+                Action::Pending
+            }
         }
     }
 }
@@ -246,5 +490,187 @@ mod tests {
                 count: 1,
             }
         );
+    }
+
+    // ---- M16: Operator state machine tests ----
+
+    #[test]
+    fn dd_deletes_line() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('d')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('d')),
+            Action::Operate {
+                op: Operator::Delete,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn yy_yanks_line() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('y')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('y')),
+            Action::Operate {
+                op: Operator::Yank,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn cc_changes_line() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('c')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('c')),
+            Action::Operate {
+                op: Operator::Change,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        // Change leaves you in Insert mode
+        assert_eq!(vim.mode(), Mode::Insert);
+    }
+
+    #[test]
+    fn dw_deletes_word() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('d')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('w')),
+            Action::Operate {
+                op: Operator::Delete,
+                motion: Motion::WordForward,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn c_dollar_changes_to_end_of_line() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('c')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('$')),
+            Action::Operate {
+                op: Operator::Change,
+                motion: Motion::LineEnd,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Insert);
+    }
+
+    #[test]
+    fn counted_operator() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('3')), Action::Pending);
+        assert_eq!(vim.handle(Key::char('d')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('w')),
+            Action::Operate {
+                op: Operator::Delete,
+                motion: Motion::WordForward,
+                count: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn d_j_deletes_down() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('d')), Action::Pending);
+        assert_eq!(
+            vim.handle(Key::char('j')),
+            Action::Operate {
+                op: Operator::Delete,
+                motion: Motion::Down,
+                count: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn visual_d_deletes_selection() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('v'));
+        assert_eq!(
+            vim.handle(Key::char('d')),
+            Action::Operate {
+                op: Operator::Delete,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn visual_y_yanks_selection() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('v'));
+        assert_eq!(
+            vim.handle(Key::char('y')),
+            Action::Operate {
+                op: Operator::Yank,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn visual_c_changes_selection() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('v'));
+        assert_eq!(
+            vim.handle(Key::char('c')),
+            Action::Operate {
+                op: Operator::Change,
+                motion: Motion::CurrentLine,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Insert);
+    }
+
+    #[test]
+    fn esc_cancels_operator() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('d'));
+        assert_eq!(vim.mode(), Mode::OperatorPending(Operator::Delete));
+        vim.handle(Key::special(KeyCode::Esc));
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn unknown_key_cancels_operator() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('d'));
+        // 'z' is not a recognized motion or operator
+        vim.handle(Key::char('z'));
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    // ---- M17: pending_count overflow guard ----
+
+    #[test]
+    fn pending_count_clamps_to_max() {
+        let mut vim = Vim::new();
+        // Type a lot of 9s — should clamp to MAX_COUNT
+        for _ in 0..10 {
+            vim.handle(Key::char('9'));
+        }
+        assert_eq!(vim.pending_count, Some(MAX_COUNT));
     }
 }
