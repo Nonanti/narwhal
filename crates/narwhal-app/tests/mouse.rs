@@ -123,7 +123,10 @@ async fn sidebar_table_click_injects_preview() {
     // The click should have dispatched a preview query via
     // run_preview (same as keyboard `o`). The core should be
     // in a running state.
-    assert!(core.is_running(), "clicking sidebar table should dispatch a query");
+    assert!(
+        core.is_running(),
+        "clicking sidebar table should dispatch a query"
+    );
 
     // Drain the run so we don't leave the core in a running state.
     core.drain_run_updates().await;

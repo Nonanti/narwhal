@@ -115,6 +115,10 @@ impl App {
                     self.core.handle_run_update(update);
                     Some(if is_stream { DrawTrigger::Stream } else { DrawTrigger::Force })
                 }
+                Some(meta) = self.core.meta_rx.recv() => {
+                    self.core.handle_meta_update(meta);
+                    Some(DrawTrigger::Force)
+                }
                 _ = sleep_until(deadline.into()) => None,
             };
 

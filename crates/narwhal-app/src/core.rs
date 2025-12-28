@@ -37,6 +37,7 @@ use crate::completion::{detect_context, gather as gather_completions, Completion
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
+use crate::meta::{spawn_meta_request, MetaRequest, MetaUpdate};
 use crate::registry::DriverRegistry;
 use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
@@ -483,6 +484,11 @@ pub struct AppCore {
     last_layout: LayoutRegions,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
+    /// Channel for background metadata operations (dump_schema, refresh,
+    /// history). Separated from the run channel so meta ops don't
+    /// interfere with query execution state.
+    meta_tx: mpsc::Sender<MetaUpdate>,
+    pub(crate) meta_rx: mpsc::Receiver<MetaUpdate>,
     /// Handle to the in-flight debounced schema refresh task.
     /// Aborting it cancels the pending timer; a new task replaces it
     /// on every `schedule_schema_refresh` call.
@@ -537,6 +543,7 @@ impl AppCore {
         clipboard: Arc<dyn Clipboard>,
     ) -> Self {
         let (run_tx, run_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
+        let (meta_tx, meta_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
         let mut this = Self::new_inner(
             registry,
             connections,
@@ -545,6 +552,8 @@ impl AppCore {
             clipboard,
             run_tx,
             run_rx,
+            meta_tx,
+            meta_rx,
         );
         this.rebuild_sidebar();
         this
@@ -565,6 +574,8 @@ impl AppCore {
         clipboard: Arc<dyn Clipboard>,
         run_tx: mpsc::Sender<RunUpdate>,
         run_rx: mpsc::Receiver<RunUpdate>,
+        meta_tx: mpsc::Sender<MetaUpdate>,
+        meta_rx: mpsc::Receiver<MetaUpdate>,
     ) -> Self {
         Self {
             registry,
@@ -609,6 +620,8 @@ impl AppCore {
             last_layout: LayoutRegions::default(),
             run_tx,
             run_rx,
+            meta_tx,
+            meta_rx,
             refresh_task: None,
             refresh_pending: Arc::new(AtomicBool::new(false)),
         }
@@ -825,37 +838,15 @@ impl AppCore {
 
     // ----- history modal -----
 
-    /// Open the Ctrl+R history modal. Reads the 200 most recent
-    /// entries from the journal synchronously via
-    /// `block_in_place + Handle::current().block_on`, the same
-    /// sync→async bridge used elsewhere in AppCore.
+    /// Open the Ctrl+R history modal. Dispatches a background
+    /// load via the meta channel (H11) so the UI stays responsive.
     pub fn open_history(&mut self) {
-        let entries = if let Some(j) = &self.history_journal {
-            let j = Arc::clone(j);
-            match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async { j.recent(200) })
-            }) {
-                Ok(e) => e,
-                Err(err) => {
-                    self.status.message = format!("history read failed: {err}");
-                    return;
-                }
-            }
-        } else {
+        let Some(_journal) = &self.history_journal else {
             self.status.message = "history disabled".into();
             return;
         };
-        if entries.is_empty() {
-            self.status.message = "no history entries".into();
-            return;
-        }
-        self.history_state = Some(HistoryState {
-            entries,
-            filter: String::new(),
-            selected: 0,
-        });
-        self.status.message =
-            "history: type to filter · Enter insert · Shift-Enter run · Esc close".into();
+        self.dispatch_meta(MetaRequest::LoadHistory { limit: 200 });
+        self.status.message = "loading history…".into();
     }
 
     fn close_history(&mut self) {
@@ -1440,7 +1431,6 @@ impl AppCore {
             self.status.message = format!("result {} of {total}", result_idx + 1);
         }
     }
-
 
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         // Terminal-agnostic function keys first. Most terminal emulators
@@ -3472,21 +3462,14 @@ impl AppCore {
     }
 
     fn refresh_schema(&mut self) {
-        let Some(session) = self.session.as_mut() else {
+        let Some(_session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(session.refresh_schemas())
-        });
-        match result {
-            Ok(()) => {
-                self.rebuild_sidebar();
-                let table_count = self.count_sidebar_tables();
-                self.status.message = format!("schema refreshed · {table_count} tables");
-            }
-            Err(error) => self.status.message = format!("refresh failed: {error}"),
-        }
+        // H11: Offload to the meta channel so the UI stays responsive
+        // during schema refreshes on databases with many schemas/tables.
+        self.dispatch_meta(MetaRequest::RefreshSchemas);
+        self.status.message = "refreshing schema…".into();
     }
 
     /// Count the number of tables currently shown in the sidebar.
@@ -4067,6 +4050,31 @@ impl AppCore {
     }
 
     fn dump_schema(&mut self, target: DumpTarget) {
+        let Some(_) = self.session.as_ref() else {
+            self.status.message = "no active connection".into();
+            return;
+        };
+
+        match target {
+            DumpTarget::All => {
+                // H11: Offload to the meta channel so the UI stays
+                // responsive during long-running dump_schema all.
+                self.dispatch_meta(MetaRequest::DumpSchemaAll {
+                    tab: self.active_tab,
+                });
+                self.status.message = "dump-schema: fetching DDL for all tables…".into();
+            }
+            DumpTarget::Current | DumpTarget::Named(_) => {
+                // Current/Named targets fetch a single table's DDL;
+                // the blocking call is brief enough that the
+                // block_in_place overhead is negligible.
+                self.dump_schema_single(target);
+            }
+        }
+    }
+
+    /// Fetch DDL for a single named or current table (synchronous path).
+    fn dump_schema_single(&mut self, target: DumpTarget) {
         let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
             return;
@@ -4095,7 +4103,6 @@ impl AppCore {
                     return;
                 }
             }
-            DumpTarget::All => schemas,
             DumpTarget::Named(ref name) => {
                 if let Some(pair) = schemas.iter().find(|(_, t)| t == name).cloned() {
                     vec![pair]
@@ -4104,6 +4111,7 @@ impl AppCore {
                     return;
                 }
             }
+            DumpTarget::All => unreachable!("handled by dump_schema"),
         };
 
         if names.is_empty() {
@@ -4427,6 +4435,71 @@ impl AppCore {
         }
     }
 
+    /// Handle a [`MetaUpdate`] delivered from the background metadata
+    /// channel. This is the counterpart of [`handle_run_update`] for
+    /// non-query metadata operations (H11).
+    pub fn handle_meta_update(&mut self, update: MetaUpdate) {
+        match update {
+            MetaUpdate::DumpSchemaReady { tab, tables } => {
+                let Some(session) = self.session.as_ref() else {
+                    self.status.message = "no active connection".into();
+                    return;
+                };
+                let dialect = session.dialect();
+                let ddl = if tables.len() == 1 {
+                    build_table_ddl(&tables[0], dialect)
+                } else {
+                    build_dump(&tables, dialect)
+                };
+                self.tabs[tab].editor.clear();
+                self.tabs[tab].editor.insert_str(&ddl);
+                self.status.message = format!(
+                    "dump-schema: wrote {} table(s) into the editor buffer",
+                    tables.len()
+                );
+                self.focus = Pane::Editor;
+            }
+            MetaUpdate::SchemasRefreshed { schemas } => {
+                if let Some(session) = self.session.as_mut() {
+                    session.schemas = schemas;
+                }
+                self.rebuild_sidebar();
+                let table_count = self.count_sidebar_tables();
+                self.status.message = format!("schema refreshed · {table_count} tables");
+            }
+            MetaUpdate::HistoryReady { entries } => {
+                if entries.is_empty() {
+                    self.status.message = "no history entries".into();
+                    return;
+                }
+                self.history_state = Some(HistoryState {
+                    entries,
+                    filter: String::new(),
+                    selected: 0,
+                });
+                self.status.message =
+                    "history: type to filter · Enter insert · Shift-Enter run · Esc close".into();
+            }
+            MetaUpdate::MetaFailed { message } => {
+                self.status.message = message;
+            }
+        }
+    }
+
+    /// Send a metadata request to the background worker. Returns false
+    /// if no session is active (for requests that need one) or if the
+    /// channel is closed.
+    fn dispatch_meta(&mut self, request: MetaRequest) -> bool {
+        let pool = self.session.as_ref().map(|s| s.pool.clone());
+        spawn_meta_request(
+            request,
+            pool,
+            self.history_journal.clone(),
+            self.meta_tx.clone(),
+        );
+        true
+    }
+
     /// Drive the worker channel to completion. Useful from tests after
     /// dispatching a batch: pumps every [`RunUpdate`] until `AllDone`.
     pub async fn drain_run_updates(&mut self) {
@@ -4451,6 +4524,30 @@ impl AppCore {
             while let Ok(update) = self.run_rx.try_recv() {
                 self.handle_run_update(update);
             }
+        }
+        // The SchemaRefresh handler now dispatches a MetaRequest::RefreshSchemas
+        // to the background channel. Drain that too.
+        self.drain_meta_updates().await;
+    }
+
+    /// Drain pending metadata updates from the meta channel.
+    /// Useful in tests after dispatching a meta request
+    /// (e.g. `refresh_schemas`, `dump_schema all`, `open_history`).
+    ///
+    /// Waits up to 2 seconds for at least one update to arrive, then
+    /// drains the channel completely.
+    pub async fn drain_meta_updates(&mut self) {
+        // Wait for the background task to produce at least one result.
+        if let Some(update) = tokio::time::timeout(Duration::from_secs(2), self.meta_rx.recv())
+            .await
+            .ok()
+            .flatten()
+        {
+            self.handle_meta_update(update);
+        }
+        // Drain any remaining.
+        while let Ok(update) = self.meta_rx.try_recv() {
+            self.handle_meta_update(update);
         }
     }
 

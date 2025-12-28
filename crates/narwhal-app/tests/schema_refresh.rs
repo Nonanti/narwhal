@@ -103,6 +103,7 @@ async fn manual_refresh_repopulates_sidebar() {
 
     // Explicit refresh updates the cache.
     core.execute_command("refresh");
+    core.drain_meta_updates().await;
     assert_eq!(table_count(&core), 3);
     assert!(
         core.status_message()
@@ -331,9 +332,11 @@ async fn refresh_uses_list_all_tables() {
 
     // Manual refresh via the new list_all_tables path.
     core.execute_command("refresh");
+    core.drain_meta_updates().await;
     assert_eq!(table_count(&core), 4);
     assert!(
-        core.status_message().contains("schema refreshed · 4 tables"),
+        core.status_message()
+            .contains("schema refreshed · 4 tables"),
         "expected table count in status, got: {}",
         core.status_message()
     );
