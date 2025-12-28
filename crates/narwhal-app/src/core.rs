@@ -830,7 +830,7 @@ impl AppCore {
     /// `block_in_place + Handle::current().block_on`, the same
     /// sync→async bridge used elsewhere in AppCore.
     pub fn open_history(&mut self) {
-        let entries = if let Some(j) = &self.history_journal {
+        let mut entries = if let Some(j) = &self.history_journal {
             let j = Arc::clone(j);
             match tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async { j.recent(200).await })
@@ -845,6 +845,9 @@ impl AppCore {
             self.status.message = "history disabled".into();
             return;
         };
+        // recent() returns chronological order (oldest first);
+        // reverse so the UI shows newest first.
+        entries.reverse();
         if entries.is_empty() {
             self.status.message = "no history entries".into();
             return;
