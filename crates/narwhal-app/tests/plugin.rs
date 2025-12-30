@@ -730,3 +730,43 @@ async fn explain_cost_wraps_editor_buffer() {
         "editor should still contain the original statement, got: {editor:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugin_timeout_uses_resolved_plugin_name_and_hints_at_set_timeout() {
+    // H20 regression: the timeout error message must contain the
+    // *resolved* plugin name (not a re-lookup that could resolve
+    // differently) and an actionable hint mentioning
+    // `narwhal.set_timeout`.
+    let plugin = LuaPlugin::from_script(
+        "slowpoke",
+        r#"
+        narwhal.set_timeout(0.05)
+        narwhal.register_command("slow", "intentionally slow", function(_)
+            local end_time = os.clock() + 10
+            while os.clock() < end_time do end
+            return "never"
+        end)
+        "#,
+    )
+    .unwrap();
+
+    let mut core = empty_core();
+    core.register_lua_plugin(plugin).unwrap();
+
+    core.execute_command("slow arg");
+    let msg = core.status_message().to_owned();
+    // The message must reference the plugin name, not the command.
+    assert!(
+        msg.contains("slowpoke"),
+        "expected plugin name 'slowpoke' in timeout message, got: {msg}"
+    );
+    // The message must mention the escape hatch.
+    assert!(
+        msg.contains("narwhal.set_timeout"),
+        "expected actionable hint in timeout message, got: {msg}"
+    );
+    assert!(
+        msg.contains("execution timeout"),
+        "expected 'execution timeout' in message, got: {msg}"
+    );
+}

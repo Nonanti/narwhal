@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use narwhal_core::{
-    ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema, Table,
+    ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema,
 };
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
 use narwhal_sql::Dialect;
@@ -67,18 +67,18 @@ impl Session {
     }
 
     /// Refresh the cached schema listing.
+    ///
+    /// Uses [`Connection::list_all_tables`] which issues a single
+    /// catalogue query when the driver supports it (e.g. PG, MySQL,
+    /// ClickHouse) and falls back to the N+1 `list_schemas` +
+    /// `list_tables` loop otherwise (H12).
     pub async fn refresh_schemas(&mut self) -> Result<()> {
         let mut conn = self
             .pool
             .acquire()
             .await
             .map_err(|e| Error::Connection(e.to_string()))?;
-        let schemas = conn.list_schemas().await?;
-        let mut listing = Vec::with_capacity(schemas.len());
-        for schema in schemas {
-            let tables: Vec<Table> = conn.list_tables(&schema.name).await.unwrap_or_default();
-            listing.push((schema, tables));
-        }
+        let mut listing = conn.list_all_tables().await?;
         // If no schemas (e.g. SQLite returns "main" synthetic), still try to
         // list tables under the empty-string schema.
         if listing.is_empty() {
