@@ -62,6 +62,7 @@ mysql_async = { version = "0.34", default-features = false, features = ["minimal
 mysql_common = { version = "0.32", default-features = false, features = ["chrono", "bigdecimal"] }
 
 # Utilities
+parking_lot = "0.12"
 directories = "5.0"
 # Platform-specific backend features are MANDATORY in keyring 3.x.
 # Without them the crate silently falls back to a mock store that

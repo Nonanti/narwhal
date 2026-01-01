@@ -171,6 +171,7 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     let mode_style = match view.mode {
         Mode::Insert => view.theme.mode_insert(),
         Mode::Command | Mode::Visual | Mode::VisualLine => view.theme.mode_command(),
+        Mode::OperatorPending(_) => view.theme.mode_command(),
         Mode::Normal => view.theme.mode_normal(),
     };
 

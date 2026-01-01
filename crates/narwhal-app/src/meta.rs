@@ -120,12 +120,15 @@ pub fn spawn_meta_request(
                         .await;
                     return;
                 };
-                let result = tokio::task::spawn_blocking(move || journal.recent(limit)).await;
-                match result {
-                    Ok(Ok(entries)) => MetaUpdate::HistoryReady { entries },
-                    Ok(Err(e)) => MetaUpdate::MetaFailed {
-                        message: format!("history read failed: {e}"),
-                    },
+                // M13: Journal::recent is async; it already off-loads
+                // file I/O via spawn_blocking internally and returns
+                // entries in chronological order (oldest first).
+                match journal.recent(limit).await {
+                    Ok(mut entries) => {
+                        // The Ctrl+R modal shows newest first.
+                        entries.reverse();
+                        MetaUpdate::HistoryReady { entries }
+                    }
                     Err(e) => MetaUpdate::MetaFailed {
                         message: format!("history read failed: {e}"),
                     },

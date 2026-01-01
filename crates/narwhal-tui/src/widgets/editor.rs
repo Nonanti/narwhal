@@ -239,6 +239,11 @@ impl EditorBuffer {
                     self.cursor_row = self.lines.len().saturating_sub(1);
                     self.cursor_col = self.current_line().len();
                 }
+                Motion::CurrentLine => {
+                    // CurrentLine is used for line-wise operators (dd, yy, cc);
+                    // it doesn't move the cursor — the operator handler
+                    // processes the current line.
+                }
             }
         }
     }
