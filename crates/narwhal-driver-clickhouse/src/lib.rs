@@ -663,8 +663,14 @@ impl Connection for ClickhouseConnection {
 
         let query_id = Self::new_query_id();
 
-        // Register query ID for cancellation tracking.
+        // Register query ID for cancellation tracking. The QueryGuard
+        // ensures the ID is removed when the scope exits, even on error
+        // or task abort (M7 RAII pattern).
         state.active_queries.lock().await.insert(query_id.clone());
+        let _guard = QueryGuard {
+            active: Arc::clone(&state.active_queries),
+            qid: query_id.clone(),
+        };
 
         if !statement_returns_rows(&formatted_sql) {
             // Non-row-returning: execute and return an empty stream.
@@ -677,13 +683,11 @@ impl Connection for ClickhouseConnection {
                 pairs.append_pair("query_id", &query_id);
             }
 
-            let response = match state.build_request(&url, formatted_sql).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    state.active_queries.lock().await.remove(&query_id);
-                    return Err(Error::Query(e.to_string()));
-                }
-            };
+            let response = state
+                .build_request(&url, formatted_sql)
+                .send()
+                .await
+                .map_err(|e| Error::Query(e.to_string()))?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -691,14 +695,12 @@ impl Connection for ClickhouseConnection {
                     .text()
                     .await
                     .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
-                state.active_queries.lock().await.remove(&query_id);
                 return Err(Error::Query(format!(
                     "ClickHouse returned {status}: {body}"
                 )));
             }
 
-            // Deregister on success.
-            state.active_queries.lock().await.remove(&query_id);
+            // _guard is dropped here, cleaning up the query ID.
 
             // Drop the sender immediately so the receiver yields
             // `Ok(None)` on first poll — a clean empty stream. No task
@@ -722,13 +724,11 @@ impl Connection for ClickhouseConnection {
             pairs.append_pair("query_id", &query_id);
         }
 
-        let response = match state.build_request(&url, full_sql).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                state.active_queries.lock().await.remove(&query_id);
-                return Err(Error::Query(e.to_string()));
-            }
-        };
+        let response = state
+            .build_request(&url, full_sql)
+            .send()
+            .await
+            .map_err(|e| Error::Query(e.to_string()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -736,7 +736,6 @@ impl Connection for ClickhouseConnection {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
-            state.active_queries.lock().await.remove(&query_id);
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
             )));
@@ -746,16 +745,19 @@ impl Connection for ClickhouseConnection {
         // as they arrive and feed a small line buffer. Rows are emitted
         // through the mpsc channel as soon as their line is complete.
         //
-        // The query ID is deregistered when the spawned task completes.
+        // The query ID is deregistered by the QueryGuard when the stream
+        // task completes or when the stream is dropped/aborted.
         let (header_tx, header_rx) = tokio::sync::oneshot::channel::<Result<Vec<ColumnHeader>>>();
         let (row_tx, row_rx) = mpsc::channel::<Result<CoreRow>>(64);
-        let active_queries = state.active_queries.clone();
-        let qid = query_id.clone();
 
+        // Move the guard into the spawned task so it is dropped when
+        // the streaming work finishes (success or error), cleaning up
+        // the query ID.
+        let guard = _guard;
         let task = tokio::spawn(async move {
             stream_tsv_chunks(response.bytes_stream(), header_tx, row_tx).await;
-            // Deregister the query ID now that the stream is complete.
-            active_queries.lock().await.remove(&qid);
+            // guard is dropped here → query ID removed from active set.
+            drop(guard);
         });
 
         let columns = match header_rx.await {
@@ -850,6 +852,57 @@ impl Connection for ClickhouseConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT database, name, engine
+              FROM system.tables
+             WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+             ORDER BY database, name";
+        let result = self.query_tsv(SQL, &[]).await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let engine = match iter.next() {
+                Some(Value::String(s)) => s.to_ascii_lowercase(),
+                _ => String::new(),
+            };
+            let kind = if engine == "view" {
+                TableKind::View
+            } else if engine == "materializedview" {
+                TableKind::MaterializedView
+            } else {
+                TableKind::Table
+            };
+            map.entry(schema.clone())
+                .or_default()
+                .push(Table { schema, name, kind });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        // Append any schemas that appeared in system.tables but not in
+        // list_schemas (shouldn't happen, but defensive).
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
+        }
+        Ok(out)
+    }
+
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
         let escaped_schema = quote_ident(schema);
         let escaped_name = quote_ident(name);
@@ -859,6 +912,10 @@ impl Connection for ClickhouseConnection {
         if result.rows.is_empty() {
             return Err(Error::Schema(format!("table {schema}.{name} not found")));
         }
+
+        // Look up the table kind (Table/View/MaterializedView) from
+        // system.tables.engine — M11.
+        let kind = self.lookup_table_kind(schema, name).await?;
 
         // ClickHouse DESCRIBE TABLE returns:
         // name, type, default_type, default_expression, comment, codec_expression, ttl_expression
@@ -920,7 +977,7 @@ impl Connection for ClickhouseConnection {
             table: Table {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes: Vec::new(),
@@ -975,6 +1032,33 @@ impl Connection for ClickhouseConnection {
 }
 
 impl ClickhouseConnection {
+    /// Look up the table kind (Table/View/MaterializedView) from
+    /// `system.tables.engine`.
+    async fn lookup_table_kind(&self, schema: &str, name: &str) -> Result<TableKind> {
+        let sql = format!(
+            "SELECT engine FROM system.tables WHERE database = '{}' AND name = '{}'",
+            escape_sql_string(schema),
+            escape_sql_string(name)
+        );
+        let result = self.query_tsv(&sql, &[]).await?;
+        match result.rows.into_iter().next() {
+            Some(row) => match row.0.into_iter().next() {
+                Some(Value::String(engine)) => {
+                    let engine = engine.to_ascii_lowercase();
+                    Ok(if engine == "view" {
+                        TableKind::View
+                    } else if engine == "materializedview" {
+                        TableKind::MaterializedView
+                    } else {
+                        TableKind::Table
+                    })
+                }
+                _ => Ok(TableKind::Table),
+            },
+            None => Ok(TableKind::Table),
+        }
+    }
+
     /// Look up the primary key columns for a table from `system.tables`.
     async fn lookup_primary_key(&mut self, schema: &str, name: &str) -> Result<Vec<String>> {
         // Both identifiers reach SQL as quoted literals; escape `'` to
@@ -999,6 +1083,34 @@ impl ClickhouseConnection {
 }
 
 // ---------------------------------------------------------------------------
+// Query ID RAII Guard
+// ---------------------------------------------------------------------------
+
+/// RAII guard that ensures a query ID is removed from the active-queries
+/// set when the guard is dropped, regardless of how the scope exits.
+///
+/// This prevents query ID leaks on error paths and task aborts.
+/// The drop implementation uses `tokio::spawn` to perform the async
+/// removal because the `Drop` trait cannot be async. This is acceptable
+/// because the removal is a brief lock + hash-set remove operation.
+struct QueryGuard {
+    active: Arc<Mutex<HashSet<String>>>,
+    qid: String,
+}
+
+impl Drop for QueryGuard {
+    fn drop(&mut self) {
+        let active = self.active.clone();
+        let qid = std::mem::take(&mut self.qid);
+        // Spawn a tiny async task to remove the query ID. The lock is
+        // held only for the brief remove() call.
+        tokio::spawn(async move {
+            active.lock().await.remove(&qid);
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Cancellation
 // ---------------------------------------------------------------------------
 
@@ -1014,7 +1126,14 @@ struct ClickhouseCancel {
 #[async_trait]
 impl CancelHandle for ClickhouseCancel {
     async fn cancel(&self) -> Result<()> {
-        let query_ids: Vec<String> = self.state.active_queries.lock().await.drain().collect();
+        let query_ids: Vec<String> = self
+            .state
+            .active_queries
+            .lock()
+            .await
+            .iter()
+            .cloned()
+            .collect();
 
         if query_ids.is_empty() {
             // No active queries — nothing to cancel.
@@ -1397,6 +1516,71 @@ mod cancel_tests {
 
         // Set should be empty.
         assert!(active.lock().await.is_empty());
+    }
+
+    /// Verify that cancel() is idempotent — a second call on the same
+    /// handle still sees the same query IDs (they are cloned, not drained).
+    #[tokio::test]
+    async fn cancel_reads_cloned_not_drained() {
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        active.lock().await.insert("qid-1".to_owned());
+        active.lock().await.insert("qid-2".to_owned());
+
+        // First cancel should read the IDs without draining.
+        let client = reqwest::Client::new();
+        let base_url = Url::parse("http://127.0.0.1:1/").expect("url");
+        let state = Arc::new(SharedState {
+            client,
+            base_url,
+            user: "default".to_owned(),
+            password: String::new(),
+            database: "default".to_owned(),
+            active_queries: active.clone(),
+        });
+        let cancel = ClickhouseCancel { state };
+
+        // Cancel will try to POST KILL QUERY — this will fail since no
+        // server, but the important thing is we don't drain the set.
+        let _ = cancel.cancel().await;
+
+        // The active_queries set should still contain the query IDs.
+        let remaining = active.lock().await;
+        assert!(
+            remaining.contains("qid-1"),
+            "qid-1 should still be present after cancel"
+        );
+        assert!(
+            remaining.contains("qid-2"),
+            "qid-2 should still be present after cancel"
+        );
+    }
+
+    /// Verify that the RAII query guard removes the query ID on drop.
+    #[tokio::test]
+    async fn stream_error_path_clears_active_query() {
+        let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let qid = "test-qid-guard".to_owned();
+        active.lock().await.insert(qid.clone());
+        assert!(active.lock().await.contains(&qid));
+
+        // Simulate the RAII guard being dropped.
+        {
+            let guard_active = active.clone();
+            let guard_qid = qid.clone();
+            let _guard = QueryGuard {
+                active: guard_active,
+                qid: guard_qid,
+            };
+            // Guard is dropped here — spawns an async task to remove.
+        }
+
+        // Yield to allow the spawned removal task to complete.
+        tokio::task::yield_now().await;
+
+        assert!(
+            !active.lock().await.contains(&qid),
+            "query ID should be removed after guard drops"
+        );
     }
 
     /// Verify that calling cancel with no active queries returns Ok(())

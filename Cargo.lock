@@ -2719,6 +2719,7 @@ name = "narwhal-driver-duckdb"
 version = "1.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "duckdb",
  "narwhal-core",
  "tempfile",
@@ -2754,6 +2755,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "lru",
  "narwhal-core",
  "rustls",
  "rustls-native-certs",

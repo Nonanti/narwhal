@@ -126,6 +126,9 @@ impl DatabaseDriver for PostgresDriver {
             client: Arc::new(client),
             tls_mode: sslmode,
             params: Arc::new(config.params.clone()),
+            prepared_cache: std::sync::Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(64).expect("64 is nonzero"),
+            )),
         }))
     }
 }
@@ -220,6 +223,9 @@ pub struct PostgresConnection {
     /// so it can use the same TLS configuration.
     tls_mode: InternalSslMode,
     params: Arc<ConnectionParams>,
+    /// Prepared statement cache (M9). Avoids a prepare round-trip
+    /// for repeated admin/schema queries.
+    prepared_cache: std::sync::Mutex<lru::LruCache<String, tokio_postgres::Statement>>,
 }
 
 fn map_pg_error(error: tokio_postgres::Error) -> Error {
@@ -304,11 +310,11 @@ impl PostgresConnection {
                    con.confkey,
                    con.confupdtype::text,
                    con.confdeltype::text,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.conrelid AND a.attnum = k.num) AS cols,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.confkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.confrelid AND a.attnum = k.num) AS refcols
@@ -372,7 +378,7 @@ impl PostgresConnection {
     ) -> Result<Vec<UniqueConstraint>> {
         const SQL: &str = "
             SELECT con.conname,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                   (SELECT string_agg(a.attname, E'\x1F' ORDER BY k.ord)
                     FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                     JOIN pg_catalog.pg_attribute a
                       ON a.attrelid = con.conrelid AND a.attnum = k.num)
@@ -406,10 +412,11 @@ impl PostgresConnection {
 }
 
 fn extract_csv(value: Option<&Value>) -> Vec<String> {
-    // The schema queries above use `string_agg(..., ',')` to flatten
-    // multi-column constraints into a plain text value, so we just split on
-    // commas here. Identifiers cannot contain a comma without quoting, and
-    // the engine catalogue never exposes the quoted form.
+    // The schema queries above use `string_agg(..., E'\x1F')` to flatten
+    // multi-column constraints into a text value separated by the unit
+    // separator character (U+001F). This avoids breakage when identifiers
+    // themselves contain commas (bug M8). We fall back to comma-splitting
+    // for values produced by older queries that haven't been migrated yet.
     let raw = match value {
         Some(Value::String(s) | Value::Unknown(s)) => s,
         _ => return Vec::new(),
@@ -417,15 +424,44 @@ fn extract_csv(value: Option<&Value>) -> Vec<String> {
     if raw.is_empty() {
         return Vec::new();
     }
-    raw.split(',').map(|s| s.to_owned()).collect()
+    if raw.contains('\x1F') {
+        raw.split('\x1F').map(|s| s.to_owned()).collect()
+    } else {
+        raw.split(',').map(|s| s.to_owned()).collect()
+    }
 }
 
 impl PostgresConnection {
+    /// Prepare the statement, using the LRU cache when possible to
+    /// avoid repeated prepare round-trips (M9).
+    async fn prepare_cached(&self, sql: &str) -> Result<tokio_postgres::Statement> {
+        // Check cache first (sync lock, very brief).
+        {
+            let mut cache = self
+                .prepared_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(stmt) = cache.get(sql) {
+                return Ok(stmt.clone());
+            }
+        }
+        // Not cached — prepare on the server.
+        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        {
+            let mut cache = self
+                .prepared_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            cache.put(sql.to_owned(), statement.clone());
+        }
+        Ok(statement)
+    }
+
     /// Prepare the statement, then route to `query` or `execute` based on
     /// whether the statement returns rows.
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let started = Instant::now();
-        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        let statement = self.prepare_cached(sql).await?;
 
         let bindings: Vec<Param<'_>> = params.iter().map(Param).collect();
         let param_refs: Vec<&(dyn ToSql + Sync)> =
@@ -485,7 +521,7 @@ impl Connection for PostgresConnection {
     }
 
     async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
-        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        let statement = self.prepare_cached(sql).await?;
 
         let columns: Vec<ColumnHeader> = statement
             .columns()
@@ -615,6 +651,62 @@ impl Connection for PostgresConnection {
                 name,
                 kind,
             });
+        }
+        Ok(out)
+    }
+
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT n.nspname, c.relname, c.relkind::text
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+               AND n.nspname NOT LIKE 'pg_temp_%'
+               AND n.nspname NOT LIKE 'pg_toast_temp_%'
+               AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+             ORDER BY n.nspname, c.relname";
+        let result = self.run(SQL, &[]).await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) => match s.as_str() {
+                    "r" | "p" => TableKind::Table,
+                    "v" => TableKind::View,
+                    "m" => TableKind::MaterializedView,
+                    "f" => TableKind::Table,
+                    _ => TableKind::Table,
+                },
+                _ => TableKind::Table,
+            };
+            map.entry(schema.clone()).or_default().push(Table {
+                schema: schema.clone(),
+                name,
+                kind,
+            });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        // Append any schemas that appeared in the query but not in
+        // list_schemas (defensive).
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
         }
         Ok(out)
     }

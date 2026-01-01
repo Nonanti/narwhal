@@ -130,6 +130,25 @@ pub struct DuckdbConnection {
 }
 
 impl DuckdbConnection {
+    /// Look up the table kind (Table/View) from duckdb_views and duckdb_tables.
+    async fn lookup_table_kind(&self, schema: &str, name: &str) -> Result<TableKind> {
+        const SQL: &str = "
+            SELECT 'view' AS kind FROM duckdb_views() WHERE schema_name = ? AND view_name = ?
+            UNION ALL
+            SELECT 'table' AS kind FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?
+            LIMIT 1";
+        let s = Value::String(schema.to_owned());
+        let n = Value::String(name.to_owned());
+        let result = self.run(SQL, &[s.clone(), n.clone(), s, n]).await?;
+        match result.rows.into_iter().next() {
+            Some(row) => match row.0.first() {
+                Some(Value::String(k)) if k.eq_ignore_ascii_case("view") => Ok(TableKind::View),
+                _ => Ok(TableKind::Table),
+            },
+            None => Ok(TableKind::Table),
+        }
+    }
+
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let inner = self.inner.clone();
         let sql = sql.to_owned();
@@ -542,6 +561,50 @@ impl Connection for DuckdbConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT table_schema, table_name, table_type
+              FROM information_schema.tables
+             WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+             ORDER BY table_schema, table_name";
+        let result = self.run(SQL, &[]).await?;
+
+        let mut map: std::collections::BTreeMap<String, Vec<Table>> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let schema = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) if s.eq_ignore_ascii_case("VIEW") => TableKind::View,
+                _ => TableKind::Table,
+            };
+            map.entry(schema.clone()).or_default().push(Table {
+                schema: schema.clone(),
+                name,
+                kind,
+            });
+        }
+
+        // Preserve the order of schemas from list_schemas.
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = map.remove(&schema.name).unwrap_or_default();
+            out.push((schema, tables));
+        }
+        for (name, tables) in map {
+            out.push((Schema { name }, tables));
+        }
+        Ok(out)
+    }
+
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema> {
         // Pull column metadata from information_schema.
         const COL_SQL: &str = "
@@ -629,6 +692,9 @@ impl Connection for DuckdbConnection {
             })
             .collect();
 
+        // Look up the table kind from duckdb_views + duckdb_tables (M11).
+        let kind = self.lookup_table_kind(schema, name).await?;
+
         let indexes = match describe_indexes(self, schema, name).await {
             Ok(v) => v,
             Err(error) => {
@@ -664,7 +730,7 @@ impl Connection for DuckdbConnection {
             table: Table {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes,

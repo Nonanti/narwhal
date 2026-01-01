@@ -263,6 +263,14 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
             }
         }
         Value::Int(i) => i.to_string(),
+        Value::Float(f) if f.is_nan() => "nan()".to_owned(),
+        Value::Float(f) if f.is_infinite() => {
+            if *f > 0.0 {
+                "inf()".to_owned()
+            } else {
+                "-inf()".to_owned()
+            }
+        }
         Value::Float(f) => {
             let s = f.to_string();
             // Ensure the float literal has a decimal point so ClickHouse
@@ -561,6 +569,24 @@ mod tests {
             result.contains('.') || result.contains('e') || result.contains('E'),
             "float literal must contain a decimal point or exponent: got {result}"
         );
+    }
+
+    #[test]
+    fn sql_literal_float_nan_renders_as_function() {
+        let result = value_to_sql_literal(&Value::Float(f64::NAN));
+        assert_eq!(result, "nan()");
+    }
+
+    #[test]
+    fn sql_literal_float_inf_renders_as_function() {
+        let result = value_to_sql_literal(&Value::Float(f64::INFINITY));
+        assert_eq!(result, "inf()");
+    }
+
+    #[test]
+    fn sql_literal_float_neg_inf_renders_with_sign() {
+        let result = value_to_sql_literal(&Value::Float(f64::NEG_INFINITY));
+        assert_eq!(result, "-inf()");
     }
 
     #[test]

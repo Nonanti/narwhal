@@ -57,16 +57,78 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
             Err(_) => Value::Bytes(bytes.to_vec()),
         },
         ValueRef::Blob(bytes) => Value::Bytes(bytes.to_vec()),
-        ValueRef::Date32(days) => Value::String(format!("date({days})")),
-        ValueRef::Time64(unit, ticks) => Value::String(format!("time({})", scaled(unit, ticks))),
+        // M12: Date32/Time64/Timestamp/Interval now render as proper
+        // chrono types instead of opaque "date(N)" strings.
+        ValueRef::Date32(days) => {
+            // days is days since 1970-01-01 in the Unix epoch.
+            // chrono's from_num_days_from_ce_opt uses the CE epoch
+            // (day 1 = 0001-01-01). Unix epoch day 0 = CE day 719_163.
+            chrono::NaiveDate::from_num_days_from_ce_opt(days + 719_163)
+                .map(Value::Date)
+                .unwrap_or_else(|| Value::String(format!("date({days})")))
+        }
+        ValueRef::Time64(unit, ticks) => {
+            let ns = scaled_ns(unit, ticks);
+            let secs = (ns / 1_000_000_000) as u32;
+            let sub_ns = (ns % 1_000_000_000) as u32;
+            chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, sub_ns)
+                .map(Value::Time)
+                .unwrap_or_else(|| Value::String(format!("time({ns}ns)")))
+        }
         ValueRef::Timestamp(unit, ticks) => {
-            Value::String(format!("timestamp({})", scaled(unit, ticks)))
+            let ns = scaled_ns(unit, ticks);
+            let secs = ns / 1_000_000_000;
+            let sub_ns = (ns % 1_000_000_000) as u32;
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns)
+                .map(Value::Timestamp)
+                .unwrap_or_else(|| Value::String(format!("timestamp({ns}ns)")))
         }
         ValueRef::Interval {
             months,
             days,
             nanos,
-        } => Value::String(format!("interval({months}m {days}d {nanos}ns)")),
+        } => {
+            // Format as ISO 8601 duration-like string.
+            // P[n]Y[n]M[n]DT[n]H[n]M[n]S
+            let years = months / 12;
+            let rem_months = months % 12;
+            let hours = nanos / 3_600_000_000_000;
+            let rem_ns = nanos % 3_600_000_000_000;
+            let minutes = rem_ns / 60_000_000_000;
+            let rem_ns2 = rem_ns % 60_000_000_000;
+            let seconds = rem_ns2 / 1_000_000_000;
+            let sub_ns = rem_ns2 % 1_000_000_000;
+            let mut s = String::from("P");
+            if years != 0 {
+                s.push_str(&format!("{years}Y"));
+            }
+            if rem_months != 0 {
+                s.push_str(&format!("{rem_months}M"));
+            }
+            if days != 0 {
+                s.push_str(&format!("{days}D"));
+            }
+            if hours != 0 || minutes != 0 || seconds != 0 || sub_ns != 0 {
+                s.push('T');
+                if hours != 0 {
+                    s.push_str(&format!("{hours}H"));
+                }
+                if minutes != 0 {
+                    s.push_str(&format!("{minutes}M"));
+                }
+                if seconds != 0 || sub_ns != 0 {
+                    s.push_str(&format!("{seconds}"));
+                    if sub_ns != 0 {
+                        s.push_str(format!(".{:09}", sub_ns).trim_end_matches('0'));
+                    }
+                    s.push('S');
+                }
+            }
+            if s == "P" {
+                s.push_str("0D");
+            }
+            Value::String(s)
+        }
         // Anything we don't recognise (Enum, List, Struct, Map, Union, …)
         // gets rendered through DuckDB's owned-value Debug impl, which is
         // already a reasonable human-readable form.
@@ -74,12 +136,12 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
     }
 }
 
-fn scaled(unit: TimeUnit, ticks: i64) -> String {
-    let suffix = match unit {
-        TimeUnit::Second => "s",
-        TimeUnit::Millisecond => "ms",
-        TimeUnit::Microsecond => "us",
-        TimeUnit::Nanosecond => "ns",
-    };
-    format!("{ticks}{suffix}")
+/// Convert a TimeUnit + ticks pair into nanoseconds.
+fn scaled_ns(unit: TimeUnit, ticks: i64) -> i64 {
+    match unit {
+        TimeUnit::Second => ticks * 1_000_000_000,
+        TimeUnit::Millisecond => ticks * 1_000_000,
+        TimeUnit::Microsecond => ticks * 1_000,
+        TimeUnit::Nanosecond => ticks,
+    }
 }

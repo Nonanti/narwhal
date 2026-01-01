@@ -103,6 +103,19 @@ pub struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// Look up the table kind from sqlite_master.type (M11).
+    async fn lookup_table_kind(&self, name: &str) -> Result<TableKind> {
+        let sql = "SELECT type FROM sqlite_master WHERE name = ? AND type IN ('table', 'view')";
+        let result = self.run(sql, &[Value::String(name.to_owned())]).await?;
+        match result.rows.into_iter().next() {
+            Some(row) => match row.0.first() {
+                Some(Value::String(t)) if t == "view" => Ok(TableKind::View),
+                _ => Ok(TableKind::Table),
+            },
+            None => Ok(TableKind::Table),
+        }
+    }
+
     /// Enumerate every index on `escaped_table_name` (which must already have
     /// embedded quote characters doubled).
     async fn list_indexes(&self, escaped_table_name: &str) -> Result<Vec<Index>> {
@@ -433,6 +446,40 @@ impl Connection for SqliteConnection {
         Ok(out)
     }
 
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        const SQL: &str = "
+            SELECT name, type
+            FROM sqlite_master
+            WHERE type IN ('table', 'view')
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name";
+        let result = self.run(SQL, &[]).await?;
+
+        let mut tables = Vec::with_capacity(result.rows.len());
+        for row in result.rows {
+            let mut iter = row.0.into_iter();
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let kind = match iter.next() {
+                Some(Value::String(s)) if s == "view" => TableKind::View,
+                _ => TableKind::Table,
+            };
+            tables.push(Table {
+                schema: "main".into(),
+                name,
+                kind,
+            });
+        }
+        Ok(vec![(
+            Schema {
+                name: "main".into(),
+            },
+            tables,
+        )])
+    }
+
     async fn describe_table(&mut self, _schema: &str, name: &str) -> Result<TableSchema> {
         // `PRAGMA table_info` does not accept bound parameters; quote the
         // identifier so embedded special characters do not break the
@@ -477,6 +524,9 @@ impl Connection for SqliteConnection {
             })
             .collect();
 
+        // Look up the table kind from sqlite_master (M11).
+        let kind = self.lookup_table_kind(name).await?;
+
         let indexes = self.list_indexes(&escaped).await.unwrap_or_default();
         let foreign_keys = self.list_foreign_keys(&escaped).await.unwrap_or_default();
         let unique_constraints = indexes
@@ -492,7 +542,7 @@ impl Connection for SqliteConnection {
             table: Table {
                 schema: "main".into(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes,

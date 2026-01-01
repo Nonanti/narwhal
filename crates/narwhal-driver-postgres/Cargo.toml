@@ -28,6 +28,7 @@ rustls = "0.23"
 tokio-postgres-rustls = "0.13"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2.1"
+lru = "0.12"
 
 [dev-dependencies]
 uuid = { workspace = true }
