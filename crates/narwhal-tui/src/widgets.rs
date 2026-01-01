@@ -16,8 +16,8 @@ pub use editor::{
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow};
 pub use results::{
-    compare_values, render_results, CellEditView, CellPopup, ExplainPlanLine, ResultDisplay,
-    ResultHitRegions, ResultView, SearchHighlight, SortDir,
+    compare_values, render_results, sanitize_for_display, CellEditView, CellPopup, ExplainPlanLine,
+    ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,
 };
 pub use row_detail::{render_row_detail, RowDetailView};
 pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};

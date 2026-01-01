@@ -2,6 +2,7 @@ use narwhal_vim::Mode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 use crate::widgets::{
@@ -142,19 +143,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         // the host app doesn't need to mirror our layout maths.
         popup.anchor = editor_cursor_anchor(editor_area, view.editor);
         let regions = render_completion_popup(frame, area, &popup, view.theme);
-        Some((
-            Rect {
-                x: popup.anchor.0.saturating_sub(1),
-                y: popup
-                    .anchor
-                    .1
-                    .saturating_add(1)
-                    .saturating_sub(popup.items.len() as u16 + 2),
-                width: 40, // approximate; not used for hit-testing
-                height: (popup.items.len() as u16 + 2).min(10),
-            },
-            regions,
-        ))
+        Some(regions)
     } else {
         None
     };
@@ -167,13 +156,13 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         editor: editor_area,
         results: main[1],
         status: outer[1],
-        completion: completion_regions.as_ref().map(|(rect, _)| *rect),
+        completion: completion_regions.as_ref().and_then(|r| r.popup_rect),
         sidebar_tables,
         result_headers: result_regions.headers,
         result_rows: result_regions.rows,
         result_tabs: result_regions.tabs,
         completion_items: completion_regions
-            .map(|(_, regions)| regions.items)
+            .map(|regions| regions.items)
             .unwrap_or_default(),
     }
 }
@@ -186,23 +175,23 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     };
 
     let mode_label = format!(" {} ", view.mode.short_label());
-    let _mode_width = mode_label.chars().count() as u16;
+    let _mode_width = mode_label.width() as u16;
 
     let focus_label = view.focus.label();
     let left_text = format!(" {mode_label}{focus_label} ");
-    let left_width = left_text.chars().count() as u16;
+    let left_width = left_text.width() as u16;
 
     let conn_text = match view.status_bar.connection {
         Some(c) => format!(" {c} "),
         None => " (no connection) ".to_owned(),
     };
-    let conn_width = conn_text.chars().count() as u16;
+    let conn_width = conn_text.width() as u16;
 
     let txn_text = match view.status_bar.transaction {
         Some(t) => format!(" TX:{t} "),
         None => String::new(),
     };
-    let txn_width = txn_text.chars().count() as u16;
+    let txn_width = txn_text.width() as u16;
 
     let running_prefix = if view.running { "⏳ " } else { "" };
     let msg_text = format!(" {}{}", running_prefix, view.status_bar.message);
@@ -240,4 +229,27 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         Paragraph::new(msg_text).style(view.theme.status_bar()),
         parts[3],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_bar_width_handles_wide_chars() {
+        // The ⏳ (hourglass) emoji has display width 2 in most terminals.
+        // CJK character '中' has display width 2.
+        // With chars().count(), "⏳" would be 1 cell; with width() it's 2.
+        let text = "⏳ running";
+        assert_eq!(text.width(), 10, "⏳ should count as 2 display cells");
+        // Verify the old chars().count() gives the wrong answer:
+        assert_ne!(text.chars().count(), text.width());
+    }
+
+    #[test]
+    fn status_bar_width_cjk_connection() {
+        let conn = " 中文数据库 ";
+        // Each CJK char = 2 display cells, plus 2 spaces = 2 + 4*2 + 2 = 12
+        assert_eq!(conn.width(), 12);
+    }
 }

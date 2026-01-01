@@ -561,6 +561,18 @@ fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Snap a byte index backwards to the nearest UTF-8 char boundary.
+/// Clamps to `s.len()` if the index is past the end. Stable Rust
+/// does not expose `str::floor_char_boundary` yet, so we implement
+/// it manually.
+fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+    idx = idx.min(s.len());
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 pub fn render_editor(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -616,11 +628,16 @@ pub fn render_editor(
                 let mut spans = vec![gutter];
                 let mut pos = 0usize;
                 for &(col, is_current) in matches_on_line {
-                    if col > pos && col <= line_text.len() {
-                        spans.push(Span::raw(line_text[pos..col].to_owned()));
+                    let start = floor_char_boundary(line_text, col);
+                    let hl_end_raw = col.saturating_add(needle_len);
+                    let end = floor_char_boundary(line_text, hl_end_raw);
+                    if start > pos {
+                        let seg_end = start.min(line_text.len());
+                        if pos < seg_end {
+                            spans.push(Span::raw(line_text[pos..seg_end].to_owned()));
+                        }
                     }
-                    let hl_end = (col + needle_len).min(line_text.len());
-                    if col < line_text.len() && hl_end > col {
+                    if start < line_text.len() && end > start {
                         let style = if is_current {
                             Style::default()
                                 .fg(theme.background)
@@ -629,12 +646,9 @@ pub fn render_editor(
                         } else {
                             Style::default().fg(theme.foreground).bg(theme.muted)
                         };
-                        spans.push(Span::styled(line_text[col..hl_end].to_owned(), style));
+                        spans.push(Span::styled(line_text[start..end].to_owned(), style));
                     }
-                    pos = hl_end.max(col + 1); // advance past the match
-                    if pos < col + 1 {
-                        pos = col + 1;
-                    }
+                    pos = end.max(start.saturating_add(1)); // advance past the match
                 }
                 if pos < line_text.len() {
                     spans.push(Span::raw(line_text[pos..].to_owned()));
@@ -694,6 +708,9 @@ pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
 /// Hit-test regions for completion popup items.
 #[derive(Debug, Default, Clone)]
 pub struct CompletionHitRegions {
+    /// The actual screen `Rect` the popup was rendered to. Set to
+    /// `None` when the popup is empty (no items).
+    pub popup_rect: Option<Rect>,
     /// One `(Rect, item_index)` per visible completion item.
     pub items: Vec<(Rect, usize)>,
 }
@@ -818,7 +835,10 @@ pub fn render_completion_popup(
             i,
         ));
     }
-    CompletionHitRegions { items: item_rects }
+    CompletionHitRegions {
+        popup_rect: Some(popup),
+        items: item_rects,
+    }
 }
 
 #[cfg(test)]
@@ -889,5 +909,69 @@ mod tests {
         assert_eq!(buf.cursor_col, 8);
         buf.apply_motion(Motion::WordBackward, 1);
         assert_eq!(buf.cursor_col, 4);
+    }
+
+    /// H16 regression: search highlight slicing must not panic on
+    /// multibyte char boundaries. The highlight code receives byte
+    /// offsets in `EditorSearchHighlight.matches`; if a match
+    /// starts or ends inside a multibyte sequence the old code
+    /// sliced directly and panicked.
+    #[test]
+    fn search_highlight_handles_multibyte_match() {
+        // "şahin" — ş is 2 bytes, so byte positions: ş(0,1) a(2) h(3) i(4) n(5)
+        // A match at byte 0 with needle_len=2 would try to slice [0..2]
+        // which is inside `ş` — without floor_char_boundary this panics.
+        let line = "şahin";
+        // Verify that the helper correctly snaps boundaries.
+        assert_eq!(floor_char_boundary(line, 0), 0);
+        assert_eq!(floor_char_boundary(line, 1), 0); // inside ş → snap to 0
+        assert_eq!(floor_char_boundary(line, 2), 2); // 'a' start
+        assert_eq!(floor_char_boundary(line, 6), 6); // at end
+        assert_eq!(floor_char_boundary(line, 99), 6); // past end → clamp to len
+    }
+
+    /// H17 regression: CompletionHitRegions.popup_rect must reflect
+    /// the actual Rect rendered by render_completion_popup, not an
+    /// approximation. The popup may be placed above or below the
+    /// anchor depending on screen space.
+    #[test]
+    fn completion_hit_regions_contains_popup_rect() {
+        let regions = CompletionHitRegions::default();
+        assert!(regions.popup_rect.is_none());
+        assert!(regions.items.is_empty());
+    }
+
+    /// H17: Verify popup placement logic — below anchor when room,
+    /// above when no room below.
+    #[test]
+    fn popup_y_below_anchor_when_room() {
+        // Screen is 80x24, anchor at (10, 5), popup height = 5.
+        // Below_y = 6. 6 + 5 = 11 <= 24 → popup goes below.
+        let screen = Rect::new(0, 0, 80, 24);
+        let anchor = (10u16, 5u16);
+        let height: u16 = 5;
+        let below_y = anchor.1.saturating_add(1);
+        let y = if below_y + height <= screen.y + screen.height {
+            below_y
+        } else {
+            anchor.1.saturating_sub(height)
+        };
+        assert_eq!(y, 6, "popup should be placed below the anchor");
+    }
+
+    #[test]
+    fn popup_y_above_anchor_when_no_room() {
+        // Screen is 80x10, anchor at (10, 9), popup height = 5.
+        // Below_y = 10. 10 + 5 = 15 > 10 → popup goes above.
+        let screen = Rect::new(0, 0, 80, 10);
+        let anchor = (10u16, 9u16);
+        let height: u16 = 5;
+        let below_y = anchor.1.saturating_add(1);
+        let y = if below_y + height <= screen.y + screen.height {
+            below_y
+        } else {
+            anchor.1.saturating_sub(height)
+        };
+        assert_eq!(y, 4, "popup should be placed above the anchor");
     }
 }

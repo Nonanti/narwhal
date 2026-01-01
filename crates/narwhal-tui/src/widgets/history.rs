@@ -12,6 +12,8 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::help::centred;
+use crate::widgets::results::sanitize_for_display;
+use unicode_width::UnicodeWidthStr;
 
 /// View model passed from AppCore to the render path. Owns only the
 /// data needed for display; the full `HistoryState` stays in the core.
@@ -114,13 +116,13 @@ pub fn render_history_modal(
         } else {
             normal_style
         };
-        let sql_truncated = truncate_str(row.sql, sql_width);
-        let ts = row.timestamp;
-        let conn = row.connection;
+        let sql_truncated = truncate_display(&sanitize_for_display(row.sql), sql_width);
+        let ts = pad_to_width(row.timestamp, timestamp_width);
+        let conn = pad_to_width(row.connection, connection_width);
         lines.push(Line::from(vec![
-            Span::styled(format!(" {ts:timestamp_width$}"), style),
-            Span::styled(format!(" {conn:connection_width$}"), style),
-            Span::styled(format!(" {sql_truncated:sql_width$}"), style),
+            Span::styled(format!(" {ts}"), style),
+            Span::styled(format!(" {conn}"), style),
+            Span::styled(format!(" {sql_truncated}"), style),
         ]));
     }
 
@@ -133,17 +135,36 @@ pub fn render_history_modal(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Truncate a string to `max` chars, appending `…` if truncated.
-fn truncate_str(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_owned()
-    } else {
-        let mut end = max.saturating_sub(1);
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}…", &s[..end])
+/// Truncate a string so its **display width** does not exceed `max_width`
+/// cells, appending `…` if truncated. Uses `unicode_width` so CJK,
+/// emoji, and other wide characters are counted correctly.
+fn truncate_display(s: &str, max_width: usize) -> String {
+    if s.width() <= max_width {
+        return s.to_owned();
     }
+    let mut out = String::new();
+    let mut w = 0;
+    for ch in s.chars() {
+        let cw = UnicodeWidthStr::width(ch.to_string().as_str());
+        if w + cw + 1 > max_width {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    out
+}
+
+/// Pad a string with trailing spaces so its **display width** equals
+/// `target_width` cells. Handles wide characters correctly by computing
+/// the difference between display width and target.
+fn pad_to_width(s: &str, target_width: usize) -> String {
+    let display_w = s.width();
+    let mut out = s.to_owned();
+    let need = target_width.saturating_sub(display_w);
+    out.extend(std::iter::repeat(' ').take(need));
+    out
 }
 
 #[cfg(test)]
@@ -151,18 +172,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn truncate_str_short() {
-        assert_eq!(truncate_str("hello", 10), "hello");
+    fn truncate_display_short() {
+        assert_eq!(truncate_display("hello", 10), "hello");
     }
 
     #[test]
-    fn truncate_str_exact() {
-        assert_eq!(truncate_str("hello", 5), "hello");
+    fn truncate_display_exact() {
+        assert_eq!(truncate_display("hello", 5), "hello");
     }
 
     #[test]
-    fn truncate_str_long() {
-        let result = truncate_str("hello world", 6);
+    fn truncate_display_long() {
+        let result = truncate_display("hello world", 6);
         assert_eq!(result, "hello…");
+    }
+
+    #[test]
+    fn truncate_display_respects_wide_chars() {
+        // CJK character '中' has display width 2.
+        // "中日" = 4 display cells. Truncating to 3 should yield "中…" (2+1=3).
+        let result = truncate_display("中日", 3);
+        assert_eq!(result, "中…");
+    }
+
+    #[test]
+    fn pad_to_width_handles_wide_chars() {
+        // '中' = 2 cells wide. Pad to 5 → need 3 spaces.
+        let result = pad_to_width("中", 5);
+        assert_eq!(result, "中   ");
+    }
+
+    #[test]
+    fn pad_to_width_ascii() {
+        let result = pad_to_width("abc", 6);
+        assert_eq!(result, "abc   ");
     }
 }
