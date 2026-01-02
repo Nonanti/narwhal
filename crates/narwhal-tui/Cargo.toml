@@ -16,7 +16,6 @@ workspace = true
 [dependencies]
 narwhal-core.workspace = true
 narwhal-vim.workspace = true
-narwhal-sql.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-width.workspace = true

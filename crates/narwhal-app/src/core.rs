@@ -35,6 +35,7 @@ use crate::clipboard::{Clipboard, InMemoryClipboard};
 use crate::commands::{parse, Command, DumpTarget, IsolationArg};
 use crate::completion::{detect_context, gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
+use crate::editor::{all_statements, statement_at_cursor};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
 use crate::meta::{spawn_meta_request, MetaRequest, MetaUpdate};
@@ -3560,10 +3561,10 @@ impl AppCore {
             self.status.message = "no active connection".into();
             return;
         };
-        let Some(sql) = self.tabs[self.active_tab]
-            .editor
-            .statement_at_cursor(session.dialect())
-        else {
+        let Some(sql) = statement_at_cursor(
+            &self.tabs[self.active_tab].editor,
+            session.dialect(),
+        ) else {
             self.status.message = "no statement under cursor".into();
             return;
         };
@@ -3580,9 +3581,10 @@ impl AppCore {
             self.status.message = "no active connection".into();
             return;
         };
-        let statements = self.tabs[self.active_tab]
-            .editor
-            .all_statements(session.dialect());
+        let statements = all_statements(
+            &self.tabs[self.active_tab].editor,
+            session.dialect(),
+        );
         if statements.is_empty() {
             self.status.message = "buffer contains no statements".into();
             return;
@@ -4206,10 +4208,10 @@ impl AppCore {
             self.status.message = "explain is only supported on postgres for now".into();
             return;
         }
-        let Some(sql) = self.tabs[self.active_tab]
-            .editor
-            .statement_at_cursor(session.dialect())
-        else {
+        let Some(sql) = statement_at_cursor(
+            &self.tabs[self.active_tab].editor,
+            session.dialect(),
+        ) else {
             self.status.message = "no statement under cursor".into();
             return;
         };

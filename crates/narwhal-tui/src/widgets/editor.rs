@@ -2,10 +2,10 @@
 //!
 //! The buffer is intentionally simple: a `Vec<String>` of lines plus a
 //! cursor and a viewport offset. It pairs with [`narwhal_vim`] to interpret
-//! modal keystrokes and with [`narwhal_sql`] to extract the statement under
-//! the cursor for execution.
+//! modal keystrokes. SQL-aware concerns (statement splitting, dialect
+//! handling) live in `narwhal_app::editor` so this crate stays reusable
+//! with alternative backends.
 
-use narwhal_sql::{split_with, Dialect};
 use narwhal_vim::Motion;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -248,40 +248,6 @@ impl EditorBuffer {
                 _ => {}
             }
         }
-    }
-
-    /// Return every statement in the buffer, trimmed of surrounding
-    /// whitespace and of any trailing semicolon.
-    pub fn all_statements(&self, dialect: Dialect) -> Vec<String> {
-        let text = self.entire_text();
-        split_with(&text, dialect)
-            .into_iter()
-            .filter_map(|s| {
-                let cleaned = s.text.trim().trim_end_matches(';').trim().to_owned();
-                (!cleaned.is_empty()).then_some(cleaned)
-            })
-            .collect()
-    }
-
-    /// Extract the statement under the cursor.
-    ///
-    /// Returns the full statement text including any trailing semicolon, or
-    /// `None` when the buffer contains no statements at all.
-    pub fn statement_at_cursor(&self, dialect: Dialect) -> Option<String> {
-        let text = self.entire_text();
-        let cursor_offset = self.cursor_byte_offset();
-        let statements = split_with(&text, dialect);
-        if statements.is_empty() {
-            return None;
-        }
-        for stmt in &statements {
-            if cursor_offset >= stmt.start && cursor_offset <= stmt.end {
-                return Some(stmt.text.to_owned());
-            }
-        }
-        // Cursor is past the last statement end (trailing whitespace);
-        // return the last statement encountered.
-        statements.last().map(|s| s.text.to_owned())
     }
 
     /// The identifier-like prefix immediately to the left of the cursor.
@@ -874,21 +840,9 @@ mod tests {
         assert_eq!(buf.cursor(), (0, 2));
     }
 
-    #[test]
-    fn statement_under_cursor_picks_the_right_one() {
-        let mut buf = EditorBuffer::new();
-        buf.insert_str("SELECT 1; SELECT 2; SELECT 3");
-        buf.apply_motion(Motion::LineStart, 1);
-        let first = buf.statement_at_cursor(Dialect::Generic).unwrap();
-        assert!(first.starts_with("SELECT 1"));
-
-        // Walk into the second statement.
-        for _ in 0..12 {
-            buf.apply_motion(Motion::Right, 1);
-        }
-        let second = buf.statement_at_cursor(Dialect::Generic).unwrap();
-        assert!(second.contains("SELECT 2"));
-    }
+    // statement_at_cursor / all_statements coverage now lives in
+    // `narwhal-app::editor` (H18). The buffer no longer knows about SQL
+    // dialects, so this crate doesn't need a splitter dependency.
 
     #[test]
     fn current_word_prefix_and_replace_round_trip() {

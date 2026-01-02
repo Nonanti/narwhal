@@ -1188,7 +1188,7 @@
 
 ---
 
-## M14 — `Connection`/`DatabaseDriver`/`Value`/`Outcome`/... `#[non_exhaustive]` değil
+## M14 ✅ — `Connection`/`DatabaseDriver`/`Value`/`Outcome`/... `#[non_exhaustive]` değil
 
 - **Dosya:**
   - `crates/narwhal-core/src/connection.rs:18-27, 68-75, 85-167`

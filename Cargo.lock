@@ -2855,7 +2855,6 @@ version = "1.0.0"
 dependencies = [
  "crossterm",
  "narwhal-core",
- "narwhal-sql",
  "narwhal-vim",
  "ratatui",
  "tracing",
