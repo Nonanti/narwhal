@@ -25,6 +25,7 @@ pub fn is_ddl_statement(sql: &str) -> bool {
 
 /// How the worker should execute a statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RunMode {
     /// Materialise the entire result on the connection and deliver it as a
     /// single chunk. Drivers report `rows_affected` for non-SELECT statements.
@@ -43,6 +44,7 @@ pub struct RunRequest {
 
 /// Where the worker should source the connection from.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum RunTarget {
     /// Acquire a fresh connection from the pool and return it on completion.
     Pool(Pool),
@@ -66,6 +68,7 @@ pub struct RunContext {
 /// The UI consumes these to build a [`crate::core::ResultState`] without
 /// stalling the event loop.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunUpdate {
     /// A new statement is about to run. `index` and `total` are 1-based.
     StatementStarted {

@@ -15,6 +15,7 @@ use crate::theme::Theme;
 
 /// Sort direction for a result column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SortDir {
     Asc,
     Desc,
@@ -64,6 +65,8 @@ fn type_rank(v: &Value) -> u8 {
         Value::Json(_) => 10,
         Value::Unknown(_) => 11,
         Value::Null => 12, // unreachable in practice but included for completeness
+        // Future variants get sorted after Null until ranked explicitly.
+        _ => 13,
     }
 }
 
@@ -227,6 +230,7 @@ impl ResultView {
 /// queries), `Affected` for non-SELECT completions, `Rows` for completed
 /// SELECT-like queries (streamed or materialised), and `Error` when the
 /// engine returned a failure.
+#[non_exhaustive]
 pub enum ResultDisplay<'a> {
     Empty,
     Running {

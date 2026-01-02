@@ -47,6 +47,8 @@ impl<'a> ToSql for Param<'a> {
             Value::Uuid(v) => v.to_sql(ty, out),
             Value::Json(v) => v.to_sql(ty, out),
             Value::Unknown(v) => v.to_sql(ty, out),
+            // Forward-compatible: bind future Value variants as their Debug repr.
+            other => format!("{other:?}").to_sql(ty, out),
         }
     }
 

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// whether dialect-specific quoting (PostgreSQL dollar-quoted strings,
 /// MySQL backtick identifiers) is recognised.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Dialect {
     /// PostgreSQL: recognises `$tag$ ... $tag$` and standard SQL escapes.
     Postgres,

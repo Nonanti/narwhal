@@ -4,6 +4,7 @@ use narwhal_core::{ConnectionConfig, SslMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -19,6 +20,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Theme {
     #[default]
     Dark,

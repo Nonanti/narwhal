@@ -1,5 +1,6 @@
 /// Selector for [`Command::DumpSchema`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DumpTarget {
     /// Dump the table currently shown in the result pane (TableDetail).
     Current,
@@ -11,6 +12,7 @@ pub enum DumpTarget {
 
 /// Isolation levels accepted by `:begin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IsolationArg {
     ReadUncommitted,
     ReadCommitted,
@@ -36,6 +38,7 @@ impl IsolationArg {
 
 /// Top-level `:`-line commands accepted by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Command {
     Quit,
     Open(String),
@@ -115,6 +118,7 @@ pub enum Command {
 
 /// Scope of a substitute command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SubstituteRange {
     /// Replace on the current line only (`:s/…`).
     CurrentLine,

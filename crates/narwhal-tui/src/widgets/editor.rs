@@ -244,6 +244,8 @@ impl EditorBuffer {
                     // it doesn't move the cursor — the operator handler
                     // processes the current line.
                 }
+                // Forward-compatible: future motions are ignored until wired.
+                _ => {}
             }
         }
     }

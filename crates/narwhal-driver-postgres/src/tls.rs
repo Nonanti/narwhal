@@ -79,6 +79,9 @@ impl InternalSslMode {
             SslMode::Require => InternalSslMode::Require,
             SslMode::VerifyCa => InternalSslMode::VerifyCa,
             SslMode::VerifyFull => InternalSslMode::Verify,
+            // Future SslMode variants: fail closed with verify-full, which
+            // is the strictest mode we support today.
+            _ => InternalSslMode::Verify,
         })
     }
 

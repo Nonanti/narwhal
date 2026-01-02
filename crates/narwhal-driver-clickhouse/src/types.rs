@@ -293,6 +293,8 @@ pub(crate) fn value_to_sql_literal(value: &Value) -> String {
         Value::Uuid(u) => format!("'{u}'"),
         Value::Json(v) => format!("'{}'", escape_sql_string(&v.to_string())),
         Value::Unknown(s) => format!("'{}'", escape_sql_string(s)),
+        // Forward-compatible: encode future variants as escaped Debug form.
+        other => format!("'{}'", escape_sql_string(&format!("{other:?}"))),
     }
 }
 

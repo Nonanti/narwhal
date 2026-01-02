@@ -385,6 +385,9 @@ impl Connection for SqliteConnection {
                 self.execute_batch("BEGIN IMMEDIATE").await
             }
             IsolationLevel::ReadUncommitted => self.execute_batch("BEGIN DEFERRED").await,
+            // Unknown future isolation levels: fall back to the strictest mode
+            // that SQLite can actually honour.
+            _ => self.execute_batch("BEGIN EXCLUSIVE").await,
         }
     }
 
