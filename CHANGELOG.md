@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **UI no longer blocks on background metadata** (H11). New
+  `narwhal-app::meta` module ships a `MetaRequest`/`MetaUpdate`
+  channel; `dump_schema all`, `refresh_schemas`, and the Ctrl+R
+  history modal now dispatch via the channel instead of
+  `tokio::task::block_in_place` + `Handle::current().block_on(...)`,
+  so F4 (cancel) and key events stay responsive while the worker
+  task is busy.
+- **Schema refresh is no longer N+1** (H12). `Connection` gains a
+  `list_all_tables` trait method with a default fallback to the
+  legacy `list_schemas` + per-schema `list_tables` loop. Postgres,
+  MySQL, SQLite, DuckDB, and ClickHouse override it with a single
+  catalogue query (`information_schema.tables`, `sqlite_master`,
+  `duckdb_tables UNION duckdb_views`, `system.tables`), eliminating
+  one round trip per schema during sidebar refresh.
+- **PostgreSQL prepared-statement cache** (M9). Schema/admin
+  queries now flow through a per-connection 64-entry LRU cache,
+  cutting `describe_table` from 8 round trips to 2 on warm cache.
+- **Lua timeout hook no longer locks a Mutex per line** (H15). The
+  budget structure became `Arc<InvocationTimeout>` with an
+  `AtomicBool` flag, eliminating contention and Mutex-poisoning
+  risk in tight transform loops.
+- **History `Journal::recent` reads in reverse and off-thread**
+  (M13). The journal is now scanned from the tail via `rev_lines`
+  inside `spawn_blocking`, stopping as soon as N entries are
+  gathered; parse errors are logged via `tracing::warn` instead of
+  being silently swallowed.
+
+### Fixed
+
+- **PostgreSQL `extract_csv` handles commas in identifiers** (M8).
+  `string_agg` now joins with the ASCII unit separator (U+001F) and
+  the parser splits on the same byte, so a column named `"a,b"` no
+  longer corrupts schema introspection.
+- **PostgreSQL cancel/cursor handle uses `Statement` from cache, not
+  re-prepares each call** — see M9 above.
+- **ClickHouse Float NaN / ±Inf binds as `nan()` / `inf()` /
+  `-inf()`** (M5) instead of the SQL-invalid literals `NaN`, `inf`,
+  and `-inf`.
+- **ClickHouse `cancel()` is idempotent** (M6). The query-id set is
+  no longer drained on the first call; every subsequent Ctrl-C
+  re-issues `KILL QUERY` for the still-running query ids.
+- **ClickHouse `stream` no longer leaks `query_id` on the error
+  path** (M7). A `QueryGuard` removes the id from the active set on
+  drop, covering panics, cancellations, and stream-task aborts.
+- **DuckDB renders Date32 / Time64 / Timestamp / Interval as proper
+  chrono types** (M12), not as `"date(19876)"` strings, so CSV
+  export, clipboard, and column sort behave correctly.
+- **`describe_table` reports `TableKind::View` on SQLite, DuckDB,
+  and ClickHouse** (M11), matching the MySQL fix in Wave 3 and the
+  Postgres baseline. Views, materialised views, and system views
+  now show the correct sidebar glyph.
+- **`narwhal-pool` removes `unwrap`/`expect`** (H19). The poison-able
+  `std::sync::Mutex` was replaced with `parking_lot::Mutex` and the
+  `PooledConnection` invariants are now encoded via
+  `ManuallyDrop`/`Option` so no defensive `expect` remains.
+- **Editor search highlight + history modal honour char boundaries
+  and display width** (H16). Multi-byte and East-Asian wide
+  characters no longer panic the highlighter or overflow the
+  modal's column budget.
+- **Completion popup geometry agrees with hit-testing** (H17).
+  `render_completion_popup` returns the actual `Rect` chosen at
+  render time so the layout regions used by mouse dispatch always
+  match what the user sees.
+- **Vim operators (`d`, `y`, `c`) work** (M16). The Vim state
+  machine gained `Mode::OperatorPending(Operator)`; `dw`, `yy`,
+  `c$`, etc. now compose correctly with motions and counts.
+  `pending_count` is saturating-adds protected (M17).
+- **Plugin command timeout reports the resolved plugin name** (H20).
+  The plugin handle is captured before dispatch so the error
+  message attributes the timeout to the right plugin even when two
+  plugins register the same head; the message now references
+  `narwhal.execution_timeout_secs` so the user knows what to tune.
+- **Lua `_timeout_budget` is no longer script-accessible** (M18).
+  The budget lives in the Lua registry under an opaque key instead
+  of a global, so plugins cannot disable their own timeout. Plugin
+  names are derived from the file stem (M19) so a restart of
+  Narwhal does not change `:foo` into `:plugin_a4d2`.
+- **Mouse table preview keeps the cell-edit path** (M15). Clicking
+  a sidebar table now routes through `run_preview`, so the preview
+  result behaves identically to the keyboard shortcut.
+- **TUI sanitises BIDI and control characters in grid display**
+  (M20). U+202E, U+200E, soft-hyphens, etc. render as a visible
+  middle-dot so a malicious value cannot reorder the cell.
+- **Status bar width uses Unicode display width** (M21), not
+  `chars().count()`, so wide-character session names no longer
+  overrun the bar.
+
 ### Changed
 
 - **MySQL parameterless queries now use the binary prepared-statement

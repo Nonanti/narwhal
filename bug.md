@@ -577,7 +577,7 @@
 
 ---
 
-## H11 — UI bloklayan `block_in_place + block_on` 17 noktada
+## H11 ✅ — UI bloklayan `block_in_place + block_on` 17 noktada
 
 - **Dosya:** `crates/narwhal-app/src/core.rs` (satırlar: 834, 2068, 2102, 2207, 2659, 3329, 3421, 3427, 3480, 3634, 3699, 3834, 4104, 4448)
 - **Etki:** `describe_table`, `dump_schema all`, `refresh_schemas`, `open_history`,
@@ -611,7 +611,7 @@
 
 ---
 
-## H12 — `refresh_schemas` N+1 (her şema için ayrı `list_tables`)
+## H12 ✅ — `refresh_schemas` N+1 (her şema için ayrı `list_tables`)
 
 - **Dosya:** `crates/narwhal-app/src/session.rs:71-101`
 - **Etki:** 50 şemalı PG'de `:open` ve `:refresh` 50+ ardışık RTT.
@@ -714,7 +714,7 @@
 
 ---
 
-## H15 — Timeout hook her Lua satırında Mutex lock
+## H15 ✅ — Timeout hook her Lua satırında Mutex lock
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:362-380`
 - **Etki:** `HookTriggers::EVERY_LINE` her bytecode satırında
@@ -745,7 +745,7 @@
 
 ---
 
-## H16 — Editor search highlight + history modal byte/char karışıklığı
+## H16 ✅ — Editor search highlight + history modal byte/char karışıklığı
 
 - **Dosya:**
   - `crates/narwhal-tui/src/widgets/editor.rs:608-633` (highlight slicing)
@@ -806,7 +806,7 @@
 
 ---
 
-## H17 — `LayoutRegions::completion` rect tutarsız (mouse hit-test yanlış)
+## H17 ✅ — `LayoutRegions::completion` rect tutarsız (mouse hit-test yanlış)
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:138-153`,
   `crates/narwhal-tui/src/widgets/editor.rs:710-716`
@@ -853,7 +853,7 @@
 
 ---
 
-## H19 — Pool `unwrap`/`expect` ihlalleri (workspace yasaklamış)
+## H19 ✅ — Pool `unwrap`/`expect` ihlalleri (workspace yasaklamış)
 
 - **Dosya:** `crates/narwhal-pool/src/pool.rs:93, 135, 191, 199`
 - **Etki:** 4 satırda invariant defensive panic. `AGENTS.md` `unwrap()/expect()`
@@ -875,7 +875,7 @@
 
 ---
 
-## H20 — Plugin command timeout `plugin_for(command)` deterministik değil
+## H20 ✅ — Plugin command timeout `plugin_for(command)` deterministik değil
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:3340-3350`
 - **Etki:** `Err(PluginError::Timeout)` yakalandığında plugin adı tekrar
@@ -985,7 +985,7 @@
 
 ---
 
-## M5 — ClickHouse `Value::Float(NaN/Inf)` geçersiz literal
+## M5 ✅ — ClickHouse `Value::Float(NaN/Inf)` geçersiz literal
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/types.rs:240-249`
 - **Etki:** `f64::NAN.to_string() == "NaN"`; ClickHouse `nan()` fonksiyonu
@@ -1002,7 +1002,7 @@
 
 ---
 
-## M6 — ClickHouse `cancel()` `drain()` ile set'i boşaltıyor
+## M6 ✅ — ClickHouse `cancel()` `drain()` ile set'i boşaltıyor
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:881-887`
 - **Etki:** İkinci Ctrl-C no-op; eş zamanlı başlayan yeni sorgu drain anı
@@ -1018,7 +1018,7 @@
 
 ---
 
-## M7 — ClickHouse `stream` hata yolunda `query_id` leak
+## M7 ✅ — ClickHouse `stream` hata yolunda `query_id` leak
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:617-660`
 - **Etki:** `task.abort()` task'ı async drop yapmaz; `active_queries.remove(&qid)`
@@ -1043,7 +1043,7 @@
 
 ---
 
-## M8 — PG `extract_csv` virgül içeren identifier'larda kırık
+## M8 ✅ — PG `extract_csv` virgül içeren identifier'larda kırık
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/lib.rs:320-333`
 - **Etki:** `string_agg(a.attname, ',')` + `split(',')` parse — `CREATE TABLE
@@ -1058,7 +1058,7 @@
 
 ---
 
-## M9 — PG her `run()` çağrısında yeni `prepare` round-trip
+## M9 ✅ — PG her `run()` çağrısında yeni `prepare` round-trip
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/lib.rs:336-385`
 - **Etki:** `describe_table` tek tablo için 4 SQL × 2 round-trip = 8 RTT.
@@ -1097,7 +1097,7 @@
 
 ---
 
-## M11 — SQLite/DuckDB/CH `describe_table` daima `TableKind::Table`
+## M11 ✅ — SQLite/DuckDB/CH `describe_table` daima `TableKind::Table`
 
 - **Dosya:**
   - `crates/narwhal-driver-sqlite/src/lib.rs:474-482`
@@ -1121,7 +1121,7 @@
 
 ---
 
-## M12 — DuckDB Date32/Timestamp `"date(19876)"` string olarak render
+## M12 ✅ — DuckDB Date32/Timestamp `"date(19876)"` string olarak render
 
 - **Dosya:** `crates/narwhal-driver-duckdb/src/types.rs:62-72`
 - **Etki:** UI'da DATE kolonu `"date(19876)"` olarak görünür — okunamaz.
@@ -1155,7 +1155,7 @@
 
 ---
 
-## M13 — `Journal::recent` bloklayıcı sync + tüm dosyayı parse + sessiz yutma
+## M13 ✅ — `Journal::recent` bloklayıcı sync + tüm dosyayı parse + sessiz yutma
 
 - **Dosya:** `crates/narwhal-history/src/journal.rs:155-165`
 - **Etki:** Tüm history dosyasını parse edip son N alıyor; UI thread'inden
@@ -1216,7 +1216,7 @@
 
 ---
 
-## M15 — Mouse table-preview cell-edit'i kaybediyor
+## M15 ✅ — Mouse table-preview cell-edit'i kaybediyor
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:1445-1458` vs `2080-2148`
 - **Etki:** Sol klikle tabloya preview yapan kullanıcı cell edit (`e`)
@@ -1228,7 +1228,7 @@
 
 ---
 
-## M16 — Vim operatörleri (`d`, `y`, `c`) state-machine'de yok
+## M16 ✅ — Vim operatörleri (`d`, `y`, `c`) state-machine'de yok
 
 - **Dosya:** `crates/narwhal-vim/src/machine.rs:103-117`
 - **Etki:** `Action::Operate { op, motion, count }` ve `Operator { Delete,
@@ -1247,7 +1247,7 @@
 
 ---
 
-## M17 — `pending_count` overflow guard yok
+## M17 ✅ — `pending_count` overflow guard yok
 
 - **Dosya:** `crates/narwhal-vim/src/machine.rs:56-60`
 - **Etki:** `pending_count.unwrap_or(0) * 10 + digit` debug panik, release wrap.
@@ -1265,7 +1265,7 @@
 
 ---
 
-## M18 — Plugin `_timeout_budget` script erişimine açık
+## M18 ✅ — Plugin `_timeout_budget` script erişimine açık
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:323-326, 113`
 - **Etki:** `narwhal._timeout_budget` field — script `nil` set ederek timeout
@@ -1280,7 +1280,7 @@
 
 ---
 
-## M19 — `LuaPlugin::from_path` `DefaultHasher` randomized — restart'ta farklı plugin adı
+## M19 ✅ — `LuaPlugin::from_path` `DefaultHasher` randomized — restart'ta farklı plugin adı
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:248-260`
 - **Etki:** `DefaultHasher` randomized SipHash. Aynı dosya yolu her process'te
@@ -1296,7 +1296,7 @@
 
 ---
 
-## M20 — `render_for_grid` BIDI/control karakter filtrelemiyor
+## M20 ✅ — `render_for_grid` BIDI/control karakter filtrelemiyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:467-486`
 - **Etki:** U+202A..U+202E, U+2066..U+2069 BIDI override karakterleri
@@ -1336,7 +1336,7 @@
 
 ---
 
-## M21 — TUI status bar `chars().count()` width hesabı yanlış
+## M21 ✅ — TUI status bar `chars().count()` width hesabı yanlış
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:177-202`
 - **Etki:** Mode/focus/conn/transaction etiketleri `chars().count() as u16`
