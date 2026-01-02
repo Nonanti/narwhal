@@ -831,7 +831,7 @@
 
 ---
 
-## H18 — `EditorBuffer` SoC ihlali (`narwhal-sql` bağımlılığı tui'de)
+## H18 ✅ — `EditorBuffer` SoC ihlali (`narwhal-sql` bağımlılığı tui'de)
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:73-460`
 - **Etki:**
