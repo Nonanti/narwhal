@@ -11,6 +11,7 @@
 mod plugin_executor;
 mod render_helpers;
 mod text_utils;
+mod transactions;
 use plugin_executor::{AppPluginExecutor, PluginConnectionState};
 use render_helpers::{
     display_from_state, extract_explain_plan, is_explain_result, sidebar_depth, sidebar_kind,
@@ -21,6 +22,7 @@ use text_utils::{
     split_head_arg, truncate,
 };
 
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,7 +30,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{
-    Column, ColumnHeader, ConnectionConfig, IsolationLevel, Row, TableKind, TableSchema,
+    Column, ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema,
 };
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
@@ -48,7 +50,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::clipboard::{Clipboard, InMemoryClipboard};
-use crate::commands::{parse, Command, DumpTarget, IsolationArg};
+use crate::commands::{parse, Command, DumpTarget};
 use crate::completion::{detect_context, gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::editor::{all_statements, statement_at_cursor};
@@ -447,74 +449,74 @@ pub struct SnippetsModal {
 
 /// Pure, IO-free application state and behaviour.
 pub struct AppCore {
-    registry: DriverRegistry,
-    connections: ConnectionsFile,
-    connections_path: Option<std::path::PathBuf>,
-    credentials: Arc<dyn CredentialStore>,
-    clipboard: Arc<dyn Clipboard>,
-    plugins: Arc<PluginRegistry>,
+    pub(super) registry: DriverRegistry,
+    pub(super) connections: ConnectionsFile,
+    pub(super) connections_path: Option<std::path::PathBuf>,
+    pub(super) credentials: Arc<dyn CredentialStore>,
+    pub(super) clipboard: Arc<dyn Clipboard>,
+    pub(super) plugins: Arc<PluginRegistry>,
     /// Shared handle the plugin SQL executor reads on every
     /// `narwhal.sql_run` call. Updated whenever a session opens or
     /// closes so scripts always target the currently-active
     /// connection.
-    plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
-    history_journal: Option<Arc<Journal>>,
+    pub(super) plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
+    pub(super) history_journal: Option<Arc<Journal>>,
     /// When `Some`, the Ctrl+R history modal is open.
-    history_state: Option<HistoryState>,
+    pub(super) history_state: Option<HistoryState>,
     /// Persistent snippet store.
-    snippet_store: SnippetStore,
+    pub(super) snippet_store: SnippetStore,
     /// When `Some`, the `:snippets` modal is open.
-    snippets_modal: Option<SnippetsModal>,
-    session: Option<Session>,
-    tabs: Vec<Tab>,
-    active_tab: usize,
-    next_tab_id: usize,
-    vim: Vim,
-    theme: Theme,
-    focus: Pane,
-    sidebar_items: Vec<SidebarItem>,
-    sidebar_index: usize,
-    status: StatusBar,
+    pub(super) snippets_modal: Option<SnippetsModal>,
+    pub(super) session: Option<Session>,
+    pub(super) tabs: Vec<Tab>,
+    pub(super) active_tab: usize,
+    pub(super) next_tab_id: usize,
+    pub(super) vim: Vim,
+    pub(super) theme: Theme,
+    pub(super) focus: Pane,
+    pub(super) sidebar_items: Vec<SidebarItem>,
+    pub(super) sidebar_index: usize,
+    pub(super) status: StatusBar,
     /// One-shot warning carried over from a plugin (transform or command
     /// hook) so that the final 'done · N statement(s)' AllDone message
     /// doesn't overwrite it silently. Cleared after it bubbles up.
-    plugin_warning: Option<String>,
-    running: bool,
+    pub(super) plugin_warning: Option<String>,
+    pub(super) running: bool,
     /// Tab index that owns the in-flight run. Set to `Some(active_tab)`
     /// when `dispatch_batch` fires; cleared to `None` on `AllDone`.
     /// All `handle_run_update` / `finalize_statement` mutations target
     /// this tab, not `active_tab`, so a mid-run tab switch cannot
     /// corrupt a different tab's results.  (Bug K1-A fix.)
-    run_tab: Option<usize>,
-    cancel_slot: ActiveCancel,
-    should_quit: bool,
-    wizard: Option<ConnectionWizard>,
-    wizard_error: Option<String>,
-    help_open: bool,
+    pub(super) run_tab: Option<usize>,
+    pub(super) cancel_slot: ActiveCancel,
+    pub(super) should_quit: bool,
+    pub(super) wizard: Option<ConnectionWizard>,
+    pub(super) wizard_error: Option<String>,
+    pub(super) help_open: bool,
     /// Pending leader key for result-tab cycling. `]` followed by
     /// `r` cycles forward; `[` followed by `r` cycles backward.
-    pending_result_leader: Option<char>,
+    pub(super) pending_result_leader: Option<char>,
     /// Collects per-statement results during a multi-statement batch.
     /// Populated by `finalize_statement`; consumed and turned into a
     /// `ResultBundle` by the `AllDone` handler.
-    pending_result_entries_states: Vec<ResultState>,
-    pending_result_entries_views: Vec<ResultView>,
-    last_layout: LayoutRegions,
-    run_tx: mpsc::Sender<RunUpdate>,
+    pub(super) pending_result_entries_states: Vec<ResultState>,
+    pub(super) pending_result_entries_views: Vec<ResultView>,
+    pub(super) last_layout: LayoutRegions,
+    pub(super) run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
     /// Channel for background metadata operations (dump_schema, refresh,
     /// history). Separated from the run channel so meta ops don't
     /// interfere with query execution state.
-    meta_tx: mpsc::Sender<MetaUpdate>,
+    pub(super) meta_tx: mpsc::Sender<MetaUpdate>,
     pub(crate) meta_rx: mpsc::Receiver<MetaUpdate>,
     /// Handle to the in-flight debounced schema refresh task.
     /// Aborting it cancels the pending timer; a new task replaces it
     /// on every `schedule_schema_refresh` call.
-    refresh_task: Option<tokio::task::AbortHandle>,
+    pub(super) refresh_task: Option<tokio::task::AbortHandle>,
     /// Shared flag set by `schedule_schema_refresh` and consumed by
     /// the debounce timer task to know whether a refresh is still
     /// pending.
-    refresh_pending: Arc<AtomicBool>,
+    pub(super) refresh_pending: Arc<AtomicBool>,
 }
 
 impl AppCore {
@@ -3662,239 +3664,9 @@ impl AppCore {
     }
 
     // ----- transactions -----
-
-    fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
-        if self.running {
-            self.status.message = "a query is already running".into();
-            return;
-        }
-        let Some(session) = self.session.as_mut() else {
-            self.status.message = "no active connection".into();
-            return;
-        };
-        if session.transaction.is_some() {
-            self.status.message = "a transaction is already open".into();
-            return;
-        }
-        let iso = isolation.map(map_isolation);
-        let pool = session.pool.clone();
-        let result: std::result::Result<narwhal_pool::PooledConnection, narwhal_core::Error> =
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async move {
-                    let mut conn = pool
-                        .acquire()
-                        .await
-                        .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
-                    match iso {
-                        Some(level) => conn.begin_with(level).await?,
-                        None => conn.begin().await?,
-                    }
-                    Ok(conn)
-                })
-            });
-        match result {
-            Ok(conn) => {
-                session.transaction = Some(crate::session::TxnHandle {
-                    conn: Arc::new(tokio::sync::Mutex::new(conn)),
-                    savepoints: Vec::new(),
-                    isolation: iso,
-                });
-                // Mark the plugin executor so `narwhal.sql_run` refuses
-                // to run while a transaction is open — a fresh pool
-                // connection wouldn't see the uncommitted state and the
-                // user would silently get wrong answers.
-                self.plugin_state
-                    .lock()
-                    .expect("plugin_state poisoned")
-                    .in_transaction = true;
-                self.status.transaction = iso.map(|level| isolation_label(level).to_owned());
-                self.status.message = match iso {
-                    Some(level) => format!("transaction started ({})", isolation_label(level)),
-                    None => "transaction started".into(),
-                };
-            }
-            Err(error) => {
-                self.status.message = format!("begin failed: {error}");
-            }
-        }
-    }
-
-    fn commit_transaction(&mut self) {
-        self.end_transaction(true);
-    }
-
-    fn rollback_transaction(&mut self) {
-        self.end_transaction(false);
-    }
-
-    /// Finish an open transaction. `commit == true` invokes `commit()`,
-    /// otherwise `rollback()`. Either way the pinned connection is
-    /// returned to the pool.
-    fn end_transaction(&mut self, commit: bool) {
-        if self.running {
-            self.status.message = "a query is already running".into();
-            return;
-        }
-        let Some(session) = self.session.as_mut() else {
-            self.status.message = "no active connection".into();
-            return;
-        };
-        let Some(txn) = session.transaction.take() else {
-            self.status.message = "no open transaction".into();
-            return;
-        };
-        let conn_arc = txn.conn;
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                // Reclaim the pinned connection. If callers held extra Arc
-                // clones we error out rather than silently leak state.
-                let mutex = match Arc::try_unwrap(conn_arc) {
-                    Ok(m) => m,
-                    Err(arc) => {
-                        // A run worker is still holding the lock; wait for
-                        // it to drop and try again. In practice
-                        // dispatch_batch only locks while running.
-                        drop(arc);
-                        return Err(narwhal_core::Error::Connection(
-                            "transaction connection still in use".into(),
-                        ));
-                    }
-                };
-                let mut conn = mutex.into_inner();
-                if commit {
-                    conn.commit().await?;
-                } else {
-                    conn.rollback().await?;
-                }
-                Ok::<(), narwhal_core::Error>(())
-            })
-        });
-        // Whatever happened to the underlying transaction, the host-side
-        // pinned-connection state is gone (we already `take()`d the txn
-        // out of `session.transaction` above). Clear the plugin-side
-        // flag so subsequent `sql_run` calls work again.
-        self.plugin_state
-            .lock()
-            .expect("plugin_state poisoned")
-            .in_transaction = false;
-        self.status.transaction = None;
-        match outcome {
-            Ok(()) => {
-                self.status.message = if commit {
-                    "transaction committed".into()
-                } else {
-                    "transaction rolled back".into()
-                };
-            }
-            Err(error) => {
-                self.status.message = if commit {
-                    format!("commit failed: {error}")
-                } else {
-                    format!("rollback failed: {error}")
-                };
-            }
-        }
-    }
-
-    fn savepoint(&mut self, name: &str) {
-        self.with_txn_conn(
-            |conn, name| Box::pin(async move { conn.savepoint(name).await }),
-            name,
-            |session, name| {
-                if let Some(txn) = session.transaction.as_mut() {
-                    txn.savepoints.push(name.to_owned());
-                }
-            },
-            |name| format!("savepoint '{name}' established"),
-            |name, error| format!("savepoint '{name}' failed: {error}"),
-        );
-    }
-
-    fn release_savepoint(&mut self, name: &str) {
-        self.with_txn_conn(
-            |conn, name| Box::pin(async move { conn.release_savepoint(name).await }),
-            name,
-            |session, name| {
-                if let Some(txn) = session.transaction.as_mut() {
-                    if let Some(pos) = txn.savepoints.iter().position(|s| s == name) {
-                        txn.savepoints.truncate(pos);
-                    }
-                }
-            },
-            |name| format!("savepoint '{name}' released"),
-            |name, error| format!("release '{name}' failed: {error}"),
-        );
-    }
-
-    fn rollback_to_savepoint(&mut self, name: &str) {
-        self.with_txn_conn(
-            |conn, name| Box::pin(async move { conn.rollback_to_savepoint(name).await }),
-            name,
-            |session, name| {
-                if let Some(txn) = session.transaction.as_mut() {
-                    if let Some(pos) = txn.savepoints.iter().position(|s| s == name) {
-                        // Everything after the savepoint is unwound.
-                        txn.savepoints.truncate(pos + 1);
-                    }
-                }
-            },
-            |name| format!("rolled back to savepoint '{name}'"),
-            |name, error| format!("rollback-to '{name}' failed: {error}"),
-        );
-    }
-
-    /// Lock the pinned transaction connection and run `op` on it. Used by
-    /// `:savepoint`, `:release` and `:rollback-to` which all need the same
-    /// guarding boilerplate. Statement execution (`:run`/`:run-all`) goes
-    /// through `dispatch_batch` instead since that path streams updates
-    /// back through `RunUpdate`.
-    fn with_txn_conn<F, S, OkF, ErrF>(
-        &mut self,
-        op: F,
-        name: &str,
-        on_success: S,
-        ok_msg: OkF,
-        err_msg: ErrF,
-    ) where
-        F: for<'a> FnOnce(
-            &'a mut dyn narwhal_core::Connection,
-            &'a str,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = narwhal_core::Result<()>> + Send + 'a>,
-        >,
-        S: FnOnce(&mut Session, &str),
-        OkF: FnOnce(&str) -> String,
-        ErrF: FnOnce(&str, &narwhal_core::Error) -> String,
-    {
-        if self.running {
-            self.status.message = "a query is already running".into();
-            return;
-        }
-        let Some(session) = self.session.as_mut() else {
-            self.status.message = "no active connection".into();
-            return;
-        };
-        let Some(txn) = session.transaction.as_ref() else {
-            self.status.message = "no open transaction".into();
-            return;
-        };
-        let conn_arc = txn.conn.clone();
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let mut guard = conn_arc.lock().await;
-                op(&mut **guard, name).await
-            })
-        });
-        match result {
-            Ok(()) => {
-                on_success(session, name);
-                self.status.message = ok_msg(name);
-            }
-            Err(error) => {
-                self.status.message = err_msg(name, &error);
-            }
-        }
-    }
+    // Transaction methods (begin/commit/rollback/savepoint/release/
+    // rollback_to_savepoint, with_txn_conn) moved to
+    // `core::transactions` (L21).
 
     fn remove_connection(&mut self, name: &str) {
         let Some(pos) = self
@@ -4736,27 +4508,7 @@ impl AppCore {
 // `sidebar_label`, `sidebar_depth`, and `sidebar_kind` moved to
 // `core::render_helpers` (L21).
 
-fn map_isolation(arg: IsolationArg) -> IsolationLevel {
-    // IsolationArg is `#[non_exhaustive]` but lives in the same crate, so a
-    // wildcard arm would be reported as unreachable. Match all variants.
-    match arg {
-        IsolationArg::ReadUncommitted => IsolationLevel::ReadUncommitted,
-        IsolationArg::ReadCommitted => IsolationLevel::ReadCommitted,
-        IsolationArg::RepeatableRead => IsolationLevel::RepeatableRead,
-        IsolationArg::Serializable => IsolationLevel::Serializable,
-    }
-}
-
-fn isolation_label(level: IsolationLevel) -> &'static str {
-    match level {
-        IsolationLevel::ReadUncommitted => "read-uncommitted",
-        IsolationLevel::ReadCommitted => "read-committed",
-        IsolationLevel::RepeatableRead => "repeatable-read",
-        IsolationLevel::Serializable => "serializable",
-        // Future IsolationLevel variants surface as a generic label.
-        _ => "isolation",
-    }
-}
+// `map_isolation` and `isolation_label` moved to `core::transactions` (L21).
 
 // `PluginConnectionState` and `AppPluginExecutor` moved to
 // `core::plugin_executor` (L21).
