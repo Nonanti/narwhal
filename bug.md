@@ -1351,7 +1351,7 @@
 
 ---
 
-## M22 — `ResultView.state: TableState` ratatui'yi public ihraç ediyor
+## M22 ✅ — `ResultView.state: TableState` ratatui'yi public ihraç ediyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:94-114`
 - **Etki:** Ratatui major upgrade (`TableState` API değişimi) app'i kırar.
@@ -1368,7 +1368,7 @@
 
 ---
 
-## M23 — Magic number'lar 8+ widget dosyasında dağınık
+## M23 ✅ — Magic number'lar 8+ widget dosyasında dağınık
 
 - **Dosya:** `narwhal-tui/src/widgets/*.rs`, `layout.rs`
 - **Düzeltme:** `narwhal-tui/src/layout.rs` (veya yeni `constants.rs`):

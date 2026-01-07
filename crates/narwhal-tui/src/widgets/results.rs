@@ -486,7 +486,11 @@ pub fn render_results(
 }
 
 fn format_count(n: usize) -> String {
-    if n >= 1_000_000 {
+    // The M threshold compares against the value that *rounds up* into
+    // the next unit so 999_999 displays as `1.0M`, not `1000.0k`
+    // (L18). The k threshold stays at 10_000 to match the previous
+    // small-number boundary.
+    if n >= 999_500 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 10_000 {
         format!("{:.1}k", n as f64 / 1_000.0)
@@ -497,11 +501,14 @@ fn format_count(n: usize) -> String {
 
 fn format_elapsed(d: std::time::Duration) -> String {
     let total = d.as_secs_f64();
-    if total < 60.0 {
+    // Anything that would round up to 60.0s belongs in mm:ss
+    // form (L19); 59.999s used to print as `60.0s`.
+    if total < 59.95 {
         format!("{total:.1}s")
     } else {
-        let mins = (total / 60.0).floor() as u64;
-        let secs = (total % 60.0).floor() as u64;
+        let total_secs = total.round() as u64;
+        let mins = total_secs / 60;
+        let secs = total_secs % 60;
         format!("{mins:02}:{secs:02}")
     }
 }
@@ -1106,11 +1113,16 @@ mod tests {
     fn format_count_k_suffix() {
         assert_eq!(format_count(10_000), "10.0k");
         assert_eq!(format_count(12_345), "12.3k");
-        assert_eq!(format_count(999_999), "1000.0k");
+        // The boundary case that triggered L18: 999_499 still rounds
+        // *down* to "999.5k" (within the k bucket); 999_500 promotes.
+        assert_eq!(format_count(999_499), "999.5k");
     }
 
     #[test]
     fn format_count_m_suffix() {
+        // L18 boundary: 999_500 rounds up into the M bucket.
+        assert_eq!(format_count(999_500), "1.0M");
+        assert_eq!(format_count(999_999), "1.0M");
         assert_eq!(format_count(1_000_000), "1.0M");
         assert_eq!(format_count(1_234_567), "1.2M");
         assert_eq!(format_count(12_345_678), "12.3M");
@@ -1121,11 +1133,16 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_millis(0)), "0.0s");
         assert_eq!(format_elapsed(Duration::from_millis(100)), "0.1s");
         assert_eq!(format_elapsed(Duration::from_millis(2100)), "2.1s");
-        assert_eq!(format_elapsed(Duration::from_millis(59999)), "60.0s");
+        // L19 boundary case: 59.949s stays in the seconds bucket.
+        assert_eq!(format_elapsed(Duration::from_millis(59_949)), "59.9s");
     }
 
     #[test]
     fn format_elapsed_over_60s() {
+        // L19: 59.95s and above now promote to mm:ss; previously 59.999s
+        // printed as "60.0s".
+        assert_eq!(format_elapsed(Duration::from_millis(59_950)), "01:00");
+        assert_eq!(format_elapsed(Duration::from_millis(59_999)), "01:00");
         assert_eq!(format_elapsed(Duration::from_secs(60)), "01:00");
         assert_eq!(format_elapsed(Duration::from_secs(125)), "02:05");
         assert_eq!(format_elapsed(Duration::from_secs(3661)), "61:01");
