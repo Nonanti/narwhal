@@ -31,7 +31,9 @@ impl AppCore {
             self.status.message = "history disabled".into();
             return;
         };
-        self.dispatch_meta(MetaRequest::LoadHistory { limit: 200 });
+        self.dispatch_meta(MetaRequest::LoadHistory {
+            limit: narwhal_tui::constants::HISTORY_LOAD_LIMIT,
+        });
         self.status.message = "loading history…".into();
     }
 

@@ -16,7 +16,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
-const GUTTER_WIDTH: usize = 6; // "NNN │ "
+use crate::constants::EDITOR_GUTTER_WIDTH as GUTTER_WIDTH;
 
 /// Search highlight information passed from the app to the editor renderer.
 #[derive(Debug, Clone, Default)]

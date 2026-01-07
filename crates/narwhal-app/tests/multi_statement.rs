@@ -257,7 +257,6 @@ async fn state_preserved_across_tab_switch() {
     let first_result_selected = core.tabs()[core.active_tab()]
         .results
         .active()
-        .state
         .selected();
     assert_eq!(
         first_result_selected,
@@ -287,7 +286,6 @@ async fn state_preserved_across_tab_switch() {
     let restored_selected = core.tabs()[core.active_tab()]
         .results
         .active()
-        .state
         .selected();
     assert_eq!(
         restored_selected,

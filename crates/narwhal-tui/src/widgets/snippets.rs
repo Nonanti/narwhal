@@ -32,8 +32,7 @@ pub fn render_snippets_modal(
     state: &SnippetsModalState<'_>,
     theme: &Theme,
 ) {
-    let max_width: u16 = 50;
-    let max_height: u16 = 20;
+    let (max_width, max_height) = crate::constants::SNIPPETS_MODAL_MAX;
     let width = (area.width * 4 / 10).min(max_width);
     let height = (area.height * 6 / 10).min(max_height);
     if width < 20 || height < 6 {

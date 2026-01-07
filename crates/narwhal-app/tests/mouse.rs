@@ -232,7 +232,6 @@ async fn scroll_in_results_pane_moves_view() {
     let initial_selected = core.tabs()[core.active_tab()]
         .results
         .active()
-        .state
         .selected();
 
     // Scroll down inside the results pane.
@@ -240,7 +239,6 @@ async fn scroll_in_results_pane_moves_view() {
     let after_scroll = core.tabs()[core.active_tab()]
         .results
         .active()
-        .state
         .selected();
 
     // The selection should have moved down (or been set to 0 from None).

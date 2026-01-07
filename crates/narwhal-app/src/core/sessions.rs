@@ -4,7 +4,7 @@
 //! the per-statement run dispatch (`Command::Run`, `Command::RunAll`,
 //! mouse double-click) and the debounced schema-refresh timer.
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use narwhal_core::ConnectionConfig;
 use narwhal_tui::Pane;
@@ -171,7 +171,7 @@ impl AppCore {
         let pending = self.refresh_pending.clone();
         self.refresh_task = Some(
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                tokio::time::sleep(narwhal_tui::constants::SCHEMA_REFRESH_DEBOUNCE).await;
                 if pending.swap(false, Ordering::Acquire) {
                     let _ = tx.send(RunUpdate::SchemaRefresh { session_id }).await;
                 }

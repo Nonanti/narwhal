@@ -90,7 +90,12 @@ fn compare_same_type(a: &Value, b: &Value) -> Ordering {
 
 #[derive(Debug, Default)]
 pub struct ResultView {
-    pub state: TableState,
+    /// Ratatui table state — `pub(crate)` so a future ratatui major
+    /// upgrade doesn't ripple a `TableState` API change into every
+    /// downstream caller. Use [`ResultView::selected`] /
+    /// [`ResultView::select`] / [`ResultView::scroll_offset`]
+    /// instead of touching it directly (M22).
+    pub(crate) state: TableState,
     pub column_index: usize,
     pub popup: Option<CellPopup>,
     /// When `Some`, the cell editor is drawn on top of the result grid in
@@ -142,6 +147,28 @@ pub struct CellPopup {
 impl ResultView {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the index of the selected row, or `None` when no row is
+    /// selected. Mirrors `ratatui::widgets::TableState::selected`.
+    pub fn selected(&self) -> Option<usize> {
+        self.state.selected()
+    }
+
+    /// Select the row at `index`, or pass `None` to clear the
+    /// selection.
+    pub fn select(&mut self, index: Option<usize>) {
+        self.state.select(index);
+    }
+
+    /// Vertical scroll offset of the underlying ratatui table.
+    pub fn scroll_offset(&self) -> usize {
+        self.state.offset()
+    }
+
+    /// Set the vertical scroll offset of the underlying ratatui table.
+    pub fn set_scroll_offset(&mut self, offset: usize) {
+        *self.state.offset_mut() = offset;
     }
 
     pub fn move_down(&mut self, total_rows: usize) {
@@ -666,8 +693,7 @@ fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
 
-const MIN_COLUMN_WIDTH: usize = 6;
-const MAX_COLUMN_WIDTH: usize = 40;
+use crate::constants::{RESULT_MAX_COLUMN_WIDTH as MAX_COLUMN_WIDTH, RESULT_MIN_COLUMN_WIDTH as MIN_COLUMN_WIDTH};
 
 fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
     columns
@@ -776,7 +802,7 @@ pub fn sanitize_for_display(s: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(80);
+    let width = area.width.saturating_sub(8).min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(12);
     if width < 20 || height < 5 {
         return;
@@ -827,7 +853,7 @@ fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme:
 }
 
 fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(80);
+    let width = area.width.saturating_sub(8).min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(20);
     if width < 20 || height < 5 {
         return;

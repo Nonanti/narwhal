@@ -1122,7 +1122,6 @@ impl AppCore {
                 self.tabs[self.active_tab]
                     .results
                     .active_mut()
-                    .state
                     .select(Some(*row_idx));
                 self.focus = Pane::Results;
                 self.status.message = format!("focus → {}", Pane::Results.label());

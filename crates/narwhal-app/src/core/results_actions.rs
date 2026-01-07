@@ -124,13 +124,11 @@ impl AppCore {
             CtKey::Char('g') => self.tabs[self.active_tab]
                 .results
                 .active_mut()
-                .state
                 .select(Some(0)),
             CtKey::Char('G') if visible_count > 0 => {
                 self.tabs[self.active_tab]
                     .results
                     .active_mut()
-                    .state
                     .select(Some(visible_count - 1));
             }
             CtKey::Char('s') => self.toggle_sort(),
@@ -182,7 +180,7 @@ impl AppCore {
     /// the full result set. Returns `None` when there are no rows.
     fn selected_original_row(&self) -> Option<usize> {
         let tab = &self.tabs[self.active_tab];
-        let vis_selected = tab.results.active().state.selected()?;
+        let vis_selected = tab.results.active().selected()?;
         tab.results
             .active()
             .visible_indices
@@ -608,7 +606,6 @@ impl AppCore {
         self.tabs[self.active_tab]
             .results
             .active_mut()
-            .state
             .select(Some(idx));
     }
 
@@ -652,7 +649,7 @@ impl AppCore {
         // Compute visible rows to map selected index → original row index.
         // This avoids depending on `visible_indices` being populated by
         // a prior render pass.
-        let Some(vis_selected) = tab.results.active().state.selected() else {
+        let Some(vis_selected) = tab.results.active().selected() else {
             self.status.message = "no row selected".into();
             return;
         };

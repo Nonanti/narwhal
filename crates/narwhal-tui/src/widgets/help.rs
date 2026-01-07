@@ -205,8 +205,7 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
 /// available space) and displays each cheatsheet section as a labelled
 /// two-column table (shortcut → description).
 pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-    let max_width: u16 = 64;
-    let max_height: u16 = 50;
+    let (max_width, max_height) = crate::constants::HELP_MODAL_MAX;
     let width = (area.width * 8 / 10).min(max_width);
     let height = (area.height * 9 / 10).min(max_height);
     if width < 30 || height < 8 {

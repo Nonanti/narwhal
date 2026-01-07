@@ -1500,7 +1500,7 @@
 - **Dosya:** `narwhal/src/main.rs:33-40`
 - **Düzeltme:** Hata logla, `_settings`'i `App::with_services`'a ilet veya kaldır.
 
-## L21 — `core.rs` 4858 satır (modül bölme)
+## L21 ✅ — `core.rs` 4858 satır (modül bölme)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 - **Düzeltme:** `core/{results,tabs,run_loop,transactions,plugins}.rs`.
