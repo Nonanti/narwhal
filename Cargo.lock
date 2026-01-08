@@ -2707,6 +2707,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "narwhal-core",
+ "parking_lot",
  "reqwest",
  "tokio",
  "tracing",
@@ -2846,6 +2847,7 @@ dependencies = [
 name = "narwhal-sql"
 version = "1.0.0"
 dependencies = [
+ "memchr",
  "serde",
 ]
 

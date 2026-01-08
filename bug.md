@@ -1487,11 +1487,11 @@
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/row_detail.rs:165-178, 184-187`
 
-## L18 — `format_count(999_999)` → `1000.0k`
+## L18 ✅ — `format_count(999_999)` → `1000.0k`
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:407-414`
 
-## L19 — `format_elapsed(59_999ms)` → `60.0s`
+## L19 ✅ — `format_elapsed(59_999ms)` → `60.0s`
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:417-425`
 

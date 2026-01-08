@@ -29,9 +29,23 @@ impl<'a> ToSql for Param<'a> {
             Value::Null => Ok(IsNull::Yes),
             Value::Bool(v) => v.to_sql(ty, out),
             Value::Int(v) => match *ty {
-                Type::INT2 => (*v as i16).to_sql(ty, out),
-                Type::INT4 => (*v as i32).to_sql(ty, out),
-                Type::OID => (*v as u32).to_sql(ty, out),
+                // L8: refuse the bind instead of letting the lossy `as`
+                // cast silently emit the truncated value.
+                Type::INT2 => i16::try_from(*v)
+                    .map_err(|_| -> Box<dyn std::error::Error + Sync + Send> {
+                        format!("value {v} out of range for INT2").into()
+                    })?
+                    .to_sql(ty, out),
+                Type::INT4 => i32::try_from(*v)
+                    .map_err(|_| -> Box<dyn std::error::Error + Sync + Send> {
+                        format!("value {v} out of range for INT4").into()
+                    })?
+                    .to_sql(ty, out),
+                Type::OID => u32::try_from(*v)
+                    .map_err(|_| -> Box<dyn std::error::Error + Sync + Send> {
+                        format!("value {v} out of range for OID").into()
+                    })?
+                    .to_sql(ty, out),
                 _ => v.to_sql(ty, out),
             },
             Value::Float(v) => match *ty {

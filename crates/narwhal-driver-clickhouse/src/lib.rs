@@ -58,7 +58,8 @@ use narwhal_core::{
     ConnectionParams, DatabaseDriver, Error, IsolationLevel, QueryResult, Result, Row as CoreRow,
     RowStream, Schema, SslMode, Table, TableKind, TableSchema, Value,
 };
-use tokio::sync::{mpsc, Mutex};
+use parking_lot::Mutex;
+use tokio::sync::mpsc;
 use tracing::{debug, info};
 use url::Url;
 
@@ -272,8 +273,10 @@ impl DatabaseDriver for ClickhouseDriver {
 /// `reqwest::Client` is already `Send + Sync` with an internal
 /// connection pool, so no mutex is needed to parallelise requests.
 ///
-/// `active_queries` uses a `tokio::sync::Mutex` because we hold it
-/// briefly across `.await` points in the cancel path.
+/// `active_queries` uses [`parking_lot::Mutex`] — every callsite
+/// follows the same `lock().{insert,remove,iter}` pattern that drops
+/// the guard before reaching any `.await` point, so the async-aware
+/// `tokio::sync::Mutex` is unnecessary overhead (L2).
 struct SharedState {
     client: reqwest::Client,
     base_url: Url,
@@ -381,7 +384,7 @@ impl ClickhouseConnection {
 
         // Register query ID before sending.
         if let Some(qid) = query_id {
-            state.active_queries.lock().await.insert(qid.to_owned());
+            state.active_queries.lock().insert(qid.to_owned());
         }
 
         // SQL goes in the request body, not the URL query string. URLs
@@ -391,7 +394,7 @@ impl ClickhouseConnection {
             Ok(r) => r,
             Err(e) => {
                 if let Some(qid) = query_id {
-                    state.active_queries.lock().await.remove(qid);
+                    state.active_queries.lock().remove(qid);
                 }
                 return Err(Error::Query(e.to_string()));
             }
@@ -406,7 +409,7 @@ impl ClickhouseConnection {
                 .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
             // Remove query ID on failure.
             if let Some(qid) = query_id {
-                state.active_queries.lock().await.remove(qid);
+                state.active_queries.lock().remove(qid);
             }
             return Err(Error::Query(format!(
                 "ClickHouse returned {status}: {body}"
@@ -415,7 +418,7 @@ impl ClickhouseConnection {
 
         // Remove query ID on success.
         if let Some(qid) = query_id {
-            state.active_queries.lock().await.remove(qid);
+            state.active_queries.lock().remove(qid);
         }
 
         response
@@ -666,7 +669,7 @@ impl Connection for ClickhouseConnection {
         // Register query ID for cancellation tracking. The QueryGuard
         // ensures the ID is removed when the scope exits, even on error
         // or task abort (M7 RAII pattern).
-        state.active_queries.lock().await.insert(query_id.clone());
+        state.active_queries.lock().insert(query_id.clone());
         let _guard = QueryGuard {
             active: Arc::clone(&state.active_queries),
             qid: query_id.clone(),
@@ -1105,7 +1108,7 @@ impl Drop for QueryGuard {
         // Spawn a tiny async task to remove the query ID. The lock is
         // held only for the brief remove() call.
         tokio::spawn(async move {
-            active.lock().await.remove(&qid);
+            active.lock().remove(&qid);
         });
     }
 }
@@ -1130,7 +1133,6 @@ impl CancelHandle for ClickhouseCancel {
             .state
             .active_queries
             .lock()
-            .await
             .iter()
             .cloned()
             .collect();
@@ -1507,15 +1509,15 @@ mod cancel_tests {
         let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
         // Simulate inserting a query ID.
-        active.lock().await.insert("test-qid-1".to_owned());
-        assert!(active.lock().await.contains("test-qid-1"));
+        active.lock().insert("test-qid-1".to_owned());
+        assert!(active.lock().contains("test-qid-1"));
 
         // Simulate removing it.
-        active.lock().await.remove("test-qid-1");
-        assert!(!active.lock().await.contains("test-qid-1"));
+        active.lock().remove("test-qid-1");
+        assert!(!active.lock().contains("test-qid-1"));
 
         // Set should be empty.
-        assert!(active.lock().await.is_empty());
+        assert!(active.lock().is_empty());
     }
 
     /// Verify that cancel() is idempotent — a second call on the same
@@ -1523,8 +1525,8 @@ mod cancel_tests {
     #[tokio::test]
     async fn cancel_reads_cloned_not_drained() {
         let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        active.lock().await.insert("qid-1".to_owned());
-        active.lock().await.insert("qid-2".to_owned());
+        active.lock().insert("qid-1".to_owned());
+        active.lock().insert("qid-2".to_owned());
 
         // First cancel should read the IDs without draining.
         let client = reqwest::Client::new();
@@ -1544,7 +1546,7 @@ mod cancel_tests {
         let _ = cancel.cancel().await;
 
         // The active_queries set should still contain the query IDs.
-        let remaining = active.lock().await;
+        let remaining = active.lock();
         assert!(
             remaining.contains("qid-1"),
             "qid-1 should still be present after cancel"
@@ -1560,8 +1562,8 @@ mod cancel_tests {
     async fn stream_error_path_clears_active_query() {
         let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let qid = "test-qid-guard".to_owned();
-        active.lock().await.insert(qid.clone());
-        assert!(active.lock().await.contains(&qid));
+        active.lock().insert(qid.clone());
+        assert!(active.lock().contains(&qid));
 
         // Simulate the RAII guard being dropped.
         {
@@ -1578,7 +1580,7 @@ mod cancel_tests {
         tokio::task::yield_now().await;
 
         assert!(
-            !active.lock().await.contains(&qid),
+            !active.lock().contains(&qid),
             "query ID should be removed after guard drops"
         );
     }
@@ -1608,6 +1610,6 @@ mod cancel_tests {
         assert!(result.is_ok());
 
         // Active set should still be empty.
-        assert!(active.lock().await.is_empty());
+        assert!(active.lock().is_empty());
     }
 }
