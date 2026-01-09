@@ -103,7 +103,20 @@ impl DatabaseDriver for DuckdbDriver {
             .ok_or_else(|| Error::Config("path missing".into()))?
             .to_owned();
 
-        debug!(target: "narwhal::duckdb", path = %path, "opening database");
+        // L11: log canonical path so a mistyped relative path is obvious.
+        let canonical = if path == ":memory:" {
+            None
+        } else {
+            std::fs::canonicalize(&path)
+                .ok()
+                .map(|p| p.display().to_string())
+        };
+        debug!(
+            target: "narwhal::duckdb",
+            path = %path,
+            canonical = canonical.as_deref().unwrap_or("<unresolved>"),
+            "opening database"
+        );
         let conn = task::spawn_blocking(move || {
             if path == ":memory:" {
                 duckdb::Connection::open_in_memory()
@@ -115,7 +128,11 @@ impl DatabaseDriver for DuckdbDriver {
         .map_err(|e| Error::Other(e.to_string()))?
         .map_err(|e| Error::Connection(e.to_string()))?;
 
-        info!(target: "narwhal::duckdb", "database opened");
+        info!(
+            target: "narwhal::duckdb",
+            canonical = canonical.as_deref().unwrap_or("<unresolved>"),
+            "database opened"
+        );
         let interrupt = conn.interrupt_handle();
         Ok(Box::new(DuckdbConnection {
             inner: Arc::new(Mutex::new(conn)),
