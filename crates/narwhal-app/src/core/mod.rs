@@ -606,7 +606,7 @@ impl AppCore {
             snippet_store: SnippetStore::new(SnippetStore::default_root()),
             snippets_modal: None,
             session: None,
-            tabs: vec![Tab::new("untitled")],
+            tabs: vec![Tab::new("untitled-1")],
             active_tab: 0,
             next_tab_id: 2,
             vim: Vim::new(),

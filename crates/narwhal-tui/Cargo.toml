@@ -20,5 +20,4 @@ ratatui.workspace = true
 crossterm.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
-tracing.workspace = true
 uuid.workspace = true

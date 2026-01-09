@@ -1453,7 +1453,7 @@
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/ddl.rs:55-64`
 
-## L10 — DuckDB `_tx` doğrudan drop edilebilir
+## L10 ✅ — DuckDB `_tx` doğrudan drop edilebilir
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:597-606`
 
@@ -1467,23 +1467,23 @@
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:317-322`
 
-## L13 — `KeyMod`/`Mode` `Hash` derive yok
+## L13 ✅ — `KeyMod`/`Mode` `Hash` derive yok
 
 - **Dosya:** `crates/narwhal-vim/src/key.rs:57-72, mode.rs:5-10`
 
-## L14 — `command_buffer` boyut sınırı yok
+## L14 ✅ — `command_buffer` boyut sınırı yok
 
 - **Dosya:** `crates/narwhal-vim/src/machine.rs:139-141`
 
-## L15 — `editor.rs:594` ölü `.max` guard
+## L15 ✅ — `editor.rs:594` ölü `.max` guard
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:594`
 
-## L16 — `EditorBuffer::move_word_forward` newline atlamıyor
+## L16 ✅ — `EditorBuffer::move_word_forward` newline atlamıyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:392-403`
 
-## L17 — `wrap_text` byte-chunk fallback
+## L17 ✅ — `wrap_text` byte-chunk fallback
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/row_detail.rs:165-178, 184-187`
 

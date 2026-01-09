@@ -16,7 +16,16 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
-use crate::constants::EDITOR_GUTTER_WIDTH as GUTTER_WIDTH;
+/// Compute the width of the line-number gutter so a buffer with N
+/// lines reserves exactly the cells it needs for `"NNN │ "` plus the
+/// trailing space (L36). Minimum 6 to keep the historical layout for
+/// small buffers.
+fn gutter_width(line_count: usize) -> usize {
+    // Account for `" │ "` (2 visible cells after the number) plus the
+    // number itself.
+    let digits = line_count.max(1).to_string().len();
+    (digits + 3).max(6)
+}
 
 /// Search highlight information passed from the app to the editor renderer.
 #[derive(Debug, Clone, Default)]
@@ -592,9 +601,11 @@ pub fn render_editor(
     let needle_len = search.map(|s| s.needle_len).unwrap_or(0);
 
     let end = (buffer.scroll + height).min(buffer.lines.len());
+    let gutter_w = gutter_width(buffer.lines.len());
+    let num_w = gutter_w.saturating_sub(3); // " │ " suffix
     let lines: Vec<Line<'_>> = (buffer.scroll..end)
         .map(|row| {
-            let number = format!("{:>3} │ ", row + 1);
+            let number = format!("{:>w$} │ ", row + 1, w = num_w);
             let gutter = Span::styled(number, Style::default().fg(theme.muted));
 
             let line_text = &buffer.lines[row];
@@ -646,7 +657,7 @@ pub fn render_editor(
     if focused && buffer.cursor_row >= buffer.scroll {
         let cursor_y = (buffer.cursor_row - buffer.scroll) as u16;
         if cursor_y < inner.height {
-            let cursor_x = (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
+            let cursor_x = (gutter_w + cursor_display_col(buffer)) as u16;
             if cursor_x < inner.width {
                 frame.set_cursor_position((inner.x + cursor_x, inner.y + cursor_y));
             }
@@ -675,7 +686,7 @@ fn cursor_display_col(buffer: &EditorBuffer) -> usize {
 pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
     let inner_x = area.x + 1;
     let inner_y = area.y + 1;
-    let cursor_x = inner_x + (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
+    let cursor_x = inner_x + (gutter_width(buffer.lines.len()) + cursor_display_col(buffer)) as u16;
     let cursor_y = if buffer.cursor_row >= buffer.scroll {
         inner_y + (buffer.cursor_row - buffer.scroll) as u16
     } else {

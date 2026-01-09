@@ -104,7 +104,7 @@ impl AppCore {
                 // prior `:begin` state implicitly, so the TX flag
                 // resets here too.
                 {
-                    let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+                    let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
                     state.pool = Some(session.pool.clone());
                     state.in_transaction = false;
                 }
@@ -120,7 +120,7 @@ impl AppCore {
 
     pub(super) fn close_session(&mut self) {
         if self.session.take().is_some() {
-            let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+            let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
             state.pool = None;
             state.in_transaction = false;
             drop(state);
@@ -303,7 +303,7 @@ impl AppCore {
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
-                let mut state = self.plugin_state.lock().expect("plugin_state poisoned");
+                let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
                 state.pool = None;
                 state.in_transaction = false;
             }

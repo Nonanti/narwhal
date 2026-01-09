@@ -80,7 +80,7 @@ impl AppCore {
                 // user would silently get wrong answers.
                 self.plugin_state
                     .lock()
-                    .expect("plugin_state poisoned")
+                    .unwrap_or_else(|e| e.into_inner())
                     .in_transaction = true;
                 self.status.transaction = iso.map(|level| isolation_label(level).to_owned());
                 self.status.message = match iso {
@@ -150,7 +150,7 @@ impl AppCore {
         // flag so subsequent `sql_run` calls work again.
         self.plugin_state
             .lock()
-            .expect("plugin_state poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .in_transaction = false;
         self.status.transaction = None;
         match outcome {

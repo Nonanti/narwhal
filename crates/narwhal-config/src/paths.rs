@@ -56,12 +56,25 @@ impl ConfigPaths {
     }
 
     /// Create every directory referenced by this struct.
+    ///
+    /// On failure the returned error mentions the offending path so the
+    /// user can tell which mount-point / permission is the problem
+    /// (L37). Without the wrapping a bare `Permission denied` was
+    /// impossible to debug.
     pub fn ensure(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.config_dir)?;
-        std::fs::create_dir_all(&self.data_dir)?;
-        std::fs::create_dir_all(&self.cache_dir)?;
-        std::fs::create_dir_all(self.log_dir())?;
-        std::fs::create_dir_all(self.plugins_dir())?;
+        fn mk(path: &std::path::Path) -> std::io::Result<()> {
+            std::fs::create_dir_all(path).map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!("could not create {}: {e}", path.display()),
+                )
+            })
+        }
+        mk(&self.config_dir)?;
+        mk(&self.data_dir)?;
+        mk(&self.cache_dir)?;
+        mk(&self.log_dir())?;
+        mk(&self.plugins_dir())?;
         Ok(())
     }
 }
