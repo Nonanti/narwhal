@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **Public enums marked `#[non_exhaustive]`** (M14). Every public
+  enum in `narwhal-core`, `narwhal-sql`, `narwhal-history`,
+  `narwhal-config`, `narwhal-pool`, `narwhal-plugin`, `narwhal-vim`,
+  `narwhal-tui`, and `narwhal-app` now carries `#[non_exhaustive]`
+  so future variant additions are not SemVer-breaking. Downstream
+  callers must add a wildcard arm to any `match` that consumes one
+  of these enums from outside the defining crate.
+- **`ResultView.state` is now `pub(crate)`** (M22). Use
+  `ResultView::selected`, `select`, `scroll_offset`,
+  `set_scroll_offset` instead of touching `TableState` directly
+  — protects callers from a future ratatui major upgrade.
+
+### Refactor
+
+- **`narwhal-tui` no longer depends on `narwhal-sql`** (H18).
+  `EditorBuffer` is strictly text+cursor; `statement_at_cursor` /
+  `all_statements` moved to `narwhal_app::editor`.
+- **`crates/narwhal-app/src/core.rs` (4858 lines) split into a
+  `core/` module tree** (L21): mod.rs + 12 submodules
+  (`text_utils`, `render_helpers`, `plugin_executor`,
+  `transactions`, `plugins`, `run_loop`, `tabs`, `sessions`,
+  `results_actions`, `editor_handlers`, `dump_export`, `modals`).
+  mod.rs is now ~1340 lines.
+- **TUI sizing constants centralised** (M23) in a new
+  `narwhal_tui::constants` module.
+
 ### Performance
 
 - **UI no longer blocks on background metadata** (H11). New
@@ -35,6 +63,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside `spawn_blocking`, stopping as soon as N entries are
   gathered; parse errors are logged via `tracing::warn` instead of
   being silently swallowed.
+- **`Value::Display` writes straight to the formatter** (L1). The
+  integer/float/date paths no longer materialise an intermediate
+  `String` before printing.
+- **`Splitter::find_dollar_close` uses `memchr::memmem`** (L3),
+  replacing the byte-by-byte scan inside long PL/pgSQL bodies.
+
+### Cleanup
+
+- **Editor gutter width is now dynamic** (L36) so buffers with
+  > 999 lines render correctly.
+- **`wrap_text` uses unicode-segmentation graphemes** (L17) for
+  long-word breaks instead of byte-chunking through multi-byte
+  UTF-8.
+- **`EditorBuffer::move_word_forward` skips newlines** (L16) so
+  `w` lands on the next word across line breaks.
+- **Vim `command_buffer` capped at 4 KiB** (L14).
+- **`Pane::cycle_back` added** (L27) for reverse focus rotation
+  via Shift+Ctrl+W.
+- **`Hash` derives added** on narwhal-vim `Mode`, `KeyCode`,
+  `KeyMod`, `Operator` (L13).
+- **`centred_rect` deduplicated** (L25) into
+  `widgets::centred_rect` shared by every modal renderer.
+- **`narwhal-tui::lib.rs` re-exports via glob** (L26) instead of
+  the duplicated explicit list.
+- **First tab named `untitled-1`** (L33) to match `untitled-N`.
+- **Dropped unused `tracing` dep** from `narwhal-tui` (L35).
+- **`ConfigPaths::ensure` returns path-aware errors** (L37).
+- **History journal caps SQL at 64 KiB** (L38) with a
+  `… (truncated N bytes)` suffix.
+- **`narwhal::main` drops the tracing guard before `exit(1)`**
+  (L40) so the final log event reaches disk.
+- **`narwhal::main` logs settings/connections load failures** (L20).
+- **`expect("plugin_state poisoned")` replaced by
+  `unwrap_or_else(|e| e.into_inner())`** (L22). Poisoned mutex no
+  longer crashes the app.
+- **`ClickHouse` `active_queries` uses `parking_lot::Mutex`** (L2)
+  instead of `tokio::sync::Mutex`.
+- **`format_count` / `format_elapsed` boundary rounding fixed**
+  (L18, L19): `999_999` → `1.0M`; `59_999ms` → `01:00`.
+- **`Pool::new` asserts `max_size > 0`** (L6).
+- **`parse_url` accepts IPv6 hosts in `[brackets]`** (L4);
+  empty query keys error via `UrlError::EmptyQueryKey` (L7).
+- **`validate_connections` rejects duplicate UUIDs** (L5).
+- **PG `Param` uses `try_from`** for INT2/INT4/OID binds (L8)
+  instead of silently truncating `as` casts.
+- **PG DDL emitter rejects generated-stored columns with no
+  expression** (L9).
+- **`find_all` `.max(1)` dead guard removed** (L32). DuckDB stream
+  empty-branch uses `drop(tx)` (L10). Editor `pos = end.max(...)`
+  simplified to `pos = end` (L15).
 
 ### Fixed
 
