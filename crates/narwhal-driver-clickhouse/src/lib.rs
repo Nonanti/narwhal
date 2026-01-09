@@ -708,8 +708,10 @@ impl Connection for ClickhouseConnection {
             // Drop the sender immediately so the receiver yields
             // `Ok(None)` on first poll — a clean empty stream. No task
             // was spawned in this branch, so the stream owns nothing
-            // that needs cancellation.
-            let (_tx, rx) = mpsc::channel::<Result<CoreRow>>(1);
+            // that needs cancellation. (L10: don't keep a `_tx` named
+            // binding alive longer than necessary.)
+            let (tx, rx) = mpsc::channel::<Result<CoreRow>>(1);
+            drop(tx);
             return Ok(Box::new(ClickhouseRowStream {
                 columns: Vec::new(),
                 rx,

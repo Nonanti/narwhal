@@ -375,7 +375,10 @@ impl EditorBuffer {
         while idx < bytes.len() && is_word_char(bytes[idx]) {
             idx += 1;
         }
-        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() && bytes[idx] != b'\n' {
+        // L16: skip trailing whitespace *including* newlines so `w`
+        // lands on the next word even if the previous one was at
+        // end-of-line.
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
             idx += 1;
         }
         self.set_cursor_from_offset(idx);
@@ -621,7 +624,10 @@ pub fn render_editor(
                         };
                         spans.push(Span::styled(line_text[start..end].to_owned(), style));
                     }
-                    pos = end.max(start.saturating_add(1)); // advance past the match
+                    // L15: search matches always have `end > start`
+                    // (zero-length needles are filtered out upstream),
+                    // so plain assignment suffices.
+                    pos = end;
                 }
                 if pos < line_text.len() {
                     spans.push(Span::raw(line_text[pos..].to_owned()));

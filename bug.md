@@ -1397,7 +1397,7 @@
 
 # LOW
 
-## L1 — `Value::render` Display path'inde alloc
+## L1 ✅ — `Value::render` Display path'inde alloc
 
 - **Dosya:** `crates/narwhal-core/src/value.rs:32-49, 52-56`
 - **Düzeltme:** `Display::fmt` doğrudan formatter'a yaz:
@@ -1415,41 +1415,41 @@
   pub fn render(&self) -> String { self.to_string() }
   ```
 
-## L2 — ClickHouse `tokio::sync::Mutex` gereksiz
+## L2 ✅ — ClickHouse `tokio::sync::Mutex` gereksiz
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:258-265`
 - **Düzeltme:** `parking_lot::Mutex<HashSet<String>>` veya `std::sync::Mutex`;
   lock'lar `.await` aşmıyor.
 
-## L3 — `Splitter::find_dollar_close` lineer
+## L3 ✅ — `Splitter::find_dollar_close` lineer
 
 - **Dosya:** `crates/narwhal-sql/src/splitter.rs:118-128`
 - **Düzeltme:** `memchr::memmem::find` ile O(n).
 
-## L4 — `parse_url` IPv6 desteklemiyor
+## L4 ✅ — `parse_url` IPv6 desteklemiyor
 
 - **Dosya:** `crates/narwhal-config/src/url.rs:96-107`
 - **Düzeltme:** `[...]` bracket parsing.
 
-## L5 — `validate_connections` UUID benzersizlik check yok
+## L5 ✅ — `validate_connections` UUID benzersizlik check yok
 
 - **Dosya:** `crates/narwhal-config/src/settings.rs:136-180`
 
-## L6 — `PoolConfig::max_size = 0` deadlock
+## L6 ✅ — `PoolConfig::max_size = 0` deadlock
 
 - **Dosya:** `crates/narwhal-pool/src/pool.rs:18-32, 56-69`
 - **Düzeltme:** `Pool::new`'da `max_size > 0` assert veya `Result`.
 
-## L7 — `parse_query` boş anahtar kabul ediyor
+## L7 ✅ — `parse_query` boş anahtar kabul ediyor
 
 - **Dosya:** `crates/narwhal-config/src/url.rs:178-191`
 
-## L8 — `Param` `i16`/`i32`/`u32` overflow sessiz
+## L8 ✅ — `Param` `i16`/`i32`/`u32` overflow sessiz
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/types.rs:31-37`
 - **Düzeltme:** `try_from`.
 
-## L9 — DDL generated `unwrap_or("")` boş ifade
+## L9 ✅ — DDL generated `unwrap_or("")` boş ifade
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/ddl.rs:55-64`
 

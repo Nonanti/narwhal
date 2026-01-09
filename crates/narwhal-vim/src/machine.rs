@@ -179,7 +179,13 @@ impl Vim {
             }
             KeyCode::Tab => Action::PromptComplete,
             KeyCode::Char(c) => {
-                self.command_buffer.push(c);
+                // L14: cap the prompt buffer to a sane size so a stuck
+                // key repeat can't grow it unboundedly. 4 KiB is well
+                // beyond any legitimate `:`-command.
+                const COMMAND_BUFFER_MAX: usize = 4 * 1024;
+                if self.command_buffer.len() < COMMAND_BUFFER_MAX {
+                    self.command_buffer.push(c);
+                }
                 Action::Pending
             }
             _ => Action::Pending,

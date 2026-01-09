@@ -2860,6 +2860,7 @@ dependencies = [
  "narwhal-vim",
  "ratatui",
  "tracing",
+ "unicode-segmentation",
  "unicode-width 0.2.2",
  "uuid",
 ]
