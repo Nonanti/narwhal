@@ -24,23 +24,20 @@ use plugin_executor::PluginConnectionState;
 use render_helpers::{display_from_state, sidebar_depth, sidebar_kind, sidebar_label};
 use text_utils::split_head_arg;
 
-
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
-use narwhal_core::{
-    Column, ColumnHeader, Row, TableKind, TableSchema,
-};
+use narwhal_core::{Column, ColumnHeader, Row, TableKind, TableSchema};
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
     render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
-    render_wizard, CompletionItemView, CompletionPopupView, EditorBuffer,
-    EditorSearchHighlight, ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane,
-    ResultView, RootLayout, RowDetailView, SearchHighlight, SidebarRow, SidebarView,
-    SnippetsModalState, StatusBarView, Theme, WizardFieldView, WizardView,
+    render_wizard, CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
+    ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane, ResultView, RootLayout,
+    RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
+    Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Mode, SearchDirection, Vim};
 use ratatui::layout::Rect;

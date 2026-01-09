@@ -1495,7 +1495,7 @@
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:417-425`
 
-## L20 — `narwhal/src/main.rs` `_settings` kullanılmıyor + `unwrap_or_default` sessiz
+## L20 ✅ — `narwhal/src/main.rs` `_settings` kullanılmıyor + `unwrap_or_default` sessiz
 
 - **Dosya:** `narwhal/src/main.rs:33-40`
 - **Düzeltme:** Hata logla, `_settings`'i `App::with_services`'a ilet veya kaldır.
@@ -1505,7 +1505,7 @@
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 - **Düzeltme:** `core/{results,tabs,run_loop,transactions,plugins}.rs`.
 
-## L22 — `expect("plugin_state poisoned")` × 6
+## L22 ✅ — `expect("plugin_state poisoned")` × 6
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:3447,3448,3464,3660,3730,3876`
 - **Düzeltme:** `lock().unwrap_or_else(|e| e.into_inner())`.
@@ -1518,16 +1518,16 @@
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/sidebar.rs:99-114`
 
-## L25 — `centred_rect` DRY ihlali (4 dosya)
+## L25 ✅ — `centred_rect` DRY ihlali (4 dosya)
 
 - **Dosya:** `widgets/row_detail.rs`, `results.rs`, `wizard.rs`, `help.rs`
 - **Düzeltme:** Tek `centred_rect` helper'da topla.
 
-## L26 — `widgets.rs` ve `lib.rs` re-export çiftlemesi
+## L26 ✅ — `widgets.rs` ve `lib.rs` re-export çiftlemesi
 
 - **Dosya:** `crates/narwhal-tui/src/{lib,widgets}.rs`
 
-## L27 — `Pane::cycle` tek yön
+## L27 ✅ — `Pane::cycle` tek yön
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:46-52`
 
@@ -1549,11 +1549,11 @@
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:494-496`
 
-## L32 — `find_all` ölü `.max(1)`
+## L32 ✅ — `find_all` ölü `.max(1)`
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:4798-4807`
 
-## L33 — İlk tab adı `untitled` (next `untitled-2`)
+## L33 ✅ — İlk tab adı `untitled` (next `untitled-2`)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:589, 3996-4000`
 
@@ -1561,28 +1561,28 @@
 
 - **Dosya:** `crates/narwhal-app/src/edit.rs:23-46`
 
-## L35 — `narwhal-tui` `tracing` dep var, kullanılmıyor
+## L35 ✅ — `narwhal-tui` `tracing` dep var, kullanılmıyor
 
 - **Dosya:** `crates/narwhal-tui/Cargo.toml`
 
-## L36 — `GUTTER_WIDTH` sabit 6 (>999 satır taşar)
+## L36 ✅ — `GUTTER_WIDTH` sabit 6 (>999 satır taşar)
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:17`
 
-## L37 — `core::ConfigPaths::ensure` path-aware hata yok
+## L37 ✅ — `core::ConfigPaths::ensure` path-aware hata yok
 
 - **Dosya:** `crates/narwhal-config/src/paths.rs:54-61`
 
-## L38 — `HistoryEntry::sql` boyut sınırı yok
+## L38 ✅ — `HistoryEntry::sql` boyut sınırı yok
 
 - **Dosya:** `crates/narwhal-history/src/journal.rs:32-46, 142-151`
 - **Düzeltme:** 64KB üstü truncate + ekle `"… (truncated N bytes)"`.
 
-## L39 — `Pool::idle_count` poison'da 0 dönüyor
+## L39 ✅ — `Pool::idle_count` poison'da 0 dönüyor
 
 - **Dosya:** `crates/narwhal-pool/src/pool.rs`
 
-## L40 — `process::exit(1)` log flush kaçırıyor
+## L40 ✅ — `process::exit(1)` log flush kaçırıyor
 
 - **Dosya:** `narwhal/src/main.rs`
 - **Düzeltme:** `drop(_guard)` öncesi açıkça flush veya `return Err`.

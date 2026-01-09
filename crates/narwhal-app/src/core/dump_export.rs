@@ -13,10 +13,10 @@ use narwhal_tui::Pane;
 use super::{AppCore, ResultState};
 use crate::commands::DumpTarget;
 use crate::ddl::{build_dump, build_table_ddl};
+use crate::explain::wrap_explain;
 use crate::export::{export_rows, ExportFormat};
 use crate::meta::MetaRequest;
 use crate::run::RunMode;
-use crate::explain::wrap_explain;
 
 impl AppCore {
     pub(super) fn dump_schema(&mut self, target: DumpTarget) {
