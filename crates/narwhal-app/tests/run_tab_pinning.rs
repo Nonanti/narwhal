@@ -65,7 +65,7 @@ async fn results_land_on_originating_tab_after_switch() {
     assert!(!core.is_running(), "run should have completed");
 
     // Tab 0 should own the result bundle.
-    let bundle = &core.tabs()[0].results;
+    let bundle = core.tabs()[0].results();
     assert_eq!(bundle.len(), 2, "tab 0 should have 2 results");
     match &bundle.states[0] {
         ResultState::Rows { rows, .. } => {
@@ -75,7 +75,7 @@ async fn results_land_on_originating_tab_after_switch() {
     }
 
     // Tab 1 should still be empty (untouched).
-    let tab1 = &core.tabs()[1].results;
+    let tab1 = core.tabs()[1].results();
     assert!(
         matches!(tab1.active_state(), ResultState::Empty),
         "tab 1 should remain Empty, got {:?}",
