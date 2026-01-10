@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// whether dialect-specific quoting (PostgreSQL dollar-quoted strings,
 /// MySQL backtick identifiers) is recognised.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Dialect {
     /// PostgreSQL: recognises `$tag$ ... $tag$` and standard SQL escapes.
     Postgres,
@@ -156,16 +157,13 @@ impl<'a> Splitter<'a> {
     /// Given a dollar-quote opening at `self.pos` of length `tag_len`, find
     /// the matching closing tag and return the position past the closing
     /// dollar. Returns `None` when the source ends without a match.
+    ///
+    /// Uses [`memchr::memmem`] so long PL/pgSQL bodies don't see a hot
+    /// O(n) byte-by-byte scan (L3).
     fn find_dollar_close(&self, tag_len: usize) -> Option<usize> {
         let tag = &self.bytes[self.pos..self.pos + tag_len];
-        let mut search_from = self.pos + tag_len;
-        while search_from + tag_len <= self.bytes.len() {
-            if &self.bytes[search_from..search_from + tag_len] == tag {
-                return Some(search_from + tag_len);
-            }
-            search_from += 1;
-        }
-        None
+        let haystack = &self.bytes[self.pos + tag_len..];
+        memchr::memmem::find(haystack, tag).map(|offset| self.pos + tag_len + offset + tag_len)
     }
 
     fn emit(&mut self, end: usize) -> Option<Statement<'a>> {

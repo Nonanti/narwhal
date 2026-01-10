@@ -54,6 +54,7 @@ impl fmt::Debug for WizardField {
 
 /// Value stored in a wizard field. Public fields use plain `String`;
 /// secret fields (passwords) use [`SecretString`] which is zeroized on drop.
+#[non_exhaustive]
 pub enum WizardFieldValue {
     Public(String),
     Secret(SecretString),
@@ -122,6 +123,7 @@ impl WizardFieldValue {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WizardFieldKind {
     Name,
     Host,

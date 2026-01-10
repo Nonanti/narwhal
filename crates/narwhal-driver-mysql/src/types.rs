@@ -64,6 +64,8 @@ pub(crate) fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
         Value::Uuid(v) => MyValue::Bytes(v.to_string().into_bytes()),
         Value::Json(v) => MyValue::Bytes(v.to_string().into_bytes()),
         Value::Unknown(v) => MyValue::Bytes(v.clone().into_bytes()),
+        // Forward-compatible: bind future Value variants as Debug bytes.
+        other => MyValue::Bytes(format!("{other:?}").into_bytes()),
     };
     Ok(v)
 }

@@ -33,6 +33,7 @@ pub use narwhal_core::{ColumnHeader, QueryResult, Row, Value};
 
 /// Errors that surface from plugin invocations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PluginError {
     /// A handler returned a structured failure (with a user-facing message).
     #[error("{0}")]
@@ -64,6 +65,7 @@ pub struct CommandDescriptor {
 /// "show this status message" are intentionally not in scope yet — they
 /// would force a tighter coupling with the AppCore than we want here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum CommandOutcome {
     /// Update the status bar with `message`.
     Status { message: String },

@@ -8,6 +8,7 @@ use narwhal_core::{ColumnHeader, Row, Value};
 
 /// Wire format produced by [`export_rows`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ExportFormat {
     Csv,
     Json,
@@ -51,6 +52,7 @@ impl std::fmt::Display for QualifiedName {
 
 /// Errors produced while exporting.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ExportError {
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
@@ -252,6 +254,10 @@ fn write_json_value<W: Write>(writer: &mut W, value: &Value) -> Result<(), Expor
         | Value::Uuid(_) => {
             write_json_string(writer, &value.render())?;
         }
+        // Future Value variants: serialise rendered form as a JSON string.
+        _ => {
+            write_json_string(writer, &value.render())?;
+        }
     }
     Ok(())
 }
@@ -333,6 +339,10 @@ fn write_insert_value<W: Write>(writer: &mut W, value: &Value) -> Result<(), Exp
         | Value::DateTime(_)
         | Value::Timestamp(_)
         | Value::Uuid(_) => {
+            write_quoted_sql_string(writer, &value.render())?;
+        }
+        // Future Value variants: serialise rendered form as a SQL string literal.
+        _ => {
             write_quoted_sql_string(writer, &value.render())?;
         }
     }

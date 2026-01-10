@@ -2,10 +2,10 @@
 //!
 //! The buffer is intentionally simple: a `Vec<String>` of lines plus a
 //! cursor and a viewport offset. It pairs with [`narwhal_vim`] to interpret
-//! modal keystrokes and with [`narwhal_sql`] to extract the statement under
-//! the cursor for execution.
+//! modal keystrokes. SQL-aware concerns (statement splitting, dialect
+//! handling) live in `narwhal_app::editor` so this crate stays reusable
+//! with alternative backends.
 
-use narwhal_sql::{split_with, Dialect};
 use narwhal_vim::Motion;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -16,7 +16,16 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
-const GUTTER_WIDTH: usize = 6; // "NNN │ "
+/// Compute the width of the line-number gutter so a buffer with N
+/// lines reserves exactly the cells it needs for `"NNN │ "` plus the
+/// trailing space (L36). Minimum 6 to keep the historical layout for
+/// small buffers.
+fn gutter_width(line_count: usize) -> usize {
+    // Account for `" │ "` (2 visible cells after the number) plus the
+    // number itself.
+    let digits = line_count.max(1).to_string().len();
+    (digits + 3).max(6)
+}
 
 /// Search highlight information passed from the app to the editor renderer.
 #[derive(Debug, Clone, Default)]
@@ -244,42 +253,10 @@ impl EditorBuffer {
                     // it doesn't move the cursor — the operator handler
                     // processes the current line.
                 }
+                // Forward-compatible: future motions are ignored until wired.
+                _ => {}
             }
         }
-    }
-
-    /// Return every statement in the buffer, trimmed of surrounding
-    /// whitespace and of any trailing semicolon.
-    pub fn all_statements(&self, dialect: Dialect) -> Vec<String> {
-        let text = self.entire_text();
-        split_with(&text, dialect)
-            .into_iter()
-            .filter_map(|s| {
-                let cleaned = s.text.trim().trim_end_matches(';').trim().to_owned();
-                (!cleaned.is_empty()).then_some(cleaned)
-            })
-            .collect()
-    }
-
-    /// Extract the statement under the cursor.
-    ///
-    /// Returns the full statement text including any trailing semicolon, or
-    /// `None` when the buffer contains no statements at all.
-    pub fn statement_at_cursor(&self, dialect: Dialect) -> Option<String> {
-        let text = self.entire_text();
-        let cursor_offset = self.cursor_byte_offset();
-        let statements = split_with(&text, dialect);
-        if statements.is_empty() {
-            return None;
-        }
-        for stmt in &statements {
-            if cursor_offset >= stmt.start && cursor_offset <= stmt.end {
-                return Some(stmt.text.to_owned());
-            }
-        }
-        // Cursor is past the last statement end (trailing whitespace);
-        // return the last statement encountered.
-        statements.last().map(|s| s.text.to_owned())
     }
 
     /// The identifier-like prefix immediately to the left of the cursor.
@@ -407,7 +384,10 @@ impl EditorBuffer {
         while idx < bytes.len() && is_word_char(bytes[idx]) {
             idx += 1;
         }
-        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() && bytes[idx] != b'\n' {
+        // L16: skip trailing whitespace *including* newlines so `w`
+        // lands on the next word even if the previous one was at
+        // end-of-line.
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
             idx += 1;
         }
         self.set_cursor_from_offset(idx);
@@ -621,9 +601,11 @@ pub fn render_editor(
     let needle_len = search.map(|s| s.needle_len).unwrap_or(0);
 
     let end = (buffer.scroll + height).min(buffer.lines.len());
+    let gutter_w = gutter_width(buffer.lines.len());
+    let num_w = gutter_w.saturating_sub(3); // " │ " suffix
     let lines: Vec<Line<'_>> = (buffer.scroll..end)
         .map(|row| {
-            let number = format!("{:>3} │ ", row + 1);
+            let number = format!("{:>w$} │ ", row + 1, w = num_w);
             let gutter = Span::styled(number, Style::default().fg(theme.muted));
 
             let line_text = &buffer.lines[row];
@@ -653,7 +635,10 @@ pub fn render_editor(
                         };
                         spans.push(Span::styled(line_text[start..end].to_owned(), style));
                     }
-                    pos = end.max(start.saturating_add(1)); // advance past the match
+                    // L15: search matches always have `end > start`
+                    // (zero-length needles are filtered out upstream),
+                    // so plain assignment suffices.
+                    pos = end;
                 }
                 if pos < line_text.len() {
                     spans.push(Span::raw(line_text[pos..].to_owned()));
@@ -672,7 +657,7 @@ pub fn render_editor(
     if focused && buffer.cursor_row >= buffer.scroll {
         let cursor_y = (buffer.cursor_row - buffer.scroll) as u16;
         if cursor_y < inner.height {
-            let cursor_x = (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
+            let cursor_x = (gutter_w + cursor_display_col(buffer)) as u16;
             if cursor_x < inner.width {
                 frame.set_cursor_position((inner.x + cursor_x, inner.y + cursor_y));
             }
@@ -701,7 +686,7 @@ fn cursor_display_col(buffer: &EditorBuffer) -> usize {
 pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
     let inner_x = area.x + 1;
     let inner_y = area.y + 1;
-    let cursor_x = inner_x + (GUTTER_WIDTH + cursor_display_col(buffer)) as u16;
+    let cursor_x = inner_x + (gutter_width(buffer.lines.len()) + cursor_display_col(buffer)) as u16;
     let cursor_y = if buffer.cursor_row >= buffer.scroll {
         inner_y + (buffer.cursor_row - buffer.scroll) as u16
     } else {
@@ -872,21 +857,9 @@ mod tests {
         assert_eq!(buf.cursor(), (0, 2));
     }
 
-    #[test]
-    fn statement_under_cursor_picks_the_right_one() {
-        let mut buf = EditorBuffer::new();
-        buf.insert_str("SELECT 1; SELECT 2; SELECT 3");
-        buf.apply_motion(Motion::LineStart, 1);
-        let first = buf.statement_at_cursor(Dialect::Generic).unwrap();
-        assert!(first.starts_with("SELECT 1"));
-
-        // Walk into the second statement.
-        for _ in 0..12 {
-            buf.apply_motion(Motion::Right, 1);
-        }
-        let second = buf.statement_at_cursor(Dialect::Generic).unwrap();
-        assert!(second.contains("SELECT 2"));
-    }
+    // statement_at_cursor / all_statements coverage now lives in
+    // `narwhal-app::editor` (H18). The buffer no longer knows about SQL
+    // dialects, so this crate doesn't need a splitter dependency.
 
     #[test]
     fn current_word_prefix_and_replace_round_trip() {

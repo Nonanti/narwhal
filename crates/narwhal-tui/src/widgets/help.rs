@@ -205,8 +205,7 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
 /// available space) and displays each cheatsheet section as a labelled
 /// two-column table (shortcut → description).
 pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-    let max_width: u16 = 64;
-    let max_height: u16 = 50;
+    let (max_width, max_height) = crate::constants::HELP_MODAL_MAX;
     let width = (area.width * 8 / 10).min(max_width);
     let height = (area.height * 9 / 10).min(max_height);
     if width < 30 || height < 8 {
@@ -256,13 +255,4 @@ pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-pub(crate) fn centred(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
-}
+pub(crate) use super::centred_rect as centred;

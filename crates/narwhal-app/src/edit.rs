@@ -11,6 +11,11 @@ use narwhal_sql::Dialect;
 
 /// Parse a raw textual input into a typed [`Value`].
 ///
+/// Untyped variant kept for back-compat. Prefer
+/// [`parse_input_typed`] (L34) when the destination column's SQL type
+/// is known — it avoids guessing `"true"` into [`Value::Bool`] when
+/// the column is actually `TEXT`.
+///
 /// The rules are intentionally simple and predictable:
 ///
 /// - The literal token `NULL` (any case) maps to [`Value::Null`].
@@ -21,10 +26,75 @@ use narwhal_sql::Dialect;
 /// - Anything else is treated as a string. The engine performs whatever
 ///   coercion its native type system allows.
 pub fn parse_input(text: &str) -> Value {
+    parse_input_typed(text, None)
+}
+
+/// Type-aware variant of [`parse_input`].
+///
+/// `data_type_hint` is the destination column's SQL type string (e.g.
+/// `"TEXT"`, `"INTEGER"`, `"BOOLEAN"`, `"VARCHAR(64)"`). When the
+/// hint is character-ish, the input is *always* a [`Value::String`]
+/// (apart from the explicit `NULL` literal) so that typing the word
+/// `true` into a `TEXT` column doesn't silently become a boolean.
+/// When the hint clearly forces a numeric / boolean type, only that
+/// kind of coercion is attempted; otherwise we fall back to the
+/// historical heuristic.
+pub fn parse_input_typed(text: &str, data_type_hint: Option<&str>) -> Value {
     let trimmed = text.trim();
     if trimmed.eq_ignore_ascii_case("null") {
         return Value::Null;
     }
+
+    let hint = data_type_hint.map(|h| h.to_ascii_uppercase());
+    let hint = hint.as_deref();
+
+    fn is_string_type(h: &str) -> bool {
+        // Cover the common spellings across PG / MySQL / SQLite /
+        // DuckDB / ClickHouse. The check is a substring match so
+        // "VARCHAR(255)" and "FixedString(8)" are both covered.
+        const NEEDLES: &[&str] = &[
+            "CHAR", "TEXT", "STRING", "JSON", "XML", "UUID", "CLOB", "BLOB", "ENUM",
+        ];
+        NEEDLES.iter().any(|n| h.contains(n))
+    }
+    fn is_bool_type(h: &str) -> bool {
+        h == "BOOL" || h == "BOOLEAN" || h.contains("BOOL")
+    }
+    fn is_int_type(h: &str) -> bool {
+        const NEEDLES: &[&str] = &["INT", "SERIAL", "BIGINT", "SMALLINT", "TINYINT"];
+        NEEDLES.iter().any(|n| h.contains(n))
+    }
+    fn is_float_type(h: &str) -> bool {
+        const NEEDLES: &[&str] = &["REAL", "DOUBLE", "FLOAT", "NUMERIC", "DECIMAL"];
+        NEEDLES.iter().any(|n| h.contains(n))
+    }
+
+    if let Some(h) = hint {
+        if is_string_type(h) {
+            return Value::String(text.to_owned());
+        }
+        if is_bool_type(h) {
+            return match trimmed {
+                "true" | "TRUE" | "1" | "t" | "T" => Value::Bool(true),
+                "false" | "FALSE" | "0" | "f" | "F" => Value::Bool(false),
+                _ => Value::String(text.to_owned()),
+            };
+        }
+        if is_int_type(h) {
+            if let Ok(i) = trimmed.parse::<i64>() {
+                return Value::Int(i);
+            }
+            return Value::String(text.to_owned());
+        }
+        if is_float_type(h) {
+            if let Ok(f) = trimmed.parse::<f64>() {
+                return Value::Float(f);
+            }
+            return Value::String(text.to_owned());
+        }
+        // Unknown / exotic hint — fall through to the legacy heuristic.
+    }
+
     if trimmed == "true" {
         return Value::Bool(true);
     }
@@ -184,6 +254,56 @@ mod tests {
             Value::String(s) => assert_eq!(s, "  x  "),
             other => panic!("expected string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_input_typed_respects_text_columns() {
+        // L34: the literal `"true"` typed into a TEXT column must
+        // stay a string — it's not a boolean.
+        for hint in ["TEXT", "text", "VARCHAR(64)", "CHARACTER VARYING", "JSON"] {
+            match parse_input_typed("true", Some(hint)) {
+                Value::String(s) => assert_eq!(s, "true", "hint={hint}"),
+                other => panic!("hint={hint}: expected string, got {other:?}"),
+            }
+            match parse_input_typed("42", Some(hint)) {
+                Value::String(s) => assert_eq!(s, "42", "hint={hint}"),
+                other => panic!("hint={hint}: expected string, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_input_typed_coerces_with_hint() {
+        assert!(matches!(
+            parse_input_typed("42", Some("INTEGER")),
+            Value::Int(42)
+        ));
+        assert!(matches!(
+            parse_input_typed("true", Some("BOOLEAN")),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            parse_input_typed("3.14", Some("DOUBLE PRECISION")),
+            Value::Float(_)
+        ));
+        // NULL bypass still works under a type hint.
+        assert!(matches!(
+            parse_input_typed("NULL", Some("INTEGER")),
+            Value::Null
+        ));
+        // Garbage in a numeric column falls back to string (the engine
+        // will raise a sensible error rather than us guessing).
+        match parse_input_typed("not-a-number", Some("INTEGER")) {
+            Value::String(s) => assert_eq!(s, "not-a-number"),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_input_typed_without_hint_matches_legacy() {
+        // No hint → same heuristic as the old parse_input.
+        assert!(matches!(parse_input_typed("true", None), Value::Bool(true)));
+        assert!(matches!(parse_input_typed("42", None), Value::Int(42)));
     }
 
     #[test]

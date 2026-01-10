@@ -34,8 +34,7 @@ pub fn render_row_detail(
     view: &RowDetailView<'_>,
     theme: &Theme,
 ) {
-    let max_w = 80u16;
-    let max_h = 30u16;
+    let (max_w, max_h) = crate::constants::ROW_DETAIL_MODAL_MAX;
     let pct_w = (area.width as u32 * 70 / 100) as u16;
     let pct_h = (area.height as u32 * 70 / 100) as u16;
     let width = max_w.min(pct_w).min(area.width);
@@ -137,11 +136,34 @@ pub fn render_row_detail(
 
 /// Simple word-aware text wrapping. Returns a list of lines, each no
 /// longer than `max_width` characters (approximately). Falls back to
-/// character-level wrapping for words that exceed `max_width`.
+/// grapheme-level wrapping for words that exceed `max_width` so we
+/// never split inside a multi-byte UTF-8 sequence (L17).
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+
     if max_width == 0 {
         return vec![text.to_owned()];
     }
+
+    fn break_long_word(word: &str, max_width: usize, out: &mut Vec<String>) {
+        let mut chunk = String::new();
+        let mut chunk_len = 0usize;
+        for g in word.graphemes(true) {
+            // Approximate "width" as grapheme count — matches the
+            // existing behaviour for ASCII and stays predictable for
+            // CJK / emoji rather than mid-UTF-8 truncation.
+            if chunk_len + 1 > max_width && !chunk.is_empty() {
+                out.push(std::mem::take(&mut chunk));
+                chunk_len = 0;
+            }
+            chunk.push_str(g);
+            chunk_len += 1;
+        }
+        if !chunk.is_empty() {
+            out.push(chunk);
+        }
+    }
+
     let mut result = Vec::new();
     for line in text.lines() {
         if line.is_empty() {
@@ -150,30 +172,22 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
         }
         let mut current = String::new();
         for word in line.split_whitespace() {
+            let word_len = word.graphemes(true).count();
             if current.is_empty() {
-                if word.len() <= max_width {
+                if word_len <= max_width {
                     current = word.to_owned();
                 } else {
-                    // Word longer than max_width — break it up.
-                    for chunk in word.as_bytes().chunks(max_width) {
-                        let s = String::from_utf8_lossy(chunk).into_owned();
-                        result.push(s);
-                    }
-                    current.clear();
+                    break_long_word(word, max_width, &mut result);
                 }
-            } else if current.len() + 1 + word.len() <= max_width {
+            } else if current.graphemes(true).count() + 1 + word_len <= max_width {
                 current.push(' ');
                 current.push_str(word);
             } else {
                 result.push(std::mem::take(&mut current));
-                if word.len() <= max_width {
+                if word_len <= max_width {
                     current = word.to_owned();
                 } else {
-                    for chunk in word.as_bytes().chunks(max_width) {
-                        let s = String::from_utf8_lossy(chunk).into_owned();
-                        result.push(s);
-                    }
-                    current.clear();
+                    break_long_word(word, max_width, &mut result);
                 }
             }
         }
@@ -187,13 +201,4 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     result
 }
 
-fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
-}
+use super::centred_rect;

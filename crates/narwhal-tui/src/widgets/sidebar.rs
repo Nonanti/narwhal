@@ -19,6 +19,7 @@ use crate::widgets::results::sanitize_for_display;
 pub type SchemaListing = (narwhal_core::Schema, Vec<narwhal_core::Table>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SidebarRowKind {
     Connection,
     ActiveConnection,

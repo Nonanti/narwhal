@@ -29,12 +29,15 @@ pub struct ParsedUrl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UrlError {
     MissingScheme,
     UnsupportedScheme(String),
     InvalidPort(String),
     InvalidPercentEscape(String),
     MissingHost,
+    InvalidHost(String),
+    EmptyQueryKey(String),
     MissingDatabase,
     EmptyPath,
     InvalidSslMode(String),
@@ -48,6 +51,8 @@ impl fmt::Display for UrlError {
             Self::InvalidPort(s) => write!(f, "invalid port: {s}"),
             Self::InvalidPercentEscape(s) => write!(f, "invalid percent escape: {s}"),
             Self::MissingHost => f.write_str("connection url missing host"),
+            Self::InvalidHost(s) => write!(f, "invalid host: {s}"),
+            Self::EmptyQueryKey(s) => write!(f, "empty query key in '{s}'"),
             Self::MissingDatabase => f.write_str("connection url missing database"),
             Self::EmptyPath => f.write_str("connection url missing path"),
             Self::InvalidSslMode(v) => write!(
@@ -104,16 +109,37 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
         return Err(UrlError::MissingHost);
     }
 
-    let (host, port) = match hostport.rsplit_once(':') {
-        // Treat as host:port only if the tail parses as a u16 — IPv6 hosts
-        // with port-less forms like `[::1]` should not be misread.
-        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => {
-            let port = p
-                .parse::<u16>()
-                .map_err(|_| UrlError::InvalidPort(p.to_owned()))?;
-            (h.to_owned(), Some(port))
+    // IPv6 hosts use bracket form (`[::1]` or `[::1]:5432`) so the colon
+    // inside the address isn't confused with the port separator (L4).
+    let (host, port) = if let Some(rest) = hostport.strip_prefix('[') {
+        let close = rest
+            .find(']')
+            .ok_or_else(|| UrlError::InvalidHost(hostport.to_owned()))?;
+        let host = rest[..close].to_owned();
+        let after = &rest[close + 1..];
+        let port = if after.is_empty() {
+            None
+        } else if let Some(p) = after.strip_prefix(':') {
+            Some(
+                p.parse::<u16>()
+                    .map_err(|_| UrlError::InvalidPort(p.to_owned()))?,
+            )
+        } else {
+            return Err(UrlError::InvalidHost(hostport.to_owned()));
+        };
+        (host, port)
+    } else {
+        match hostport.rsplit_once(':') {
+            // Treat as host:port only if the tail parses as a u16. IPv4 /
+            // hostname path.
+            Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => {
+                let port = p
+                    .parse::<u16>()
+                    .map_err(|_| UrlError::InvalidPort(p.to_owned()))?;
+                (h.to_owned(), Some(port))
+            }
+            _ => (hostport.to_owned(), None),
         }
-        _ => (hostport.to_owned(), None),
     };
 
     let (path, query) = match path_query.split_once('?') {
@@ -198,7 +224,13 @@ fn parse_query(qs: &str) -> Result<BTreeMap<String, String>, UrlError> {
             Some(kv) => kv,
             None => (pair, ""),
         };
-        out.insert(percent_decode(k)?, percent_decode(v)?);
+        let key = percent_decode(k)?;
+        if key.is_empty() {
+            // L7: silently dropping `?=v` was a footgun — reject it so
+            // typos surface instead of disappearing.
+            return Err(UrlError::EmptyQueryKey(pair.to_owned()));
+        }
+        out.insert(key, percent_decode(v)?);
     }
     Ok(out)
 }
@@ -285,6 +317,26 @@ fn extract_ssl_params(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn ipv6_host_with_port_parses() {
+        let parsed = parse("postgres://[::1]:5432/db").expect("parse");
+        assert_eq!(parsed.config.params.host.as_deref(), Some("::1"));
+        assert_eq!(parsed.config.params.port, Some(5432));
+    }
+
+    #[test]
+    fn ipv6_host_without_port_parses() {
+        let parsed = parse("postgres://[2001:db8::1]/db").expect("parse");
+        assert_eq!(parsed.config.params.host.as_deref(), Some("2001:db8::1"));
+        assert_eq!(parsed.config.params.port, None);
+    }
+
+    #[test]
+    fn ipv6_host_missing_closing_bracket_errors() {
+        let err = parse("postgres://[::1/db").unwrap_err();
+        assert!(matches!(err, UrlError::InvalidHost(_)));
+    }
 
     #[test]
     fn postgres_with_password_and_options() {

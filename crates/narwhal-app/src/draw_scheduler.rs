@@ -31,6 +31,7 @@ pub const THROTTLE: Duration = Duration::from_millis(100);
 
 /// Why the event loop is considering a redraw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DrawTrigger {
     /// User input (key, mouse, resize) or a non-streaming run update
     /// (StatementStarted, Failed, AllDone, SchemaRefresh, …). Always
@@ -43,6 +44,7 @@ pub enum DrawTrigger {
 
 /// What the scheduler decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DrawDecision {
     /// Draw now and reset `last_draw`.
     DrawNow,

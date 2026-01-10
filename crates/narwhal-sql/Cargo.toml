@@ -14,4 +14,5 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+memchr = "2"
 serde.workspace = true

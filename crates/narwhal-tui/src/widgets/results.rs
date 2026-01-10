@@ -15,6 +15,7 @@ use crate::theme::Theme;
 
 /// Sort direction for a result column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SortDir {
     Asc,
     Desc,
@@ -64,6 +65,8 @@ fn type_rank(v: &Value) -> u8 {
         Value::Json(_) => 10,
         Value::Unknown(_) => 11,
         Value::Null => 12, // unreachable in practice but included for completeness
+        // Future variants get sorted after Null until ranked explicitly.
+        _ => 13,
     }
 }
 
@@ -87,7 +90,12 @@ fn compare_same_type(a: &Value, b: &Value) -> Ordering {
 
 #[derive(Debug, Default)]
 pub struct ResultView {
-    pub state: TableState,
+    /// Ratatui table state — `pub(crate)` so a future ratatui major
+    /// upgrade doesn't ripple a `TableState` API change into every
+    /// downstream caller. Use [`ResultView::selected`] /
+    /// [`ResultView::select`] / [`ResultView::scroll_offset`]
+    /// instead of touching it directly (M22).
+    pub(crate) state: TableState,
     pub column_index: usize,
     pub popup: Option<CellPopup>,
     /// When `Some`, the cell editor is drawn on top of the result grid in
@@ -139,6 +147,28 @@ pub struct CellPopup {
 impl ResultView {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the index of the selected row, or `None` when no row is
+    /// selected. Mirrors `ratatui::widgets::TableState::selected`.
+    pub fn selected(&self) -> Option<usize> {
+        self.state.selected()
+    }
+
+    /// Select the row at `index`, or pass `None` to clear the
+    /// selection.
+    pub fn select(&mut self, index: Option<usize>) {
+        self.state.select(index);
+    }
+
+    /// Vertical scroll offset of the underlying ratatui table.
+    pub fn scroll_offset(&self) -> usize {
+        self.state.offset()
+    }
+
+    /// Set the vertical scroll offset of the underlying ratatui table.
+    pub fn set_scroll_offset(&mut self, offset: usize) {
+        *self.state.offset_mut() = offset;
     }
 
     pub fn move_down(&mut self, total_rows: usize) {
@@ -227,6 +257,7 @@ impl ResultView {
 /// queries), `Affected` for non-SELECT completions, `Rows` for completed
 /// SELECT-like queries (streamed or materialised), and `Error` when the
 /// engine returned a failure.
+#[non_exhaustive]
 pub enum ResultDisplay<'a> {
     Empty,
     Running {
@@ -455,7 +486,11 @@ pub fn render_results(
 }
 
 fn format_count(n: usize) -> String {
-    if n >= 1_000_000 {
+    // The M threshold compares against the value that *rounds up* into
+    // the next unit so 999_999 displays as `1.0M`, not `1000.0k`
+    // (L18). The k threshold stays at 10_000 to match the previous
+    // small-number boundary.
+    if n >= 999_500 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 10_000 {
         format!("{:.1}k", n as f64 / 1_000.0)
@@ -466,11 +501,14 @@ fn format_count(n: usize) -> String {
 
 fn format_elapsed(d: std::time::Duration) -> String {
     let total = d.as_secs_f64();
-    if total < 60.0 {
+    // Anything that would round up to 60.0s belongs in mm:ss
+    // form (L19); 59.999s used to print as `60.0s`.
+    if total < 59.95 {
         format!("{total:.1}s")
     } else {
-        let mins = (total / 60.0).floor() as u64;
-        let secs = (total % 60.0).floor() as u64;
+        let total_secs = total.round() as u64;
+        let mins = total_secs / 60;
+        let secs = total_secs % 60;
         format!("{mins:02}:{secs:02}")
     }
 }
@@ -662,8 +700,9 @@ fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
 
-const MIN_COLUMN_WIDTH: usize = 6;
-const MAX_COLUMN_WIDTH: usize = 40;
+use crate::constants::{
+    RESULT_MAX_COLUMN_WIDTH as MAX_COLUMN_WIDTH, RESULT_MIN_COLUMN_WIDTH as MIN_COLUMN_WIDTH,
+};
 
 fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
     columns
@@ -772,7 +811,10 @@ pub fn sanitize_for_display(s: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(80);
+    let width = area
+        .width
+        .saturating_sub(8)
+        .min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(12);
     if width < 20 || height < 5 {
         return;
@@ -823,7 +865,10 @@ fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme:
 }
 
 fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(80);
+    let width = area
+        .width
+        .saturating_sub(8)
+        .min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(20);
     if width < 20 || height < 5 {
         return;
@@ -854,16 +899,7 @@ fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: 
     frame.render_widget(paragraph, inner);
 }
 
-fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
-}
+use super::centred_rect;
 
 fn draw_explain(
     frame: &mut Frame<'_>,
@@ -1076,11 +1112,16 @@ mod tests {
     fn format_count_k_suffix() {
         assert_eq!(format_count(10_000), "10.0k");
         assert_eq!(format_count(12_345), "12.3k");
-        assert_eq!(format_count(999_999), "1000.0k");
+        // The boundary case that triggered L18: 999_499 still rounds
+        // *down* to "999.5k" (within the k bucket); 999_500 promotes.
+        assert_eq!(format_count(999_499), "999.5k");
     }
 
     #[test]
     fn format_count_m_suffix() {
+        // L18 boundary: 999_500 rounds up into the M bucket.
+        assert_eq!(format_count(999_500), "1.0M");
+        assert_eq!(format_count(999_999), "1.0M");
         assert_eq!(format_count(1_000_000), "1.0M");
         assert_eq!(format_count(1_234_567), "1.2M");
         assert_eq!(format_count(12_345_678), "12.3M");
@@ -1091,11 +1132,16 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_millis(0)), "0.0s");
         assert_eq!(format_elapsed(Duration::from_millis(100)), "0.1s");
         assert_eq!(format_elapsed(Duration::from_millis(2100)), "2.1s");
-        assert_eq!(format_elapsed(Duration::from_millis(59999)), "60.0s");
+        // L19 boundary case: 59.949s stays in the seconds bucket.
+        assert_eq!(format_elapsed(Duration::from_millis(59_949)), "59.9s");
     }
 
     #[test]
     fn format_elapsed_over_60s() {
+        // L19: 59.95s and above now promote to mm:ss; previously 59.999s
+        // printed as "60.0s".
+        assert_eq!(format_elapsed(Duration::from_millis(59_950)), "01:00");
+        assert_eq!(format_elapsed(Duration::from_millis(59_999)), "01:00");
         assert_eq!(format_elapsed(Duration::from_secs(60)), "01:00");
         assert_eq!(format_elapsed(Duration::from_secs(125)), "02:05");
         assert_eq!(format_elapsed(Duration::from_secs(3661)), "61:01");

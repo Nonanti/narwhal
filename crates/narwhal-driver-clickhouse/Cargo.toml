@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 narwhal-core.workspace = true
 async-trait.workspace = true
+parking_lot.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"] }

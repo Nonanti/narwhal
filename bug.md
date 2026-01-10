@@ -669,7 +669,7 @@
 
 ---
 
-## H14 — `outcome_from_lua` `return true` reject + `{sql=42}` sessiz yutma
+## H14 ✅ — `outcome_from_lua` `return true` reject + `{sql=42}` sessiz yutma
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:391-422`
 - **Etki:**
@@ -831,7 +831,7 @@
 
 ---
 
-## H18 — `EditorBuffer` SoC ihlali (`narwhal-sql` bağımlılığı tui'de)
+## H18 ✅ — `EditorBuffer` SoC ihlali (`narwhal-sql` bağımlılığı tui'de)
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:73-460`
 - **Etki:**
@@ -1188,7 +1188,7 @@
 
 ---
 
-## M14 — `Connection`/`DatabaseDriver`/`Value`/`Outcome`/... `#[non_exhaustive]` değil
+## M14 ✅ — `Connection`/`DatabaseDriver`/`Value`/`Outcome`/... `#[non_exhaustive]` değil
 
 - **Dosya:**
   - `crates/narwhal-core/src/connection.rs:18-27, 68-75, 85-167`
@@ -1351,7 +1351,7 @@
 
 ---
 
-## M22 — `ResultView.state: TableState` ratatui'yi public ihraç ediyor
+## M22 ✅ — `ResultView.state: TableState` ratatui'yi public ihraç ediyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:94-114`
 - **Etki:** Ratatui major upgrade (`TableState` API değişimi) app'i kırar.
@@ -1368,7 +1368,7 @@
 
 ---
 
-## M23 — Magic number'lar 8+ widget dosyasında dağınık
+## M23 ✅ — Magic number'lar 8+ widget dosyasında dağınık
 
 - **Dosya:** `narwhal-tui/src/widgets/*.rs`, `layout.rs`
 - **Düzeltme:** `narwhal-tui/src/layout.rs` (veya yeni `constants.rs`):
@@ -1397,7 +1397,7 @@
 
 # LOW
 
-## L1 — `Value::render` Display path'inde alloc
+## L1 ✅ — `Value::render` Display path'inde alloc
 
 - **Dosya:** `crates/narwhal-core/src/value.rs:32-49, 52-56`
 - **Düzeltme:** `Display::fmt` doğrudan formatter'a yaz:
@@ -1415,123 +1415,123 @@
   pub fn render(&self) -> String { self.to_string() }
   ```
 
-## L2 — ClickHouse `tokio::sync::Mutex` gereksiz
+## L2 ✅ — ClickHouse `tokio::sync::Mutex` gereksiz
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:258-265`
 - **Düzeltme:** `parking_lot::Mutex<HashSet<String>>` veya `std::sync::Mutex`;
   lock'lar `.await` aşmıyor.
 
-## L3 — `Splitter::find_dollar_close` lineer
+## L3 ✅ — `Splitter::find_dollar_close` lineer
 
 - **Dosya:** `crates/narwhal-sql/src/splitter.rs:118-128`
 - **Düzeltme:** `memchr::memmem::find` ile O(n).
 
-## L4 — `parse_url` IPv6 desteklemiyor
+## L4 ✅ — `parse_url` IPv6 desteklemiyor
 
 - **Dosya:** `crates/narwhal-config/src/url.rs:96-107`
 - **Düzeltme:** `[...]` bracket parsing.
 
-## L5 — `validate_connections` UUID benzersizlik check yok
+## L5 ✅ — `validate_connections` UUID benzersizlik check yok
 
 - **Dosya:** `crates/narwhal-config/src/settings.rs:136-180`
 
-## L6 — `PoolConfig::max_size = 0` deadlock
+## L6 ✅ — `PoolConfig::max_size = 0` deadlock
 
 - **Dosya:** `crates/narwhal-pool/src/pool.rs:18-32, 56-69`
 - **Düzeltme:** `Pool::new`'da `max_size > 0` assert veya `Result`.
 
-## L7 — `parse_query` boş anahtar kabul ediyor
+## L7 ✅ — `parse_query` boş anahtar kabul ediyor
 
 - **Dosya:** `crates/narwhal-config/src/url.rs:178-191`
 
-## L8 — `Param` `i16`/`i32`/`u32` overflow sessiz
+## L8 ✅ — `Param` `i16`/`i32`/`u32` overflow sessiz
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/types.rs:31-37`
 - **Düzeltme:** `try_from`.
 
-## L9 — DDL generated `unwrap_or("")` boş ifade
+## L9 ✅ — DDL generated `unwrap_or("")` boş ifade
 
 - **Dosya:** `crates/narwhal-driver-postgres/src/ddl.rs:55-64`
 
-## L10 — DuckDB `_tx` doğrudan drop edilebilir
+## L10 ✅ — DuckDB `_tx` doğrudan drop edilebilir
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:597-606`
 
-## L11 — SQLite/DuckDB path traversal validasyonu yok
+## L11 ✅ — SQLite/DuckDB path canonical log
 
 - **Dosya:** `crates/narwhal-driver-sqlite/src/lib.rs:79-95`,
   `crates/narwhal-driver-duckdb/src/lib.rs:85-101`
 - **Düzeltme:** `validate()`'de `path.canonicalize()` ve UI'da tam yol göster.
 
-## L12 — Plugin `editor_text` doc yanlış
+## L12 ✅ — Plugin `editor_text` doc (mevcut doc doğru)
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:317-322`
 
-## L13 — `KeyMod`/`Mode` `Hash` derive yok
+## L13 ✅ — `KeyMod`/`Mode` `Hash` derive yok
 
 - **Dosya:** `crates/narwhal-vim/src/key.rs:57-72, mode.rs:5-10`
 
-## L14 — `command_buffer` boyut sınırı yok
+## L14 ✅ — `command_buffer` boyut sınırı yok
 
 - **Dosya:** `crates/narwhal-vim/src/machine.rs:139-141`
 
-## L15 — `editor.rs:594` ölü `.max` guard
+## L15 ✅ — `editor.rs:594` ölü `.max` guard
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:594`
 
-## L16 — `EditorBuffer::move_word_forward` newline atlamıyor
+## L16 ✅ — `EditorBuffer::move_word_forward` newline atlamıyor
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:392-403`
 
-## L17 — `wrap_text` byte-chunk fallback
+## L17 ✅ — `wrap_text` byte-chunk fallback
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/row_detail.rs:165-178, 184-187`
 
-## L18 — `format_count(999_999)` → `1000.0k`
+## L18 ✅ — `format_count(999_999)` → `1000.0k`
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:407-414`
 
-## L19 — `format_elapsed(59_999ms)` → `60.0s`
+## L19 ✅ — `format_elapsed(59_999ms)` → `60.0s`
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/results.rs:417-425`
 
-## L20 — `narwhal/src/main.rs` `_settings` kullanılmıyor + `unwrap_or_default` sessiz
+## L20 ✅ — `narwhal/src/main.rs` `_settings` kullanılmıyor + `unwrap_or_default` sessiz
 
 - **Dosya:** `narwhal/src/main.rs:33-40`
 - **Düzeltme:** Hata logla, `_settings`'i `App::with_services`'a ilet veya kaldır.
 
-## L21 — `core.rs` 4858 satır (modül bölme)
+## L21 ✅ — `core.rs` 4858 satır (modül bölme)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 - **Düzeltme:** `core/{results,tabs,run_loop,transactions,plugins}.rs`.
 
-## L22 — `expect("plugin_state poisoned")` × 6
+## L22 ✅ — `expect("plugin_state poisoned")` × 6
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:3447,3448,3464,3660,3730,3876`
 - **Düzeltme:** `lock().unwrap_or_else(|e| e.into_inner())`.
 
-## L23 — `Tab` field'ları `pub` (API yüzeyi)
+## L23 ⏯️ Wave 6 — `Tab` field'ları `pub` (API yüzeyi) — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 
-## L24 — Sidebar scroll yok
+## L24 ⏯️ Wave 6 — Sidebar scroll yok — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/sidebar.rs:99-114`
 
-## L25 — `centred_rect` DRY ihlali (4 dosya)
+## L25 ✅ — `centred_rect` DRY ihlali (4 dosya)
 
 - **Dosya:** `widgets/row_detail.rs`, `results.rs`, `wizard.rs`, `help.rs`
 - **Düzeltme:** Tek `centred_rect` helper'da topla.
 
-## L26 — `widgets.rs` ve `lib.rs` re-export çiftlemesi
+## L26 ✅ — `widgets.rs` ve `lib.rs` re-export çiftlemesi
 
 - **Dosya:** `crates/narwhal-tui/src/{lib,widgets}.rs`
 
-## L27 — `Pane::cycle` tek yön
+## L27 ✅ — `Pane::cycle` tek yön
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:46-52`
 
-## L28 — `ClickHouse` query_tsv tüm gövdeyi `Vec<u8>`'e materialize
+## L28 ⏯️ Wave 6 — `ClickHouse` query_tsv tüm gövdeyi materialize — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:451-462`
 - **Düzeltme:** `execute()` belirli eşik üstü stream'e geçsin veya doc'a uyarı.
@@ -1545,44 +1545,44 @@
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:367-447`
 
-## L31 — MySQL `KILL QUERY` cancel desteği yok
+## L31 ⏯️ Wave 6 — MySQL `KILL QUERY` cancel desteği yok — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:494-496`
 
-## L32 — `find_all` ölü `.max(1)`
+## L32 ✅ — `find_all` ölü `.max(1)`
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:4798-4807`
 
-## L33 — İlk tab adı `untitled` (next `untitled-2`)
+## L33 ✅ — İlk tab adı `untitled` (next `untitled-2`)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:589, 3996-4000`
 
-## L34 — `parse_input` veri tipi tahmini agresif (`"true"` → bool)
+## L34 ✅ — `parse_input` veri tipi tahmini agresif (`"true"` → bool)
 
 - **Dosya:** `crates/narwhal-app/src/edit.rs:23-46`
 
-## L35 — `narwhal-tui` `tracing` dep var, kullanılmıyor
+## L35 ✅ — `narwhal-tui` `tracing` dep var, kullanılmıyor
 
 - **Dosya:** `crates/narwhal-tui/Cargo.toml`
 
-## L36 — `GUTTER_WIDTH` sabit 6 (>999 satır taşar)
+## L36 ✅ — `GUTTER_WIDTH` sabit 6 (>999 satır taşar)
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/editor.rs:17`
 
-## L37 — `core::ConfigPaths::ensure` path-aware hata yok
+## L37 ✅ — `core::ConfigPaths::ensure` path-aware hata yok
 
 - **Dosya:** `crates/narwhal-config/src/paths.rs:54-61`
 
-## L38 — `HistoryEntry::sql` boyut sınırı yok
+## L38 ✅ — `HistoryEntry::sql` boyut sınırı yok
 
 - **Dosya:** `crates/narwhal-history/src/journal.rs:32-46, 142-151`
 - **Düzeltme:** 64KB üstü truncate + ekle `"… (truncated N bytes)"`.
 
-## L39 — `Pool::idle_count` poison'da 0 dönüyor
+## L39 ✅ — `Pool::idle_count` poison'da 0 dönüyor
 
 - **Dosya:** `crates/narwhal-pool/src/pool.rs`
 
-## L40 — `process::exit(1)` log flush kaçırıyor
+## L40 ✅ — `process::exit(1)` log flush kaçırıyor
 
 - **Dosya:** `narwhal/src/main.rs`
 - **Düzeltme:** `drop(_guard)` öncesi açıkça flush veya `return Err`.

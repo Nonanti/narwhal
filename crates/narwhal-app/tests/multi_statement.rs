@@ -254,11 +254,7 @@ async fn state_preserved_across_tab_switch() {
     core.handle_key(key(KeyCode::Char('j')));
     core.handle_key(key(KeyCode::Char('j')));
     core.handle_key(key(KeyCode::Char('j')));
-    let first_result_selected = core.tabs()[core.active_tab()]
-        .results
-        .active()
-        .state
-        .selected();
+    let first_result_selected = core.tabs()[core.active_tab()].results.active().selected();
     assert_eq!(
         first_result_selected,
         Some(2),
@@ -284,11 +280,7 @@ async fn state_preserved_across_tab_switch() {
     );
 
     // Verify scroll state was preserved
-    let restored_selected = core.tabs()[core.active_tab()]
-        .results
-        .active()
-        .state
-        .selected();
+    let restored_selected = core.tabs()[core.active_tab()].results.active().selected();
     assert_eq!(
         restored_selected,
         Some(2),

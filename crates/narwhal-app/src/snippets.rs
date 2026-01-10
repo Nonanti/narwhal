@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 /// Errors produced by [`SnippetStore`] operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SnippetError {
     /// The snippet name contains characters outside the allowed set.
     #[error("invalid snippet name '{0}': use lowercase letters, digits, '-', or '_' only")]

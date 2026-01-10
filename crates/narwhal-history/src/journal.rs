@@ -52,6 +52,7 @@ fn redact_secrets(sql: &str) -> Cow<'_, str> {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HistoryError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -62,6 +63,7 @@ pub enum HistoryError {
 /// Outcome of a recorded statement execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Outcome {
     Success,
     Cancelled,
@@ -206,6 +208,25 @@ impl Journal {
             e
         } else {
             entry.clone()
+        };
+
+        // L38: cap SQL at 64 KiB so a giant migration dump can't bloat
+        // the journal indefinitely. The truncated suffix is replaced by
+        // a `… (truncated N bytes)` marker so callers can tell the
+        // entry was clipped.
+        const SQL_MAX_BYTES: usize = 64 * 1024;
+        let entry = if entry.sql.len() > SQL_MAX_BYTES {
+            let mut e = entry;
+            let mut end = SQL_MAX_BYTES;
+            while end > 0 && !e.sql.is_char_boundary(end) {
+                end -= 1;
+            }
+            let dropped = e.sql.len() - end;
+            e.sql.truncate(end);
+            e.sql.push_str(&format!("… (truncated {dropped} bytes)"));
+            e
+        } else {
+            entry
         };
 
         let mut line = serde_json::to_vec(&entry)?;

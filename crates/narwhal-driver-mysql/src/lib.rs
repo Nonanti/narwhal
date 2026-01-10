@@ -395,6 +395,8 @@ impl Connection for MysqlConnection {
             IsolationLevel::ReadCommitted => "READ COMMITTED",
             IsolationLevel::RepeatableRead => "REPEATABLE READ",
             IsolationLevel::Serializable => "SERIALIZABLE",
+            // Future isolation levels: fall back to SERIALIZABLE (strictest).
+            _ => "SERIALIZABLE",
         };
         let stmt = format!("SET TRANSACTION ISOLATION LEVEL {level}");
         self.execute(&stmt, &[]).await?;

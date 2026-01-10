@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::action::Operator;
 
 /// Modal editor states.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Mode {
     #[default]
     Normal,

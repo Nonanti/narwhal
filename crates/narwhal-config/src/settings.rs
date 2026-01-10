@@ -4,6 +4,7 @@ use narwhal_core::{ConnectionConfig, SslMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -19,6 +20,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Theme {
     #[default]
     Dark,
@@ -130,6 +132,18 @@ impl ConnectionsFile {
 ///   default `prefer` would break every pre-existing sqlite/duckdb
 ///   config that landed before TLS fields existed.
 fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigError> {
+    // L5: catch duplicate UUIDs early. The keyring uses `id` as the key,
+    // so two configs sharing an id silently collide on credentials.
+    let mut seen_ids: std::collections::HashMap<uuid::Uuid, &str> =
+        std::collections::HashMap::with_capacity(connections.len());
+    for conn in connections {
+        if let Some(prior) = seen_ids.insert(conn.id, conn.name.as_str()) {
+            return Err(ConfigError::Validation(format!(
+                "connections '{prior}' and '{}' share id {}",
+                conn.name, conn.id
+            )));
+        }
+    }
     for conn in connections {
         // ssl_cert and ssl_key must both be set or both absent.
         let has_cert = conn.params.ssl_cert.is_some();

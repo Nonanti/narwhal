@@ -503,7 +503,11 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
 
 fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, String> {
     match value {
-        LuaValue::Nil | LuaValue::Boolean(false) => Ok(CommandOutcome::Silent),
+        // `nil`, `false`, and `true` all mean "command handled, nothing
+        // to show". `true` used to fall through to the wildcard arm and
+        // return an opaque "unsupported return value: boolean" — H14
+        // makes the contract explicit instead.
+        LuaValue::Nil | LuaValue::Boolean(_) => Ok(CommandOutcome::Silent),
         LuaValue::String(s) => Ok(CommandOutcome::Status {
             message: s.to_string_lossy(),
         }),
@@ -516,21 +520,44 @@ fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, Stri
             // editor on every command would be a footgun for someone
             // halfway through a long query. Scripts that explicitly
             // want to replace the buffer set append = false.
-            if let Ok(sql) = t.get::<String>("sql") {
-                // mlua converts a missing field to LuaNil, and FromLua
-                // for bool maps nil to false — so `get::<bool>("append")
-                // .unwrap_or(true)` would always be false. Use
-                // Option<bool> to distinguish 'unset' (→ default true)
-                // from 'explicitly false'.
-                let append = match t.get::<Option<bool>>("append") {
-                    Ok(Some(v)) => v,
-                    Ok(None) | Err(_) => true,
-                };
-                Ok(CommandOutcome::InsertSql { sql, append })
-            } else if let Ok(status) = t.get::<String>("status") {
-                Ok(CommandOutcome::Status { message: status })
-            } else {
-                Err("table return must have a 'sql' or 'status' field".into())
+            //
+            // H14: probe the raw LuaValue before coercing so a typo'd
+            // shape like `{ sql = 42 }` produces a clear error instead
+            // of mlua silently stringifying `42` (or, for some types,
+            // returning Err that we used to swallow into the
+            // "missing sql/status" branch).
+            let raw_sql = t
+                .get::<LuaValue>("sql")
+                .map_err(|e| format!("reading 'sql' field: {e}"))?;
+            let raw_status = t
+                .get::<LuaValue>("status")
+                .map_err(|e| format!("reading 'status' field: {e}"))?;
+
+            match (&raw_sql, &raw_status) {
+                (LuaValue::String(s), _) => {
+                    let append = match t.get::<Option<bool>>("append") {
+                        Ok(Some(v)) => v,
+                        Ok(None) => true,
+                        Err(e) => return Err(format!("'append' must be boolean: {e}")),
+                    };
+                    Ok(CommandOutcome::InsertSql {
+                        sql: s.to_string_lossy(),
+                        append,
+                    })
+                }
+                (LuaValue::Nil, LuaValue::String(s)) => Ok(CommandOutcome::Status {
+                    message: s.to_string_lossy(),
+                }),
+                (LuaValue::Nil, LuaValue::Nil) => {
+                    Err("table return must have a 'sql' or 'status' field".into())
+                }
+                (other, _) if !matches!(other, LuaValue::Nil) => {
+                    Err(format!("'sql' must be a string, got {}", other.type_name()))
+                }
+                (_, other) => Err(format!(
+                    "'status' must be a string, got {}",
+                    other.type_name()
+                )),
             }
         }
         other => Err(format!("unsupported return value: {}", other.type_name())),
@@ -650,6 +677,9 @@ fn value_to_lua(lua: &Lua, value: &Value) -> LuaResult<LuaValue> {
         | Value::Uuid(_)
         | Value::Json(_)
         | Value::Unknown(_) => LuaValue::String(lua.create_string(value.render())?),
+        // Forward-compatible fallback for future `Value` variants — surface the
+        // canonical rendered form so Lua sees a string.
+        _ => LuaValue::String(lua.create_string(value.render())?),
     })
 }
 

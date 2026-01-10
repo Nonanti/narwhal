@@ -566,6 +566,8 @@ impl Connection for PostgresConnection {
             IsolationLevel::ReadCommitted => "READ COMMITTED",
             IsolationLevel::RepeatableRead => "REPEATABLE READ",
             IsolationLevel::Serializable => "SERIALIZABLE",
+            // Future isolation levels: default to SERIALIZABLE (strictest).
+            _ => "SERIALIZABLE",
         };
         let stmt = format!("BEGIN ISOLATION LEVEL {level}");
         self.client.batch_execute(&stmt).await.map_err(map_pg_error)

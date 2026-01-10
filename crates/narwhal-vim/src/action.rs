@@ -4,6 +4,7 @@ use crate::mode::Mode;
 
 /// Direction for the search prompt opened by `/` or `?`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum SearchDirection {
     #[default]
     Forward,
@@ -14,6 +15,7 @@ pub enum SearchDirection {
 ///
 /// The buffer applies actions; the state machine never mutates text directly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Action {
     /// Move the cursor along a motion, optionally repeated.
     Move { motion: Motion, count: usize },
@@ -46,6 +48,7 @@ pub enum Action {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Motion {
     Left,
     Right,
@@ -61,7 +64,8 @@ pub enum Motion {
     CurrentLine,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Operator {
     Delete,
     Yank,

@@ -8,6 +8,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PoolError {
     #[error("pool is closed")]
     Closed,
@@ -55,12 +56,24 @@ struct Inner {
 }
 
 impl Pool {
+    /// Construct a new [`Pool`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when `settings.max_size == 0` — a zero-capacity pool would
+    /// deadlock every [`Pool::acquire`] call. This is enforced as a
+    /// panic (rather than `Result`) because a misconfigured pool is a
+    /// programmer error caught at startup (L6).
     pub fn new(
         driver: Arc<dyn DatabaseDriver>,
         config: ConnectionConfig,
         password: Option<String>,
         settings: PoolConfig,
     ) -> Self {
+        assert!(
+            settings.max_size > 0,
+            "PoolConfig::max_size must be > 0 (would deadlock acquire)",
+        );
         Self {
             inner: Arc::new(Inner {
                 driver,

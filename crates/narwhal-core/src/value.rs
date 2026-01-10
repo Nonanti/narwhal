@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// expressed in one of the structured variants are preserved in
 /// [`Value::Unknown`] as their textual rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Value {
     Null,
     Bool(bool),
@@ -30,27 +31,31 @@ impl Value {
     }
 
     /// Render the value as a plain string suitable for display in a grid.
+    ///
+    /// Delegates to [`std::fmt::Display`] which writes straight to the
+    /// formatter — no intermediate allocation for the integer/float/date
+    /// paths (L1).
     pub fn render(&self) -> String {
-        match self {
-            Value::Null => "NULL".into(),
-            Value::Bool(b) => b.to_string(),
-            Value::Int(i) => i.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::String(s) => s.clone(),
-            Value::Bytes(b) => format!("<{} bytes>", b.len()),
-            Value::Date(d) => d.to_string(),
-            Value::Time(t) => t.to_string(),
-            Value::DateTime(dt) => dt.to_string(),
-            Value::Timestamp(ts) => ts.to_rfc3339(),
-            Value::Uuid(u) => u.to_string(),
-            Value::Json(v) => v.to_string(),
-            Value::Unknown(s) => s.clone(),
-        }
+        self.to_string()
     }
 }
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.render())
+        match self {
+            Value::Null => f.write_str("NULL"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Int(i) => write!(f, "{i}"),
+            Value::Float(v) => write!(f, "{v}"),
+            Value::String(s) => f.write_str(s),
+            Value::Bytes(b) => write!(f, "<{} bytes>", b.len()),
+            Value::Date(d) => write!(f, "{d}"),
+            Value::Time(t) => write!(f, "{t}"),
+            Value::DateTime(dt) => write!(f, "{dt}"),
+            Value::Timestamp(ts) => f.write_str(&ts.to_rfc3339()),
+            Value::Uuid(u) => write!(f, "{u}"),
+            Value::Json(v) => write!(f, "{v}"),
+            Value::Unknown(s) => f.write_str(s),
+        }
     }
 }

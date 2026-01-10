@@ -4,6 +4,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error returned from the core abstractions and from driver implementations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("connection failed: {0}")]
     Connection(String),

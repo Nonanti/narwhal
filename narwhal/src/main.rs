@@ -29,8 +29,32 @@ async fn main() -> Result<()> {
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting narwhal");
 
-    let _settings = Settings::load(&paths.settings_file()).unwrap_or_default();
-    let connections = ConnectionsFile::load(&paths.connections_file()).unwrap_or_default();
+    // L20: log instead of silently swallowing a malformed settings file
+    // — a user-visible warning beats falling back to defaults blind.
+    // TODO: thread `_settings` into App once a `with_settings` constructor
+    // exists; until then the load+warn surface is the value.
+    let _settings = match Settings::load(&paths.settings_file()) {
+        Ok(s) => s,
+        Err(error) => {
+            tracing::warn!(
+                path = %paths.settings_file().display(),
+                error = %error,
+                "falling back to default settings"
+            );
+            Settings::default()
+        }
+    };
+    let connections = match ConnectionsFile::load(&paths.connections_file()) {
+        Ok(c) => c,
+        Err(error) => {
+            tracing::warn!(
+                path = %paths.connections_file().display(),
+                error = %error,
+                "falling back to empty connections file"
+            );
+            ConnectionsFile::default()
+        }
+    };
     let history = match Journal::open(paths.history_file()).await {
         Ok(j) => Some(Arc::new(j)),
         Err(error) => {
@@ -49,6 +73,10 @@ async fn main() -> Result<()> {
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");
         eprintln!("narwhal: fatal: {error:#}");
+        // L40: drop the non-blocking appender guard *before* exiting so
+        // the final tracing::error reliably reaches disk. `process::exit`
+        // skips destructors of in-scope bindings, including `_guard`.
+        drop(_guard);
         std::process::exit(1);
     }
 

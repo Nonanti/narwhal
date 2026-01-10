@@ -37,6 +37,7 @@ pub struct LayoutRegions {
 
 /// Indicates which pane currently owns keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Pane {
     Sidebar,
     Editor,
@@ -45,10 +46,22 @@ pub enum Pane {
 
 impl Pane {
     pub fn cycle(self) -> Self {
+        // Same-crate enum is exhaustively matched; the `#[non_exhaustive]`
+        // attribute only forces wildcards on downstream consumers.
         match self {
             Pane::Sidebar => Pane::Editor,
             Pane::Editor => Pane::Results,
             Pane::Results => Pane::Sidebar,
+        }
+    }
+
+    /// Reverse-cycle counterpart to [`Pane::cycle`] (L27). Used by
+    /// `Shift-Ctrl+W` to walk the focus chain backwards.
+    pub fn cycle_back(self) -> Self {
+        match self {
+            Pane::Sidebar => Pane::Results,
+            Pane::Editor => Pane::Sidebar,
+            Pane::Results => Pane::Editor,
         }
     }
 
@@ -103,14 +116,20 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(34), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(crate::constants::SIDEBAR_WIDTH),
+            Constraint::Min(1),
+        ])
         .split(outer[0]);
 
     let sidebar_table_indices = render_sidebar(frame, body[0], &view.sidebar, view.theme);
 
     let main = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([
+            Constraint::Percentage(crate::constants::EDITOR_RESULTS_SPLIT_PCT.0),
+            Constraint::Percentage(crate::constants::EDITOR_RESULTS_SPLIT_PCT.1),
+        ])
         .split(body[1]);
 
     let editor_area = main[0];
@@ -173,6 +192,8 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         Mode::Command | Mode::Visual | Mode::VisualLine => view.theme.mode_command(),
         Mode::OperatorPending(_) => view.theme.mode_command(),
         Mode::Normal => view.theme.mode_normal(),
+        // Future vim modes fall back to the normal style until styled explicitly.
+        _ => view.theme.mode_normal(),
     };
 
     let mode_label = format!(" {} ", view.mode.short_label());
