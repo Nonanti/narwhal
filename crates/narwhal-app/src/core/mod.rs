@@ -343,25 +343,31 @@ impl Default for ResultBundle {
 }
 
 /// One editor tab: a buffer + the most recent result it produced.
+///
+/// Fields are `pub(crate)` so the rest of `narwhal-app` can mutate them
+/// directly while downstream crates (and integration tests) go through
+/// the read-only / mutable getter pairs below. This keeps internal
+/// ergonomics intact while letting us evolve the storage shape without
+/// breaking SemVer (L23).
 pub struct Tab {
-    pub name: String,
-    pub editor: EditorBuffer,
-    pub results: ResultBundle,
-    pub search: Option<ResultSearch>,
-    pub editing: Option<CellEdit>,
-    pub completion: Option<CompletionState>,
+    pub(crate) name: String,
+    pub(crate) editor: EditorBuffer,
+    pub(crate) results: ResultBundle,
+    pub(crate) search: Option<ResultSearch>,
+    pub(crate) editing: Option<CellEdit>,
+    pub(crate) completion: Option<CompletionState>,
     /// Per-tab editor search state (separate from result pane search).
-    pub editor_search: EditorSearchState,
+    pub(crate) editor_search: EditorSearchState,
     /// Page size used by the next sidebar preview. Stored per-tab so a
     /// user paging through one table doesn't disturb another tab.
-    pub page_size: usize,
+    pub(crate) page_size: usize,
     /// Pending row source to attach to the next `Rows` result. Populated
     /// by `preview_sidebar_selection` and consumed in `finish_run`.
-    pub pending_source: Option<RowSource>,
+    pub(crate) pending_source: Option<RowSource>,
     /// When `Some`, the row detail modal is open on the result pane.
     /// Sits at the same layer as the cell popup; only one of them
     /// should be open at a time.
-    pub row_detail: Option<RowDetailState>,
+    pub(crate) row_detail: Option<RowDetailState>,
 }
 
 impl Tab {
@@ -378,6 +384,46 @@ impl Tab {
             pending_source: None,
             row_detail: None,
         }
+    }
+
+    /// Tab display name shown in the tab bar.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Editor buffer attached to this tab.
+    pub fn editor(&self) -> &EditorBuffer {
+        &self.editor
+    }
+
+    /// Mutable editor buffer for tests and host-side compositors.
+    pub fn editor_mut(&mut self) -> &mut EditorBuffer {
+        &mut self.editor
+    }
+
+    /// Most-recent result bundle produced by this tab.
+    pub fn results(&self) -> &ResultBundle {
+        &self.results
+    }
+
+    /// Mutable access to the result bundle.
+    pub fn results_mut(&mut self) -> &mut ResultBundle {
+        &mut self.results
+    }
+
+    /// Per-tab editor search state (separate from the result pane search).
+    pub fn editor_search(&self) -> &EditorSearchState {
+        &self.editor_search
+    }
+
+    /// Page size used by the next sidebar preview.
+    pub fn page_size(&self) -> usize {
+        self.page_size
+    }
+
+    /// Active completion popup, if any.
+    pub fn completion(&self) -> Option<&CompletionState> {
+        self.completion.as_ref()
     }
 }
 
@@ -465,6 +511,8 @@ pub struct AppCore {
     pub(super) focus: Pane,
     pub(super) sidebar_items: Vec<SidebarItem>,
     pub(super) sidebar_index: usize,
+    /// Sidebar viewport scroll (L24). First visible row.
+    pub(super) sidebar_scroll: usize,
     pub(super) status: StatusBar,
     /// One-shot warning carried over from a plugin (transform or command
     /// hook) so that the final 'done · N statement(s)' AllDone message
@@ -611,6 +659,7 @@ impl AppCore {
             focus: Pane::Editor,
             sidebar_items: Vec::new(),
             sidebar_index: 0,
+            sidebar_scroll: 0,
             status: StatusBar {
                 message: "ready".into(),
                 ..Default::default()
@@ -854,9 +903,19 @@ impl AppCore {
                 label: label.as_str(),
             })
             .collect();
+        // L24: pre-clamp the scroll offset against the last known
+        // sidebar viewport so the cached `sidebar_scroll` we keep around
+        // (for the next click handler / snapshot test) is always
+        // consistent with what the renderer is about to draw. The
+        // renderer itself also clamps, but doing it here too keeps the
+        // host's view of the world honest.
+        let visible = SidebarView::visible_rows(self.last_layout.sidebar.height.saturating_sub(2));
+        self.sidebar_scroll =
+            SidebarView::clamp_scroll(self.sidebar_index, self.sidebar_scroll, visible, rows.len());
         let sidebar_view = SidebarView {
             items: &rows,
             selected_index: self.sidebar_index,
+            scroll_offset: self.sidebar_scroll,
             focused: self.focus == Pane::Sidebar,
         };
         let editor_title = self.editor_title_with_tabs();
@@ -1185,6 +1244,14 @@ impl AppCore {
                 buf.apply_motion(narwhal_vim::Motion::Up, 1);
                 buf.ensure_visible(height);
             }
+        } else if layout
+            .sidebar
+            .contains(ratatui::layout::Position::new(pos.0, pos.1))
+        {
+            // L24: mouse wheel over the sidebar pans the viewport by
+            // 3 rows per tick. The selection stays put so the user can
+            // peek at off-screen rows without losing context.
+            self.scroll_sidebar(if delta > 0 { 3 } else { -3 });
         }
     }
 

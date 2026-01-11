@@ -649,6 +649,11 @@ impl AppCore {
     }
 
     pub(super) fn handle_sidebar_key(&mut self, key: KeyEvent) {
+        // L24: paging step. The actual viewport size depends on the
+        // terminal height; using a fixed step keeps the binding
+        // predictable regardless of layout. Wheel events use a smaller
+        // step (3) to feel closer to the OS scroll cadence.
+        const PAGE_STEP: usize = 10;
         match key.code {
             CtKey::Char('j') | CtKey::Down if !self.sidebar_items.is_empty() => {
                 self.sidebar_index = (self.sidebar_index + 1) % self.sidebar_items.len();
@@ -657,11 +662,42 @@ impl AppCore {
                 let len = self.sidebar_items.len();
                 self.sidebar_index = (self.sidebar_index + len - 1) % len;
             }
+            CtKey::PageDown | CtKey::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !self.sidebar_items.is_empty() =>
+            {
+                let len = self.sidebar_items.len();
+                self.sidebar_index = (self.sidebar_index + PAGE_STEP).min(len - 1);
+            }
+            CtKey::PageUp | CtKey::Char('u')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !self.sidebar_items.is_empty() =>
+            {
+                self.sidebar_index = self.sidebar_index.saturating_sub(PAGE_STEP);
+            }
+            CtKey::Home if !self.sidebar_items.is_empty() => {
+                self.sidebar_index = 0;
+            }
+            CtKey::End if !self.sidebar_items.is_empty() => {
+                self.sidebar_index = self.sidebar_items.len() - 1;
+            }
             CtKey::Enter => self.activate_sidebar_selection(),
             CtKey::Char('o') => self.preview_sidebar_selection(),
             CtKey::Char('d') => self.ddl_sidebar_selection(),
             _ => {}
         }
+    }
+
+    /// L24: scroll the sidebar viewport by `delta` rows without moving
+    /// the selection. Mouse-wheel handlers call this so the user can
+    /// inspect off-screen rows before committing to a click.
+    pub(super) fn scroll_sidebar(&mut self, delta: isize) {
+        if self.sidebar_items.is_empty() {
+            return;
+        }
+        let max = self.sidebar_items.len().saturating_sub(1);
+        let new = (self.sidebar_scroll as isize + delta).clamp(0, max as isize) as usize;
+        self.sidebar_scroll = new;
     }
 
     fn preview_sidebar_selection(&mut self) {
