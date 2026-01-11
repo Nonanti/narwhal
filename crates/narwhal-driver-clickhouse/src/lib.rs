@@ -370,7 +370,14 @@ impl ClickhouseConnection {
     /// Uses `response.bytes()` instead of `response.text()` because
     /// ClickHouse's `String` type is byte-oriented — cells may contain
     /// arbitrary bytes that are not valid UTF-8.
-    async fn http_query(&self, sql: &str, query_id: Option<&str>) -> Result<Vec<u8>> {
+    /// Send a query and return the raw response body.
+    ///
+    /// L28: returns `bytes::Bytes` (cheap clone, refcounted buffer)
+    /// instead of `Vec<u8>` so the response is not copied a second time
+    /// just to satisfy the `Vec` API. Callers that need an owned `Vec`
+    /// can still `.to_vec()` at the boundary, but no current caller does
+    /// — `parse_tsv_body` takes `&[u8]`.
+    async fn http_query(&self, sql: &str, query_id: Option<&str>) -> Result<bytes::Bytes> {
         let state = &self.inner;
         let mut url = state.base_url.clone();
         url.query_pairs_mut()
@@ -424,7 +431,6 @@ impl ClickhouseConnection {
         response
             .bytes()
             .await
-            .map(|b| b.to_vec())
             .map_err(|e| Error::Query(e.to_string()))
     }
 
@@ -1018,6 +1024,8 @@ impl Connection for ClickhouseConnection {
 
     async fn ping(&mut self) -> Result<()> {
         self.http_query("SELECT 1", None).await.map(|_| ())
+        // L28: `.map(|_| ())` discards the `Bytes` immediately; the
+        // refcount drop is the only cleanup needed.
     }
 
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {

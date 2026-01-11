@@ -1510,11 +1510,11 @@
 - **Dosya:** `crates/narwhal-app/src/core.rs:3447,3448,3464,3660,3730,3876`
 - **Düzeltme:** `lock().unwrap_or_else(|e| e.into_inner())`.
 
-## L23 ⏯️ Wave 6 — `Tab` field'ları `pub` (API yüzeyi) — bkz. plans/wave-6-followups.md
+## L23 ✅ — `Tab` field'ları `pub` (API yüzeyi)
 
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 
-## L24 ⏯️ Wave 6 — Sidebar scroll yok — bkz. plans/wave-6-followups.md
+## L24 ✅ — Sidebar scroll yok
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/sidebar.rs:99-114`
 
@@ -1531,7 +1531,7 @@
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:46-52`
 
-## L28 ⏯️ Wave 6 — `ClickHouse` query_tsv tüm gövdeyi materialize — bkz. plans/wave-6-followups.md
+## L28 ✅ — `ClickHouse` query_tsv tüm gövdeyi materialize
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:451-462`
 - **Düzeltme:** `execute()` belirli eşik üstü stream'e geçsin veya doc'a uyarı.
@@ -1545,7 +1545,7 @@
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:367-447`
 
-## L31 ⏯️ Wave 6 — MySQL `KILL QUERY` cancel desteği yok — bkz. plans/wave-6-followups.md
+## L31 ✅ — MySQL `KILL QUERY` cancel desteği yok
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:494-496`
 

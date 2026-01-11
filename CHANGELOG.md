@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sidebar viewport scrolling** (L24). The connection / schema browser
+  now clamps a `scroll_offset` against the visible viewport so long
+  catalogues (> N items) stay navigable. `PageDown`/`PageUp` (or
+  `Ctrl-d`/`Ctrl-u`) jump ten rows; `Home`/`End` snap to the
+  endpoints; mouse wheel over the sidebar pans the viewport by 3 rows
+  without moving the selection. New
+  `SidebarView::{visible_rows, clamp_scroll}` helpers live in
+  `narwhal-tui`.
+- **MySQL `KILL QUERY` cancel** (L31). `MysqlConnection` now captures
+  `CONNECTION_ID()` at connect time and exposes a `cancel_handle()`
+  that opens a second connection to issue `KILL QUERY <thread_id>`.
+  Brings F4 cancel parity with the PostgreSQL and ClickHouse drivers.
+
 ### Breaking
 
 - **Public enums marked `#[non_exhaustive]`** (M14). Every public
@@ -20,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ResultView::selected`, `select`, `scroll_offset`,
   `set_scroll_offset` instead of touching `TableState` directly
   — protects callers from a future ratatui major upgrade.
+- **`Tab` storage fields are now `pub(crate)`** (L23). Downstream
+  callers use the new read-only / mutable getter pairs: `name()`,
+  `editor()`/`editor_mut()`, `results()`/`results_mut()`,
+  `editor_search()`, `page_size()`, `completion()`. Lets us evolve
+  the per-tab storage shape without SemVer breakage.
 
 ### Refactor
 
@@ -37,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **ClickHouse `http_query` returns `bytes::Bytes`** (L28) instead of
+  copying the response body into an owned `Vec<u8>`. Halves the peak
+  RSS on large `SELECT` results that take the non-streaming path.
 - **UI no longer blocks on background metadata** (H11). New
   `narwhal-app::meta` module ships a `MetaRequest`/`MetaUpdate`
   channel; `dump_schema all`, `refresh_schemas`, and the Ctrl+R

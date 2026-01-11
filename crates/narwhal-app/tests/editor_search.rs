@@ -180,7 +180,10 @@ fn enter_during_prompt_keeps_match_highlighted() {
     // Prompt should be closed but highlights should remain.
     assert!(!core.tabs()[core.active_tab()].editor_search().prompt_open);
     assert!(core.tabs()[core.active_tab()].editor_search().highlight);
-    assert_eq!(core.tabs()[core.active_tab()].editor_search().needle, "this");
+    assert_eq!(
+        core.tabs()[core.active_tab()].editor_search().needle,
+        "this"
+    );
     assert!(!core.tabs()[core.active_tab()]
         .editor_search()
         .matches
