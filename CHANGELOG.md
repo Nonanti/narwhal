@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet — the next entry will land here when the first post-v1.0
+change is merged. See `[1.0.0]` below for the inaugural release._
+
+## [1.0.0] — 2026-05-22
+
+First tagged release. The lines below are grouped by area; the
+**Phase 1 → 3** suffixes refer to the staged hardening sweep that
+landed immediately before tagging — they are noted for traceability
+but do not affect the public API.
+
+### Highlights
+
+- Five-driver parity (Postgres, MySQL, SQLite, DuckDB, ClickHouse)
+  with streaming, query cancel, prepared-statement caches where
+  applicable, and a unified TLS surface.
+- Vim editing model with auto-pair, schema-aware completion (alias
+  resolved, schema-qualified, built-in functions), result-pane sort
+  and filter, and a `:` command palette.
+- Lua plugin runtime with command, transform and `sql_run` hooks;
+  ships with six sample scripts in `examples/plugins/`.
+- Connection UX: `:url`, `:add`, `:edit`, `:test`, last-used
+  ordering, SSH tunnels, `~/.pgpass` + env-var password fallback,
+  OS keyring credential storage.
+- Performance hardening (Phase 2): `~6×` faster JSON column sort,
+  `~6×` faster vim word-motion at 5 000 lines, structural JSON
+  compare without `to_string()` allocation, zero-clone history
+  append for the no-secret path.
+- Correctness hardening (Phase 1): 14 bugs fixed across SSH probe,
+  password redaction, transaction unwinding, percent-decoding,
+  describe-table observability, and the `:export` arg parser. Five
+  new regression tests guard the affected paths.
+- Settings wiring (Phase 3): a one-line `config.toml` with
+  `theme = "light"` etc. is now honoured at start-up; malformed
+  files emit a load-time warning.
+- `cargo-deny` advisory and licence gate added to CI; `deny.toml`
+  at the repo root.
+
 ### Added
 
 - **Sidebar viewport scrolling** (L24). The connection / schema browser

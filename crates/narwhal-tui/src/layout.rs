@@ -75,7 +75,7 @@ impl Pane {
 }
 
 /// Read-only view of the three-slot status bar passed from
-/// [`narwhal_app::core::StatusBar`] into the render path.
+/// `narwhal_app::core::StatusBar` into the render path.
 #[derive(Debug, Clone, Default)]
 pub struct StatusBarView<'a> {
     /// Center slot — connection name + driver (sticky).

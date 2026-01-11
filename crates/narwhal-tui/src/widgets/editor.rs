@@ -49,7 +49,7 @@ const PAIRS: &[(char, char)] = &[
 ];
 
 /// One entry in [`CompletionPopupView::items`]. The host app builds these
-/// from [`narwhal_app::completion::Completion`] so the renderer stays
+/// from `narwhal_app::completion::Completion` so the renderer stays
 /// allocation-free.
 #[derive(Debug, Clone, Copy)]
 pub struct CompletionItemView<'a> {
@@ -375,39 +375,47 @@ impl EditorBuffer {
     }
 
     fn move_word_forward(&mut self) {
-        let text = self.entire_text();
-        let bytes = text.as_bytes();
-        let mut idx = self.cursor_byte_offset();
-        while idx < bytes.len() && !is_word_char(bytes[idx]) {
-            idx += 1;
+        // Walk the existing `Vec<String>` directly instead of joining
+        // it into a fresh `entire_text()` buffer; the latter allocates
+        // O(total bytes) per motion and dominated the profile at 5k+
+        // lines (Phase 2 hotspot #2).
+        //
+        // `LineCursor::at` avoids the redundant O(rows) walk that
+        // `cursor_byte_offset()` + `from_offset()` would do back-to-back.
+        let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+        while cur.has_more() && !cur.is_word() {
+            cur.advance();
         }
-        while idx < bytes.len() && is_word_char(bytes[idx]) {
-            idx += 1;
+        while cur.has_more() && cur.is_word() {
+            cur.advance();
         }
         // L16: skip trailing whitespace *including* newlines so `w`
         // lands on the next word even if the previous one was at
         // end-of-line.
-        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
-            idx += 1;
+        while cur.has_more() && cur.is_whitespace() {
+            cur.advance();
         }
-        self.set_cursor_from_offset(idx);
+        self.cursor_row = cur.row;
+        self.cursor_col = cur.col;
     }
 
     fn move_word_backward(&mut self) {
-        let text = self.entire_text();
-        let bytes = text.as_bytes();
-        let mut idx = self.cursor_byte_offset();
-        if idx == 0 {
+        let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+        if cur.row == 0 && cur.col == 0 {
             return;
         }
-        idx -= 1;
-        while idx > 0 && !is_word_char(bytes[idx]) {
-            idx -= 1;
+        cur.retreat();
+        while !cur.at_start() && !cur.is_word() {
+            cur.retreat();
         }
-        while idx > 0 && is_word_char(bytes[idx - 1]) {
-            idx -= 1;
+        // Stop one before the start of the word — mirrors the previous
+        // `bytes[idx - 1]` peek by checking the *previous* byte before
+        // each retreat.
+        while !cur.at_start() && cur.peek_prev_is_word() {
+            cur.retreat();
         }
-        self.set_cursor_from_offset(idx);
+        self.cursor_row = cur.row;
+        self.cursor_col = cur.col;
     }
 
     fn raw_insert_char(&mut self, c: char) {
@@ -526,19 +534,98 @@ impl EditorBuffer {
         }
         inside_single || inside_double
     }
+}
 
-    fn set_cursor_from_offset(&mut self, mut offset: usize) {
-        for (row, line) in self.lines.iter().enumerate() {
-            let len = line.len();
-            if offset <= len {
-                self.cursor_row = row;
-                self.cursor_col = offset;
-                return;
-            }
-            offset -= len + 1;
+/// Per-line byte cursor used by the word-motion helpers to walk
+/// `Vec<String>` without materialising a joined `String`.
+///
+/// `col == lines[row].len()` is a valid position and represents the
+/// synthetic newline that separates `row` from `row + 1`. Advancing
+/// past it crosses the line boundary; the synthetic newline counts
+/// as one absolute byte so callers can reason about it the same way
+/// the legacy `entire_text()`-based path did.
+struct LineCursor<'a> {
+    lines: &'a [String],
+    row: usize,
+    col: usize,
+}
+
+impl<'a> LineCursor<'a> {
+    /// Construct a cursor positioned at `(row, col)` without doing the
+    /// O(rows) prefix-sum walk that `from_offset` would require.
+    /// Callers that already know the logical row/col use this; only
+    /// the legacy offset-based call sites need the slower path.
+    fn at(lines: &'a [String], row: usize, col: usize) -> Self {
+        Self { lines, row, col }
+    }
+
+    /// Whether there is at least one more byte to read at the cursor.
+    fn has_more(&self) -> bool {
+        match self.lines.get(self.row) {
+            Some(line) if self.col < line.len() => true,
+            Some(_) => self.row + 1 < self.lines.len(),
+            None => false,
         }
-        self.cursor_row = self.lines.len() - 1;
-        self.cursor_col = self.lines.last().map(String::len).unwrap_or(0);
+    }
+
+    /// True iff the cursor sits at the very start of the buffer
+    /// (`(0, 0)`). Symmetric to `has_more()`'s end-of-buffer check.
+    fn at_start(&self) -> bool {
+        self.row == 0 && self.col == 0
+    }
+
+    /// Byte at the cursor, or `None` past the end. Returns `b'\n'` for
+    /// the synthetic newline between lines.
+    fn peek(&self) -> Option<u8> {
+        let line = self.lines.get(self.row)?;
+        if self.col < line.len() {
+            Some(line.as_bytes()[self.col])
+        } else if self.row + 1 < self.lines.len() {
+            Some(b'\n')
+        } else {
+            None
+        }
+    }
+
+    fn is_word(&self) -> bool {
+        self.peek().is_some_and(is_word_char)
+    }
+
+    fn is_whitespace(&self) -> bool {
+        self.peek().is_some_and(|b| b.is_ascii_whitespace())
+    }
+
+    /// `move_word_backward` peeks at `bytes[idx - 1]` while standing
+    /// at `idx`; this returns whether that byte is a word character
+    /// without retreating. The previous byte at `(self.row, 0)` is
+    /// the synthetic newline separating the previous line, never a
+    /// word character.
+    fn peek_prev_is_word(&self) -> bool {
+        if self.col > 0 {
+            is_word_char(self.lines[self.row].as_bytes()[self.col - 1])
+        } else {
+            false
+        }
+    }
+
+    fn advance(&mut self) {
+        let line_len = self.lines.get(self.row).map(String::len).unwrap_or(0);
+        if self.col < line_len {
+            self.col += 1;
+        } else if self.row + 1 < self.lines.len() {
+            // Stepping over the synthetic newline.
+            self.row += 1;
+            self.col = 0;
+        }
+    }
+
+    fn retreat(&mut self) {
+        if self.col > 0 {
+            self.col -= 1;
+        } else if self.row > 0 {
+            self.row -= 1;
+            self.col = self.lines[self.row].len(); // synthetic-newline slot
+        }
     }
 }
 

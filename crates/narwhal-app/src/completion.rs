@@ -31,7 +31,12 @@ pub enum CompletionContext {
     /// etc. — prefer table names.
     TableExpected,
     /// Cursor sits right after `ident.` — suggest columns of that table.
+    /// The `table` field is already alias-resolved: `FROM users u`
+    /// followed by `u.` arrives here as `table = "users"`.
     ColumnExpected { table: String },
+    /// Cursor sits right after `schema.` — suggest tables that live in
+    /// the named schema (e.g. `public.`).
+    SchemaTableExpected { schema: String },
 }
 
 /// Walk backward from `cursor_byte_offset` inside `buffer`, stopping at
@@ -40,26 +45,41 @@ pub enum CompletionContext {
 /// The tokeniser is deliberately lightweight — it only needs to
 /// distinguish identifiers, dots, keywords, and boundaries. It skips
 /// over string literals and comments so they can't fake a keyword.
+///
+/// Schema-aware behaviour:
+///
+/// - `FROM users u` followed by `u.` resolves to
+///   `ColumnExpected { table: "users" }` because we extract a
+///   forward-walking alias map before the reverse classification pass.
+/// - `public.` (where `public` is *not* a known alias) resolves to
+///   `SchemaTableExpected { schema: "public" }` so the gather step
+///   can narrow the table list.
 pub fn detect_context(buffer: &str, cursor_byte_offset: usize) -> CompletionContext {
-    // 1. Trim to the current statement (everything after the last `;`
-    //    before the cursor).
-    let slice = trim_to_current_statement(buffer, cursor_byte_offset);
+    detect_context_with_schemas(buffer, cursor_byte_offset, &[])
+}
 
-    // 2. Tokenise the trimmed slice.
+/// Like [`detect_context`] but consults the active session's schema
+/// names so `public.` is recognised as a schema rather than misclassified
+/// as a table alias. Pass an empty slice when no session is open.
+pub fn detect_context_with_schemas(
+    buffer: &str,
+    cursor_byte_offset: usize,
+    known_schemas: &[String],
+) -> CompletionContext {
+    let slice = trim_to_current_statement(buffer, cursor_byte_offset);
     let tokens = tokenize(&slice);
 
-    // 3. Walk backward through tokens to find the context.
-    //    - If we find `.` preceded by an identifier → ColumnExpected.
-    //    - If we find a table-expected keyword → TableExpected.
-    //    - Otherwise → Generic.
-    //
-    //    Bare identifiers (the current word being typed) are skipped
-    //    so we can see past them to the keyword that governs them.
+    // Build a forward-walking alias map: `FROM users u` and
+    // `JOIN orders AS o` both contribute `(u, users)` / `(o, orders)`.
+    // We need it before the reverse pass so `u.` can resolve to `users`.
+    let alias_map = extract_aliases(&tokens);
+
+    // Walk tokens in reverse so the *closest* keyword to the cursor
+    // wins (handles nested clauses like `SELECT ... FROM (SELECT ...`).
     let mut saw_dot = false;
     let mut ident_before_dot: Option<String> = None;
     let mut last_keyword: Option<&str> = None;
 
-    // Walk tokens in reverse.
     for tok in tokens.iter().rev() {
         match tok {
             Token::Dot => {
@@ -70,28 +90,32 @@ pub fn detect_context(buffer: &str, cursor_byte_offset: usize) -> CompletionCont
             Token::Ident(name) => {
                 if saw_dot && ident_before_dot.is_none() {
                     ident_before_dot = Some(name.to_ascii_lowercase());
-                    // Keep going to find a keyword if needed.
                     saw_dot = false;
                 }
-                // Bare identifier — skip past it to find the governing
-                // keyword (e.g. skip `u` in `FROM u` to find `FROM`).
             }
             Token::Keyword(kw) => {
                 last_keyword = Some(kw);
                 break;
             }
-            Token::StringLiteral | Token::Other => {
-                // Skip over these — they don't affect context.
-            }
+            Token::StringLiteral | Token::Other => {}
         }
     }
 
-    // Check for ColumnExpected first (higher priority).
-    if let Some(table) = ident_before_dot {
-        return CompletionContext::ColumnExpected { table };
+    if let Some(ident) = ident_before_dot {
+        // Alias wins over schema (they share the same syntax `ident.`).
+        if let Some(resolved) = alias_map.get(&ident) {
+            return CompletionContext::ColumnExpected {
+                table: resolved.clone(),
+            };
+        }
+        // Then a known schema.
+        if known_schemas.iter().any(|s| s.eq_ignore_ascii_case(&ident)) {
+            return CompletionContext::SchemaTableExpected { schema: ident };
+        }
+        // Fallback: treat as a literal table name (legacy behaviour).
+        return CompletionContext::ColumnExpected { table: ident };
     }
 
-    // Check for TableExpected.
     if let Some(kw) = last_keyword {
         if TABLE_EXPECTED_KEYWORDS
             .iter()
@@ -102,6 +126,76 @@ pub fn detect_context(buffer: &str, cursor_byte_offset: usize) -> CompletionCont
     }
 
     CompletionContext::Generic
+}
+
+/// Forward-walking pass that picks up `FROM table alias` and
+/// `JOIN table AS alias` constructs and returns a map of
+/// `lowercase(alias) -> lowercase(table_name)`.
+///
+/// Supports both implicit (`FROM users u`) and explicit
+/// (`JOIN orders AS o`) alias forms. Comma-joined tables
+/// (`FROM users u, orders o`) are not yet handled — only the
+/// first table picks up an alias from that style today.
+fn extract_aliases(tokens: &[Token]) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let claims_table = matches!(&tokens[i], Token::Keyword(kw)
+            if matches!(kw.as_str(), "FROM" | "JOIN"));
+        if !claims_table {
+            i += 1;
+            continue;
+        }
+        // Skip the FROM/JOIN keyword itself.
+        i += 1;
+        // Skip secondary join modifiers (LEFT JOIN, INNER JOIN, etc.).
+        while let Some(Token::Keyword(kw)) = tokens.get(i) {
+            if matches!(
+                kw.as_str(),
+                "INNER" | "OUTER" | "LEFT" | "RIGHT" | "FULL" | "CROSS" | "JOIN"
+            ) {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        let Some(Token::Ident(table)) = tokens.get(i) else {
+            continue;
+        };
+        let table_name = table.to_ascii_lowercase();
+        i += 1;
+        // Optional `schema.table` form: pick the second identifier.
+        if matches!(tokens.get(i), Some(Token::Dot)) {
+            if let Some(Token::Ident(real)) = tokens.get(i + 1) {
+                let _ = table_name;
+                let table_name = real.to_ascii_lowercase();
+                i += 2;
+                consume_alias(tokens, &mut i, &mut map, &table_name);
+                continue;
+            }
+        }
+        consume_alias(tokens, &mut i, &mut map, &table_name);
+    }
+    map
+}
+
+fn consume_alias(
+    tokens: &[Token],
+    i: &mut usize,
+    map: &mut std::collections::HashMap<String, String>,
+    table_name: &str,
+) {
+    // Optional explicit `AS`.
+    if matches!(tokens.get(*i), Some(Token::Keyword(kw)) if kw == "AS") {
+        *i += 1;
+    }
+    if let Some(Token::Ident(alias)) = tokens.get(*i) {
+        // Reject anything that looks like a keyword being misclassified
+        // as an identifier (defensive).
+        let alias_lc = alias.to_ascii_lowercase();
+        map.insert(alias_lc, table_name.to_owned());
+        *i += 1;
+    }
 }
 
 /// Trim `buffer` to only the portion of the current statement —
@@ -254,6 +348,10 @@ pub enum CompletionKind {
     Table,
     /// Column belonging to a known table.
     Column,
+    /// Built-in / aggregate function (`COUNT(`, `SUM(`, …).
+    /// Inserted with the trailing `(` so the cursor lands inside the
+    /// argument list ready for the user to type the column.
+    Function,
 }
 
 /// Single completion candidate.
@@ -340,6 +438,58 @@ pub const KEYWORDS: &[&str] = &[
     "SAVEPOINT",
     "RELEASE",
     "TRANSACTION",
+];
+
+/// Built-in functions offered as `NAME(` so the cursor lands inside
+/// the parens after acceptance. Mirrors the everyday set used across
+/// postgres / mysql / sqlite / clickhouse / duckdb; engine-specific
+/// helpers are intentionally omitted to keep the popup focused.
+pub const FUNCTIONS: &[&str] = &[
+    // Aggregates.
+    "COUNT(",
+    "COUNT(DISTINCT ",
+    "SUM(",
+    "AVG(",
+    "MIN(",
+    "MAX(",
+    "STRING_AGG(",
+    "ARRAY_AGG(",
+    "GROUP_CONCAT(",
+    // Null / type helpers.
+    "COALESCE(",
+    "NULLIF(",
+    "GREATEST(",
+    "LEAST(",
+    "CAST(",
+    // String.
+    "LOWER(",
+    "UPPER(",
+    "LENGTH(",
+    "TRIM(",
+    "SUBSTRING(",
+    "SUBSTR(",
+    "REPLACE(",
+    "CONCAT(",
+    "SPLIT_PART(",
+    // Date / time.
+    "NOW()",
+    "CURRENT_DATE",
+    "CURRENT_TIMESTAMP",
+    "DATE_TRUNC(",
+    "EXTRACT(",
+    "AGE(",
+    // Math.
+    "ROUND(",
+    "CEIL(",
+    "FLOOR(",
+    "ABS(",
+    "POWER(",
+    // Window.
+    "ROW_NUMBER() OVER (",
+    "RANK() OVER (",
+    "DENSE_RANK() OVER (",
+    "LAG(",
+    "LEAD(",
 ];
 
 /// Multi-word SQL phrases offered as a single completion. They cover the
@@ -486,6 +636,23 @@ pub fn gather(
                 }
             }
         }
+        CompletionContext::SchemaTableExpected { schema } => {
+            // Only emit tables whose owning schema name matches. We
+            // skip the schema-name detail because the prefix already
+            // displays it visually.
+            for (s, tables) in schemas {
+                if !s.name.eq_ignore_ascii_case(schema) {
+                    continue;
+                }
+                for table in tables {
+                    push(Completion {
+                        text: table.name.clone(),
+                        kind: CompletionKind::Table,
+                        detail: None,
+                    });
+                }
+            }
+        }
         CompletionContext::Generic => {
             for keyword in KEYWORDS {
                 push(Completion {
@@ -498,6 +665,13 @@ pub fn gather(
                 push(Completion {
                     text: (*phrase).to_owned(),
                     kind: CompletionKind::Keyword,
+                    detail: None,
+                });
+            }
+            for func in FUNCTIONS {
+                push(Completion {
+                    text: (*func).to_owned(),
+                    kind: CompletionKind::Function,
                     detail: None,
                 });
             }
@@ -742,5 +916,130 @@ mod tests {
         assert!(!out
             .iter()
             .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
+    }
+
+    // ----- new tests: alias resolution + schema prefix + functions -----
+
+    fn user_cols() -> HashMap<String, (String, Vec<ColumnHeader>)> {
+        let mut m = HashMap::new();
+        m.insert(
+            "users".to_owned(),
+            (
+                "public".to_owned(),
+                vec![
+                    ColumnHeader {
+                        name: "id".into(),
+                        data_type: "int4".into(),
+                    },
+                    ColumnHeader {
+                        name: "email".into(),
+                        data_type: "text".into(),
+                    },
+                ],
+            ),
+        );
+        m
+    }
+
+    /// `FROM users u WHERE u.` should resolve `u` → `users` and
+    /// suggest the table's columns instead of treating `u` as a real
+    /// table name.
+    #[test]
+    fn alias_in_from_resolves_to_real_table_for_dot_completion() {
+        let buf = "SELECT * FROM users u WHERE u.";
+        let ctx = detect_context(buf, buf.len());
+        assert_eq!(
+            ctx,
+            CompletionContext::ColumnExpected {
+                table: "users".into()
+            }
+        );
+        let out = gather("e", &listing(), &ctx, &user_cols(), 50);
+        assert!(out
+            .iter()
+            .any(|c| c.text == "email" && c.kind == CompletionKind::Column));
+    }
+
+    /// `JOIN orders AS o ON o.` walks through the explicit `AS` form.
+    #[test]
+    fn alias_with_explicit_as_keyword_is_resolved() {
+        let mut cols = user_cols();
+        cols.insert(
+            "orders".to_owned(),
+            (
+                "public".to_owned(),
+                vec![ColumnHeader {
+                    name: "total".into(),
+                    data_type: "numeric".into(),
+                }],
+            ),
+        );
+        let buf = "SELECT * FROM users u JOIN orders AS o ON o.";
+        let ctx = detect_context(buf, buf.len());
+        assert_eq!(
+            ctx,
+            CompletionContext::ColumnExpected {
+                table: "orders".into()
+            }
+        );
+        let out = gather("t", &listing(), &ctx, &cols, 50);
+        assert!(out.iter().any(|c| c.text == "total"));
+    }
+
+    /// `public.` when `public` is a known schema lands in
+    /// `SchemaTableExpected` and the gather only emits tables from
+    /// that schema.
+    #[test]
+    fn schema_prefix_narrows_table_list() {
+        let buf = "SELECT * FROM public.";
+        let known = vec!["public".to_owned()];
+        let ctx = detect_context_with_schemas(buf, buf.len(), &known);
+        assert_eq!(
+            ctx,
+            CompletionContext::SchemaTableExpected {
+                schema: "public".into()
+            }
+        );
+        let out = gather("u", &listing(), &ctx, &no_columns(), 50);
+        assert!(out
+            .iter()
+            .any(|c| c.text == "users" && c.kind == CompletionKind::Table));
+    }
+
+    /// Without the schema list, `public.` falls back to the legacy
+    /// behaviour (ColumnExpected on a non-existent table).
+    #[test]
+    fn unknown_dotted_prefix_falls_back_to_column_lookup() {
+        let buf = "SELECT * FROM public.";
+        let ctx = detect_context(buf, buf.len());
+        assert_eq!(
+            ctx,
+            CompletionContext::ColumnExpected {
+                table: "public".into()
+            }
+        );
+    }
+
+    /// Generic context surfaces the function list with the trailing
+    /// `(` so the cursor lands inside the call after acceptance.
+    #[test]
+    fn generic_context_includes_functions() {
+        let ctx = detect_context("SELECT ", 7);
+        assert_eq!(ctx, CompletionContext::Generic);
+        let out = gather("cou", &listing(), &ctx, &no_columns(), 50);
+        assert!(out
+            .iter()
+            .any(|c| c.text == "COUNT(" && c.kind == CompletionKind::Function));
+    }
+
+    /// Function suggestions are kind-tagged distinctly so the UI can
+    /// render them with a different glyph.
+    #[test]
+    fn function_kind_distinct_from_keyword() {
+        let ctx = detect_context("SELECT ", 7);
+        let out = gather("now", &listing(), &ctx, &no_columns(), 50);
+        assert!(out
+            .iter()
+            .any(|c| c.text == "NOW()" && c.kind == CompletionKind::Function));
     }
 }

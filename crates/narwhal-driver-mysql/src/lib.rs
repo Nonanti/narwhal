@@ -213,6 +213,15 @@ struct MysqlCancelHandle {
 #[async_trait]
 impl CancelHandle for MysqlCancelHandle {
     async fn cancel(&self) -> Result<()> {
+        // CONNECTION_ID() never returns 0 on a healthy session, so a
+        // stored zero means the connect path's lookup fell back. Refuse
+        // to fire `KILL QUERY 0` (which would either error out or, on
+        // some forks, hit an unrelated session).
+        if self.connection_id == 0 {
+            return Err(Error::unsupported(
+                "cancel: connection id not captured at connect time",
+            ));
+        }
         let mut killer = Conn::new(self.opts.clone())
             .await
             .map_err(|e| Error::Connection(format!("cancel: open killer conn: {e}")))?;

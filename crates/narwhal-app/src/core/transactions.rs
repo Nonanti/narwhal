@@ -114,27 +114,35 @@ impl AppCore {
             self.status.message = "no active connection".into();
             return;
         };
-        let Some(txn) = session.transaction.take() else {
+        // Peek at the Arc without taking it: if another holder is still
+        // around (a run worker, a paused stream) the commit cannot
+        // succeed and we must leave `session.transaction` in place so
+        // the host's view stays in sync with the server. Previously we
+        // `take()`'d unconditionally and emitted "connection still in
+        // use", which silently de-synced the session (Round 2 fix).
+        let Some(txn) = session.transaction.as_ref() else {
             self.status.message = "no open transaction".into();
             return;
         };
+        if Arc::strong_count(&txn.conn) > 1 {
+            self.status.message = if commit {
+                "commit failed: transaction connection still in use".into()
+            } else {
+                "rollback failed: transaction connection still in use".into()
+            };
+            return;
+        }
+        // Safe to take the transaction now — the only Arc clone is the
+        // one we're about to consume.
+        let txn = session.transaction.take().expect("checked above");
         let conn_arc = txn.conn;
         let outcome = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
-                // Reclaim the pinned connection. If callers held extra Arc
-                // clones we error out rather than silently leak state.
-                let mutex = match Arc::try_unwrap(conn_arc) {
-                    Ok(m) => m,
-                    Err(arc) => {
-                        // A run worker is still holding the lock; wait for
-                        // it to drop and try again. In practice
-                        // dispatch_batch only locks while running.
-                        drop(arc);
-                        return Err(narwhal_core::Error::Connection(
-                            "transaction connection still in use".into(),
-                        ));
-                    }
-                };
+                let mutex = Arc::try_unwrap(conn_arc).map_err(|_| {
+                    narwhal_core::Error::Connection(
+                        "transaction connection raced after strong-count check".into(),
+                    )
+                })?;
                 let mut conn = mutex.into_inner();
                 if commit {
                     conn.commit().await?;
@@ -144,10 +152,10 @@ impl AppCore {
                 Ok::<(), narwhal_core::Error>(())
             })
         });
-        // Whatever happened to the underlying transaction, the host-side
-        // pinned-connection state is gone (we already `take()`d the txn
-        // out of `session.transaction` above). Clear the plugin-side
-        // flag so subsequent `sql_run` calls work again.
+        // Clear the plugin-side flag so subsequent `sql_run` calls work
+        // against the pool again. The connection itself is now back in
+        // the pool (PooledConnection::drop returned it), regardless of
+        // whether the commit/rollback round-trip succeeded.
         self.plugin_state
             .lock()
             .unwrap_or_else(|e| e.into_inner())

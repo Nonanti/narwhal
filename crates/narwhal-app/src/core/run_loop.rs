@@ -225,8 +225,8 @@ impl AppCore {
     }
 
     /// Handle a [`MetaUpdate`] delivered from the background metadata
-    /// channel. This is the counterpart of [`handle_run_update`] for
-    /// non-query metadata operations (H11).
+    /// channel. This is the counterpart of [`Self::handle_run_update`]
+    /// for non-query metadata operations (H11).
     pub fn handle_meta_update(&mut self, update: MetaUpdate) {
         match update {
             MetaUpdate::DumpSchemaReady { tab, tables } => {

@@ -1,5 +1,5 @@
 [package]
-name = "narwhal-cli"
+name = "narwhal"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

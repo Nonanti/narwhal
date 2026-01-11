@@ -21,3 +21,18 @@ crossterm.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
 uuid.workspace = true
+# Already transitive via narwhal-core; named explicitly here so the
+# Json sort comparator can pattern-match on `serde_json::Value` without
+# round-tripping through `.to_string()`.
+serde_json.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "sort"
+harness = false
+
+[[bench]]
+name = "editor_motion"
+harness = false

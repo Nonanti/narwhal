@@ -82,9 +82,74 @@ fn compare_same_type(a: &Value, b: &Value) -> Ordering {
         (Value::DateTime(x), Value::DateTime(y)) => x.cmp(y),
         (Value::Timestamp(x), Value::Timestamp(y)) => x.cmp(y),
         (Value::Uuid(x), Value::Uuid(y)) => x.cmp(y),
-        (Value::Json(x), Value::Json(y)) => x.to_string().cmp(&y.to_string()),
+        (Value::Json(x), Value::Json(y)) => compare_json(x, y),
         (Value::Unknown(x), Value::Unknown(y)) => x.cmp(y),
         _ => Ordering::Equal,
+    }
+}
+
+/// Structurally compare two `serde_json::Value`s without materialising
+/// either side via `to_string()`. The ordering is total and stable —
+/// suitable for `sort_by` — but is deliberately *not* the same lexical
+/// order `to_string()` produces; for sort UX purposes that doesn't
+/// matter, what matters is that equal inputs compare equal and that
+/// the result is deterministic across runs.
+///
+/// Performance: this allocates only when the operands are strings
+/// (already-allocated `&str`) and never for numeric / bool / null /
+/// nested-container leaves. Array compare is element-wise; object
+/// compare iterates `serde_json::Map`'s in-order entries which are
+/// already sorted when the feature is `preserve_order`-off (default).
+fn compare_json(a: &serde_json::Value, b: &serde_json::Value) -> Ordering {
+    use serde_json::Value as J;
+    fn rank(v: &J) -> u8 {
+        match v {
+            J::Null => 0,
+            J::Bool(_) => 1,
+            J::Number(_) => 2,
+            J::String(_) => 3,
+            J::Array(_) => 4,
+            J::Object(_) => 5,
+        }
+    }
+    match (a, b) {
+        (J::Null, J::Null) => Ordering::Equal,
+        (J::Bool(x), J::Bool(y)) => x.cmp(y),
+        (J::Number(x), J::Number(y)) => {
+            // serde_json::Number doesn't implement Ord because of NaN /
+            // mixed int-vs-float semantics; fall back to f64 with the
+            // partial_cmp -> Equal collapse the rest of the comparator
+            // already uses for floats.
+            match (x.as_f64(), y.as_f64()) {
+                (Some(xf), Some(yf)) => xf.partial_cmp(&yf).unwrap_or(Ordering::Equal),
+                _ => Ordering::Equal,
+            }
+        }
+        (J::String(x), J::String(y)) => x.cmp(y),
+        (J::Array(x), J::Array(y)) => {
+            for (xa, yb) in x.iter().zip(y.iter()) {
+                match compare_json(xa, yb) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+            }
+            x.len().cmp(&y.len())
+        }
+        (J::Object(x), J::Object(y)) => {
+            for ((kx, vx), (ky, vy)) in x.iter().zip(y.iter()) {
+                match kx.cmp(ky) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+                match compare_json(vx, vy) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+            }
+            x.len().cmp(&y.len())
+        }
+        // Different JSON kinds — fall back to the type rank.
+        _ => rank(a).cmp(&rank(b)),
     }
 }
 
@@ -1175,5 +1240,63 @@ mod tests {
         let input = "a\n\u{202E}b";
         let output = render_for_grid(input);
         assert_eq!(output, "a⏎·b");
+    }
+
+    #[test]
+    fn compare_json_structural_matches_string_for_equal_inputs() {
+        let a = serde_json::json!({"id": 1, "tags": ["a", "b"]});
+        let b = serde_json::json!({"id": 1, "tags": ["a", "b"]});
+        assert_eq!(
+            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn compare_json_orders_by_first_differing_field() {
+        let a = serde_json::json!({"name": "alice"});
+        let b = serde_json::json!({"name": "bob"});
+        assert_eq!(
+            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_json_orders_numbers_numerically_not_lexically() {
+        // String-based compare would put "10" before "2"; structural
+        // compare orders 2 < 10.
+        let a = serde_json::json!(2);
+        let b = serde_json::json!(10);
+        assert_eq!(
+            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_json_arrays_use_lexicographic_order() {
+        let a = serde_json::json!([1, 2, 3]);
+        let b = serde_json::json!([1, 2, 4]);
+        let c = serde_json::json!([1, 2]);
+        assert_eq!(
+            compare_values(Some(&Value::Json(a.clone())), Some(&Value::Json(b))),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_values(Some(&Value::Json(c)), Some(&Value::Json(a))),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_json_different_kinds_use_type_rank() {
+        // bool ranks below string, regardless of payload.
+        let a = serde_json::json!(true);
+        let b = serde_json::json!("a");
+        assert_eq!(
+            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
+            Ordering::Less
+        );
     }
 }

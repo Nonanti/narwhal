@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
-use narwhal_config::{ConnectionsFile, CredentialStore};
+use narwhal_config::{ConnectionsFile, CredentialStore, Settings};
 use narwhal_history::Journal;
 use tokio::time::sleep_until;
 use tracing::{debug, info};
@@ -70,6 +70,24 @@ impl App {
     /// `:add` wizard. Should be called immediately after [`Self::new`].
     pub fn with_connections_path(mut self, path: std::path::PathBuf) -> Self {
         self.core.set_connections_path(path);
+        self
+    }
+
+    /// Wire the per-connection recency cache so the sidebar can show
+    /// most-recently-opened connections first. Safe to skip in tests;
+    /// without it the ordering falls back to alphabetical.
+    pub fn with_last_used_path(mut self, path: std::path::PathBuf) -> Self {
+        self.core.set_last_used_path(path);
+        self
+    }
+
+    /// Apply a user-supplied [`Settings`] payload. Currently the only
+    /// field that takes effect at runtime is `theme`; the remaining
+    /// `editor` / `keybindings` fields are accepted and persisted but
+    /// will be honoured in a follow-up release (see the v1.0 release
+    /// notes for the planned activation timeline).
+    pub fn with_settings(mut self, settings: Settings) -> Self {
+        self.core.apply_settings(settings);
         self
     }
 

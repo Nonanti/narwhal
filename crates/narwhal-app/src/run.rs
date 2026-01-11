@@ -10,9 +10,11 @@ use uuid::Uuid;
 
 /// Check whether a SQL statement is a DDL statement by inspecting its
 /// first token. Matches CREATE, DROP, ALTER, TRUNCATE, RENAME
-/// (case-insensitive).
+/// (case-insensitive). Leading SQL comments (`-- ...\n` and `/* ... */`)
+/// are skipped first so a comment-prefixed migration still triggers the
+/// schema-refresh side-effect.
 pub fn is_ddl_statement(sql: &str) -> bool {
-    let head = sql
+    let head = strip_leading_comments(sql)
         .split_whitespace()
         .next()
         .unwrap_or("")
@@ -21,6 +23,33 @@ pub fn is_ddl_statement(sql: &str) -> bool {
         head.as_str(),
         "CREATE" | "DROP" | "ALTER" | "TRUNCATE" | "RENAME"
     )
+}
+
+/// Trim leading whitespace and SQL comments from `sql`. Stops as soon
+/// as a non-comment token begins. Handles nested block comments
+/// conservatively (only the outermost `*/` ends the comment).
+fn strip_leading_comments(sql: &str) -> &str {
+    let mut s = sql;
+    loop {
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("--") {
+            // Skip to end of line.
+            let end = rest.find('\n').map(|i| i + 1).unwrap_or(rest.len());
+            s = &rest[end..];
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("/*") {
+            // Skip to the next `*/`.
+            if let Some(end) = rest.find("*/") {
+                s = &rest[end + 2..];
+                continue;
+            }
+            // Unterminated block comment — there's no statement to
+            // classify.
+            return "";
+        }
+        return trimmed;
+    }
 }
 
 /// How the worker should execute a statement.
@@ -417,6 +446,22 @@ mod tests {
     fn ddl_classifier_leading_whitespace() {
         assert!(is_ddl_statement("   CREATE TABLE t (id INT)"));
         assert!(is_ddl_statement("\n\tDROP TABLE t"));
+    }
+
+    /// Round 1 bugfix: leading SQL comments used to break the
+    /// classifier so a comment-prefixed migration would not trigger
+    /// the post-DDL schema-refresh side-effect.
+    #[test]
+    fn ddl_classifier_skips_leading_comments() {
+        assert!(is_ddl_statement(
+            "-- migration 0001\nCREATE TABLE t (id INT)"
+        ));
+        assert!(is_ddl_statement("/* block */ DROP TABLE t"));
+        assert!(is_ddl_statement(
+            "-- one\n-- two\n /* three */ ALTER TABLE t ADD x INT"
+        ));
+        // Unterminated block comment: defensively classify as non-DDL.
+        assert!(!is_ddl_statement("/* open"));
     }
 
     #[test]

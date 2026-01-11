@@ -30,7 +30,7 @@
 //!   active-queries set is a no-op.
 //! * **Parameter binding** — ClickHouse's HTTP API does not support
 //!   server-side prepared statements. Parameters are rendered as SQL
-//!   literals via [`types::value_to_sql_literal`] and interpolated into
+//!   literals via the internal `types::value_to_sql_literal` and interpolated into
 //!   the query string. String escaping uses single-quote doubling to
 //!   prevent injection.
 //!
@@ -968,11 +968,19 @@ impl Connection for ClickhouseConnection {
             })
             .collect();
 
-        // Try to look up primary key from system.tables.
-        let primary_key_columns = self
-            .lookup_primary_key(schema, name)
-            .await
-            .unwrap_or_default();
+        // Try to look up primary key from system.tables. Log a miss
+        // (often a permission issue) instead of silently dropping it.
+        let primary_key_columns = match self.lookup_primary_key(schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                tracing::warn!(
+                    target: "narwhal::clickhouse",
+                    schema, table = name, error = %error,
+                    "primary-key lookup failed; continuing without"
+                );
+                Vec::new()
+            }
+        };
         let pk_set: std::collections::HashSet<String> = primary_key_columns.into_iter().collect();
 
         let columns: Vec<Column> = columns

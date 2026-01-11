@@ -4,12 +4,12 @@ expression: snapshot_core(&mut core)
 ---
 ┌ narwhal ───────────────────────┐┌ editor ────────────────────────────────────────────────────────────────────────────┐
 │                                ││  1 │                                                                               │
-│  no connections                ││                                                                                    │
+│  no connections yet            ││                                                                                    │
 │                                ││                                                                                    │
-│  add one to connections.toml   ││                                                                                    │
+│  press :add to create one      ││                                                                                    │
+│  or  :url <dsn> to paste a URL ││                                                                                    │
 │                                ││                                                                                    │
-│                                ││                                                                                    │
-│                                ││                                                                                    │
+│  press ? for help              ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │
 │                                ││                                                                                    │

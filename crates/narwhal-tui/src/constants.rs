@@ -14,7 +14,7 @@ pub const SIDEBAR_WIDTH: u16 = 34;
 pub const EDITOR_RESULTS_SPLIT_PCT: (u16, u16) = (55, 45);
 
 /// Hard cap for the help modal: `(max_width, max_height)` in cells.
-pub const HELP_MODAL_MAX: (u16, u16) = (64, 50);
+pub const HELP_MODAL_MAX: (u16, u16) = (72, 64);
 
 /// Hard cap for the history modal: `(max_width, max_height)` in cells.
 pub const HISTORY_MODAL_MAX: (u16, u16) = (80, 24);

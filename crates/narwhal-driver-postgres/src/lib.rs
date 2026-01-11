@@ -783,15 +783,43 @@ impl Connection for PostgresConnection {
             });
         }
 
-        let indexes = self.list_indexes(schema, name).await.unwrap_or_default();
-        let foreign_keys = self
-            .list_foreign_keys(schema, name)
-            .await
-            .unwrap_or_default();
-        let unique_constraints = self
-            .list_unique_constraints(schema, name)
-            .await
-            .unwrap_or_default();
+        // Index/FK/unique queries are best-effort — permission errors
+        // on a single catalogue should not fail `describe_table`, but
+        // they must surface in logs so opaque empty index lists in the
+        // UI are explainable.
+        let indexes = match self.list_indexes(schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                tracing::warn!(
+                    target: "narwhal::postgres",
+                    schema, table = name, error = %error,
+                    "list_indexes failed; continuing without"
+                );
+                Vec::new()
+            }
+        };
+        let foreign_keys = match self.list_foreign_keys(schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                tracing::warn!(
+                    target: "narwhal::postgres",
+                    schema, table = name, error = %error,
+                    "list_foreign_keys failed; continuing without"
+                );
+                Vec::new()
+            }
+        };
+        let unique_constraints = match self.list_unique_constraints(schema, name).await {
+            Ok(v) => v,
+            Err(error) => {
+                tracing::warn!(
+                    target: "narwhal::postgres",
+                    schema, table = name, error = %error,
+                    "list_unique_constraints failed; continuing without"
+                );
+                Vec::new()
+            }
+        };
 
         Ok(TableSchema {
             table: Table {

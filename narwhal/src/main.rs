@@ -31,9 +31,7 @@ async fn main() -> Result<()> {
 
     // L20: log instead of silently swallowing a malformed settings file
     // — a user-visible warning beats falling back to defaults blind.
-    // TODO: thread `_settings` into App once a `with_settings` constructor
-    // exists; until then the load+warn surface is the value.
-    let _settings = match Settings::load(&paths.settings_file()) {
+    let settings = match Settings::load(&paths.settings_file()) {
         Ok(s) => s,
         Err(error) => {
             tracing::warn!(
@@ -68,6 +66,8 @@ async fn main() -> Result<()> {
     let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
     let app = App::with_services(registry, connections, history, credentials, clipboard)
         .with_connections_path(paths.connections_file())
+        .with_last_used_path(paths.last_used_file())
+        .with_settings(settings)
         .with_plugins_dir(&paths.plugins_dir());
 
     if let Err(error) = app.run().await {

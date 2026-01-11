@@ -7,8 +7,8 @@
 //!
 //! * supports multiple logical schemas, surfaced via `information_schema`;
 //! * has a richer type lattice (huge ints, decimals, intervals, lists,
-//!   structs, maps, unions). [`crate::types`] keeps the lossy mapping in
-//!   one place so the rest of the code stays simple;
+//!   structs, maps, unions). The internal `types` module keeps the lossy
+//!   mapping in one place so the rest of the code stays simple;
 //! * supports query cancellation through [`duckdb::InterruptHandle`].
 //!
 //! The intent is parity with the SQLite driver's surface area, so the
@@ -653,7 +653,10 @@ impl Connection for DuckdbConnection {
                AND tc.table_name      = kcu.table_name
              WHERE tc.constraint_type = 'PRIMARY KEY'
                AND tc.table_schema = ? AND tc.table_name = ?";
-        let pk = self
+        // information_schema may be unavailable on some DuckDB builds;
+        // log the miss instead of returning a silently empty PK set,
+        // which makes the UI's missing PK indicator unexplainable.
+        let pk = match self
             .run(
                 PK_SQL,
                 &[
@@ -662,7 +665,17 @@ impl Connection for DuckdbConnection {
                 ],
             )
             .await
-            .ok();
+        {
+            Ok(r) => Some(r),
+            Err(error) => {
+                tracing::warn!(
+                    target: "narwhal::duckdb",
+                    schema, table = name, error = %error,
+                    "primary-key lookup failed; continuing without"
+                );
+                None
+            }
+        };
         let pk_set: std::collections::HashSet<String> = pk
             .map(|r| {
                 r.rows

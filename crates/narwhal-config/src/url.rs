@@ -163,6 +163,11 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
         ssl_key,
     } = extract_ssl_params(options)?;
 
+    // Same for SSH: pull `ssh_*` query params into a typed SshConfig so
+    // `:url postgres://h/db?ssh_host=jump&ssh_user=ubuntu` works
+    // end-to-end without any wizard interaction.
+    let (options, ssh) = extract_ssh_params(options)?;
+
     let port_segment = port.map(|p| format!(":{p}")).unwrap_or_default();
     let name = format!("{host}{port_segment}/{database}");
 
@@ -181,11 +186,43 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
                 ssl_root_cert,
                 ssl_cert,
                 ssl_key,
+                ssh,
                 ..Default::default()
             },
         },
         password,
     })
+}
+
+/// Pull the `ssh_host`/`ssh_user`/`ssh_port`/`ssh_key` keys out of
+/// the options map and assemble them into an [`SshConfig`]. A bare
+/// `ssh_host` is invalid (no default user); the parser errors out the
+/// same way the wizard would.
+fn extract_ssh_params(
+    mut options: BTreeMap<String, String>,
+) -> Result<(BTreeMap<String, String>, Option<narwhal_core::SshConfig>), UrlError> {
+    let host = options.remove("ssh_host");
+    let port = options.remove("ssh_port");
+    let user = options.remove("ssh_user");
+    let key = options.remove("ssh_key");
+    let any = host.is_some() || port.is_some() || user.is_some() || key.is_some();
+    if !any {
+        return Ok((options, None));
+    }
+    let Some(host) = host else {
+        return Err(UrlError::EmptyQueryKey("ssh_host".into()));
+    };
+    let Some(user) = user else {
+        return Err(UrlError::EmptyQueryKey("ssh_user".into()));
+    };
+    let port = match port {
+        Some(p) => Some(p.parse::<u16>().map_err(|_| UrlError::InvalidPort(p))?),
+        None => None,
+    };
+    let mut ssh = narwhal_core::SshConfig::new(host, user);
+    ssh.port = port;
+    ssh.key_path = key.map(PathBuf::from);
+    Ok((options, Some(ssh)))
 }
 
 fn parse_sqlite(rest: &str) -> ParsedUrl {
@@ -241,7 +278,14 @@ fn percent_decode(s: &str) -> Result<String, UrlError> {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
+            b'%' => {
+                // Reject truncated escapes outright instead of silently
+                // emitting a literal `%` — RFC 3986 considers `%X` or a
+                // trailing `%` malformed and surfacing the error catches
+                // typo'd URLs at parse time.
+                if i + 2 >= bytes.len() {
+                    return Err(UrlError::InvalidPercentEscape(s.to_owned()));
+                }
                 let high = hex_digit(bytes[i + 1])
                     .ok_or_else(|| UrlError::InvalidPercentEscape(s.to_owned()))?;
                 let low = hex_digit(bytes[i + 2])
@@ -419,6 +463,14 @@ mod tests {
         assert_eq!(percent_decode("hello+world").unwrap(), "hello world");
         assert_eq!(percent_decode("a%2Fb").unwrap(), "a/b");
         assert!(percent_decode("a%ZZ").is_err());
+    }
+
+    #[test]
+    fn percent_decode_rejects_truncated_escape() {
+        // Trailing `%X` or bare `%` used to slip through and emit a
+        // literal `%`. Both should error out now.
+        assert!(percent_decode("a%").is_err());
+        assert!(percent_decode("a%F").is_err());
     }
 
     #[test]

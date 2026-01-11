@@ -13,6 +13,8 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// Default palette — cool accent on the terminal's native
+    /// background. Designed to look right on a dark terminal.
     pub const DARK: Theme = Theme {
         background: Color::Reset,
         foreground: Color::Gray,
@@ -20,6 +22,30 @@ impl Theme {
         muted: Color::DarkGray,
         error: Color::LightRed,
         warning: Color::Yellow,
+    };
+
+    /// Light-terminal palette. `Color::Reset` keeps the terminal's
+    /// background, but the foreground / accent shift down a step so
+    /// text and selection still contrast on a white background.
+    pub const LIGHT: Theme = Theme {
+        background: Color::Reset,
+        foreground: Color::Black,
+        accent: Color::Blue,
+        muted: Color::Gray,
+        error: Color::Red,
+        warning: Color::Rgb(0xb0, 0x60, 0x00), // amber that survives on white
+    };
+
+    /// High-contrast palette — saturated primaries on a black
+    /// background. Aimed at low-vision users and projector displays
+    /// where the default dark theme washes out.
+    pub const HIGH_CONTRAST: Theme = Theme {
+        background: Color::Black,
+        foreground: Color::White,
+        accent: Color::Yellow,
+        muted: Color::White,
+        error: Color::LightRed,
+        warning: Color::LightYellow,
     };
 
     pub fn status_bar(&self) -> Style {
