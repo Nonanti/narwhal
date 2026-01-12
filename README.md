@@ -298,6 +298,42 @@ Built-in command names (`run`, `open`, `begin`, `quit`, …) are reserved;
 a plugin that tries to shadow one is rejected at load time. During a
 `:begin` transaction, `narwhal.sql_run` is refused entirely.
 
+## MCP server — talk to your databases through an AI agent
+
+narwhal ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
+server so any MCP-capable AI assistant (Claude Desktop, Cursor, Continue,
+Aider, …) can browse the connections you already configured and inspect
+their schema.
+
+```sh
+narwhal mcp   # runs the JSON-RPC stdio server
+```
+
+Wire it into Claude Desktop:
+
+```jsonc
+// ~/.config/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "narwhal": {
+      "command": "narwhal",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The v0 tool surface is intentionally narrow:
+
+| Tool | What it does |
+|------|--------------|
+| `list_connections` | List configured connections — driver, target, SSH flag. No IO, no credentials loaded. |
+| `describe_schema`  | Open a short-lived connection by name and return the schema / table / view tree. |
+
+`run_query`, `explain_query` and per-tool read-only enforcement land in
+the next release; the v0 surface is what we needed to validate the
+transport and the credential-resolution path.
+
 ## Transactions
 
 | Command | Action |

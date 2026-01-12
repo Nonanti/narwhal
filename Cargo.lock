@@ -2714,6 +2714,7 @@ dependencies = [
  "narwhal-app",
  "narwhal-config",
  "narwhal-history",
+ "narwhal-mcp",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -2884,6 +2885,29 @@ dependencies = [
  "once_cell",
  "regex",
  "rev_lines",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "narwhal-mcp"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "narwhal-config",
+ "narwhal-core",
+ "narwhal-driver-clickhouse",
+ "narwhal-driver-duckdb",
+ "narwhal-driver-mysql",
+ "narwhal-driver-postgres",
+ "narwhal-driver-sqlite",
+ "rusqlite",
+ "secrecy",
  "serde",
  "serde_json",
  "tempfile",

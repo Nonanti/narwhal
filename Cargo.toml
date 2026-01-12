@@ -16,6 +16,7 @@ members = [
     "crates/narwhal-vim",
     "crates/narwhal-tui",
     "crates/narwhal-app",
+    "crates/narwhal-mcp",
     "narwhal",
 ]
 
@@ -108,6 +109,7 @@ mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "se
 narwhal-vim = { path = "crates/narwhal-vim" }
 narwhal-tui = { path = "crates/narwhal-tui" }
 narwhal-app = { path = "crates/narwhal-app" }
+narwhal-mcp = { path = "crates/narwhal-mcp" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

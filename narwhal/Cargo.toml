@@ -21,6 +21,7 @@ workspace = true
 narwhal-app.workspace = true
 narwhal-config.workspace = true
 narwhal-history.workspace = true
+narwhal-mcp.workspace = true
 
 tokio.workspace = true
 anyhow.workspace = true

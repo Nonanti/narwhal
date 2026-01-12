@@ -1,0 +1,39 @@
+[package]
+name = "narwhal-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Model Context Protocol (MCP) server for narwhal — exposes connections, schema and queries to AI agents"
+keywords = ["mcp", "database", "ai", "agent"]
+categories = ["command-line-utilities", "database"]
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-core.workspace = true
+narwhal-config.workspace = true
+narwhal-driver-postgres.workspace = true
+narwhal-driver-sqlite.workspace = true
+narwhal-driver-mysql.workspace = true
+narwhal-driver-duckdb.workspace = true
+narwhal-driver-clickhouse.workspace = true
+
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+secrecy.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util"] }
+# `describe_schema_reads_real_sqlite_tables` seeds a real sqlite file
+# so the test drives the production driver path end-to-end.
+rusqlite.workspace = true
+tempfile = "3"

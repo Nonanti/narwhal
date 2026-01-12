@@ -7,8 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — the next entry will land here when the first post-v1.0
-change is merged. See `[1.0.0]` below for the inaugural release._
+### Added
+
+- **MCP server** (`narwhal-mcp` crate + `narwhal mcp` subcommand).
+  Exposes narwhal's configured connections to AI agents (Claude Desktop,
+  Cursor, Continue, Aider, …) over the canonical Model Context Protocol
+  stdio transport (JSON-RPC 2.0, protocol version `2024-11-05`). v0 ships
+  two tools:
+  - `list_connections` — read-only catalogue of the connections defined
+    in `~/.config/narwhal/connections.toml`. No IO, no credentials
+    loaded.
+  - `describe_schema` — opens a short-lived connection, returns the
+    schema/table/view tree via the same `list_all_tables` path the TUI
+    uses, then closes. Credential resolution mirrors the TUI: keyring
+    first, `~/.pgpass`/env fallback second.
+
+  Wire-up for Claude Desktop:
+
+  ```jsonc
+  // ~/.config/Claude/claude_desktop_config.json
+  {
+    "mcpServers": {
+      "narwhal": { "command": "narwhal", "args": ["mcp"] }
+    }
+  }
+  ```
+
+  Logs go to stderr in MCP mode (stdout is the JSON-RPC transport).
+
+### Fixed
+
+- **ClickHouse driver: drop transitive openssl dependency.**
+  `narwhal-driver-clickhouse` declared `reqwest` with the `rustls-tls`
+  feature but kept `default-features = true`, so the `default-tls` chain
+  (native-tls → openssl-sys) was still active. The workspace already
+  avoids OpenSSL elsewhere (the `keyring` crate uses `crypto-rust`).
+  Setting `default-features = false` and re-listing the actually-needed
+  default features (`charset`, `http2`, `system-proxy`) removes
+  `openssl-sys` from the whole workspace dependency graph, drops the
+  `libssl-dev` requirement for Linux builds and shrinks the audit
+  surface.
 
 ## [1.0.0] — 2026-05-22
 
