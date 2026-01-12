@@ -159,7 +159,20 @@ async fn run_mcp(paths: ConfigPaths) -> Result<()> {
 
     let drivers = Arc::new(McpDriverRegistry::with_defaults());
     let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
-    let ctx = ServerContext::new(drivers, Arc::new(connections), credentials);
+    let journal = match Journal::open(paths.history_file()).await {
+        Ok(j) => Some(Arc::new(j)),
+        Err(error) => {
+            // Audit logging is best-effort; carry on without it so an
+            // unwriteable disk does not prevent the agent from talking
+            // to a working database.
+            tracing::warn!(error = %error, "MCP audit journal disabled");
+            None
+        }
+    };
+    let mut ctx = ServerContext::new(drivers, Arc::new(connections), credentials);
+    if let Some(journal) = journal {
+        ctx = ctx.with_journal(journal);
+    }
 
     McpServer::new(ctx)
         .serve_stdio()

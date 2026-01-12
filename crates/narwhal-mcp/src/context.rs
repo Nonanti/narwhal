@@ -10,10 +10,16 @@ use std::sync::Arc;
 
 use narwhal_config::{ConnectionsFile, CredentialStore};
 use narwhal_core::{Connection, ConnectionConfig};
+use narwhal_history::{HistoryEntry, Journal};
 use secrecy::ExposeSecret;
 
 use crate::error::McpError;
 use crate::registry::DriverRegistry;
+
+/// Free-form source tag written to every `HistoryEntry` the MCP server
+/// produces. The TUI tags itself implicitly with `None`; auditors search
+/// for `source = "mcp"` to isolate agent-driven traffic.
+pub const AUDIT_SOURCE: &str = "mcp";
 
 /// State accessible to tool implementations.
 ///
@@ -23,6 +29,11 @@ pub struct ServerContext {
     drivers: Arc<DriverRegistry>,
     connections: Arc<ConnectionsFile>,
     credentials: Arc<dyn CredentialStore>,
+    /// Optional. When `Some`, every tool that touches the database appends
+    /// an audited entry tagged `source = "mcp"` so the operator can audit
+    /// agent activity offline. When `None` (typically in unit tests), the
+    /// audit calls are no-ops.
+    journal: Option<Arc<Journal>>,
 }
 
 impl ServerContext {
@@ -35,7 +46,16 @@ impl ServerContext {
             drivers,
             connections,
             credentials,
+            journal: None,
         }
+    }
+
+    /// Attach an audit journal. Returns `self` so the constructor can be
+    /// used fluently in the binary entry point.
+    #[must_use]
+    pub fn with_journal(mut self, journal: Arc<Journal>) -> Self {
+        self.journal = Some(journal);
+        self
     }
 
     pub fn connections(&self) -> &ConnectionsFile {
@@ -80,5 +100,40 @@ impl ServerContext {
             &config.driver,
             &config.params,
         ))
+    }
+
+    /// Append an audit entry for a query the agent is about to run.
+    ///
+    /// The entry carries `source = "mcp"` so the operator can grep for
+    /// agent-issued statements after the fact. We resolve the connection
+    /// metadata best-effort and swallow journal-write failures: an
+    /// unwriteable history file must not break the request path.
+    pub async fn audit_query(&self, connection_name: &str, sql: &str, read_only: bool) {
+        let Some(journal) = self.journal.as_ref() else {
+            return;
+        };
+        // We always log the SQL the agent supplied; the journal already
+        // redacts known secret patterns (CREATE USER ... PASSWORD '…' etc.)
+        // before writing, so we don't need to do it here.
+        let mut entry = HistoryEntry::success(sql).with_source(AUDIT_SOURCE);
+        if let Some(config) = self
+            .connections
+            .connections
+            .iter()
+            .find(|c| c.name == connection_name)
+        {
+            entry = entry
+                .with_connection(config.id, &config.name)
+                .with_driver(&config.driver);
+        }
+        // Hint the agent's intent (read-only/full) by appending a comment
+        // suffix — the entry struct does not have a dedicated field and we
+        // don't want to grow the schema for a single bit.
+        if !read_only {
+            entry.sql = format!("-- mcp: read_only=false\n{}", entry.sql);
+        }
+        if let Err(error) = journal.append(&entry).await {
+            tracing::warn!(error = %error, "MCP audit append failed");
+        }
     }
 }

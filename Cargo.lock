@@ -2899,6 +2899,8 @@ name = "narwhal-mcp"
 version = "1.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "chrono",
  "narwhal-config",
  "narwhal-core",
  "narwhal-driver-clickhouse",
@@ -2906,6 +2908,7 @@ dependencies = [
  "narwhal-driver-mysql",
  "narwhal-driver-postgres",
  "narwhal-driver-sqlite",
+ "narwhal-history",
  "rusqlite",
  "secrecy",
  "serde",

@@ -13,9 +13,11 @@ use crate::protocol::ToolDescriptor;
 
 mod describe_schema;
 mod list_connections;
+mod run_query;
 
 pub use describe_schema::DescribeSchemaTool;
 pub use list_connections::ListConnectionsTool;
+pub use run_query::RunQueryTool;
 
 /// A single MCP tool callable via `tools/call`.
 ///
@@ -83,7 +85,11 @@ impl ToolRegistry {
     /// Registry preloaded with every tool bundled with narwhal-mcp.
     pub fn with_defaults() -> Self {
         Self {
-            tools: vec![Box::new(ListConnectionsTool), Box::new(DescribeSchemaTool)],
+            tools: vec![
+                Box::new(ListConnectionsTool),
+                Box::new(DescribeSchemaTool),
+                Box::new(RunQueryTool),
+            ],
         }
     }
 

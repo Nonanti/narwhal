@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 narwhal-core.workspace = true
 narwhal-config.workspace = true
+narwhal-history.workspace = true
 narwhal-driver-postgres.workspace = true
 narwhal-driver-sqlite.workspace = true
 narwhal-driver-mysql.workspace = true
@@ -30,10 +31,12 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 secrecy.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util"] }
-# `describe_schema_reads_real_sqlite_tables` seeds a real sqlite file
-# so the test drives the production driver path end-to-end.
+# Integration tests seed a real sqlite file so the production driver path
+# is exercised end-to-end (handshake.rs + run_query.rs).
 rusqlite.workspace = true
 tempfile = "3"
+chrono.workspace = true

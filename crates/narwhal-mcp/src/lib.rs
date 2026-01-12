@@ -48,6 +48,7 @@
 
 pub mod context;
 pub mod error;
+pub mod json_value;
 pub mod protocol;
 pub mod registry;
 pub mod server;

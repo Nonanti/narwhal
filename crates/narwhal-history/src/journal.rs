@@ -132,6 +132,12 @@ pub struct HistoryEntry {
     pub rows_returned: Option<u64>,
     pub outcome: Outcome,
     pub error: Option<String>,
+    /// Who produced this entry. Free-form tag — `"tui"` (default for
+    /// existing on-disk entries via `#[serde(default)]`) or `"mcp"` for
+    /// statements that came through the MCP server. Future runtimes
+    /// (CLI `-e`, plugin, …) tag themselves the same way.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 impl HistoryEntry {
@@ -147,7 +153,19 @@ impl HistoryEntry {
             rows_returned: None,
             outcome: Outcome::Success,
             error: None,
+            source: None,
         }
+    }
+
+    /// Tag the entry with a free-form source identifier.
+    ///
+    /// Used by the MCP server to mark statements as `"mcp"` so an
+    /// auditor can separate agent-issued traffic from interactive TUI
+    /// usage.
+    #[must_use]
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
     }
 
     #[must_use]
