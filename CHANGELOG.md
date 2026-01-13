@@ -13,14 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Exposes narwhal's configured connections to AI agents (Claude Desktop,
   Cursor, Continue, Aider, …) over the canonical Model Context Protocol
   stdio transport (JSON-RPC 2.0, protocol version `2024-11-05`). v0 ships
-  two tools:
+  five tools:
   - `list_connections` — read-only catalogue of the connections defined
     in `~/.config/narwhal/connections.toml`. No IO, no credentials
-    loaded.
-  - `describe_schema` — opens a short-lived connection, returns the
-    schema/table/view tree via the same `list_all_tables` path the TUI
-    uses, then closes. Credential resolution mirrors the TUI: keyring
-    first, `~/.pgpass`/env fallback second.
+    loaded. Honours the workspace ACL when one is attached.
+  - `describe_schema` — opens a short-lived connection and returns the
+    schema/table/view tree.
+  - `describe_table` — full `TableSchema` for one table (columns,
+    indexes, foreign keys, unique constraints) plus engine-native DDL
+    when the driver supports `fetch_ddl`.
+  - `run_query` — executes a single statement. Defaults to
+    **read-only** with three layers of defence: a syntactic guard
+    (statement must start with `SELECT/WITH/SHOW/EXPLAIN/DESCRIBE/
+    PRAGMA/VALUES/TABLE`), a `BEGIN ... ROLLBACK` sandwich, and a row
+    limit (default 1 000, max 10 000). `read_only=false` disables all
+    three but is itself rejected when the active workspace forbids
+    writes. Every call is audit-logged.
+  - `explain_query` — driver-native EXPLAIN with the right prefix per
+    dialect (`EXPLAIN (VERBOSE)` on Postgres, `EXPLAIN QUERY PLAN` on
+    SQLite, `EXPLAIN PLAN` on ClickHouse, …). Optional `analyze=true`
+    runs the statement to gather real cardinalities on engines that
+    support it (PG / MySQL / DuckDB).
+
+  Credential resolution mirrors the TUI: keyring first,
+  `~/.pgpass`/env fallback second.
 
   Wire-up for Claude Desktop:
 
@@ -34,6 +50,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```
 
   Logs go to stderr in MCP mode (stdout is the JSON-RPC transport).
+
+- **MCP audit log.** `narwhal-history::HistoryEntry` gained a
+  `source: Option<String>` field (backward-compatible via
+  `#[serde(default)]`). Every MCP tool that touches a database appends
+  an entry tagged `"mcp"` to the existing `history.jsonl` so operators
+  can `jq 'select(.source == "mcp")'` to isolate agent-issued
+  traffic. Write calls (`read_only=false`) prepend a
+  `-- mcp: read_only=false` marker to the recorded SQL.
+
+- **Workspace file** — `.narwhal/workspace.toml`. A repo-local file
+  (discovered by walking up from `pwd`, same idiom as `.git`) declares
+  which subset of `connections.toml` the MCP server may expose and
+  whether writes are permitted. The TUI ignores the file for now
+  — v1.1 will wire it up across the application. Schema:
+
+  ```toml
+  allowed_connections = ["staging", "test"]   # empty = all
+  allow_writes = false                         # default true
+  ```
+
+  `deny_unknown_fields` is on so a typo like `allow_write` fails
+  loudly instead of silently being permissive.
 
 ### Fixed
 

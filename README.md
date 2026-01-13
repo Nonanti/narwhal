@@ -323,16 +323,42 @@ Wire it into Claude Desktop:
 }
 ```
 
-The v0 tool surface is intentionally narrow:
+The v0 tool surface:
 
 | Tool | What it does |
 |------|--------------|
-| `list_connections` | List configured connections — driver, target, SSH flag. No IO, no credentials loaded. |
-| `describe_schema`  | Open a short-lived connection by name and return the schema / table / view tree. |
+| `list_connections` | List configured connections — driver, target, SSH flag. No IO, no credentials loaded. Honours the workspace ACL. |
+| `describe_schema`  | Schema / table / view tree for one connection. |
+| `describe_table`   | Full structure of one table — columns, indexes, foreign keys, unique constraints, engine-native DDL. |
+| `run_query`        | Execute a single statement. **Read-only by default** — syntactic guard + `BEGIN/ROLLBACK` sandwich + row limit (default 1 000). `read_only=false` opts out, subject to the workspace ACL. |
+| `explain_query`    | Driver-native EXPLAIN with the right dialect prefix. Optional `analyze=true` runs the statement for real cardinalities (PG / MySQL / DuckDB). |
 
-`run_query`, `explain_query` and per-tool read-only enforcement land in
-the next release; the v0 surface is what we needed to validate the
-transport and the credential-resolution path.
+Every database-touching call is audit-logged to
+`~/.local/share/narwhal/history.jsonl` with `source: "mcp"` so you can
+`jq 'select(.source == "mcp")'` to isolate agent traffic.
+
+### Workspace scoping — `.narwhal/workspace.toml`
+
+A repo-local file (discovered by walking up from `pwd`, same idiom as
+`.git`) declares what the MCP server may expose when narwhal runs from
+inside that directory tree. Commit it next to your code so an agent
+launched against your project can only reach the databases you list.
+
+```toml
+# .narwhal/workspace.toml
+
+# Connection names from connections.toml that the agent may target.
+# Empty / omitted = all of them.
+allowed_connections = ["staging", "test"]
+
+# When false, run_query rejects read_only=false. Default true.
+allow_writes = false
+```
+
+Disallowed connections appear to the agent exactly as a misspelled
+name would (the `list_connections` result hides them, `describe_*` /
+`run_query` calls answer with the same "unknown connection" tool-level
+error) — the agent retries against the visible set automatically.
 
 ## Transactions
 

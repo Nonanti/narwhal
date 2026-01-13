@@ -15,6 +15,7 @@ use secrecy::ExposeSecret;
 
 use crate::error::McpError;
 use crate::registry::DriverRegistry;
+use crate::workspace::Workspace;
 
 /// Free-form source tag written to every `HistoryEntry` the MCP server
 /// produces. The TUI tags itself implicitly with `None`; auditors search
@@ -34,6 +35,11 @@ pub struct ServerContext {
     /// agent activity offline. When `None` (typically in unit tests), the
     /// audit calls are no-ops.
     journal: Option<Arc<Journal>>,
+    /// Optional. When `Some`, every connection-touching tool consults the
+    /// workspace ACL before dispatch. `None` means "no workspace file
+    /// found" — expose every connection from `connections.toml` and
+    /// honour the per-call `read_only` flag without further restriction.
+    workspace: Option<Arc<Workspace>>,
 }
 
 impl ServerContext {
@@ -47,6 +53,7 @@ impl ServerContext {
             connections,
             credentials,
             journal: None,
+            workspace: None,
         }
     }
 
@@ -58,8 +65,54 @@ impl ServerContext {
         self
     }
 
+    /// Attach a workspace file. When attached, ACL checks are enforced
+    /// on every connection-touching tool call.
+    #[must_use]
+    pub fn with_workspace(mut self, workspace: Arc<Workspace>) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
     pub fn connections(&self) -> &ConnectionsFile {
         &self.connections
+    }
+
+    /// Connections visible to the agent under the current workspace.
+    ///
+    /// Tools that enumerate connections (`list_connections`) call this
+    /// instead of touching `connections()` directly so the response
+    /// already reflects the workspace allow-list.
+    pub fn visible_connections(&self) -> Vec<&ConnectionConfig> {
+        self.connections
+            .connections
+            .iter()
+            .filter(|c| self.is_connection_allowed(&c.name))
+            .collect()
+    }
+
+    /// True when `name` is visible under the current workspace's ACL.
+    /// `true` is returned when no workspace is attached — absence of a
+    /// workspace file means "everything goes", matching the documented
+    /// default in the README.
+    pub fn is_connection_allowed(&self, name: &str) -> bool {
+        self.workspace
+            .as_ref()
+            .map_or(true, |ws| ws.connection_allowed(name))
+    }
+
+    /// True when writes are permitted in the current workspace.
+    /// `true` is returned when no workspace is attached.
+    pub fn writes_allowed(&self) -> bool {
+        self.workspace
+            .as_ref()
+            .map_or(true, |ws| ws.file.allow_writes)
+    }
+
+    /// Borrow the workspace if one is attached. Tools usually go through
+    /// the helper methods above instead of inspecting the workspace
+    /// directly.
+    pub fn workspace(&self) -> Option<&Workspace> {
+        self.workspace.as_deref()
     }
 
     /// Resolve a connection by user-facing name and dial it.
@@ -69,6 +122,14 @@ impl ServerContext {
     /// — every MCP call is short and the per-call dial cost is negligible
     /// compared to the network round-trips that follow.
     pub async fn open_connection(&self, name: &str) -> Result<Box<dyn Connection>, McpError> {
+        if !self.is_connection_allowed(name) {
+            // Workspace ACLs reject up-front so the agent sees a clear
+            // "not exposed" signal instead of a vague driver error
+            // after the dial. We re-use `UnknownConnection` because
+            // that's exactly how the agent should treat the rejection:
+            // re-call `list_connections` and pick from the visible set.
+            return Err(McpError::UnknownConnection(name.to_string()));
+        }
         let config = self.find_by_name(name)?;
         let driver = self.drivers.get(&config.driver)?;
         let password = self.resolve_password(&config).await?;

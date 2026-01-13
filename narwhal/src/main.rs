@@ -7,7 +7,7 @@ use narwhal_app::clipboard::{ArboardClipboard, Clipboard};
 use narwhal_app::{App, DriverRegistry as AppDriverRegistry};
 use narwhal_config::{ConfigPaths, ConnectionsFile, CredentialStore, KeyringStore, Settings};
 use narwhal_history::Journal;
-use narwhal_mcp::{DriverRegistry as McpDriverRegistry, McpServer, ServerContext};
+use narwhal_mcp::{DriverRegistry as McpDriverRegistry, McpServer, ServerContext, Workspace};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
@@ -172,6 +172,30 @@ async fn run_mcp(paths: ConfigPaths) -> Result<()> {
     let mut ctx = ServerContext::new(drivers, Arc::new(connections), credentials);
     if let Some(journal) = journal {
         ctx = ctx.with_journal(journal);
+    }
+
+    // Workspace discovery: walk up from `pwd` looking for
+    // `.narwhal/workspace.toml`. Found = scoped MCP; not found = legacy
+    // behaviour (expose every connection, allow writes).
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    match Workspace::discover(&cwd) {
+        Ok(Some(ws)) => {
+            tracing::info!(
+                root = %ws.root.display(),
+                allowed_connections = ws.file.allowed_connections.len(),
+                allow_writes = ws.file.allow_writes,
+                "workspace attached"
+            );
+            ctx = ctx.with_workspace(Arc::new(ws));
+        }
+        Ok(None) => {
+            tracing::info!("no workspace file found; exposing every connection");
+        }
+        Err(error) => {
+            // Refuse to start with a broken workspace file — silent
+            // fallback would expose more than the user intended.
+            return Err(anyhow::anyhow!("workspace discovery: {error}"));
+        }
     }
 
     McpServer::new(ctx)

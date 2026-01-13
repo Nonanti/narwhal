@@ -114,7 +114,24 @@ impl Tool for RunQueryTool {
 
         let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
-        if args.read_only {
+        // Workspace ACL: if `allow_writes = false` the agent cannot opt
+        // out of read_only mode even by passing the flag. We refuse
+        // up-front with a clear message so the agent can adapt.
+        let read_only = if !ctx.writes_allowed() && !args.read_only {
+            return Ok(ToolOutput::err(format!(
+                "the active workspace (root: {root}) disallows writes \
+                 — `read_only=false` is rejected. Open a permissive \
+                 workspace or call again with `read_only=true`.",
+                root = ctx
+                    .workspace()
+                    .map(|w| w.root.display().to_string())
+                    .unwrap_or_default()
+            )));
+        } else {
+            args.read_only
+        };
+
+        if read_only {
             if let Err(reason) = guard_read_only(&args.sql) {
                 return Ok(ToolOutput::err(format!(
                     "read-only guard rejected the statement: {reason}. \
@@ -136,11 +153,11 @@ impl Tool for RunQueryTool {
 
         // Audit-log the call. We log *before* dispatch so the journal still
         // captures the attempt if the query hangs or panics.
-        ctx.audit_query(&args.connection, &args.sql, args.read_only)
+        ctx.audit_query(&args.connection, &args.sql, read_only)
             .await;
 
         let started = Instant::now();
-        let exec_result = if args.read_only {
+        let exec_result = if read_only {
             run_in_sandbox(conn.as_mut(), &args.sql).await
         } else {
             conn.execute(&args.sql, &[]).await
@@ -180,7 +197,7 @@ impl Tool for RunQueryTool {
 
         let payload = json!({
             "connection": args.connection,
-            "read_only": args.read_only,
+            "read_only": read_only,
             "elapsed_ms": elapsed_ms,
             "columns": columns,
             "rows": rows,
