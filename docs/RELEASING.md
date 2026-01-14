@@ -33,8 +33,8 @@ release commit.
 ## 2. Commit and tag
 
 ```sh
-git commit -am "chore: release v1.0.0"
-git tag -s v1.0.0 -m "v1.0.0"
+git commit -am "chore: release v1.1.0"
+git tag -s v1.1.0 -m "v1.1.0"
 ```
 
 ## 3. Publish to crates.io (in dependency order)
@@ -55,6 +55,9 @@ cargo publish -p narwhal-plugin-lua
 cargo publish -p narwhal-vim
 cargo publish -p narwhal-tui
 cargo publish -p narwhal-app
+# `narwhal-mcp` depends on -core, -config, -history and every driver,
+# so it must publish *after* all of them but *before* the bin.
+cargo publish -p narwhal-mcp
 cargo publish -p narwhal
 ```
 
@@ -70,7 +73,7 @@ cargo build --release --bin narwhal
 ## 5. Push the tag
 
 ```sh
-git push origin v1.0.0
+git push origin v1.1.0
 ```
 
 ## 6. Update packaging templates

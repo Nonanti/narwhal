@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet — the next entry will land here when the first post-v1.1
+change is merged. See `[1.1.0]` below for the most recent release._
+
+## [1.1.0] — 2026-05-22
+
+First post-v1.0 release. Headline feature: narwhal now ships a built-in
+Model Context Protocol server so AI agents can use the same connection
+config the TUI does. No breaking changes to the public Rust API or to
+the on-disk configuration formats.
+
 ### Added
 
 - **MCP server** (`narwhal-mcp` crate + `narwhal mcp` subcommand).
