@@ -30,7 +30,7 @@ use tracing::warn;
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::json_value::value_to_json;
+use crate::json_value::{json_array_to_values, value_to_json};
 use crate::tools::{Tool, ToolOutput};
 
 /// Default ceiling on returned rows. A handful of agents (Claude Desktop,
@@ -47,6 +47,12 @@ const MAX_LIMIT: usize = 10_000;
 struct Args {
     connection: String,
     sql: String,
+    /// Positional bind parameters. The driver substitutes them for
+    /// placeholder tokens (`$1`/`$2` on PG, `?` everywhere else). When
+    /// omitted the statement runs without parameters — use this for
+    /// literal-only queries.
+    #[serde(default)]
+    params: Vec<narwhal_core::Value>,
     /// `true` (default) wraps the statement in a `BEGIN ... ROLLBACK`
     /// sandwich and rejects anything that does not look like a query.
     #[serde(default = "default_read_only")]
@@ -74,9 +80,11 @@ impl Tool for RunQueryTool {
          read-only: the statement is rejected unless it begins with \
          SELECT/WITH/SHOW/EXPLAIN/DESCRIBE/PRAGMA/VALUES, and even then it \
          runs inside a transaction that always ROLLBACKs. Set \
-         `read_only=false` to allow writes (use sparingly). Rows are \
-         truncated to `limit` (default 1000, max 10000) and the response \
-         includes a `truncated` flag when truncation occurred."
+         `read_only=false` to allow writes (use sparingly). Pass `params` \
+         to bind values for placeholder tokens (`$1`/`$2` on Postgres, \
+         `?` elsewhere) and avoid string-concatenation SQL injection. \
+         Rows are truncated to `limit` (default 1000, max 10000) and the \
+         response includes a `truncated` flag when truncation occurred."
     }
 
     fn input_schema(&self) -> Value {
@@ -89,7 +97,12 @@ impl Tool for RunQueryTool {
                 },
                 "sql": {
                     "type": "string",
-                    "description": "Single SQL statement to execute. Multi-statement scripts are not supported in this tool — use `run_query` once per statement."
+                    "description": "Single SQL statement to execute. Use placeholders (`$1`/`$2` on Postgres, `?` elsewhere) plus `params` instead of string-interpolating values. Multi-statement scripts are not supported."
+                },
+                "params": {
+                    "type": "array",
+                    "description": "Positional bind parameters. JSON primitives map to SQL scalars; `{\"$bytes_base64\": \"<base64>\"}` envelopes bind as BYTEA/BLOB. Length must match the number of placeholders in `sql`.",
+                    "items": true
                 },
                 "read_only": {
                     "type": "boolean",
@@ -109,8 +122,41 @@ impl Tool for RunQueryTool {
     }
 
     async fn call(&self, ctx: &ServerContext, arguments: Value) -> Result<ToolOutput, McpError> {
-        let args: Args = serde_json::from_value(arguments)
+        // Deserialize against a `serde_json::Value`-typed `params` field
+        // first so we get position-aware error messages out of the JSON
+        // converter. `Args` directly typed as `Vec<narwhal_core::Value>`
+        // would surface serde's generic "expected X, got Y" instead.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawArgs {
+            connection: String,
+            sql: String,
+            #[serde(default)]
+            params: Vec<serde_json::Value>,
+            #[serde(default = "default_read_only")]
+            read_only: bool,
+            #[serde(default)]
+            limit: Option<usize>,
+        }
+        let raw: RawArgs = serde_json::from_value(arguments)
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+
+        let params = match json_array_to_values(&raw.params) {
+            Ok(v) => v,
+            Err(error) => {
+                // Param decoding errors are *agent* mistakes — surface
+                // them as a tool-level error so the agent retries with
+                // the right shape instead of crashing the dispatch.
+                return Ok(ToolOutput::err(format!("invalid params: {error}")));
+            }
+        };
+        let args = Args {
+            connection: raw.connection,
+            sql: raw.sql,
+            params,
+            read_only: raw.read_only,
+            limit: raw.limit,
+        };
 
         let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
@@ -158,9 +204,9 @@ impl Tool for RunQueryTool {
 
         let started = Instant::now();
         let exec_result = if read_only {
-            run_in_sandbox(conn.as_mut(), &args.sql).await
+            run_in_sandbox(conn.as_mut(), &args.sql, &args.params).await
         } else {
-            conn.execute(&args.sql, &[]).await
+            conn.execute(&args.sql, &args.params).await
         };
         let elapsed_ms = started.elapsed().as_millis() as u64;
 
@@ -292,15 +338,16 @@ fn strip_leading_comments_and_whitespace(sql: &str) -> &str {
 async fn run_in_sandbox(
     conn: &mut dyn narwhal_core::Connection,
     sql: &str,
+    params: &[narwhal_core::Value],
 ) -> Result<narwhal_core::QueryResult, narwhal_core::Error> {
     if let Err(error) = conn.begin().await {
         warn!(%error, "read-only sandbox: BEGIN failed, executing without transaction");
         // Falling through to a bare execute is safer than refusing the
         // call: drivers that don't support transactions (e.g. ClickHouse)
         // are useful read-only without one.
-        return conn.execute(sql, &[]).await;
+        return conn.execute(sql, params).await;
     }
-    let result = conn.execute(sql, &[]).await;
+    let result = conn.execute(sql, params).await;
     if let Err(error) = conn.rollback().await {
         warn!(%error, "read-only sandbox: ROLLBACK after query failed");
     }

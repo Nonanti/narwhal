@@ -320,6 +320,110 @@ async fn audit_journal_records_mcp_source() {
 }
 
 #[tokio::test]
+async fn bind_parameters_substitute_into_placeholders() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    seed_sqlite(&path);
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT name FROM users WHERE name = ?",
+            "params": ["alice"]
+        })),
+    )
+    .await;
+
+    assert_ne!(response["result"]["isError"], true);
+    let body = tool_body(&response);
+    assert_eq!(body["row_count"], 1);
+    assert_eq!(body["rows"][0][0], "alice");
+}
+
+#[tokio::test]
+async fn bind_parameters_avoid_sql_injection_in_string_param() {
+    // A literal string containing a quote and a SQL fragment is treated
+    // as data, not code. The query returns zero rows because no user
+    // is literally named `'; DROP TABLE users; --`.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    seed_sqlite(&path);
+
+    let injection = "'; DROP TABLE users; --";
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT name FROM users WHERE name = ?",
+            "params": [injection]
+        })),
+    )
+    .await;
+
+    assert_ne!(response["result"]["isError"], true);
+    let body = tool_body(&response);
+    assert_eq!(body["row_count"], 0, "injection payload must match no rows");
+
+    // Confirm the table still exists — the parameter binding prevented
+    // the DROP from being parsed as code.
+    let conn = rusqlite::Connection::open(&path).expect("open");
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(count, 3, "users table must still hold the seeded rows");
+}
+
+#[tokio::test]
+async fn bind_parameter_count_mismatch_is_tool_error() {
+    // Two placeholders, one param — the driver rejects, we surface as
+    // a tool-level error so the agent retries with the right shape.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    seed_sqlite(&path);
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT * FROM users WHERE id = ? AND name = ?",
+            "params": [1]
+        })),
+    )
+    .await;
+
+    assert_eq!(response["result"]["isError"], true);
+}
+
+#[tokio::test]
+async fn bind_bytes_param_via_base64_envelope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch("CREATE TABLE blobs(id INTEGER PRIMARY KEY, payload BLOB);")
+            .expect("seed");
+    }
+
+    // base64("hello") == "aGVsbG8="
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT length(?)",
+            "params": [{"$bytes_base64": "aGVsbG8="}]
+        })),
+    )
+    .await;
+
+    let body = tool_body(&response);
+    assert_eq!(
+        body["rows"][0][0], 5,
+        "bytes round-tripped as a 5-byte BLOB"
+    );
+}
+
+#[tokio::test]
 async fn audit_marks_explicit_writes() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("db.sqlite");

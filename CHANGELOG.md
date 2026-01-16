@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`run_query` accepts bind parameters.** A new optional `params`
+  argument carries the positional values the driver substitutes for
+  placeholder tokens (`$1`/`$2` on Postgres, `?` everywhere else).
+  Eliminates string-interpolation SQL-injection risk in agent-issued
+  queries:
+
+  ```jsonc
+  {
+    "name": "run_query",
+    "arguments": {
+      "connection": "prod",
+      "sql": "SELECT * FROM users WHERE name = ?",
+      "params": ["alice"]
+    }
+  }
+  ```
+
+  JSON primitives map to the obvious SQL scalars; the
+  `{"$bytes_base64": "<base64>"}` envelope (already used in the
+  response shape) binds as a BLOB/BYTEA. Length mismatches surface as
+  tool-level errors so the agent can recover. `narwhal_mcp::json_value`
+  exposes `json_to_value` / `json_array_to_values` for the inverse of
+  the existing `value_to_json`.
+
 - **Headless `exec` mode.** `narwhal exec --conn NAME "SQL"` runs one
   statement and prints the result to stdout, then exits. The third
   runtime alongside the TUI and the MCP server — same `connections.toml`,
