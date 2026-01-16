@@ -20,11 +20,14 @@ workspace = true
 [dependencies]
 narwhal-app.workspace = true
 narwhal-config.workspace = true
+narwhal-core.workspace = true
 narwhal-history.workspace = true
 narwhal-mcp.workspace = true
 
 tokio.workspace = true
 anyhow.workspace = true
+clap.workspace = true
+secrecy.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true

@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — the next entry will land here when the first post-v1.1
-change is merged. See `[1.1.0]` below for the most recent release._
+### Added
+
+- **Headless `exec` mode.** `narwhal exec --conn NAME "SQL"` runs one
+  statement and prints the result to stdout, then exits. The third
+  runtime alongside the TUI and the MCP server — same `connections.toml`,
+  same credential resolution (keyring → `~/.pgpass` → env), same audit
+  log (tagged `source = "exec"`).
+
+  ```sh
+  narwhal exec -c prod 'SELECT count(*) FROM users'                # default: ASCII grid
+  narwhal exec -c prod -f json 'SELECT * FROM users LIMIT 5'       # JSON for jq
+  narwhal exec -c prod -f csv 'SELECT * FROM orders' > orders.csv  # RFC 4180
+  narwhal exec -c prod -f tsv 'SELECT * FROM ev' | column -t       # pipe-friendly
+  narwhal exec -c prod --write 'UPDATE users SET banned=true WHERE id=42'
+  ```
+
+  Writes are sandboxed in a `BEGIN ... ROLLBACK` transaction by
+  default; `--write` opts out. `--limit N` caps result rows.
+
+- **`narwhal_app::export::write_format<W: Write>`** — stream a result
+  set to any writer, sibling of the existing `export_rows`. Powers the
+  exec mode but is reusable from any consumer that wants to render a
+  result without going through a temp file.
+
+- **`ExportFormat::Tsv` and `ExportFormat::Table`.** Tab-separated
+  values for shell pipelines (no quoting, embedded tabs/newlines
+  replaced with spaces) and a human-readable ASCII grid for terminal
+  output. `ExportFormat::from_token` learns the new tokens (`tsv`,
+  `table`, `tbl`, plus `sql` as an alias for `insert`).
+
+- **CLI parsing now goes through `clap` (derive).** The TUI continues
+  to launch when `narwhal` is invoked with no arguments; subcommands
+  (`mcp`, `exec`) pick up alternative runtimes. `narwhal --help` and
+  `narwhal exec --help` are generated from the type definitions.
 
 ## [1.1.0] — 2026-05-22
 

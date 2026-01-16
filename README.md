@@ -298,6 +298,32 @@ Built-in command names (`run`, `open`, `begin`, `quit`, …) are reserved;
 a plugin that tries to shadow one is rejected at load time. During a
 `:begin` transaction, `narwhal.sql_run` is refused entirely.
 
+## Headless `exec` mode — one-shot SQL from the shell
+
+The same binary doubles as a `psql -c` / `mysql -e` muadili. Use it in
+CI smoke checks, `cron` jobs, or shell pipelines:
+
+```sh
+narwhal exec --conn prod 'SELECT count(*) FROM users'
+
+# Choose a format for the consumer (default: table)
+narwhal exec -c prod -f json 'SELECT id, email FROM users' | jq '.[].email'
+narwhal exec -c prod -f csv  'SELECT * FROM orders' > orders.csv
+narwhal exec -c prod -f tsv  'SELECT id, name FROM users' | column -t
+
+# Limit rows to keep large queries snappy
+narwhal exec -c prod -l 100 'SELECT * FROM events'
+
+# Writes are sandboxed by default (BEGIN ... ROLLBACK). `--write` opts out:
+narwhal exec -c prod --write "UPDATE users SET banned = true WHERE id = 42"
+```
+
+Formats: `table` (default, ASCII grid), `csv` (RFC 4180), `json`
+(array-of-objects), `tsv` (pipe-friendly, no quoting). Connection
+resolution is the same as the TUI — keyring first, `~/.pgpass`/env
+fallback. Every call is audit-logged to `history.jsonl` with
+`source: "exec"` so it can be grepped alongside MCP traffic.
+
 ## MCP server — talk to your databases through an AI agent
 
 narwhal ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
