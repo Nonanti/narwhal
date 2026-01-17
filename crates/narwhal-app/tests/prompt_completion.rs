@@ -57,9 +57,7 @@ fn type_prompt(core: &mut AppCore, text: &str) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Test 1: `:open <prefix>` with a unique match → completes inline
-// ---------------------------------------------------------------------------
 
 #[test]
 fn open_unique_completes_inline() {
@@ -77,9 +75,7 @@ fn open_unique_completes_inline() {
     assert_eq!(core.command_buffer(), "open smoke");
 }
 
-// ---------------------------------------------------------------------------
 // Test 2: `:open <prefix>` with multiple matches → inserts LCP, lists
-// ---------------------------------------------------------------------------
 
 #[test]
 fn open_multiple_inserts_lcp() {
@@ -100,9 +96,7 @@ fn open_multiple_inserts_lcp() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 3: `:help <prefix>` completes a built-in command name
-// ---------------------------------------------------------------------------
 
 #[test]
 fn help_completes_builtin() {
@@ -116,9 +110,7 @@ fn help_completes_builtin() {
     assert_eq!(core.command_buffer(), "help open");
 }
 
-// ---------------------------------------------------------------------------
 // Test 4: `:help <prefix>` completes a plugin command name
-// ---------------------------------------------------------------------------
 
 #[test]
 fn help_completes_plugin() {
@@ -152,9 +144,7 @@ end)
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 5: `:export <prefix>` completes the format
-// ---------------------------------------------------------------------------
 
 #[test]
 fn export_completes_format() {
@@ -168,9 +158,7 @@ fn export_completes_format() {
     assert_eq!(core.command_buffer(), "export csv");
 }
 
-// ---------------------------------------------------------------------------
 // Test 6: Unknown command head → Tab is a no-op
-// ---------------------------------------------------------------------------
 
 #[test]
 fn unknown_head_is_noop() {
@@ -185,9 +173,7 @@ fn unknown_head_is_noop() {
     assert_eq!(core.command_buffer(), before);
 }
 
-// ---------------------------------------------------------------------------
 // Test 7: Bare `:` (empty buffer) → no completion
-// ---------------------------------------------------------------------------
 
 #[test]
 fn bare_colon_no_completion() {

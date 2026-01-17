@@ -124,18 +124,14 @@ unused_must_use = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
 missing_debug_implementations = "warn"
 
+# Lints scoped to *every* target (lib, bin, tests, examples).
+# Lints that should fire only in production code (forbidden unwrap, panic,
+# dbg, print macros, todo, unimplemented) are configured per-crate at the
+# lib.rs / main.rs root so test code is not pestered.
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-unwrap_used = "warn"
-expect_used = "warn"
-panic = "warn"
-todo = "warn"
-unimplemented = "warn"
-dbg_macro = "warn"
-print_stdout = "warn"
-print_stderr = "warn"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"

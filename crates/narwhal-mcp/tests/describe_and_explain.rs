@@ -95,9 +95,7 @@ fn body(response: &Value) -> Value {
     serde_json::from_str(text).expect("body is JSON")
 }
 
-// ---------------------------------------------------------------------------
 // describe_table
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn describe_table_returns_columns_indexes_and_fks() {
@@ -178,9 +176,7 @@ async fn describe_table_unknown_table_is_tool_error() {
     assert!(text.contains("describe_table failed"));
 }
 
-// ---------------------------------------------------------------------------
 // explain_query
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn explain_query_returns_plan_rows_and_dialect_tag() {

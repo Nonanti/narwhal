@@ -113,9 +113,7 @@ fn extract_rendered(vis: &[usize], rows: &[Row], col: usize) -> Vec<String> {
     vis.iter().map(|&i| rows[i].0[col].render()).collect()
 }
 
-// ---------------------------------------------------------------------------
 // Test 1: sort cycle None → Asc → Desc → None
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sort_asc_then_desc_then_off() {
@@ -163,9 +161,7 @@ async fn sort_asc_then_desc_then_off() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 2: stable sort across ties
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sort_stable_across_ties() {
@@ -212,9 +208,7 @@ async fn sort_stable_across_ties() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 3: NULLs sort last in Asc, first in Desc
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sort_handles_nulls() {
@@ -266,9 +260,7 @@ async fn sort_handles_nulls() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 4: filter substring case-insensitive
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn filter_substring_case_insensitive() {
@@ -312,9 +304,7 @@ async fn filter_substring_case_insensitive() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 5: filter then sort
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn filter_then_sort() {
@@ -367,9 +357,7 @@ async fn filter_then_sort() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 6: Escape clears filter and closes prompt
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn escape_clears_filter_and_closes_prompt() {
@@ -411,9 +399,7 @@ async fn escape_clears_filter_and_closes_prompt() {
     assert!(core.status_message().contains("filter cleared"));
 }
 
-// ---------------------------------------------------------------------------
 // Test 7: streaming results reject sort
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn streaming_results_reject_sort() {

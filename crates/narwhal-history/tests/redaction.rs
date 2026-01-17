@@ -26,7 +26,6 @@ fn read_journal_raw(tmp: &tempfile::TempDir) -> String {
     fs::read_to_string(path).unwrap()
 }
 
-// ---- Redaction tests ----
 
 #[tokio::test]
 async fn redacts_create_user_password() {
@@ -138,7 +137,6 @@ async fn redacts_multiple_secrets_in_one_statement() {
     assert!(!raw.contains("second"), "second password leaked: {raw}");
 }
 
-// ---- File mode test (Unix only) ----
 
 #[cfg(unix)]
 #[tokio::test]

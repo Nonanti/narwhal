@@ -16,6 +16,16 @@
 //! - `verify-full`: TLS with full chain + hostname verification.
 
 #![forbid(unsafe_code)]
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::dbg_macro,
+    clippy::print_stdout,
+    clippy::print_stderr
+)]
 
 mod ddl;
 mod tls;

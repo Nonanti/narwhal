@@ -97,7 +97,6 @@ async fn normal_plugin_unaffected() {
     }
 }
 
-// ---- K3-C: Duration overflow guard ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn set_timeout_large_value_no_panic() {
@@ -172,7 +171,6 @@ async fn set_timeout_negative_disables() {
     }
 }
 
-// ---- Y4-C: transform timeout ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn transform_infinite_loop_times_out() {

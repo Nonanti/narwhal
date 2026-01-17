@@ -384,7 +384,6 @@ pub fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>
 mod tests {
     use super::*;
 
-    // ---- classify_type ----
 
     #[test]
     fn classify_integer_types() {
@@ -461,7 +460,6 @@ mod tests {
         assert_eq!(classify_type("IPv6"), ValueKind::String);
     }
 
-    // ---- parse_tsv_value ----
 
     #[test]
     fn parse_null_value() {
@@ -514,7 +512,6 @@ mod tests {
         assert_eq!(v.render(), "hello world");
     }
 
-    // ---- value_to_sql_literal ----
 
     #[test]
     fn sql_literal_string_escapes_quotes() {
@@ -598,7 +595,6 @@ mod tests {
         assert!(result.contains("dead"));
     }
 
-    // ---- parse_tsv_body ----
 
     #[test]
     fn parse_full_tsv_body() {
@@ -623,7 +619,6 @@ mod tests {
         assert!(matches!(rows[0][1], Value::Null));
     }
 
-    // ---- TSV escape decoding and byte preservation ----
 
     #[test]
     fn parse_tsv_escape_decoded_string() {
@@ -675,7 +670,6 @@ mod tests {
         }
     }
 
-    // ---- statement_returns_rows (in lib.rs) ----
 
     #[test]
     fn row_returning_keywords() {

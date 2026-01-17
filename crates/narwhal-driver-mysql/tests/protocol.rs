@@ -17,7 +17,6 @@
 
 use narwhal_driver_mysql::__test_only::uses_text_protocol;
 
-// ----- Statements that MUST stay on the text protocol -----
 
 #[test]
 fn savepoint_uses_text_protocol() {
@@ -118,7 +117,6 @@ fn leading_line_comment_is_skipped() {
     assert!(uses_text_protocol("-- explain\nCOMMIT"));
 }
 
-// ----- Statements that MUST go through the binary protocol -----
 
 #[test]
 fn select_uses_binary_protocol() {

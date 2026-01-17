@@ -820,7 +820,6 @@ mod tests {
         assert!(out.len() <= 3);
     }
 
-    // ----- context detection tests -----
 
     #[test]
     fn from_keyword_narrows_to_tables() {
@@ -918,7 +917,6 @@ mod tests {
             .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
     }
 
-    // ----- new tests: alias resolution + schema prefix + functions -----
 
     fn user_cols() -> HashMap<String, (String, Vec<ColumnHeader>)> {
         let mut m = HashMap::new();

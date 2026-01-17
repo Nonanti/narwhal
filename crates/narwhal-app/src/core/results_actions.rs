@@ -173,7 +173,6 @@ impl AppCore {
         }
     }
 
-    // ----- yank -----
 
     /// Translate the current `TableState` selection (which is an index
     /// into the visible/rendered rows) to the original row index in
@@ -643,7 +642,6 @@ impl AppCore {
         });
     }
 
-    // ----- row detail modal -----
 
     fn open_row_detail(&mut self) {
         let tab = &self.tabs[self.active_tab];

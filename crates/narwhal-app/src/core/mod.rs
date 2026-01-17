@@ -801,7 +801,6 @@ impl AppCore {
         }
     }
 
-    // ----- accessors -----
 
     pub fn status_message(&self) -> &str {
         &self.status.message
@@ -977,7 +976,6 @@ impl AppCore {
     // open_help and other help/history/snippets modal handlers moved to
     // `core::modals` (L21).
 
-    // ----- render -----
 
     // editor_title_with_tabs moved to `core::tabs` (L21).
 
@@ -1149,7 +1147,6 @@ impl AppCore {
         }
     }
 
-    // ----- input -----
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.wizard.is_some() {
@@ -1460,7 +1457,6 @@ impl AppCore {
         }
     }
 
-    // ----- plugins -----
 
     // Plugin lifecycle and dispatch methods moved to `core::plugins` (L21).
 
@@ -1470,7 +1466,6 @@ impl AppCore {
         self.tabs[self.active_tab].editor.insert_str(text);
     }
 
-    // ----- session management -----
 
     // Session lifecycle (open_named, open_connection*, close_session),
     // schema (refresh_schema, count_sidebar_tables, schedule_schema_refresh),

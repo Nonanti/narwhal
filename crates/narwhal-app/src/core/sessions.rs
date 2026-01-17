@@ -188,7 +188,6 @@ impl AppCore {
         );
     }
 
-    // ----- dispatch -----
 
     pub(super) fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.as_ref() else {
@@ -419,7 +418,6 @@ impl AppCore {
         }
     }
 
-    // ----- transactions -----
     // Transaction methods (begin/commit/rollback/savepoint/release/
     // rollback_to_savepoint, with_txn_conn) moved to
     // `core::transactions` (L21).

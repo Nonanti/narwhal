@@ -1201,7 +1201,6 @@ mod tests {
         );
     }
 
-    // ----- write_format (headless exec mode) -----
 
     fn sample_columns_and_rows() -> (Vec<ColumnHeader>, Vec<Row>) {
         let columns = vec![

@@ -190,7 +190,6 @@ mod tests {
         );
     }
 
-    // ----- json_to_value -----
 
     #[test]
     fn json_to_value_primitives() {

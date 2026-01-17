@@ -18,7 +18,6 @@ fn make_core() -> AppCore {
     )
 }
 
-// ---- Search tests ----
 
 #[test]
 fn forward_search_finds_first_match() {
@@ -190,7 +189,6 @@ fn enter_during_prompt_keeps_match_highlighted() {
         .is_empty());
 }
 
-// ---- Substitute tests ----
 
 #[test]
 fn substitute_current_line_no_g() {

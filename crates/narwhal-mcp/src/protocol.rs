@@ -125,9 +125,7 @@ impl RpcError {
     }
 }
 
-// ---------------------------------------------------------------------------
 // `initialize` exchange
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -182,9 +180,7 @@ pub struct ServerInfo {
     pub version: &'static str,
 }
 
-// ---------------------------------------------------------------------------
 // `tools/list` and `tools/call`
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
 pub struct ToolsListResult {

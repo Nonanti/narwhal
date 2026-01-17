@@ -78,9 +78,7 @@ async fn seed_result(core: &mut AppCore, db_path: PathBuf) {
     core.handle_key(key(KeyCode::Char('j')));
 }
 
-// ---------------------------------------------------------------------------
 // Test 1: open_with_no_row_shows_status_message
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn open_with_no_row_shows_status_message() {
@@ -107,9 +105,7 @@ async fn open_with_no_row_shows_status_message() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 2: open_populates_columns_and_values
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn open_populates_columns_and_values() {
@@ -139,9 +135,7 @@ async fn open_populates_columns_and_values() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 3: navigate_selects_columns
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn navigate_selects_columns() {
@@ -178,9 +172,7 @@ async fn navigate_selects_columns() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 4: esc_closes
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn esc_closes() {

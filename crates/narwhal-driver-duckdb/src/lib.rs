@@ -18,6 +18,16 @@
 //! SQL is bespoke even when the wire shape matches.
 
 #![forbid(unsafe_code)]
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::dbg_macro,
+    clippy::print_stdout,
+    clippy::print_stderr
+)]
 
 mod types;
 
@@ -806,7 +816,6 @@ impl Connection for DuckdbConnection {
     }
 }
 
-// ---- discovery helpers ----
 
 /// Look up indexes for `schema.name` via `DuckDB`'s `duckdb_indexes()`
 /// table function. The function exposes the SQL that built the index but
@@ -1004,7 +1013,6 @@ async fn describe_foreign_keys(
     Ok(by_name.into_values().collect())
 }
 
-// ---- streaming + cancellation ----
 
 struct DuckdbRowStream {
     columns: Vec<ColumnHeader>,

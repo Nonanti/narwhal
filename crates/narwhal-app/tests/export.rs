@@ -53,9 +53,7 @@ fn get_rows(core: &AppCore) -> Vec<Row> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Test 1: CSV round-trip with special characters
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn csv_round_trip_with_special_chars() {
@@ -89,9 +87,7 @@ async fn csv_round_trip_with_special_chars() {
     assert!(body.contains("3,carol,\"she said \"\"hi\"\"\"\r\n"));
 }
 
-// ---------------------------------------------------------------------------
 // Test 2: CSV NULL becomes empty field
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn csv_null_becomes_empty_field() {
@@ -125,9 +121,7 @@ async fn csv_null_becomes_empty_field() {
     assert_eq!(fields[2], "", "NULL bio should be empty string");
 }
 
-// ---------------------------------------------------------------------------
 // Test 3: JSON array of objects
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn json_array_of_objects() {
@@ -158,9 +152,7 @@ async fn json_array_of_objects() {
     assert_eq!(arr[1]["name"], "bob");
 }
 
-// ---------------------------------------------------------------------------
 // Test 4: JSON invalid UTF-8 uses $bytes sentinel
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn json_invalid_utf8_uses_bytes_sentinel() {
@@ -187,9 +179,7 @@ async fn json_invalid_utf8_uses_bytes_sentinel() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 5: INSERT single-table round trip
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_single_table_round_trip() {
@@ -243,9 +233,7 @@ async fn insert_single_table_round_trip() {
     assert_eq!(rows[2].2, Some("she said \"hi\"".into()));
 }
 
-// ---------------------------------------------------------------------------
 // Test 6: INSERT without source table errors
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_without_source_table_errors() {

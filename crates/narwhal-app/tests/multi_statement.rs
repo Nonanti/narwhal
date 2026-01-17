@@ -57,9 +57,7 @@ fn focus_results(core: &mut AppCore) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Test 1: single_result_no_strip
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn single_result_no_strip() {
@@ -84,9 +82,7 @@ async fn single_result_no_strip() {
     assert!(matches!(bundle.active_state(), ResultState::Rows { .. }));
 }
 
-// ---------------------------------------------------------------------------
 // Test 2: three_statements_three_results
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn three_statements_three_results() {
@@ -118,9 +114,7 @@ async fn three_statements_three_results() {
     assert_eq!(bundle.active, 2, "active defaults to last result");
 }
 
-// ---------------------------------------------------------------------------
 // Test 3: ]r_advances_active
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bracket_r_advances_active() {
@@ -166,9 +160,7 @@ async fn bracket_r_advances_active() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 4: [r_wraps_backward
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bracket_l_bracket_r_wraps_backward() {
@@ -214,9 +206,7 @@ async fn bracket_l_bracket_r_wraps_backward() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Test 5: state_preserved_across_tab_switch
-// ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_preserved_across_tab_switch() {

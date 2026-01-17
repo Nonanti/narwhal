@@ -278,7 +278,6 @@ impl AppCore {
         });
     }
 
-    // ----- editor search -----
 
     /// Open the editor search prompt (`/` for forward, `?` for backward).
     fn open_editor_search(&mut self, direction: SearchDirection) {
@@ -509,7 +508,6 @@ impl AppCore {
         self.status.message = format!("/{needle} · {}/{count}", next + 1);
     }
 
-    // ----- substitute -----
 
     /// Execute a substitute command (`:s/old/new/[g][c]` or `:%s/old/new/[g][c]`).
     pub(super) fn execute_substitute(
@@ -570,7 +568,6 @@ impl AppCore {
         }
     }
 
-    // ----- completion -----
 
     fn trigger_completion(&mut self) {
         let prefix = self.tabs[self.active_tab].editor.current_word_prefix();
@@ -984,7 +981,6 @@ impl AppCore {
         }
     }
 
-    // ----- prompt tab-completion -----
 
     /// Complete the last token in the `:`-prompt buffer against the
     /// universe appropriate for the current command head.

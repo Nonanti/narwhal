@@ -498,7 +498,6 @@ mod tests {
         );
     }
 
-    // ---- M16: Operator state machine tests ----
 
     #[test]
     fn dd_deletes_line() {
@@ -668,7 +667,6 @@ mod tests {
         assert_eq!(vim.mode(), Mode::Normal);
     }
 
-    // ---- M17: pending_count overflow guard ----
 
     #[test]
     fn pending_count_clamps_to_max() {

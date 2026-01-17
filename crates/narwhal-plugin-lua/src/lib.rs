@@ -64,6 +64,16 @@
 //! `#[tokio::main]` which is multi-thread.
 
 #![forbid(unsafe_code)]
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::dbg_macro,
+    clippy::print_stdout,
+    clippy::print_stderr
+)]
 
 use std::path::Path;
 use std::sync::Arc;
@@ -330,7 +340,6 @@ impl Plugin for LuaPlugin {
     }
 }
 
-// ---- Lua API installation ----
 
 fn install_api(
     lua: &Lua,
@@ -399,7 +408,6 @@ fn read_descriptors(descriptors_table: &Table) -> LuaResult<Vec<CommandDescripto
     Ok(out)
 }
 
-// ---- command dispatch ----
 
 fn invoke_command(
     lua: &Lua,
@@ -564,7 +572,6 @@ fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, Stri
     }
 }
 
-// ---- result transforms ----
 
 /// Run every registered transform in order over `result`. Returns the
 /// (possibly partially transformed) `QueryResult` alongside the first

@@ -530,7 +530,6 @@ mod tests {
         assert_eq!(entries[1].outcome, Outcome::Cancelled);
     }
 
-    // ---- redact_secrets unit tests ----
 
     #[test]
     fn redact_password_literal() {

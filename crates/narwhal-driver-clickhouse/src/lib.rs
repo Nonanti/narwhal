@@ -45,6 +45,16 @@
 //!   DML and `0` for row-returning statements.
 
 #![forbid(unsafe_code)]
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::dbg_macro,
+    clippy::print_stdout,
+    clippy::print_stderr
+)]
 
 mod types;
 
@@ -65,9 +75,7 @@ use url::Url;
 
 use crate::types::{parse_tsv_body, parse_tsv_value, value_to_sql_literal};
 
-// ---------------------------------------------------------------------------
 // Driver
-// ---------------------------------------------------------------------------
 
 /// `ClickHouse` driver factory.
 #[derive(Debug, Default)]
@@ -264,9 +272,7 @@ impl DatabaseDriver for ClickhouseDriver {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Connection
-// ---------------------------------------------------------------------------
 
 /// Shared state behind a plain `Arc` so the spawned streaming task
 /// can clone the `Arc` and issue HTTP requests independently.
@@ -1103,9 +1109,7 @@ impl ClickhouseConnection {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Query ID RAII Guard
-// ---------------------------------------------------------------------------
 
 /// RAII guard that ensures a query ID is removed from the active-queries
 /// set when the guard is dropped, regardless of how the scope exits.
@@ -1131,9 +1135,7 @@ impl Drop for QueryGuard {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Cancellation
-// ---------------------------------------------------------------------------
 
 /// Cancellation handle for `ClickHouse` connections.
 ///
@@ -1191,9 +1193,7 @@ impl CancelHandle for ClickhouseCancel {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Row stream
-// ---------------------------------------------------------------------------
 
 struct ClickhouseRowStream {
     columns: Vec<ColumnHeader>,
@@ -1242,9 +1242,7 @@ impl Drop for ClickhouseRowStream {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Chunked TSV stream decoder (testable in isolation)
-// ---------------------------------------------------------------------------
 
 /// Drive a `bytes_stream`-style async byte source through the TSV
 /// line-buffered decoder and emit headers + rows via channels.
