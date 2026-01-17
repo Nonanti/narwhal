@@ -73,8 +73,7 @@ impl AppCore {
                 p.is_file()
                     && p.extension()
                         .and_then(|s| s.to_str())
-                        .map(|s| s.eq_ignore_ascii_case("lua"))
-                        .unwrap_or(false)
+                        .is_some_and(|s| s.eq_ignore_ascii_case("lua"))
             })
             .collect();
         // Deterministic order so the registry index is reproducible.
@@ -149,9 +148,7 @@ impl AppCore {
         // the same command head (H20).
         let plugin_name = self
             .plugins
-            .plugin_for(command)
-            .map(|p| p.name().to_owned())
-            .unwrap_or_else(|| command.to_owned());
+            .plugin_for(command).map_or_else(|| command.to_owned(), |p| p.name().to_owned());
         let plugins = Arc::clone(&self.plugins);
         let command_owned = command.to_owned();
         // Plugin dispatch is async by trait definition; bridge to the

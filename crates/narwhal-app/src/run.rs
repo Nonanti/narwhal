@@ -34,7 +34,7 @@ fn strip_leading_comments(sql: &str) -> &str {
         let trimmed = s.trim_start();
         if let Some(rest) = trimmed.strip_prefix("--") {
             // Skip to end of line.
-            let end = rest.find('\n').map(|i| i + 1).unwrap_or(rest.len());
+            let end = rest.find('\n').map_or(rest.len(), |i| i + 1);
             s = &rest[end..];
             continue;
         }
@@ -172,8 +172,8 @@ pub fn spawn_run(
                 // `&mut OwnedMutexGuard<PooledConnection>`, so we need an
                 // extra deref step in each arm to reach `dyn Connection`.
                 match self {
-                    Holder::Owned(c) => &mut **c,
-                    Holder::Pinned(g) => &mut ***g,
+                    Self::Owned(c) => &mut **c,
+                    Self::Pinned(g) => &mut ***g,
                 }
             }
         }

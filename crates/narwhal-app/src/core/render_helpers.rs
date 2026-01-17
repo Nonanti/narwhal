@@ -129,7 +129,7 @@ pub(super) fn sidebar_label(item: &SidebarItem) -> String {
 }
 
 /// Indentation depth (in tree levels) of a sidebar row.
-pub(super) fn sidebar_depth(item: &SidebarItem) -> u8 {
+pub(super) const fn sidebar_depth(item: &SidebarItem) -> u8 {
     match item {
         SidebarItem::Connection { .. } => 0,
         SidebarItem::Schema { .. } => 1,
@@ -138,7 +138,7 @@ pub(super) fn sidebar_depth(item: &SidebarItem) -> u8 {
 }
 
 /// Visual classification (icon/colour) for a sidebar row.
-pub(super) fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
+pub(super) const fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
     match item {
         SidebarItem::Connection { active: true, .. } => SidebarRowKind::ActiveConnection,
         SidebarItem::Connection { .. } => SidebarRowKind::Connection,

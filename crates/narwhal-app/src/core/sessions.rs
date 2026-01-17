@@ -82,7 +82,7 @@ impl AppCore {
         self.status.message = format!("connecting to {label}…");
 
         let driver = driver.clone();
-        let password_for_open = password.clone();
+        let password_for_open = password;
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async { Session::open(driver, config, password_for_open).await })
@@ -110,7 +110,7 @@ impl AppCore {
                 // prior `:begin` state implicitly, so the TX flag
                 // resets here too.
                 {
-                    let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     state.pool = Some(session.pool.clone());
                     state.in_transaction = false;
                 }
@@ -128,7 +128,7 @@ impl AppCore {
 
     pub(super) fn close_session(&mut self) {
         if self.session.take().is_some() {
-            let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             state.pool = None;
             state.in_transaction = false;
             drop(state);
@@ -459,7 +459,7 @@ impl AppCore {
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
-                let mut state = self.plugin_state.lock().unwrap_or_else(|e| e.into_inner());
+                let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 state.pool = None;
                 state.in_transaction = false;
             }

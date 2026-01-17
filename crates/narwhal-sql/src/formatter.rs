@@ -2,7 +2,7 @@
 //!
 //! Wraps the [`sqlformat`] crate so the rest of the workspace doesn't
 //! have to know about its option struct. The dialect is mostly used to
-//! pick between standard SQL keywords and MySQL `` ` `` quoting style;
+//! pick between standard SQL keywords and `MySQL` `` ` `` quoting style;
 //! everything else (line breaks, indentation, comma placement) is
 //! shared across drivers.
 //!

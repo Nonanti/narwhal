@@ -15,7 +15,7 @@ use crate::widgets::help::centred;
 use crate::widgets::results::sanitize_for_display;
 use unicode_width::UnicodeWidthStr;
 
-/// View model passed from AppCore to the render path. Owns only the
+/// View model passed from `AppCore` to the render path. Owns only the
 /// data needed for display; the full `HistoryState` stays in the core.
 pub struct HistoryModalState<'a> {
     /// All loaded entries (used to compute `total`).

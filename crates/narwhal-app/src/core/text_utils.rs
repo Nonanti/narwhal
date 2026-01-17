@@ -9,7 +9,7 @@ use narwhal_tui::widgets::EditorBuffer;
 /// Split a one-line command argument into `(head, tail)` where `head` is the
 /// first whitespace-delimited token and `tail` is the rest with leading
 /// whitespace trimmed.
-pub(crate) fn split_head_arg(text: &str) -> (&str, &str) {
+pub fn split_head_arg(text: &str) -> (&str, &str) {
     let trimmed = text.trim_start();
     match trimmed.find(char::is_whitespace) {
         Some(idx) => (&trimmed[..idx], trimmed[idx..].trim_start()),
@@ -19,7 +19,7 @@ pub(crate) fn split_head_arg(text: &str) -> (&str, &str) {
 
 /// Truncate a string to at most `max` bytes, replacing the tail with `…`
 /// while respecting char boundaries.
-pub(crate) fn truncate(s: &str, max: usize) -> String {
+pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_owned()
     } else {
@@ -33,7 +33,7 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 
 /// Compute the longest common prefix across a non-empty slice of strings,
 /// character by character.
-pub(crate) fn longest_common_prefix(strings: &[&str]) -> String {
+pub fn longest_common_prefix(strings: &[&str]) -> String {
     if strings.is_empty() {
         return String::new();
     }
@@ -51,7 +51,7 @@ pub(crate) fn longest_common_prefix(strings: &[&str]) -> String {
 
 /// Find all occurrences of `needle` in `buffer`, returning
 /// `(line_idx, byte_col)` pairs. Literal substring, no regex.
-pub(crate) fn find_all(buffer: &str, needle: &str) -> Vec<(usize, usize)> {
+pub fn find_all(buffer: &str, needle: &str) -> Vec<(usize, usize)> {
     if needle.is_empty() {
         return Vec::new();
     }
@@ -69,7 +69,7 @@ pub(crate) fn find_all(buffer: &str, needle: &str) -> Vec<(usize, usize)> {
 }
 
 /// Convert a (row, col) position in the editor buffer to a byte offset.
-pub(crate) fn row_col_to_offset(buffer: &EditorBuffer, row: usize, col: usize) -> usize {
+pub fn row_col_to_offset(buffer: &EditorBuffer, row: usize, col: usize) -> usize {
     let mut offset = 0usize;
     for (i, line) in buffer.lines().iter().enumerate() {
         if i == row {
@@ -82,7 +82,7 @@ pub(crate) fn row_col_to_offset(buffer: &EditorBuffer, row: usize, col: usize) -
 
 /// Replace the first occurrence of `pattern` with `replacement` in `text`.
 /// Returns the new string and the number of replacements (0 or 1).
-pub(crate) fn replace_first(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
+pub fn replace_first(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
     if let Some(pos) = text.find(pattern) {
         let mut result = String::with_capacity(text.len() + replacement.len());
         result.push_str(&text[..pos]);
@@ -96,7 +96,7 @@ pub(crate) fn replace_first(text: &str, pattern: &str, replacement: &str) -> (St
 
 /// Replace every occurrence of `pattern` with `replacement` in `text`.
 /// Returns the new string and the count of replacements.
-pub(crate) fn replace_all(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
+pub fn replace_all(text: &str, pattern: &str, replacement: &str) -> (String, usize) {
     if pattern.is_empty() {
         return (text.to_owned(), 0);
     }

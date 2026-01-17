@@ -112,10 +112,10 @@ impl AppCore {
                 .active_mut()
                 .move_down(visible_count),
             CtKey::Char('k') | CtKey::Up => {
-                self.tabs[self.active_tab].results.active_mut().move_up()
+                self.tabs[self.active_tab].results.active_mut().move_up();
             }
             CtKey::Char('h') | CtKey::Left => {
-                self.tabs[self.active_tab].results.active_mut().move_left()
+                self.tabs[self.active_tab].results.active_mut().move_left();
             }
             CtKey::Char('l') | CtKey::Right => self.tabs[self.active_tab]
                 .results
@@ -175,7 +175,7 @@ impl AppCore {
 
     // ----- yank -----
 
-    /// Translate the current TableState selection (which is an index
+    /// Translate the current `TableState` selection (which is an index
     /// into the visible/rendered rows) to the original row index in
     /// the full result set. Returns `None` when there are no rows.
     fn selected_original_row(&self) -> Option<usize> {
@@ -292,7 +292,7 @@ impl AppCore {
                 return;
             };
             let cell = row.0.get(col_index);
-            let original = cell.map(|v| v.render()).unwrap_or_default();
+            let original = cell.map(narwhal_core::Value::render).unwrap_or_default();
             let buffer = if matches!(cell, Some(narwhal_core::Value::Null) | None) {
                 String::new()
             } else {

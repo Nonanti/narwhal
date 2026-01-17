@@ -31,7 +31,7 @@ pub struct Request {
 impl Request {
     /// `true` when this message expects a response (i.e. it is a request,
     /// not a notification).
-    pub fn is_request(&self) -> bool {
+    pub const fn is_request(&self) -> bool {
         self.id.is_some()
     }
 }
@@ -48,7 +48,7 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn success(id: Value, result: Value) -> Self {
+    pub const fn success(id: Value, result: Value) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION,
             id,
@@ -57,7 +57,7 @@ impl Response {
         }
     }
 
-    pub fn error(id: Value, error: RpcError) -> Self {
+    pub const fn error(id: Value, error: RpcError) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION,
             id,

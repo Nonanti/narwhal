@@ -4,7 +4,7 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_vim::{Key, KeyCode, KeyMod};
 
-pub fn translate_key_event(event: KeyEvent) -> Option<Key> {
+pub const fn translate_key_event(event: KeyEvent) -> Option<Key> {
     let code = match event.code {
         CtKey::Char(c) => KeyCode::Char(c),
         CtKey::Enter => KeyCode::Enter,

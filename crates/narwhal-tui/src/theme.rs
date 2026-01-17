@@ -15,7 +15,7 @@ pub struct Theme {
 impl Theme {
     /// Default palette — cool accent on the terminal's native
     /// background. Designed to look right on a dark terminal.
-    pub const DARK: Theme = Theme {
+    pub const DARK: Self = Self {
         background: Color::Reset,
         foreground: Color::Gray,
         accent: Color::Cyan,
@@ -27,7 +27,7 @@ impl Theme {
     /// Light-terminal palette. `Color::Reset` keeps the terminal's
     /// background, but the foreground / accent shift down a step so
     /// text and selection still contrast on a white background.
-    pub const LIGHT: Theme = Theme {
+    pub const LIGHT: Self = Self {
         background: Color::Reset,
         foreground: Color::Black,
         accent: Color::Blue,
@@ -39,7 +39,7 @@ impl Theme {
     /// High-contrast palette — saturated primaries on a black
     /// background. Aimed at low-vision users and projector displays
     /// where the default dark theme washes out.
-    pub const HIGH_CONTRAST: Theme = Theme {
+    pub const HIGH_CONTRAST: Self = Self {
         background: Color::Black,
         foreground: Color::White,
         accent: Color::Yellow,
@@ -99,6 +99,6 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Theme::DARK
+        Self::DARK
     }
 }

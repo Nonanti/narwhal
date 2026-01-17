@@ -20,7 +20,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn short_label(self) -> &'static str {
+    pub const fn short_label(self) -> &'static str {
         match self {
             Self::Normal => "NOR",
             Self::Insert => "INS",

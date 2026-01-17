@@ -85,7 +85,7 @@ pub enum ReferentialAction {
 }
 
 impl ReferentialAction {
-    pub fn as_sql(self) -> &'static str {
+    pub const fn as_sql(self) -> &'static str {
         match self {
             Self::NoAction => "NO ACTION",
             Self::Restrict => "RESTRICT",

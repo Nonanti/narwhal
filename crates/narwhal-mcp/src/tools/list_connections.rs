@@ -90,9 +90,7 @@ fn summarise_target(c: &narwhal_core::ConnectionConfig) -> String {
     let host = c.params.host.as_deref().unwrap_or("?");
     let port = c
         .params
-        .port
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "?".to_string());
+        .port.map_or_else(|| "?".to_string(), |p| p.to_string());
     let db = c.params.database.as_deref().unwrap_or("?");
     format!("{host}:{port}/{db}")
 }

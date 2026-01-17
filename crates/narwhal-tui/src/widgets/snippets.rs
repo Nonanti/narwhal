@@ -13,7 +13,7 @@ use ratatui::Frame;
 use crate::theme::Theme;
 use crate::widgets::help::centred;
 
-/// View model passed from AppCore to the render path.
+/// View model passed from `AppCore` to the render path.
 pub struct SnippetsModalState<'a> {
     /// Snippet names to display.
     pub entries: Vec<&'a str>,

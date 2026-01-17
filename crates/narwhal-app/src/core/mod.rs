@@ -227,6 +227,7 @@ pub struct RowDetailState {
 }
 
 /// Bundle of per-statement results produced by a multi-statement batch.
+///
 /// When the dispatch pipeline produces N result sets the user can cycle
 /// through them with `]r` / `[r` (or Ctrl-PgDown / Ctrl-PgUp); the
 /// active tab's state — scroll, sort, filter — is preserved across
@@ -349,7 +350,7 @@ impl Default for ResultBundle {
 /// directly while downstream crates (and integration tests) go through
 /// the read-only / mutable getter pairs below. This keeps internal
 /// ergonomics intact while letting us evolve the storage shape without
-/// breaking SemVer (L23).
+/// breaking `SemVer` (L23).
 pub struct Tab {
     pub(crate) name: String,
     pub(crate) editor: EditorBuffer,
@@ -393,7 +394,7 @@ impl Tab {
     }
 
     /// Editor buffer attached to this tab.
-    pub fn editor(&self) -> &EditorBuffer {
+    pub const fn editor(&self) -> &EditorBuffer {
         &self.editor
     }
 
@@ -403,7 +404,7 @@ impl Tab {
     }
 
     /// Most-recent result bundle produced by this tab.
-    pub fn results(&self) -> &ResultBundle {
+    pub const fn results(&self) -> &ResultBundle {
         &self.results
     }
 
@@ -413,17 +414,17 @@ impl Tab {
     }
 
     /// Per-tab editor search state (separate from the result pane search).
-    pub fn editor_search(&self) -> &EditorSearchState {
+    pub const fn editor_search(&self) -> &EditorSearchState {
         &self.editor_search
     }
 
     /// Page size used by the next sidebar preview.
-    pub fn page_size(&self) -> usize {
+    pub const fn page_size(&self) -> usize {
         self.page_size
     }
 
     /// Active completion popup, if any.
-    pub fn completion(&self) -> Option<&CompletionState> {
+    pub const fn completion(&self) -> Option<&CompletionState> {
         self.completion.as_ref()
     }
 }
@@ -526,7 +527,7 @@ pub struct AppCore {
     pub(super) sidebar_scroll: usize,
     pub(super) status: StatusBar,
     /// One-shot warning carried over from a plugin (transform or command
-    /// hook) so that the final 'done · N statement(s)' AllDone message
+    /// hook) so that the final 'done · N statement(s)' `AllDone` message
     /// doesn't overwrite it silently. Cleared after it bubbles up.
     pub(super) plugin_warning: Option<String>,
     pub(super) running: bool,
@@ -552,7 +553,7 @@ pub struct AppCore {
     pub(super) last_layout: LayoutRegions,
     pub(super) run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
-    /// Channel for background metadata operations (dump_schema, refresh,
+    /// Channel for background metadata operations (`dump_schema`, refresh,
     /// history). Separated from the run channel so meta ops don't
     /// interfere with query execution state.
     pub(super) meta_tx: mpsc::Sender<MetaUpdate>,
@@ -807,7 +808,7 @@ impl AppCore {
     }
 
     /// Read-only accessor for the full [`StatusBar`] struct.
-    pub fn status_bar(&self) -> &StatusBar {
+    pub const fn status_bar(&self) -> &StatusBar {
         &self.status
     }
 
@@ -832,7 +833,7 @@ impl AppCore {
         &self.tabs
     }
 
-    pub fn active_tab(&self) -> usize {
+    pub const fn active_tab(&self) -> usize {
         self.active_tab
     }
 
@@ -856,11 +857,11 @@ impl AppCore {
         &mut self.tabs[self.active_tab]
     }
 
-    pub fn session(&self) -> Option<&Session> {
+    pub const fn session(&self) -> Option<&Session> {
         self.session.as_ref()
     }
 
-    pub fn focus(&self) -> Pane {
+    pub const fn focus(&self) -> Pane {
         self.focus
     }
 
@@ -873,11 +874,11 @@ impl AppCore {
     /// Read-only accessor for the most recent layout regions computed
     /// during render. Used by tests to determine where to click.
     #[doc(hidden)]
-    pub fn last_layout(&self) -> &narwhal_tui::LayoutRegions {
+    pub const fn last_layout(&self) -> &narwhal_tui::LayoutRegions {
         &self.last_layout
     }
 
-    pub fn mode(&self) -> Mode {
+    pub const fn mode(&self) -> Mode {
         self.vim.mode()
     }
 
@@ -885,7 +886,7 @@ impl AppCore {
     /// assert that `:add` / `:url` / `:edit` open the wizard and that
     /// it carries the expected pre-filled state.
     #[doc(hidden)]
-    pub fn wizard(&self) -> Option<&crate::wizard::ConnectionWizard> {
+    pub const fn wizard(&self) -> Option<&crate::wizard::ConnectionWizard> {
         self.wizard.as_ref()
     }
 
@@ -911,11 +912,11 @@ impl AppCore {
         self.vim.command_buffer()
     }
 
-    pub fn is_running(&self) -> bool {
+    pub const fn is_running(&self) -> bool {
         self.running
     }
 
-    pub fn should_quit(&self) -> bool {
+    pub const fn should_quit(&self) -> bool {
         self.should_quit
     }
 
@@ -923,23 +924,23 @@ impl AppCore {
     /// Useful in tests to verify that non-DDL statements don't schedule
     /// a refresh.
     #[doc(hidden)]
-    pub fn refresh_task(&self) -> Option<&tokio::task::AbortHandle> {
+    pub const fn refresh_task(&self) -> Option<&tokio::task::AbortHandle> {
         self.refresh_task.as_ref()
     }
 
-    pub fn help_open(&self) -> bool {
+    pub const fn help_open(&self) -> bool {
         self.help_open
     }
 
     /// Whether the history modal is currently open.
     #[doc(hidden)]
-    pub fn history_is_open(&self) -> bool {
+    pub const fn history_is_open(&self) -> bool {
         self.history_state.is_some()
     }
 
     /// Read-only accessor for the history modal state (for tests).
     #[doc(hidden)]
-    pub fn history_state(&self) -> Option<&HistoryState> {
+    pub const fn history_state(&self) -> Option<&HistoryState> {
         self.history_state.as_ref()
     }
 
@@ -951,19 +952,19 @@ impl AppCore {
 
     /// Whether the snippets modal is currently open.
     #[doc(hidden)]
-    pub fn snippets_modal_is_open(&self) -> bool {
+    pub const fn snippets_modal_is_open(&self) -> bool {
         self.snippets_modal.is_some()
     }
 
     /// Read-only accessor for the snippets modal state (for tests).
     #[doc(hidden)]
-    pub fn snippets_modal(&self) -> Option<&SnippetsModal> {
+    pub const fn snippets_modal(&self) -> Option<&SnippetsModal> {
         self.snippets_modal.as_ref()
     }
 
     /// Read-only accessor for the snippet store (for tests).
     #[doc(hidden)]
-    pub fn snippet_store(&self) -> &SnippetStore {
+    pub const fn snippet_store(&self) -> &SnippetStore {
         &self.snippet_store
     }
 
@@ -1419,9 +1420,7 @@ impl AppCore {
                     let desc = plugin
                         .commands()
                         .into_iter()
-                        .find(|cmd| cmd.name == name)
-                        .map(|cmd| cmd.description)
-                        .unwrap_or_else(|| "(no description)".into());
+                        .find(|cmd| cmd.name == name).map_or_else(|| "(no description)".into(), |cmd| cmd.description);
                     self.status.message = format!(":{name} — {desc}");
                 } else {
                     self.status.message = format!("unknown command: {name}");

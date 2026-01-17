@@ -14,7 +14,7 @@ use crate::commands::IsolationArg;
 use crate::session::{Session, TxnHandle};
 
 /// Map a CLI-level isolation argument to the engine-agnostic level.
-pub(super) fn map_isolation(arg: IsolationArg) -> IsolationLevel {
+pub(super) const fn map_isolation(arg: IsolationArg) -> IsolationLevel {
     // IsolationArg is `#[non_exhaustive]` but lives in the same crate, so a
     // wildcard arm would be reported as unreachable. Match all variants.
     match arg {
@@ -26,7 +26,7 @@ pub(super) fn map_isolation(arg: IsolationArg) -> IsolationLevel {
 }
 
 /// Human-readable label for a transaction isolation level.
-pub(super) fn isolation_label(level: IsolationLevel) -> &'static str {
+pub(super) const fn isolation_label(level: IsolationLevel) -> &'static str {
     match level {
         IsolationLevel::ReadUncommitted => "read-uncommitted",
         IsolationLevel::ReadCommitted => "read-committed",
@@ -80,7 +80,7 @@ impl AppCore {
                 // user would silently get wrong answers.
                 self.plugin_state
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .in_transaction = true;
                 self.status.transaction = iso.map(|level| isolation_label(level).to_owned());
                 self.status.message = match iso {
@@ -158,7 +158,7 @@ impl AppCore {
         // whether the commit/rollback round-trip succeeded.
         self.plugin_state
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .in_transaction = false;
         self.status.transaction = None;
         match outcome {

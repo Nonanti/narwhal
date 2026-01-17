@@ -108,7 +108,7 @@ impl EditorBuffer {
 
     /// Return the text of line at `idx`, or empty string if out of bounds.
     pub fn get_line(&self, idx: usize) -> &str {
-        self.lines.get(idx).map(String::as_str).unwrap_or("")
+        self.lines.get(idx).map_or("", String::as_str)
     }
 
     /// Replace the contents of line `idx` with `new_text`.
@@ -120,11 +120,11 @@ impl EditorBuffer {
     }
 
     /// Return the current cursor row.
-    pub fn cursor_row(&self) -> usize {
+    pub const fn cursor_row(&self) -> usize {
         self.cursor_row
     }
 
-    pub fn cursor(&self) -> (usize, usize) {
+    pub const fn cursor(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
     }
 
@@ -196,7 +196,7 @@ impl EditorBuffer {
     }
 
     /// Returns whether auto-pair is enabled.
-    pub fn auto_pair_enabled(&self) -> bool {
+    pub const fn auto_pair_enabled(&self) -> bool {
         self.auto_pair_enabled
     }
 
@@ -306,8 +306,7 @@ impl EditorBuffer {
     fn current_line(&self) -> &str {
         self.lines
             .get(self.cursor_row)
-            .map(String::as_str)
-            .unwrap_or("")
+            .map_or("", String::as_str)
     }
 
     fn current_line_mut(&mut self) -> &mut String {
@@ -555,7 +554,7 @@ impl<'a> LineCursor<'a> {
     /// O(rows) prefix-sum walk that `from_offset` would require.
     /// Callers that already know the logical row/col use this; only
     /// the legacy offset-based call sites need the slower path.
-    fn at(lines: &'a [String], row: usize, col: usize) -> Self {
+    const fn at(lines: &'a [String], row: usize, col: usize) -> Self {
         Self { lines, row, col }
     }
 
@@ -570,7 +569,7 @@ impl<'a> LineCursor<'a> {
 
     /// True iff the cursor sits at the very start of the buffer
     /// (`(0, 0)`). Symmetric to `has_more()`'s end-of-buffer check.
-    fn at_start(&self) -> bool {
+    const fn at_start(&self) -> bool {
         self.row == 0 && self.col == 0
     }
 
@@ -609,7 +608,7 @@ impl<'a> LineCursor<'a> {
     }
 
     fn advance(&mut self) {
-        let line_len = self.lines.get(self.row).map(String::len).unwrap_or(0);
+        let line_len = self.lines.get(self.row).map_or(0, String::len);
         if self.col < line_len {
             self.col += 1;
         } else if self.row + 1 < self.lines.len() {
@@ -629,7 +628,7 @@ impl<'a> LineCursor<'a> {
     }
 }
 
-fn is_word_char(b: u8) -> bool {
+const fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
@@ -685,7 +684,7 @@ pub fn render_editor(
             map
         })
         .unwrap_or_default();
-    let needle_len = search.map(|s| s.needle_len).unwrap_or(0);
+    let needle_len = search.map_or(0, |s| s.needle_len);
 
     let end = (buffer.scroll + height).min(buffer.lines.len());
     let gutter_w = gutter_width(buffer.lines.len());
@@ -824,7 +823,7 @@ pub fn render_completion_popup(
     let max_detail = view
         .items
         .iter()
-        .map(|i| i.detail.map(|d| d.chars().count()).unwrap_or(0))
+        .map(|i| i.detail.map_or(0, |d| d.chars().count()))
         .max()
         .unwrap_or(0);
     let want = 2 + max_text + if max_detail == 0 { 0 } else { max_detail + 1 } + 4;

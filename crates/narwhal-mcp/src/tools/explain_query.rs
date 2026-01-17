@@ -2,8 +2,8 @@
 //! statement.
 //!
 //! We deliberately do **not** parse the plan into a unified structure:
-//! every engine emits a different shape (Postgres trees, MySQL row-table,
-//! SQLite virtual-machine ops, ClickHouse pipeline, DuckDB ASCII), and
+//! every engine emits a different shape (Postgres trees, `MySQL` row-table,
+//! `SQLite` virtual-machine ops, `ClickHouse` pipeline, `DuckDB` ASCII), and
 //! pre-digesting it would strip cues an LLM is excellent at reading. The
 //! tool returns the raw `EXPLAIN` rows plus the dialect tag so the agent
 //! knows which conventions apply.
@@ -33,7 +33,7 @@ struct Args {
     connection: String,
     sql: String,
     /// Pass-through flags that the driver's EXPLAIN supports. Currently
-    /// we only honour `analyze` for Postgres / MySQL, which we expose via
+    /// we only honour `analyze` for Postgres / `MySQL`, which we expose via
     /// a single boolean. Other knobs (formats, costs) come later when
     /// there is a concrete need.
     #[serde(default)]
@@ -175,9 +175,9 @@ impl Tool for ExplainQueryTool {
 /// Driver-specific `EXPLAIN` prefix.
 ///
 /// Centralised here because each engine spells the keywords slightly
-/// differently. SQLite uses `EXPLAIN QUERY PLAN` for the high-level tree;
+/// differently. `SQLite` uses `EXPLAIN QUERY PLAN` for the high-level tree;
 /// the low-level `EXPLAIN` lists VDBE opcodes and is rarely what an agent
-/// wants. ClickHouse only accepts plain `EXPLAIN` (no ANALYZE), MySQL
+/// wants. `ClickHouse` only accepts plain `EXPLAIN` (no ANALYZE), `MySQL`
 /// accepts both, Postgres prefers the parenthesised form.
 fn explain_prefix(driver: &str, analyze: bool, sql: &str) -> String {
     match driver {

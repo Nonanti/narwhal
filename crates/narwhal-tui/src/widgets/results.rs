@@ -29,7 +29,7 @@ pub enum SortDir {
 /// - Same-type values compare naturally (Int numerically, String
 ///   lexicographically, etc.).
 /// - Different types sort by a stable type-order: Int < Float < Bool <
-///   String < Bytes < Date < Time < DateTime < Timestamp < Uuid < Json <
+///   String < Bytes < Date < Time < `DateTime` < Timestamp < Uuid < Json <
 ///   Unknown.
 pub fn compare_values(a: Option<&Value>, b: Option<&Value>) -> Ordering {
     match (a, b) {
@@ -50,7 +50,7 @@ pub fn compare_values(a: Option<&Value>, b: Option<&Value>) -> Ordering {
     }
 }
 
-fn type_rank(v: &Value) -> u8 {
+const fn type_rank(v: &Value) -> u8 {
     match v {
         Value::Int(_) => 0,
         Value::Float(_) => 1,
@@ -102,7 +102,7 @@ fn compare_same_type(a: &Value, b: &Value) -> Ordering {
 /// already sorted when the feature is `preserve_order`-off (default).
 fn compare_json(a: &serde_json::Value, b: &serde_json::Value) -> Ordering {
     use serde_json::Value as J;
-    fn rank(v: &J) -> u8 {
+    const fn rank(v: &J) -> u8 {
         match v {
             J::Null => 0,
             J::Bool(_) => 1,
@@ -216,7 +216,7 @@ impl ResultView {
 
     /// Returns the index of the selected row, or `None` when no row is
     /// selected. Mirrors `ratatui::widgets::TableState::selected`.
-    pub fn selected(&self) -> Option<usize> {
+    pub const fn selected(&self) -> Option<usize> {
         self.state.selected()
     }
 
@@ -227,7 +227,7 @@ impl ResultView {
     }
 
     /// Vertical scroll offset of the underlying ratatui table.
-    pub fn scroll_offset(&self) -> usize {
+    pub const fn scroll_offset(&self) -> usize {
         self.state.offset()
     }
 
@@ -240,7 +240,7 @@ impl ResultView {
         if total_rows == 0 {
             return;
         }
-        let next = self.state.selected().map(|i| i + 1).unwrap_or(0);
+        let next = self.state.selected().map_or(0, |i| i + 1);
         self.state.select(Some(next.min(total_rows - 1)));
     }
 
@@ -779,8 +779,7 @@ fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
                 .iter()
                 .map(|r| {
                     r.0.get(i)
-                        .map(|v| render_for_grid(&v.render()).width())
-                        .unwrap_or(0)
+                        .map_or(0, |v| render_for_grid(&v.render()).width())
                 })
                 .max()
                 .unwrap_or(0);
@@ -840,7 +839,7 @@ fn render_for_grid(s: &str) -> String {
 /// in a terminal grid: BIDI override controls, zero-width / directional
 /// marks, and C0/C1 control characters (except \t, \n, \r which are
 /// handled separately by `render_for_grid`).
-fn is_dangerous_glyph(c: char) -> bool {
+const fn is_dangerous_glyph(c: char) -> bool {
     matches!(
         c,
         '\u{202A}'..='\u{202E}'  // BIDI override

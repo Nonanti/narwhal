@@ -137,7 +137,7 @@ impl App {
                     self.core.handle_meta_update(meta);
                     Some(DrawTrigger::Force)
                 }
-                _ = sleep_until(deadline.into()) => None,
+                () = sleep_until(deadline.into()) => None,
             };
 
             let now = Instant::now();

@@ -39,7 +39,7 @@ impl ExportFormat {
         }
     }
 
-    pub fn default_extension(self) -> &'static str {
+    pub const fn default_extension(self) -> &'static str {
         match self {
             Self::Csv => "csv",
             Self::Json => "json",
@@ -92,7 +92,7 @@ pub fn export_rows(
     path: &Path,
     source_table: Option<&QualifiedName>,
 ) -> Result<(), ExportError> {
-    if let ExportFormat::Insert = format {
+    if format == ExportFormat::Insert {
         let table = source_table.ok_or(ExportError::NoSourceTable)?;
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -272,7 +272,7 @@ fn write_json_value<W: Write>(writer: &mut W, value: &Value) -> Result<(), Expor
             // Bytes that are NOT valid UTF-8 are emitted as
             // {"$bytes": "<base64>"} so the round-trip survives.
             if let Ok(s) = std::str::from_utf8(b) {
-                write_json_string(writer, s)?
+                write_json_string(writer, s)?;
             } else {
                 let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b);
                 writer.write_all(b"{\"$bytes\":\"")?;

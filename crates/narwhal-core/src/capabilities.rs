@@ -25,7 +25,7 @@ pub struct Capabilities {
     /// materialising the entire result set in memory first.
     ///
     /// Drivers that currently buffer the full result before exposing the
-    /// stream (notably MySQL, which is awaiting a real `stream_and_drop`
+    /// stream (notably `MySQL`, which is awaiting a real `stream_and_drop`
     /// implementation) must leave this `false` so the UI can warn the
     /// user and refuse to launch open-ended streams over large tables.
     pub streaming: bool,

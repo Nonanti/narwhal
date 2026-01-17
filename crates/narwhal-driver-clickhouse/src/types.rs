@@ -1,11 +1,11 @@
-//! ClickHouse type system bridge and SQL literal rendering.
+//! `ClickHouse` type system bridge and SQL literal rendering.
 //!
-//! ClickHouse returns column metadata in the
+//! `ClickHouse` returns column metadata in the
 //! `TabSeparatedWithNamesAndTypes` wire format where each value is a
 //! tab-delimited field and the first two rows carry column names and
 //! native type strings respectively. This module:
 //!
-//! * maps ClickHouse type strings (`UInt32`, `Nullable(String)`,
+//! * maps `ClickHouse` type strings (`UInt32`, `Nullable(String)`,
 //!   `Array(Int64)`, …) to [`narwhal_core::Value`] variants for display;
 //! * renders [`narwhal_core::Value`] as safe SQL literals for the HTTP
 //!   query parameter substitution path;
@@ -13,9 +13,9 @@
 //!
 //! # Byte-accurate TSV parsing
 //!
-//! ClickHouse's `String` type is byte-oriented — it stores any byte
+//! `ClickHouse`'s `String` type is byte-oriented — it stores any byte
 //! sequence, not just UTF-8 text. The TSV parser therefore works on
-//! `&[u8]` throughout the data path, decoding ClickHouse's TSV escape
+//! `&[u8]` throughout the data path, decoding `ClickHouse`'s TSV escape
 //! sequences (`\b \f \n \r \t \0 \\ \'`) and routing invalid-UTF-8
 //! payloads into [`Value::Bytes`] instead of silently replacing them
 //! with `U+FFFD`. Only header lines (column names and type strings,
@@ -23,14 +23,14 @@
 
 use narwhal_core::Value;
 
-/// Classify a ClickHouse type string into the [`Value`] variant that
+/// Classify a `ClickHouse` type string into the [`Value`] variant that
 /// should hold it.
 ///
-/// Composite and exotic types (Array, Map, Tuple, Nested, LowCardinality,
-/// AggregateFunction, …) collapse to `Value::String` — the TSV wire
+/// Composite and exotic types (Array, Map, Tuple, Nested, `LowCardinality`,
+/// `AggregateFunction`, …) collapse to `Value::String` — the TSV wire
 /// representation is already human-readable and round-tripping structured
 /// types is out of scope for a TUI client.
-pub(crate) fn classify_type(ch_type: &str) -> ValueKind {
+pub fn classify_type(ch_type: &str) -> ValueKind {
     let ch_type = ch_type.trim();
 
     // Strip Nullable(…) and LowCardinality(…) wrappers — the inner type
@@ -82,7 +82,7 @@ pub(crate) fn classify_type(ch_type: &str) -> ValueKind {
 /// Simplified classification result used to decide which [`Value`] variant
 /// to produce when parsing a TSV field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ValueKind {
+pub enum ValueKind {
     Int,
     Float,
     Bool,
@@ -107,10 +107,10 @@ fn strip_wrappers(ty: &str) -> &str {
     current
 }
 
-/// Decode ClickHouse TSV escape sequences in a string-typed field.
+/// Decode `ClickHouse` TSV escape sequences in a string-typed field.
 /// Returns the decoded bytes (which may not be valid UTF-8).
 ///
-/// ClickHouse escapes `\b \f \n \r \t \0 \\ \'` in TSV string cells.
+/// `ClickHouse` escapes `\b \f \n \r \t \0 \\ \'` in TSV string cells.
 /// Any other byte is passed through unchanged — including bytes that
 /// are not valid UTF-8.
 fn decode_tsv_string_bytes(field: &[u8]) -> Vec<u8> {
@@ -142,20 +142,20 @@ fn decode_tsv_string_bytes(field: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Parse a single TSV field according to the ClickHouse type string.
+/// Parse a single TSV field according to the `ClickHouse` type string.
 ///
-/// `\\N` (literal backslash-N) is ClickHouse's NULL representation in
+/// `\\N` (literal backslash-N) is `ClickHouse`'s NULL representation in
 /// TSV format. Empty strings in non-Nullable columns are preserved as
 /// `Value::String("")`.
 ///
-/// Takes `&[u8]` because ClickHouse's `String` type is byte-oriented —
+/// Takes `&[u8]` because `ClickHouse`'s `String` type is byte-oriented —
 /// it may contain arbitrary bytes that are not valid UTF-8. String-typed
 /// fields are decoded via [`decode_tsv_string_bytes`] and then routed to
 /// [`Value::String`] if the decoded bytes are valid UTF-8, or
 /// [`Value::Bytes`] otherwise. Numeric/Bool/Uuid fields use strict
 /// `std::str::from_utf8` because those types are always ASCII on the
 /// wire; invalid UTF-8 there produces [`Value::Unknown`].
-pub(crate) fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
+pub fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
     // ClickHouse represents NULL as the two-byte sequence \N in TSV.
     // This check must happen before escape decoding because \N is not
     // an escaped byte — it is a literal backslash followed by 'N'.
@@ -223,17 +223,17 @@ pub(crate) fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
     }
 }
 
-/// Quick check: does the ClickHouse type string start with `Nullable(`?
+/// Quick check: does the `ClickHouse` type string start with `Nullable(`?
 fn is_nullable_type(ch_type: &str) -> bool {
     ch_type.trim().starts_with("Nullable(")
 }
 
-/// Escape a string for embedding in a single-quoted ClickHouse SQL literal.
+/// Escape a string for embedding in a single-quoted `ClickHouse` SQL literal.
 ///
-/// ClickHouse honours backslash escapes inside string literals, so both
+/// `ClickHouse` honours backslash escapes inside string literals, so both
 /// backslash and single-quote must be escaped. Backslash is doubled
 /// (`\\` → `\\\\`) and single-quote is doubled (`'` → `''`).
-pub(crate) fn escape_sql_string(s: &str) -> String {
+pub fn escape_sql_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -245,14 +245,14 @@ pub(crate) fn escape_sql_string(s: &str) -> String {
     out
 }
 
-/// Render a [`Value`] as a SQL literal safe for embedding in a ClickHouse
+/// Render a [`Value`] as a SQL literal safe for embedding in a `ClickHouse`
 /// HTTP query string.
 ///
 /// **Security**: String values are single-quoted with interior quotes
 /// escaped by doubling (`'` → `''`). Byte arrays are rendered as hex
 /// literals. All other variants use their natural SQL representation.
 /// This function must **never** produce an unescaped interpolation.
-pub(crate) fn value_to_sql_literal(value: &Value) -> String {
+pub fn value_to_sql_literal(value: &Value) -> String {
     match value {
         Value::Null => "NULL".to_owned(),
         Value::Bool(b) => {
@@ -328,14 +328,14 @@ fn split_lines(body: &[u8]) -> Vec<&[u8]> {
 /// format.
 ///
 /// Returns `(headers, type_strings, rows)` where `headers` has the column
-/// names, `type_strings` has the ClickHouse native types, and `rows` has
+/// names, `type_strings` has the `ClickHouse` native types, and `rows` has
 /// the parsed [`Value`] rows.
 ///
 /// Takes `&[u8]` because data cells may contain arbitrary bytes (the
-/// ClickHouse `String` type is byte-oriented). Header lines (column
+/// `ClickHouse` `String` type is byte-oriented). Header lines (column
 /// names and type strings) are always ASCII identifiers on the wire, so
 /// they are converted to `String` via `from_utf8_lossy` defensively.
-pub(crate) fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
+pub fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
     let lines = split_lines(body);
     let mut lines_iter = lines.iter().peekable();
 
@@ -367,7 +367,7 @@ pub(crate) fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<
         let fields: Vec<&[u8]> = line.split(|&b| b == b'\t').collect();
         let mut row = Vec::with_capacity(headers.len());
         for (i, field) in fields.iter().enumerate() {
-            let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
+            let ch_type = type_strings.get(i).map_or("String", String::as_str);
             row.push(parse_tsv_value(field, ch_type));
         }
         // Pad missing fields with Null.

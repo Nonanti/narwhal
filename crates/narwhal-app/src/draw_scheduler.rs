@@ -34,7 +34,7 @@ pub const THROTTLE: Duration = Duration::from_millis(100);
 #[non_exhaustive]
 pub enum DrawTrigger {
     /// User input (key, mouse, resize) or a non-streaming run update
-    /// (StatementStarted, Failed, AllDone, SchemaRefresh, …). Always
+    /// (`StatementStarted`, Failed, `AllDone`, `SchemaRefresh`, …). Always
     /// draws immediately.
     Force,
     /// A `RunUpdate::RowsAppended` carrying a fresh batch of rows.
@@ -66,7 +66,7 @@ pub struct DrawScheduler {
 impl DrawScheduler {
     /// Construct a fresh scheduler. The first event of any kind will
     /// draw immediately; the throttle window starts from that draw.
-    pub fn new(_initial: Instant) -> Self {
+    pub const fn new(_initial: Instant) -> Self {
         Self {
             last_draw: None,
             pending: false,

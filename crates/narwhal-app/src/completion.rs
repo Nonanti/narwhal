@@ -330,11 +330,11 @@ fn tokenize(input: &str) -> Vec<Token> {
     tokens
 }
 
-fn is_ident_start(b: u8) -> bool {
+const fn is_ident_start(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_'
 }
 
-fn is_ident_cont(b: u8) -> bool {
+const fn is_ident_cont(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 

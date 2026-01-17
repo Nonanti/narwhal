@@ -2,7 +2,7 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DumpTarget {
-    /// Dump the table currently shown in the result pane (TableDetail).
+    /// Dump the table currently shown in the result pane (`TableDetail`).
     Current,
     /// Dump every table the active session knows about.
     All,
@@ -146,6 +146,7 @@ pub enum SubstituteRange {
 }
 
 /// Every token the parser accepts as a built-in `:`-line command head.
+///
 /// Plugins that try to register one of these names are rejected at
 /// load time so the user isn't left wondering why their `:run`
 /// override never runs (the parser would always match the built-in
@@ -230,6 +231,7 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
 ];
 
 /// Short descriptions for built-in commands, looked up by `:help <name>`.
+///
 /// Each entry maps a primary token to a one-line human-readable summary.
 /// Aliases (e.g. `"o"` for `"open"`) are not listed here — `:help o`
 /// resolves through the parser to `Help(Some("o"))` and the core maps

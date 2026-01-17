@@ -77,7 +77,7 @@ pub struct WorkspaceFile {
     pub allow_writes: bool,
 }
 
-fn default_allow_writes() -> bool {
+const fn default_allow_writes() -> bool {
     true
 }
 

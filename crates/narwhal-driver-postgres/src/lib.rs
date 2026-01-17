@@ -1,4 +1,4 @@
-//! PostgreSQL driver backed by `tokio-postgres`.
+//! `PostgreSQL` driver backed by `tokio-postgres`.
 //!
 //! Transport security is configured via the `ssl_mode` parameter in the
 //! connection parameters. Supported values mirror libpq:
@@ -8,7 +8,7 @@
 //!   the system trust store or `ssl_root_cert`. Unlike libpq, there is no
 //!   fallback to plain-text — this is a hardened interpretation.
 //! - `require`: TLS with chain verification but hostname verification
-//!   skipped (matches MySQL `require` semantics). The server certificate
+//!   skipped (matches `MySQL` `require` semantics). The server certificate
 //!   must chain to a trusted root, but the hostname in the certificate
 //!   is not checked.
 //! - `verify-ca`: identical to `require` (chain verify, no hostname) —
@@ -42,7 +42,7 @@ use tracing::{debug, error, info};
 use crate::tls::{make_tls_connector, InternalSslMode, MakeRustlsConnect};
 use crate::types::{column_to_value, Param};
 
-/// PostgreSQL driver. The current implementation uses `NoTls`; configurable
+/// `PostgreSQL` driver. The current implementation uses `NoTls`; configurable
 /// TLS support is planned and tracked separately.
 #[derive(Debug, Default)]
 pub struct PostgresDriver;
@@ -50,7 +50,7 @@ pub struct PostgresDriver;
 impl PostgresDriver {
     pub const NAME: &'static str = "postgres";
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -425,9 +425,9 @@ fn extract_csv(value: Option<&Value>) -> Vec<String> {
         return Vec::new();
     }
     if raw.contains('\x1F') {
-        raw.split('\x1F').map(|s| s.to_owned()).collect()
+        raw.split('\x1F').map(std::borrow::ToOwned::to_owned).collect()
     } else {
-        raw.split(',').map(|s| s.to_owned()).collect()
+        raw.split(',').map(std::borrow::ToOwned::to_owned).collect()
     }
 }
 
@@ -440,7 +440,7 @@ impl PostgresConnection {
             let mut cache = self
                 .prepared_cache
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(stmt) = cache.get(sql) {
                 return Ok(stmt.clone());
             }
@@ -451,7 +451,7 @@ impl PostgresConnection {
             let mut cache = self
                 .prepared_cache
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.put(sql.to_owned(), statement.clone());
         }
         Ok(statement)

@@ -26,8 +26,8 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
+    pub const fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
     }
 
     /// Render the value as a plain string suitable for display in a grid.
@@ -43,19 +43,19 @@ impl Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Null => f.write_str("NULL"),
-            Value::Bool(b) => write!(f, "{b}"),
-            Value::Int(i) => write!(f, "{i}"),
-            Value::Float(v) => write!(f, "{v}"),
-            Value::String(s) => f.write_str(s),
-            Value::Bytes(b) => write!(f, "<{} bytes>", b.len()),
-            Value::Date(d) => write!(f, "{d}"),
-            Value::Time(t) => write!(f, "{t}"),
-            Value::DateTime(dt) => write!(f, "{dt}"),
-            Value::Timestamp(ts) => f.write_str(&ts.to_rfc3339()),
-            Value::Uuid(u) => write!(f, "{u}"),
-            Value::Json(v) => write!(f, "{v}"),
-            Value::Unknown(s) => f.write_str(s),
+            Self::Null => f.write_str("NULL"),
+            Self::Bool(b) => write!(f, "{b}"),
+            Self::Int(i) => write!(f, "{i}"),
+            Self::Float(v) => write!(f, "{v}"),
+            Self::String(s) => f.write_str(s),
+            Self::Bytes(b) => write!(f, "<{} bytes>", b.len()),
+            Self::Date(d) => write!(f, "{d}"),
+            Self::Time(t) => write!(f, "{t}"),
+            Self::DateTime(dt) => write!(f, "{dt}"),
+            Self::Timestamp(ts) => f.write_str(&ts.to_rfc3339()),
+            Self::Uuid(u) => write!(f, "{u}"),
+            Self::Json(v) => write!(f, "{v}"),
+            Self::Unknown(s) => f.write_str(s),
         }
     }
 }

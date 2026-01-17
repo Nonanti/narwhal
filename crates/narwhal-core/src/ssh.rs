@@ -109,11 +109,11 @@ impl SshTunnel {
     }
 
     /// Loopback host the driver should connect to.
-    pub fn local_host(&self) -> &'static str {
+    pub const fn local_host(&self) -> &'static str {
         "127.0.0.1"
     }
 
-    pub fn local_port(&self) -> u16 {
+    pub const fn local_port(&self) -> u16 {
         self.local_port
     }
 

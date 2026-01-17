@@ -1,9 +1,9 @@
-//! DuckDB driver backed by the `duckdb` crate (an embedded OLAP engine
+//! `DuckDB` driver backed by the `duckdb` crate (an embedded OLAP engine
 //! whose Rust API is a near-fork of `rusqlite`).
 //!
-//! Like SQLite, every call is synchronous so we dispatch the work onto
+//! Like `SQLite`, every call is synchronous so we dispatch the work onto
 //! [`tokio::task::spawn_blocking`] and serialise concurrent use behind a
-//! [`tokio::sync::Mutex`]. Unlike SQLite, DuckDB:
+//! [`tokio::sync::Mutex`]. Unlike `SQLite`, `DuckDB`:
 //!
 //! * supports multiple logical schemas, surfaced via `information_schema`;
 //! * has a richer type lattice (huge ints, decimals, intervals, lists,
@@ -11,9 +11,9 @@
 //!   mapping in one place so the rest of the code stays simple;
 //! * supports query cancellation through [`duckdb::InterruptHandle`].
 //!
-//! The intent is parity with the SQLite driver's surface area, so the
+//! The intent is parity with the `SQLite` driver's surface area, so the
 //! result set, schema discovery and transaction surface are uniform. DDL
-//! and PRAGMA invocations are different (DuckDB uses `information_schema`
+//! and PRAGMA invocations are different (`DuckDB` uses `information_schema`
 //! and a couple of `pragma_*` table-valued functions), so the underlying
 //! SQL is bespoke even when the wire shape matches.
 
@@ -55,7 +55,7 @@ pub struct DuckdbDriver;
 impl DuckdbDriver {
     pub const NAME: &'static str = "duckdb";
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -147,7 +147,7 @@ pub struct DuckdbConnection {
 }
 
 impl DuckdbConnection {
-    /// Look up the table kind (Table/View) from duckdb_views and duckdb_tables.
+    /// Look up the table kind (Table/View) from `duckdb_views` and `duckdb_tables`.
     async fn lookup_table_kind(&self, schema: &str, name: &str) -> Result<TableKind> {
         const SQL: &str = "
             SELECT 'view' AS kind FROM duckdb_views() WHERE schema_name = ? AND view_name = ?
@@ -191,7 +191,7 @@ impl DuckdbConnection {
 
 /// Best-effort: does `sql` likely return a result set?
 ///
-/// DuckDB's prepared-statement API requires us to commit to either
+/// `DuckDB`'s prepared-statement API requires us to commit to either
 /// [`Statement::execute`] or [`Statement::query`] *before* it knows the
 /// statement shape, so we infer from:
 ///
@@ -278,7 +278,7 @@ fn is_word_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
 }
 
 /// Render a [`duckdb::types::Type`] as the human-readable SQL type name
-/// matching DuckDB's documentation. The default `Debug` formatting
+/// matching `DuckDB`'s documentation. The default `Debug` formatting
 /// produces variant names like `Int` rather than the engine's own
 /// `INTEGER`; composite types are rendered recursively. Keeps the
 /// result-pane legend on parity with the other drivers.
@@ -357,8 +357,7 @@ fn run_blocking(
                 .map(|idx| ColumnHeader {
                     name: stmt
                         .column_name(idx)
-                        .map(|s| s.as_str())
-                        .unwrap_or("")
+                        .map_or("", std::string::String::as_str)
                         .to_owned(),
                     data_type: format_column_type(&duckdb::types::Type::from(
                         &stmt.column_type(idx),
@@ -434,8 +433,7 @@ impl Connection for DuckdbConnection {
                         .map(|idx| ColumnHeader {
                             name: stmt
                                 .column_name(idx)
-                                .map(|s| s.as_str())
-                                .unwrap_or("")
+                                .map_or("", std::string::String::as_str)
                                 .to_owned(),
                             data_type: format_column_type(&duckdb::types::Type::from(
                                 &stmt.column_type(idx),
@@ -810,7 +808,7 @@ impl Connection for DuckdbConnection {
 
 // ---- discovery helpers ----
 
-/// Look up indexes for `schema.name` via DuckDB's `duckdb_indexes()`
+/// Look up indexes for `schema.name` via `DuckDB`'s `duckdb_indexes()`
 /// table function. The function exposes the SQL that built the index but
 /// not its column list directly, so we parse the trailing `(col, col)`
 /// out of the rendered statement — good enough for the common cases.

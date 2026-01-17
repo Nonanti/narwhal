@@ -1,6 +1,6 @@
 //! Reconstruct `CREATE TABLE` DDL from `pg_catalog`.
 //!
-//! PostgreSQL does not expose a native `SHOW CREATE TABLE` command.
+//! `PostgreSQL` does not expose a native `SHOW CREATE TABLE` command.
 //! Instead, we query `pg_attribute`, `pg_constraint`, and `pg_attrdef`
 //! and assemble the DDL text.
 //!
@@ -31,8 +31,8 @@ struct PkInfo {
     columns: Vec<String>,
 }
 
-/// Build a `CREATE TABLE schema.name ( … );` statement from pg_catalog.
-pub(crate) async fn build_create_table(
+/// Build a `CREATE TABLE schema.name ( … );` statement from `pg_catalog`.
+pub async fn build_create_table(
     conn: &super::PostgresConnection,
     schema: &str,
     table: &str,

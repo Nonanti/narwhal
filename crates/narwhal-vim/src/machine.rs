@@ -19,7 +19,7 @@ impl Vim {
         Self::default()
     }
 
-    pub fn mode(&self) -> Mode {
+    pub const fn mode(&self) -> Mode {
         self.mode
     }
 
@@ -52,7 +52,7 @@ impl Vim {
         self.pending_count.take().unwrap_or(1)
     }
 
-    /// Accumulate a digit into the pending count, clamping to MAX_COUNT.
+    /// Accumulate a digit into the pending count, clamping to `MAX_COUNT`.
     fn push_count_digit(&mut self, digit: usize) {
         let next = self
             .pending_count
@@ -246,7 +246,7 @@ impl Vim {
         }
     }
 
-    /// Handle keys in OperatorPending mode. After an operator (d/y/c) is
+    /// Handle keys in `OperatorPending` mode. After an operator (d/y/c) is
     /// pressed, we wait for a motion or a doubled operator (dd/yy/cc for
     /// line-wise).
     fn handle_operator_pending(&mut self, key: Key) -> Action {

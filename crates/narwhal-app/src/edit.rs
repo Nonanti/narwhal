@@ -45,7 +45,7 @@ pub fn parse_input_typed(text: &str, data_type_hint: Option<&str>) -> Value {
         return Value::Null;
     }
 
-    let hint = data_type_hint.map(|h| h.to_ascii_uppercase());
+    let hint = data_type_hint.map(str::to_ascii_uppercase);
     let hint = hint.as_deref();
 
     fn is_string_type(h: &str) -> bool {
@@ -120,7 +120,7 @@ pub fn quote_ident(name: &str, dialect: Dialect) -> String {
     }
 }
 
-/// Quote a `schema.table` pair, omitting an empty schema (SQLite).
+/// Quote a `schema.table` pair, omitting an empty schema (`SQLite`).
 pub fn quote_qualified(schema: &str, table: &str, dialect: Dialect) -> String {
     if schema.is_empty() {
         quote_ident(table, dialect)

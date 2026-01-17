@@ -467,7 +467,7 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
 
     let timeout = Arc::new(InvocationTimeout::new(budget));
     let timeout_hook = timeout.clone();
-    let timeout_err = timeout.clone();
+    let timeout_err = timeout;
 
     lua.set_hook(HookTriggers::EVERY_LINE, move |_lua, _debug| {
         if timeout_hook.exceeded() {
@@ -580,7 +580,7 @@ fn invoke_transforms(
         Ok(t) => t,
         Err(e) => return (result, Some(PluginError::Runtime(e.to_string()))),
     };
-    if transforms.len().map(|n| n == 0).unwrap_or(true) {
+    if transforms.len().map_or(true, |n| n == 0) {
         return (result, None);
     }
     // Transform handlers are subject to the same timeout budget as
@@ -690,7 +690,7 @@ fn value_from_lua(value: LuaValue) -> Value {
         LuaValue::Integer(i) => Value::Int(i),
         LuaValue::Number(f) => Value::Float(f),
         LuaValue::String(s) => Value::String(s.to_string_lossy()),
-        other => Value::String(format!("{:?}", other)),
+        other => Value::String(format!("{other:?}")),
     }
 }
 

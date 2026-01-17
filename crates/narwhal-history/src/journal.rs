@@ -103,7 +103,7 @@ struct HistoryEntryView<'a> {
 }
 
 impl<'a> HistoryEntryView<'a> {
-    fn from(entry: &'a HistoryEntry, sql: &'a str) -> Self {
+    const fn from(entry: &'a HistoryEntry, sql: &'a str) -> Self {
         Self {
             timestamp: &entry.timestamp,
             connection_id: &entry.connection_id,
@@ -182,19 +182,19 @@ impl HistoryEntry {
     }
 
     #[must_use]
-    pub fn with_timing(mut self, elapsed_ms: u64) -> Self {
+    pub const fn with_timing(mut self, elapsed_ms: u64) -> Self {
         self.elapsed_ms = elapsed_ms;
         self
     }
 
     #[must_use]
-    pub fn with_rows_affected(mut self, count: u64) -> Self {
+    pub const fn with_rows_affected(mut self, count: u64) -> Self {
         self.rows_affected = Some(count);
         self
     }
 
     #[must_use]
-    pub fn with_rows_returned(mut self, count: u64) -> Self {
+    pub const fn with_rows_returned(mut self, count: u64) -> Self {
         self.rows_returned = Some(count);
         self
     }
@@ -207,7 +207,7 @@ impl HistoryEntry {
     }
 
     #[must_use]
-    pub fn with_cancellation(mut self) -> Self {
+    pub const fn with_cancellation(mut self) -> Self {
         self.outcome = Outcome::Cancelled;
         self
     }

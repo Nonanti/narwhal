@@ -90,15 +90,15 @@ impl Session {
     }
 
     /// True while a transaction is open.
-    pub fn in_transaction(&self) -> bool {
+    pub const fn in_transaction(&self) -> bool {
         self.transaction.is_some()
     }
 
     /// Refresh the cached schema listing.
     ///
     /// Uses [`narwhal_core::Connection::list_all_tables`] which issues a single
-    /// catalogue query when the driver supports it (e.g. PG, MySQL,
-    /// ClickHouse) and falls back to the N+1 `list_schemas` +
+    /// catalogue query when the driver supports it (e.g. PG, `MySQL`,
+    /// `ClickHouse`) and falls back to the N+1 `list_schemas` +
     /// `list_tables` loop otherwise (H12).
     pub async fn refresh_schemas(&mut self) -> Result<()> {
         let mut conn = self

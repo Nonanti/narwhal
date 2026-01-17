@@ -35,8 +35,8 @@ pub fn render_row_detail(
     theme: &Theme,
 ) {
     let (max_w, max_h) = crate::constants::ROW_DETAIL_MODAL_MAX;
-    let pct_w = (area.width as u32 * 70 / 100) as u16;
-    let pct_h = (area.height as u32 * 70 / 100) as u16;
+    let pct_w = (u32::from(area.width) * 70 / 100) as u16;
+    let pct_h = (u32::from(area.height) * 70 / 100) as u16;
     let width = max_w.min(pct_w).min(area.width);
     let height = max_h.min(pct_h).min(area.height);
 

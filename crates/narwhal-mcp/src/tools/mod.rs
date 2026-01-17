@@ -107,6 +107,6 @@ impl ToolRegistry {
         self.tools
             .iter()
             .find(|t| t.name() == name)
-            .map(|t| t.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 }

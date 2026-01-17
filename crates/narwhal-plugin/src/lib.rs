@@ -63,7 +63,7 @@ pub struct CommandDescriptor {
 
 /// What a command handler may report to the host. Side effects beyond
 /// "show this status message" are intentionally not in scope yet — they
-/// would force a tighter coupling with the AppCore than we want here.
+/// would force a tighter coupling with the `AppCore` than we want here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CommandOutcome {

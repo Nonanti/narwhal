@@ -1,4 +1,4 @@
-//! SQLite driver backed by `rusqlite`.
+//! `SQLite` driver backed by `rusqlite`.
 //!
 //! `rusqlite` is synchronous, so every database call is dispatched onto a
 //! blocking thread via [`tokio::task::spawn_blocking`]. The connection is
@@ -36,7 +36,7 @@ pub struct SqliteDriver;
 impl SqliteDriver {
     pub const NAME: &'static str = "sqlite";
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -122,7 +122,7 @@ pub struct SqliteConnection {
 }
 
 impl SqliteConnection {
-    /// Look up the table kind from sqlite_master.type (M11).
+    /// Look up the table kind from `sqlite_master.type` (M11).
     async fn lookup_table_kind(&self, name: &str) -> Result<TableKind> {
         let sql = "SELECT type FROM sqlite_master WHERE name = ? AND type IN ('table', 'view')";
         let result = self.run(sql, &[Value::String(name.to_owned())]).await?;

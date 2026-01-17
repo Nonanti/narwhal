@@ -231,9 +231,7 @@ fn parse_sqlite(rest: &str) -> ParsedUrl {
     // sqlite:./rel   -> "./rel" (caller strips the `sqlite:` prefix)
     let path = rest.to_owned();
     let display = std::path::Path::new(&path)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.clone());
+        .file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
     ParsedUrl {
         config: ConnectionConfig {
             id: Uuid::new_v4(),
@@ -306,7 +304,7 @@ fn percent_decode(s: &str) -> Result<String, UrlError> {
     String::from_utf8(out).map_err(|_| UrlError::InvalidPercentEscape(s.to_owned()))
 }
 
-fn hex_digit(b: u8) -> Option<u8> {
+const fn hex_digit(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
         b'a'..=b'f' => Some(b - b'a' + 10),

@@ -65,8 +65,8 @@ impl WizardFieldValue {
     /// positioning). For secret fields, this is the actual character count.
     pub fn len(&self) -> usize {
         match self {
-            WizardFieldValue::Public(s) => s.len(),
-            WizardFieldValue::Secret(s) => s.expose_secret().len(),
+            Self::Public(s) => s.len(),
+            Self::Secret(s) => s.expose_secret().len(),
         }
     }
 
@@ -79,8 +79,8 @@ impl WizardFieldValue {
     /// the `SecretString`.
     pub fn push(&mut self, ch: char) {
         match self {
-            WizardFieldValue::Public(s) => s.push(ch),
-            WizardFieldValue::Secret(s) => {
+            Self::Public(s) => s.push(ch),
+            Self::Secret(s) => {
                 let mut plain = s.expose_secret().to_owned();
                 plain.push(ch);
                 // The old SecretString is dropped (its inner Box<str>
@@ -96,10 +96,10 @@ impl WizardFieldValue {
     /// Remove the last character.
     pub fn pop(&mut self) {
         match self {
-            WizardFieldValue::Public(s) => {
+            Self::Public(s) => {
                 s.pop();
             }
-            WizardFieldValue::Secret(s) => {
+            Self::Secret(s) => {
                 let mut plain = s.expose_secret().to_owned();
                 plain.pop();
                 *s = SecretString::new(plain.into_boxed_str());
@@ -116,8 +116,8 @@ impl WizardFieldValue {
     /// immediate operation.
     pub fn expose(&self) -> &str {
         match self {
-            WizardFieldValue::Public(s) => s,
-            WizardFieldValue::Secret(s) => s.expose_secret(),
+            Self::Public(s) => s,
+            Self::Secret(s) => s.expose_secret(),
         }
     }
 }
@@ -149,7 +149,7 @@ pub enum WizardFieldKind {
 pub struct ConnectionWizard {
     pub driver_index: usize,
     pub fields: Vec<WizardField>,
-    /// Index 0 is the driver selector; indexes 1..=fields.len() target a
+    /// Index 0 is the driver selector; indexes `1..=fields.len()` target a
     /// field. This keeps a single integer cursor consistent across the form.
     pub focused: usize,
     /// `Some(uuid)` when the wizard is editing an existing connection.
@@ -389,9 +389,7 @@ fn complete_path(input: &str) -> CompletionResult {
         } else {
             (
                 path.parent()
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| std::path::PathBuf::from(".")),
+                    .filter(|p| !p.as_os_str().is_empty()).map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf),
                 path.file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default(),
@@ -405,7 +403,7 @@ fn complete_path(input: &str) -> CompletionResult {
         };
     };
     let mut matches: Vec<(String, bool)> = entries
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             if !name.starts_with(&prefix) {
@@ -415,7 +413,7 @@ fn complete_path(input: &str) -> CompletionResult {
             if name.starts_with('.') && !prefix.starts_with('.') {
                 return None;
             }
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             Some((name, is_dir))
         })
         .collect();
@@ -687,7 +685,7 @@ impl Default for ConnectionWizard {
 }
 
 impl WizardField {
-    fn default_value(&self) -> &str {
+    const fn default_value(&self) -> &'static str {
         // When the user clears the field, we still want to consult the
         // originally-set default. The `value` field is seeded with the
         // default in `with_default` so empty means the user cleared it;
@@ -740,7 +738,7 @@ fn server_fields(default_port: &str) -> Vec<WizardField> {
     ]
 }
 
-fn text(label: &'static str, kind: WizardFieldKind) -> WizardField {
+const fn text(label: &'static str, kind: WizardFieldKind) -> WizardField {
     WizardField {
         label,
         value: WizardFieldValue::Public(String::new()),

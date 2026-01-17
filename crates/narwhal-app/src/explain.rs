@@ -1,6 +1,6 @@
-//! Parse and render PostgreSQL `EXPLAIN (ANALYZE, FORMAT JSON)` output.
+//! Parse and render `PostgreSQL` `EXPLAIN (ANALYZE, FORMAT JSON)` output.
 //!
-//! Only PostgreSQL is supported. The driver returns a single-row,
+//! Only `PostgreSQL` is supported. The driver returns a single-row,
 //! single-column result whose value is a JSON array containing one plan
 //! object. The plan tree lives under `Plan.Plans` and is rendered as
 //! indented lines that mimic `EXPLAIN`'s textual format while preserving

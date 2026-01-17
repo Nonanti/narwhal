@@ -3,16 +3,16 @@ use serde::{Deserialize, Serialize};
 /// SQL dialect understood by the splitter.
 ///
 /// The dialect affects how string literals and identifiers are escaped and
-/// whether dialect-specific quoting (PostgreSQL dollar-quoted strings,
-/// MySQL backtick identifiers) is recognised.
+/// whether dialect-specific quoting (`PostgreSQL` dollar-quoted strings,
+/// `MySQL` backtick identifiers) is recognised.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Dialect {
-    /// PostgreSQL: recognises `$tag$ ... $tag$` and standard SQL escapes.
+    /// `PostgreSQL`: recognises `$tag$ ... $tag$` and standard SQL escapes.
     Postgres,
-    /// SQLite: standard SQL escapes only.
+    /// `SQLite`: standard SQL escapes only.
     Sqlite,
-    /// MySQL: backtick identifiers in addition to standard SQL escapes.
+    /// `MySQL`: backtick identifiers in addition to standard SQL escapes.
     MySql,
     /// Conservative default: standard SQL only.
     #[default]
@@ -49,7 +49,7 @@ enum State {
     LineComment,
     BlockComment(u32),
     /// Single-quoted string literal. `backslash_escape` controls whether
-    /// a `\` consumes the next byte (MySQL default mode, PostgreSQL
+    /// a `\` consumes the next byte (`MySQL` default mode, `PostgreSQL`
     /// `E'...'` escape strings). Standard SQL and PG plain literals use
     /// `false` and treat `\` as an ordinary character.
     StringLiteral {
@@ -70,7 +70,7 @@ struct Splitter<'a> {
 }
 
 impl<'a> Splitter<'a> {
-    fn new(source: &'a str, dialect: Dialect) -> Self {
+    const fn new(source: &'a str, dialect: Dialect) -> Self {
         Self {
             source,
             bytes: source.as_bytes(),
@@ -89,8 +89,8 @@ impl<'a> Splitter<'a> {
     }
 
     /// Decide whether the literal opening at `self.pos` should honour
-    /// backslash escapes. MySQL applies them unconditionally to single-quoted
-    /// strings; PostgreSQL only inside `E'...'` (`e'...'`) where the prefix
+    /// backslash escapes. `MySQL` applies them unconditionally to single-quoted
+    /// strings; `PostgreSQL` only inside `E'...'` (`e'...'`) where the prefix
     /// stands as its own token.
     fn opening_uses_backslash_escape(&self) -> bool {
         match self.dialect {

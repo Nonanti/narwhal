@@ -1,7 +1,7 @@
 //! Statement-level splitting of SQL source text.
 //!
 //! The splitter is dialect-aware so that dialect-specific constructs such
-//! as PostgreSQL dollar-quoted strings are not mistakenly cut in half.
+//! as `PostgreSQL` dollar-quoted strings are not mistakenly cut in half.
 //! It does not parse SQL; it only locates statement boundaries, which is
 //! sufficient for routing each statement to the database driver
 //! individually.

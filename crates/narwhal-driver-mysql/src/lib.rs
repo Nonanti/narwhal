@@ -1,4 +1,4 @@
-//! MySQL / MariaDB driver backed by `mysql_async`.
+//! `MySQL` / `MariaDB` driver backed by `mysql_async`.
 //!
 //! The driver opens a dedicated connection per [`Connection`] instance
 //! rather than sharing a pool internally; multi-connection workloads are
@@ -65,7 +65,7 @@ pub struct MysqlDriver;
 impl MysqlDriver {
     pub const NAME: &'static str = "mysql";
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -192,7 +192,7 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
 
 pub struct MysqlConnection {
     inner: Arc<Mutex<Option<Conn>>>,
-    /// MySQL server-assigned thread id, captured at connect time. Used
+    /// `MySQL` server-assigned thread id, captured at connect time. Used
     /// by [`MysqlCancelHandle`] to target the right session with
     /// `KILL QUERY` (L31).
     connection_id: u64,
@@ -203,7 +203,7 @@ pub struct MysqlConnection {
 
 /// L31: cancel handle that fires `KILL QUERY <thread_id>` on a fresh
 /// connection. Best-effort: if opening the secondary connection fails
-/// (e.g. server is at max_connections) we surface the error rather than
+/// (e.g. server is at `max_connections`) we surface the error rather than
 /// pretending the cancel succeeded.
 struct MysqlCancelHandle {
     connection_id: u64,
@@ -790,7 +790,7 @@ async fn collect_binary(
     })
 }
 
-/// Statements whose leading keyword forces them onto MySQL's text
+/// Statements whose leading keyword forces them onto `MySQL`'s text
 /// protocol. The server refuses to prepare these — transaction
 /// control, session state, catalogue introspection, lock management,
 /// bulk load — so `exec_iter` would fail with a protocol error.
@@ -817,7 +817,7 @@ const TEXT_PROTOCOL_KEYWORDS: &[&str] = &[
     "HANDLER",
 ];
 
-/// Decides whether an SQL statement must travel over MySQL's *text*
+/// Decides whether an SQL statement must travel over `MySQL`'s *text*
 /// protocol rather than the binary prepared-statement protocol.
 ///
 /// The leading keyword (after skipping ASCII whitespace and a single
@@ -908,7 +908,7 @@ fn map_rows(rows: Vec<mysql_async::Row>, column_count: usize) -> Vec<CoreRow> {
             // Capture per-column types before consuming the row so we can
             // honour BLOB/VARBINARY in the decoder (bug L29).
             let types: Vec<ColumnType> =
-                row.columns_ref().iter().map(|c| c.column_type()).collect();
+                row.columns_ref().iter().map(mysql_async::Column::column_type).collect();
             let mut values = Vec::with_capacity(column_count);
             for (idx, value) in row.unwrap_raw().into_iter().enumerate() {
                 let ty = types

@@ -8,11 +8,11 @@ use narwhal_core::{ColumnHeader, Error, Value};
 
 /// Convert a [`Value`] into the `mysql_async` wire representation.
 ///
-/// Returns an error for inputs MySQL cannot represent (years outside
+/// Returns an error for inputs `MySQL` cannot represent (years outside
 /// the `u16` range). Date/Time/DateTime components are read directly
 /// from the `chrono` value via the `Datelike`/`Timelike` traits — no
 /// `format("%Y").parse()` round-trip and no silent `unwrap_or(0)`.
-pub(crate) fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
+pub fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
     let v = match value {
         Value::Null => MyValue::NULL,
         Value::Bool(v) => MyValue::Int(i64::from(*v)),
@@ -78,7 +78,7 @@ fn year_to_u16(year: i32) -> Result<u16, Error> {
 /// Returns true when the column carries binary content that must not be
 /// re-interpreted as UTF-8 text, even if the bytes happen to be valid
 /// UTF-8 (e.g. an ASCII-only BLOB).
-fn is_binary_column(ty: ColumnType) -> bool {
+const fn is_binary_column(ty: ColumnType) -> bool {
     matches!(
         ty,
         ColumnType::MYSQL_TYPE_BLOB
@@ -89,7 +89,7 @@ fn is_binary_column(ty: ColumnType) -> bool {
     )
 }
 
-pub(crate) fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
+pub fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     match value {
         MyValue::NULL => Value::Null,
         MyValue::Int(v) => Value::Int(*v),
@@ -141,7 +141,7 @@ pub(crate) fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     }
 }
 
-pub(crate) fn column_header(column: &MyColumn) -> ColumnHeader {
+pub fn column_header(column: &MyColumn) -> ColumnHeader {
     ColumnHeader {
         name: column.name_str().to_string(),
         data_type: column_type_name(column.column_type()),

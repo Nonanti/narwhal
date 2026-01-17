@@ -34,7 +34,7 @@ pub struct SnippetStore {
 
 impl SnippetStore {
     /// Create a new store pointing at `root`.
-    pub fn new(root: PathBuf) -> Self {
+    pub const fn new(root: PathBuf) -> Self {
         Self { root }
     }
 
@@ -42,12 +42,10 @@ impl SnippetStore {
     ///
     /// Uses the same `directories::ProjectDirs` crate that the rest of
     /// narwhal uses, so `XDG_CONFIG_HOME` is handled consistently.
-    /// Falls back to `~/.config/narwhal/snippets/` if ProjectDirs cannot
+    /// Falls back to `~/.config/narwhal/snippets/` if `ProjectDirs` cannot
     /// be resolved.
     pub fn default_root() -> PathBuf {
-        directories::ProjectDirs::from("dev", "narwhal", "narwhal")
-            .map(|dirs| dirs.config_dir().join("snippets"))
-            .unwrap_or_else(|| PathBuf::from(".").join("narwhal").join("snippets"))
+        directories::ProjectDirs::from("dev", "narwhal", "narwhal").map_or_else(|| PathBuf::from(".").join("narwhal").join("snippets"), |dirs| dirs.config_dir().join("snippets"))
     }
 
     /// Save `sql` under `name`. Overwrites if the name already exists.
@@ -95,7 +93,7 @@ impl SnippetStore {
                 let entry = entry.ok()?;
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("sql") {
-                    path.file_stem()?.to_str().map(|s| s.to_owned())
+                    path.file_stem()?.to_str().map(std::borrow::ToOwned::to_owned)
                 } else {
                     None
                 }

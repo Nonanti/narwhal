@@ -4,10 +4,10 @@ use narwhal_core::Value;
 use rusqlite::types::{Value as SqlValue, ValueRef};
 
 /// Convert a [`Value`] into a `rusqlite` owned value suitable for parameter
-/// binding. Types that have no native SQLite representation are encoded as
+/// binding. Types that have no native `SQLite` representation are encoded as
 /// their canonical textual form (timestamps as RFC 3339, UUIDs as hyphenated
 /// hex, JSON as its serialised form).
-pub(crate) fn value_to_sql(value: &Value) -> SqlValue {
+pub fn value_to_sql(value: &Value) -> SqlValue {
     match value {
         Value::Null => SqlValue::Null,
         Value::Bool(v) => SqlValue::Integer(i64::from(*v)),
@@ -30,7 +30,7 @@ pub(crate) fn value_to_sql(value: &Value) -> SqlValue {
 
 /// Convert a borrowed `rusqlite` value reference into the engine-agnostic
 /// representation.
-pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
+pub fn value_from_ref(value: ValueRef<'_>) -> Value {
     match value {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(v) => Value::Int(v),

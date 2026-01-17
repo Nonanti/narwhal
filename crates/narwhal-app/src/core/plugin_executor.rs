@@ -25,12 +25,12 @@ use narwhal_pool::Pool;
 /// * the plain `std::sync::Mutex` is fine because every access is short
 ///   (clone the pool out, drop the guard) and never spans an `.await`.
 #[derive(Default)]
-pub(crate) struct PluginConnectionState {
+pub struct PluginConnectionState {
     pub(crate) pool: Option<Pool>,
     pub(crate) in_transaction: bool,
 }
 
-/// SQL executor injected into every Lua plugin loaded by AppCore.
+/// SQL executor injected into every Lua plugin loaded by `AppCore`.
 ///
 /// Reads [`PluginConnectionState`] on every call so the script always
 /// targets the *currently active* connection. Refuses to run while a

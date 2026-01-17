@@ -1,6 +1,6 @@
-//! ClickHouse driver using the native HTTP interface.
+//! `ClickHouse` driver using the native HTTP interface.
 //!
-//! ClickHouse exposes an HTTP API on port 8123 by default. Queries are
+//! `ClickHouse` exposes an HTTP API on port 8123 by default. Queries are
 //! sent as `POST` requests with the SQL in the body and results come back
 //! in the `TabSeparatedWithNamesAndTypes` format which embeds column
 //! names and native type strings in the first two rows.
@@ -16,7 +16,7 @@
 //!   lines once available, then forwards each completed row through
 //!   an [`mpsc`] channel. Backpressure is provided by the channel's
 //!   bounded buffer (capacity 64). Data cells are parsed at the byte
-//!   level (not routed through `&str`) because ClickHouse's `String`
+//!   level (not routed through `&str`) because `ClickHouse`'s `String`
 //!   type is byte-oriented — cells may contain arbitrary bytes that
 //!   are not valid UTF-8. TSV escape sequences (`\b \f \n \r \t \0 \\ \'`)
 //!   are decoded, and invalid-UTF-8 payloads are preserved as
@@ -28,7 +28,7 @@
 //!   `KILL QUERY WHERE query_id IN (...)` request. Cancellation is
 //!   best-effort: server errors during KILL are ignored and an empty
 //!   active-queries set is a no-op.
-//! * **Parameter binding** — ClickHouse's HTTP API does not support
+//! * **Parameter binding** — `ClickHouse`'s HTTP API does not support
 //!   server-side prepared statements. Parameters are rendered as SQL
 //!   literals via the internal `types::value_to_sql_literal` and interpolated into
 //!   the query string. String escaping uses single-quote doubling to
@@ -36,7 +36,7 @@
 //!
 //! # Limitations
 //!
-//! * ClickHouse does not support true ACID transactions, savepoints, or
+//! * `ClickHouse` does not support true ACID transactions, savepoints, or
 //!   foreign keys. The corresponding [`Connection`] methods return
 //!   [`Error::Unsupported`].
 //! * `rows_affected` is not reliably available from the HTTP response
@@ -69,14 +69,14 @@ use crate::types::{parse_tsv_body, parse_tsv_value, value_to_sql_literal};
 // Driver
 // ---------------------------------------------------------------------------
 
-/// ClickHouse driver factory.
+/// `ClickHouse` driver factory.
 #[derive(Debug, Default)]
 pub struct ClickhouseDriver;
 
 impl ClickhouseDriver {
     pub const NAME: &'static str = "clickhouse";
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -312,10 +312,10 @@ pub struct ClickhouseConnection {
 
 /// Best-effort heuristic: does `sql` likely return a result set?
 ///
-/// ClickHouse's HTTP API always returns a response body (even for DDL),
+/// `ClickHouse`'s HTTP API always returns a response body (even for DDL),
 /// but we need to decide whether to parse it as rows or treat it as a
 /// simple acknowledgement. The heuristic matches the same pattern used
-/// by the DuckDB driver.
+/// by the `DuckDB` driver.
 fn statement_returns_rows(sql: &str) -> bool {
     let lead = sql
         .trim_start()
@@ -348,19 +348,19 @@ fn build_base_url(params: &ConnectionParams) -> Result<Url> {
         .map_err(|e| Error::Config(format!("invalid URL: {e}")))
 }
 
-/// Double-quote an identifier for ClickHouse (e.g. `"my table"`).
+/// Double-quote an identifier for `ClickHouse` (e.g. `"my table"`).
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 impl ClickhouseConnection {
-    /// Send a query to ClickHouse via HTTP and return the full response
+    /// Send a query to `ClickHouse` via HTTP and return the full response
     /// body as a string.
     ///
     /// If `query_id` is `Some`, the query ID is registered in the
     /// active-queries set for the duration of the request so that
     /// cancellation can target it.
-    /// Send a query to ClickHouse via HTTP and return the full response
+    /// Send a query to `ClickHouse` via HTTP and return the full response
     /// body as raw bytes.
     ///
     /// If `query_id` is `Some`, the query ID is registered in the
@@ -368,7 +368,7 @@ impl ClickhouseConnection {
     /// cancellation can target it.
     ///
     /// Uses `response.bytes()` instead of `response.text()` because
-    /// ClickHouse's `String` type is byte-oriented — cells may contain
+    /// `ClickHouse`'s `String` type is byte-oriented — cells may contain
     /// arbitrary bytes that are not valid UTF-8.
     /// Send a query and return the raw response body.
     ///
@@ -577,7 +577,7 @@ fn substitute_params(sql: &str, params: &[Value]) -> String {
 /// or table names into the SQL by hand instead of going through the
 /// regular parameter binding path.
 ///
-/// ClickHouse honours backslash escapes inside string literals, so a
+/// `ClickHouse` honours backslash escapes inside string literals, so a
 /// lone backslash would be interpreted as an escape leader (potentially
 /// swallowing a subsequent closing quote). Both backslash-to-doubled-backslash
 /// and single-quote-to-doubled-quote are applied to prevent injection
@@ -1135,7 +1135,7 @@ impl Drop for QueryGuard {
 // Cancellation
 // ---------------------------------------------------------------------------
 
-/// Cancellation handle for ClickHouse connections.
+/// Cancellation handle for `ClickHouse` connections.
 ///
 /// Reads the active query IDs from the shared state and issues a
 /// `KILL QUERY WHERE query_id IN (...)` request. Best-effort:
@@ -1354,7 +1354,7 @@ async fn stream_tsv_chunks<S>(
             let fields: Vec<&[u8]> = line_bytes.split(|&b| b == b'\t').collect();
             let mut row = Vec::with_capacity(headers.len());
             for (i, field) in fields.iter().enumerate() {
-                let ch_type = type_strings.get(i).map(String::as_str).unwrap_or("String");
+                let ch_type = type_strings.get(i).map_or("String", String::as_str);
                 row.push(parse_tsv_value(field, ch_type));
             }
             while row.len() < headers.len() {

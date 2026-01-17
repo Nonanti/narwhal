@@ -100,7 +100,7 @@ impl ConnectionsFile {
             return Ok(Self::default());
         }
         let text = std::fs::read_to_string(path)?;
-        let file: ConnectionsFile = toml::from_str(&text)?;
+        let file: Self = toml::from_str(&text)?;
         validate_connections(&file.connections)?;
         Ok(file)
     }
@@ -116,7 +116,7 @@ impl ConnectionsFile {
 
     /// Parse a TOML string directly (useful for tests).
     pub fn load_from_str(toml: &str) -> Result<Self, ConfigError> {
-        let file: ConnectionsFile = toml::from_str(toml)?;
+        let file: Self = toml::from_str(toml)?;
         validate_connections(&file.connections)?;
         Ok(file)
     }

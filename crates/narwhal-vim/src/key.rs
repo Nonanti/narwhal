@@ -12,21 +12,21 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn char(c: char) -> Self {
+    pub const fn char(c: char) -> Self {
         Self {
             code: KeyCode::Char(c),
             mods: KeyMod::NONE,
         }
     }
 
-    pub fn special(code: KeyCode) -> Self {
+    pub const fn special(code: KeyCode) -> Self {
         Self {
             code,
             mods: KeyMod::NONE,
         }
     }
 
-    pub fn ctrl(c: char) -> Self {
+    pub const fn ctrl(c: char) -> Self {
         Self {
             code: KeyCode::Char(c),
             mods: KeyMod::CTRL,
@@ -61,11 +61,11 @@ impl KeyMod {
     pub const ALT: Self = Self(1 << 1);
     pub const SHIFT: Self = Self(1 << 2);
 
-    pub fn contains(self, other: Self) -> bool {
+    pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
     }
 
-    pub fn with(self, other: Self) -> Self {
+    pub const fn with(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 }

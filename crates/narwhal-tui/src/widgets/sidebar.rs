@@ -31,7 +31,7 @@ pub enum SidebarRowKind {
 }
 
 impl SidebarRowKind {
-    fn glyph(self) -> &'static str {
+    const fn glyph(self) -> &'static str {
         match self {
             Self::Connection => "○",
             Self::ActiveConnection => "●",
@@ -62,9 +62,9 @@ pub struct SidebarView<'a> {
     pub focused: bool,
 }
 
-impl<'a> SidebarView<'a> {
+impl SidebarView<'_> {
     /// How many rows fit in `inner_height` cells (one row per item).
-    pub fn visible_rows(inner_height: u16) -> usize {
+    pub const fn visible_rows(inner_height: u16) -> usize {
         inner_height as usize
     }
 

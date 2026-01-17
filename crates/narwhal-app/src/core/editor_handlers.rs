@@ -270,8 +270,7 @@ impl AppCore {
         let selected = self.tabs[self.active_tab]
             .completion
             .as_ref()
-            .map(|c| c.selected.min(items.len() - 1))
-            .unwrap_or(0);
+            .map_or(0, |c| c.selected.min(items.len() - 1));
         self.tabs[self.active_tab].completion = Some(CompletionState {
             items,
             selected,
@@ -328,8 +327,7 @@ impl AppCore {
                     let idx = self.tabs[self.active_tab]
                         .editor_search
                         .current
-                        .map(|i| i + 1)
-                        .unwrap_or(1);
+                        .map_or(1, |i| i + 1);
                     self.status.message = format!("/{needle} · {idx}/{count}");
                 }
             }
@@ -402,10 +400,10 @@ impl AppCore {
                 })
                 .or({
                     // Wrap around.
-                    if !tab.editor_search.matches.is_empty() {
-                        Some(0)
-                    } else {
+                    if tab.editor_search.matches.is_empty() {
                         None
+                    } else {
+                        Some(0)
                     }
                 }),
             SearchDirection::Backward => {
@@ -421,10 +419,10 @@ impl AppCore {
                 }
                 best.or_else(|| {
                     // Wrap around to the last match.
-                    if !tab.editor_search.matches.is_empty() {
-                        Some(tab.editor_search.matches.len() - 1)
-                    } else {
+                    if tab.editor_search.matches.is_empty() {
                         None
+                    } else {
+                        Some(tab.editor_search.matches.len() - 1)
                     }
                 })
             }
@@ -616,7 +614,7 @@ impl AppCore {
     /// Returns `true` when the key was consumed by the completion popup.
     ///
     /// Bindings inside the popup follow the IDE convention used by
-    /// IntelliJ / DataGrip / VS Code so the muscle memory transfers:
+    /// `IntelliJ` / `DataGrip` / VS Code so the muscle memory transfers:
     /// - Tab / Enter: accept the selected completion
     /// - ↑ / ↓: move the highlight
     /// - Shift-Tab: previous highlight (kept for keyboards without
@@ -790,7 +788,7 @@ impl AppCore {
         });
         let source = match described {
             Ok(ts) => {
-                let columns = ts.columns.clone();
+                let columns = ts.columns;
                 // Cache column names for completion.
                 if let Some(session) = self.session.as_mut() {
                     session.column_cache.insert(
@@ -919,8 +917,7 @@ impl AppCore {
                 }
                 self.tabs[self.active_tab].results.active_mut().reset();
                 self.status.message = format!(
-                    "{}.{}: {} cols·{} idx·{} fk",
-                    table_schema, table_name, col_count, idx_count, fk_count
+                    "{table_schema}.{table_name}: {col_count} cols·{idx_count} idx·{fk_count} fk"
                 );
                 *self.tabs[self.active_tab].results.active_state_mut() =
                     ResultState::TableDetail { schema: ts };

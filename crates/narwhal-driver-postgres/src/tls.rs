@@ -8,10 +8,10 @@
 //!   `ssl_root_cert`). This is a **hardened** interpretation: unlike libpq's
 //!   `prefer`, there is no fallback to a plain-text connection.
 //! - **Require**: TLS with chain verification but **hostname verification
-//!   skipped** (matches MySQL `Require` semantics). The server certificate
+//!   skipped** (matches `MySQL` `Require` semantics). The server certificate
 //!   must chain to a trusted root, but the hostname in the certificate is
 //!   not checked.
-//! - **VerifyCa**: identical to `Require` (chain verify, no hostname) —
+//! - **`VerifyCa`**: identical to `Require` (chain verify, no hostname) —
 //!   provided for explicitness.
 //! - **Verify**: TLS with full chain + hostname verification (the previous
 //!   `verify-full` behaviour).
@@ -23,17 +23,17 @@ use narwhal_core::{ConnectionParams, Error, Result, SslMode};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
-pub(crate) use tokio_postgres_rustls::MakeRustlsConnect;
+pub use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Internal representation that maps the public [`SslMode`] onto the
 /// TLS behaviours rustls supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InternalSslMode {
+pub enum InternalSslMode {
     /// No TLS handshake.
     Disable,
-    /// Chain + hostname verification (system CA or ssl_root_cert).
+    /// Chain + hostname verification (system CA or `ssl_root_cert`).
     Prefer,
-    /// Chain verification, hostname skipped (matches MySQL Require).
+    /// Chain verification, hostname skipped (matches `MySQL` Require).
     Require,
     /// Chain verification, hostname skipped (explicit verify-ca).
     VerifyCa,
@@ -74,18 +74,18 @@ impl InternalSslMode {
         };
 
         Ok(match mode {
-            SslMode::Disable => InternalSslMode::Disable,
-            SslMode::Prefer => InternalSslMode::Prefer,
-            SslMode::Require => InternalSslMode::Require,
-            SslMode::VerifyCa => InternalSslMode::VerifyCa,
-            SslMode::VerifyFull => InternalSslMode::Verify,
+            SslMode::Disable => Self::Disable,
+            SslMode::Prefer => Self::Prefer,
+            SslMode::Require => Self::Require,
+            SslMode::VerifyCa => Self::VerifyCa,
+            SslMode::VerifyFull => Self::Verify,
             // Future SslMode variants: fail closed with verify-full, which
             // is the strictest mode we support today.
-            _ => InternalSslMode::Verify,
+            _ => Self::Verify,
         })
     }
 
-    pub(crate) fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Disable => "disable",
             Self::Prefer => "prefer",
@@ -102,7 +102,7 @@ impl std::fmt::Display for InternalSslMode {
     }
 }
 
-pub(crate) fn make_tls_connector(
+pub fn make_tls_connector(
     mode: InternalSslMode,
     params: &ConnectionParams,
 ) -> Result<MakeRustlsConnect> {

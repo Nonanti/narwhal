@@ -9,17 +9,17 @@ use tokio_postgres::Row;
 /// Newtype wrapping [`Value`] to provide a [`ToSql`] implementation.
 ///
 /// `ToSql` is required when binding parameters through `tokio-postgres`.
-/// `Value` is defined in `narwhal-core` which has no PostgreSQL dependency,
+/// `Value` is defined in `narwhal-core` which has no `PostgreSQL` dependency,
 /// so the bridge lives here.
-pub(crate) struct Param<'a>(pub &'a Value);
+pub struct Param<'a>(pub &'a Value);
 
-impl<'a> std::fmt::Debug for Param<'a> {
+impl std::fmt::Debug for Param<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(self.0, f)
     }
 }
 
-impl<'a> ToSql for Param<'a> {
+impl ToSql for Param<'_> {
     fn to_sql(
         &self,
         ty: &Type,
@@ -76,7 +76,7 @@ impl<'a> ToSql for Param<'a> {
 }
 
 /// Convert a single column of a `tokio-postgres` row into a [`Value`].
-pub(crate) fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value> {
+pub fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value> {
     macro_rules! get {
         ($t:ty, $map:expr) => {{
             match row.try_get::<_, Option<$t>>(idx) {
@@ -120,7 +120,7 @@ pub(crate) fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value>
 
 #[allow(dead_code)]
 fn _assert_traits() {
-    fn ensure_sync<T: Sync>(_: &T) {}
+    const fn ensure_sync<T: Sync>(_: &T) {}
     let value = Value::Null;
     let param = Param(&value);
     ensure_sync(&param);

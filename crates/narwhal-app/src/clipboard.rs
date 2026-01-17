@@ -53,7 +53,7 @@ impl Clipboard for InMemoryClipboard {
 pub struct ArboardClipboard;
 
 impl ArboardClipboard {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 }

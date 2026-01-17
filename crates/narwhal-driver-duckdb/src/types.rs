@@ -1,6 +1,6 @@
 //! Conversion layer between [`narwhal_core::Value`] and `duckdb`.
 //!
-//! DuckDB has a richer native type system than SQLite (hugeints, decimals,
+//! `DuckDB` has a richer native type system than `SQLite` (hugeints, decimals,
 //! intervals, lists, structs, maps, …). For now we map the common cases
 //! to engine-agnostic variants and fall back to a string rendering for
 //! everything else — that's enough to *display* exotic results, which is
@@ -10,11 +10,11 @@
 use duckdb::types::{TimeUnit, Value as DuckValue, ValueRef};
 use narwhal_core::Value;
 
-/// Convert a [`Value`] into an owned DuckDB value suitable for parameter
+/// Convert a [`Value`] into an owned `DuckDB` value suitable for parameter
 /// binding. Engine-specific types (Date, Timestamp, …) are encoded as
 /// strings so the round-trip remains lossless even when the column is a
-/// VARCHAR; DuckDB casts on its end.
-pub(crate) fn value_to_sql(value: &Value) -> DuckValue {
+/// VARCHAR; `DuckDB` casts on its end.
+pub fn value_to_sql(value: &Value) -> DuckValue {
     match value {
         Value::Null => DuckValue::Null,
         Value::Bool(v) => DuckValue::Boolean(*v),
@@ -34,11 +34,11 @@ pub(crate) fn value_to_sql(value: &Value) -> DuckValue {
     }
 }
 
-/// Convert a borrowed DuckDB value reference into the engine-agnostic
+/// Convert a borrowed `DuckDB` value reference into the engine-agnostic
 /// representation. Composite/temporal types that don't have a direct
 /// counterpart in [`Value`] collapse to `Value::String` via their
 /// debug/display form — good enough for read-only browsing.
-pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
+pub fn value_from_ref(value: ValueRef<'_>) -> Value {
     match value {
         ValueRef::Null => Value::Null,
         ValueRef::Boolean(v) => Value::Bool(v),
@@ -65,25 +65,19 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
             // days is days since 1970-01-01 in the Unix epoch.
             // chrono's from_num_days_from_ce_opt uses the CE epoch
             // (day 1 = 0001-01-01). Unix epoch day 0 = CE day 719_163.
-            chrono::NaiveDate::from_num_days_from_ce_opt(days + 719_163)
-                .map(Value::Date)
-                .unwrap_or_else(|| Value::String(format!("date({days})")))
+            chrono::NaiveDate::from_num_days_from_ce_opt(days + 719_163).map_or_else(|| Value::String(format!("date({days})")), Value::Date)
         }
         ValueRef::Time64(unit, ticks) => {
             let ns = scaled_ns(unit, ticks);
             let secs = (ns / 1_000_000_000) as u32;
             let sub_ns = (ns % 1_000_000_000) as u32;
-            chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, sub_ns)
-                .map(Value::Time)
-                .unwrap_or_else(|| Value::String(format!("time({ns}ns)")))
+            chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, sub_ns).map_or_else(|| Value::String(format!("time({ns}ns)")), Value::Time)
         }
         ValueRef::Timestamp(unit, ticks) => {
             let ns = scaled_ns(unit, ticks);
             let secs = ns / 1_000_000_000;
             let sub_ns = (ns % 1_000_000_000) as u32;
-            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns)
-                .map(Value::Timestamp)
-                .unwrap_or_else(|| Value::String(format!("timestamp({ns}ns)")))
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns).map_or_else(|| Value::String(format!("timestamp({ns}ns)")), Value::Timestamp)
         }
         ValueRef::Interval {
             months,
@@ -121,7 +115,7 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
                 if seconds != 0 || sub_ns != 0 {
                     s.push_str(&format!("{seconds}"));
                     if sub_ns != 0 {
-                        s.push_str(format!(".{:09}", sub_ns).trim_end_matches('0'));
+                        s.push_str(format!(".{sub_ns:09}").trim_end_matches('0'));
                     }
                     s.push('S');
                 }
@@ -138,8 +132,8 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
     }
 }
 
-/// Convert a TimeUnit + ticks pair into nanoseconds.
-fn scaled_ns(unit: TimeUnit, ticks: i64) -> i64 {
+/// Convert a `TimeUnit` + ticks pair into nanoseconds.
+const fn scaled_ns(unit: TimeUnit, ticks: i64) -> i64 {
     match unit {
         TimeUnit::Second => ticks * 1_000_000_000,
         TimeUnit::Millisecond => ticks * 1_000_000,

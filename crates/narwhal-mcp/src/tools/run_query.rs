@@ -63,7 +63,7 @@ struct Args {
     limit: Option<usize>,
 }
 
-fn default_read_only() -> bool {
+const fn default_read_only() -> bool {
     true
 }
 

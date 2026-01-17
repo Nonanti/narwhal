@@ -110,7 +110,7 @@ impl Tool for DescribeSchemaTool {
     }
 }
 
-fn table_kind_str(kind: narwhal_core::TableKind) -> &'static str {
+const fn table_kind_str(kind: narwhal_core::TableKind) -> &'static str {
     match kind {
         narwhal_core::TableKind::Table => "table",
         narwhal_core::TableKind::View => "view",

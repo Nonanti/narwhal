@@ -292,7 +292,7 @@ impl AppCore {
                 self.wizard = None;
                 self.wizard_error = None;
                 self.rebuild_sidebar();
-                let name = built.config.name.clone();
+                let name = built.config.name;
                 self.status.message = if existing_id.is_some() {
                     format!("connection '{name}' updated")
                 } else {
