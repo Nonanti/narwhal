@@ -31,3 +31,18 @@ secrecy.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+
+[features]
+default = ["driver-postgres", "driver-sqlite"]
+driver-postgres = ["narwhal-app/driver-postgres", "narwhal-mcp/driver-postgres"]
+driver-sqlite = ["narwhal-app/driver-sqlite", "narwhal-mcp/driver-sqlite"]
+driver-mysql = ["narwhal-app/driver-mysql", "narwhal-mcp/driver-mysql"]
+driver-duckdb = ["narwhal-app/driver-duckdb", "narwhal-mcp/driver-duckdb"]
+driver-clickhouse = ["narwhal-app/driver-clickhouse", "narwhal-mcp/driver-clickhouse"]
+all-drivers = [
+    "driver-postgres",
+    "driver-sqlite",
+    "driver-mysql",
+    "driver-duckdb",
+    "driver-clickhouse",
+]

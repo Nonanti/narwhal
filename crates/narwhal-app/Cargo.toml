@@ -18,11 +18,7 @@ narwhal-core.workspace = true
 narwhal-config.workspace = true
 narwhal-vim.workspace = true
 narwhal-tui.workspace = true
-narwhal-driver-postgres.workspace = true
-narwhal-driver-sqlite.workspace = true
-narwhal-driver-mysql.workspace = true
-narwhal-driver-duckdb.workspace = true
-narwhal-driver-clickhouse.workspace = true
+narwhal-driver-registry = { workspace = true }
 narwhal-plugin.workspace = true
 narwhal-plugin-lua.workspace = true
 async-trait.workspace = true
@@ -45,9 +41,25 @@ directories.workspace = true
 secrecy = { workspace = true }
 zeroize = { workspace = true }
 
+[features]
+default = ["driver-postgres", "driver-sqlite"]
+driver-postgres = ["narwhal-driver-registry/driver-postgres"]
+driver-sqlite = ["narwhal-driver-registry/driver-sqlite"]
+driver-mysql = ["narwhal-driver-registry/driver-mysql"]
+driver-duckdb = ["narwhal-driver-registry/driver-duckdb"]
+driver-clickhouse = ["narwhal-driver-registry/driver-clickhouse"]
+all-drivers = [
+    "driver-postgres",
+    "driver-sqlite",
+    "driver-mysql",
+    "driver-duckdb",
+    "driver-clickhouse",
+]
+
 [dev-dependencies]
 tempfile = "3.13"
 rusqlite = "0.32"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 insta = "1.40"
 regex-lite = "0.1"
+narwhal-driver-registry = { workspace = true, features = ["all-drivers"] }

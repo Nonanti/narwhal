@@ -17,11 +17,7 @@ workspace = true
 narwhal-core.workspace = true
 narwhal-config.workspace = true
 narwhal-history.workspace = true
-narwhal-driver-postgres.workspace = true
-narwhal-driver-sqlite.workspace = true
-narwhal-driver-mysql.workspace = true
-narwhal-driver-duckdb.workspace = true
-narwhal-driver-clickhouse.workspace = true
+narwhal-driver-registry = { workspace = true }
 
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
 async-trait.workspace = true
@@ -34,6 +30,21 @@ secrecy.workspace = true
 base64.workspace = true
 toml.workspace = true
 
+[features]
+default = ["driver-postgres", "driver-sqlite"]
+driver-postgres = ["narwhal-driver-registry/driver-postgres"]
+driver-sqlite = ["narwhal-driver-registry/driver-sqlite"]
+driver-mysql = ["narwhal-driver-registry/driver-mysql"]
+driver-duckdb = ["narwhal-driver-registry/driver-duckdb"]
+driver-clickhouse = ["narwhal-driver-registry/driver-clickhouse"]
+all-drivers = [
+    "driver-postgres",
+    "driver-sqlite",
+    "driver-mysql",
+    "driver-duckdb",
+    "driver-clickhouse",
+]
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util"] }
 # Integration tests seed a real sqlite file so the production driver path
@@ -41,3 +52,4 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-u
 rusqlite.workspace = true
 tempfile = "3"
 chrono.workspace = true
+narwhal-driver-registry = { workspace = true, features = ["all-drivers"] }
