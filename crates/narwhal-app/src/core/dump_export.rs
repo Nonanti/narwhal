@@ -133,7 +133,7 @@ impl AppCore {
             self.status.message = "explain is only supported on postgres for now".into();
             return;
         }
-        let Some(sql) = crate::editor::statement_at_cursor(
+        let Some(sql) = crate::statements::statement_at_cursor(
             &self.tabs[self.active_tab].editor,
             session.dialect(),
         ) else {

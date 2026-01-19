@@ -1,4 +1,4 @@
-//! SQL-aware helpers that build on top of [`narwhal_tui::widgets::EditorBuffer`].
+//! SQL statement extraction over an editor buffer.
 //!
 //! The text buffer itself lives in `narwhal-tui` and is dialect-agnostic; the
 //! statement-extraction logic here is the *only* place that bridges the editor

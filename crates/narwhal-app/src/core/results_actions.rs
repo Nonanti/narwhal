@@ -390,10 +390,10 @@ impl AppCore {
             .iter()
             .find(|c| c.name == edit.column_name)
             .map(|c| c.data_type.as_str());
-        let new_value = crate::edit::parse_input_typed(&edit.buffer, hint);
+        let new_value = crate::cell_edit::parse_input_typed(&edit.buffer, hint);
         let column_order: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let dialect = session.dialect();
-        let compiled = match crate::edit::build_update(
+        let compiled = match crate::cell_edit::build_update(
             &source.schema,
             &source.table,
             &source.columns,

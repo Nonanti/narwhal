@@ -9,7 +9,7 @@
 //! part of the L21 split. They never touch [`AppCore`] state directly.
 
 mod dump_export;
-mod editor_handlers;
+mod editor_dispatch;
 mod format;
 mod modals;
 mod plugin_executor;
@@ -1348,7 +1348,7 @@ impl AppCore {
     // refresh_editor_search_matches, jump_to_editor_search_match,
     // sync_editor_search_current, repeat_editor_search, execute_substitute,
     // trigger_completion, handle_completion_key, apply_action, complete_prompt
-    // moved to `core::editor_handlers` (L21).
+    // moved to `core::editor_dispatch`.
 
     /// Execute a command exactly as if the user submitted it from command-line
     /// mode. Useful from tests.

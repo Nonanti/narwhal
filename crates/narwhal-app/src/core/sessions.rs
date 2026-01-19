@@ -13,7 +13,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::{AppCore, ResultBundle, ResultState, ResultView, SidebarItem};
-use crate::editor::{all_statements, statement_at_cursor};
+use crate::statements::{all_statements, statement_at_cursor};
 use crate::meta::MetaRequest;
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
