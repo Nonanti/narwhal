@@ -5,7 +5,7 @@ Live progress tracker. Updated after every commit.
 | Phase | State | Tag |
 |-------|-------|-----|
 | 0 — Standards baseline | done | `refactor-phase-0-done` |
-| 1 — Feature flags + driver registry | not started | — |
+| 1 — Feature flags + driver registry | done | `refactor-phase-1-done` |
 | 2 — Rename collisions | not started | — |
 | 3 — Extract narwhal-domain | not started | — |
 | 4 — Extract narwhal-commands | not started | — |
@@ -33,3 +33,15 @@ Live progress tracker. Updated after every commit.
 - 120 banner comments (`// ===`, `// ---`, `// ***`) stripped per
   `docs/STYLE.md`.
 - Test suite green: full `cargo test --workspace --lib` passes.
+
+### Phase 1 outcome
+
+- New crate `narwhal-driver-registry` owns the `DriverRegistry` and the
+  conditional `with_defaults()` registration of bundled drivers.
+- App and MCP no longer pull in driver crates directly; both consume
+  the registry and forward feature flags to it.
+- `narwhal` binary exposes `driver-postgres`, `driver-sqlite`,
+  `driver-mysql`, `driver-duckdb`, `driver-clickhouse`, `all-drivers`
+  with `default = ["driver-postgres", "driver-sqlite"]`.
+- Build matrix verified: default features, `--no-default-features
+  --features driver-sqlite`, and `--features all-drivers` all compile.
