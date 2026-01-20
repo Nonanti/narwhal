@@ -26,6 +26,8 @@ pub mod wizard;
 
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
+};
+pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};

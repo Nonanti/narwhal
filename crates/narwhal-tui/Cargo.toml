@@ -14,6 +14,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+narwhal-domain.workspace = true
 narwhal-core.workspace = true
 narwhal-vim.workspace = true
 ratatui.workspace = true

@@ -2861,6 +2861,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "narwhal-domain"
+version = "1.1.0"
+dependencies = [
+ "narwhal-core",
+ "narwhal-vim",
+ "serde",
+]
+
+[[package]]
 name = "narwhal-driver-clickhouse"
 version = "1.1.0"
 dependencies = [
@@ -3057,6 +3066,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "narwhal-core",
+ "narwhal-domain",
  "narwhal-vim",
  "ratatui",
  "serde_json",

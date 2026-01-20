@@ -1,0 +1,21 @@
+[package]
+name = "narwhal-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure domain models for narwhal: editor buffer, results, tabs, session, sidebar, snippets. No IO, no rendering."
+
+[dependencies]
+narwhal-core.workspace = true
+narwhal-vim.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[lints]
+workspace = true
