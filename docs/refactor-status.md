@@ -7,7 +7,7 @@ Live progress tracker. Updated after every commit.
 | 0 — Standards baseline | done | `refactor-phase-0-done` |
 | 1 — Feature flags + driver registry | done | `refactor-phase-1-done` |
 | 2 — Rename collisions | done | `refactor-phase-2-done` |
-| 3 — Extract narwhal-domain | not started | — |
+| 3 — Bootstrap narwhal-domain, move EditorBuffer | done | `refactor-phase-3-done` |
 | 4 — Extract narwhal-commands | not started | — |
 | 5 — Plugin isolation | not started | — |
 | 6 — Binary slimming + final pass | not started | — |
@@ -57,3 +57,22 @@ Live progress tracker. Updated after every commit.
   commands in Phases 3-4).
 - The TUI `widgets/editor.rs` keeps the editor name (genuine editor
   widget). `rg editor_handlers` returns nothing.
+
+### Phase 3 outcome
+
+- New crate `narwhal-domain` (deps: narwhal-core, narwhal-vim).
+- `EditorBuffer` and all of its model-only support types relocated
+  from `narwhal-tui::widgets::editor` to
+  `narwhal-domain::editor`. TUI re-exports keep external imports
+  working.
+- `narwhal-tui::widgets::editor.rs` shrank from 1041 LOC to 341 LOC;
+  only render code (`render_editor`, `render_completion_popup`,
+  `editor_cursor_anchor`, `CompletionHitRegions`) remains.
+- Domain tests cover insert/navigate, delete/join, word motion and
+  the multibyte boundary helper. TUI keeps the ratatui placement
+  tests.
+- Larger model relocations (Tab, Session, sidebar/history/completion
+  state) and the `editor_dispatch.rs` split were deferred to
+  Phase 4 where they happen as a byproduct of the
+  `narwhal-commands` extraction. ResultView -> ResultModel split
+  deferred to Phase 6 (it requires breaking TableState ownership).

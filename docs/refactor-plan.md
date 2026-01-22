@@ -58,22 +58,22 @@ Exit: `rg "editor" -l` shows ≤ 4 files, each with a clear, distinct role. Tag:
 
 ---
 
-## Phase 3 — Extract `narwhal-domain`
+## Phase 3 — Bootstrap `narwhal-domain`, move `EditorBuffer`
 
-Goal: model state lives in a sync, IO-free crate. View and app become consumers.
+Goal: the domain crate exists and owns at least one real model, so later phases have somewhere to move state into. Larger AppCore / ResultView splits intentionally deferred so this phase stays surgical.
 
-3.1 🔴 Create `crates/narwhal-domain` with zero deps beyond `narwhal-core`, `serde`, `thiserror`.
-3.2 🔴 Move from `narwhal-tui::widgets::editor::EditorBuffer` → `narwhal_domain::editor::EditorModel`. Strip any `ratatui` types. `EditorBuffer` in TUI becomes a thin render-only view (`pub struct EditorView<'a>(&'a EditorModel)`).
-3.3 🔴 Same treatment for `ResultView` → `ResultModel`. The TUI keeps a `ResultTableState` (just `TableState` + scroll), the rest moves.
-3.4 🟡 Pull `Tab`, `Session`, `SidebarModel`, `WizardModel`, `SnippetModel`, `HistoryModel` out of `narwhal-app::core` into `narwhal-domain`.
-3.5 🔴 `AppCore` struct stripped: every domain field moves to a single `domain::Session`. `AppCore` keeps only channels, terminal, scheduler, driver registry handle, plugin host.
-3.6 🟡 `narwhal-tui` updated to take `&Model` borrows. No mutation calls remain in widget code.
-3.7 🟡 `narwhal-app::core::editor_dispatch.rs` (≈1073 LOC) splits:
-    - pure transitions on `EditorModel` → `narwhal-domain::editor::ops` (unit-tested standalone).
-    - effect-producing branches → kept in app, but each ≤ 60 LOC.
-3.8 🟢 All `narwhal-domain` types get unit tests for their transitions (no driver, no TUI).
+3.1 🔴 Create `crates/narwhal-domain` with zero deps beyond `narwhal-core` and `narwhal-vim`.
+3.2 🔴 Move `EditorBuffer` (and its support types `EditorSearchHighlight`, `CompletionItemView`, `CompletionPopupView`, `LineCursor`, `floor_char_boundary`) from `narwhal-tui::widgets::editor` to `narwhal-domain::editor`. Domain version owns mutation; TUI side keeps render functions only.
+3.3 🔴 TUI re-exports the moved types so external callers keep their imports.
+3.4 🟢 Domain editor module carries the pure-model tests (insert/navigate, delete/join, word motion, multibyte boundary). TUI keeps the ratatui-coupled placement tests.
 
-Exit: `narwhal-tui` builds with `narwhal-domain` as its only state dep. AppCore ≤ 400 LOC. Tag: `refactor-phase-3-done`.
+Deferred to later phases (because they touch the god crate and are safer to do alongside the commands extraction):
+- ResultView ↔ ResultModel split (`TableState` stays in TUI). → Phase 6.
+- AppCore field reduction. → Phase 4 alongside the commands extraction.
+- Tab / Session / SidebarItem / HistoryState / CompletionState etc. relocation. → Phase 4.
+- editor_dispatch.rs split. → Phase 4.
+
+Exit: `narwhal-domain` is a real workspace crate, `narwhal-tui::widgets::editor.rs` shrunk from 1041 LOC to <400 LOC, tests green. Tag: `refactor-phase-3-done`.
 
 ---
 
