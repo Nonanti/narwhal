@@ -13,7 +13,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use narwhal_core::ColumnHeader;
-use narwhal_tui::SchemaListing;
+use narwhal_domain::SchemaListing;
 
 /// Keywords that signal the next token should be a table name.
 const TABLE_EXPECTED_KEYWORDS: &[&str] = &[
@@ -23,7 +23,6 @@ const TABLE_EXPECTED_KEYWORDS: &[&str] = &[
 
 /// Context inferred from the tokens preceding the cursor.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum CompletionContext {
     /// No special context — mix keywords, phrases, and tables as before.
     Generic,
@@ -340,7 +339,6 @@ const fn is_ident_cont(b: u8) -> bool {
 
 /// What a single completion entry represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
 pub enum CompletionKind {
     /// Reserved SQL keyword (`SELECT`, `FROM`, …).
     Keyword,

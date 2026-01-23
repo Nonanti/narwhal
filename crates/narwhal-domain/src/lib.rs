@@ -18,5 +18,7 @@
 )]
 
 pub mod editor;
+pub mod schema;
 
 pub use editor::EditorBuffer;
+pub use schema::SchemaListing;

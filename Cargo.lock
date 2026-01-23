@@ -2807,8 +2807,10 @@ dependencies = [
  "directories",
  "futures",
  "insta",
+ "narwhal-commands",
  "narwhal-config",
  "narwhal-core",
+ "narwhal-domain",
  "narwhal-driver-registry",
  "narwhal-history",
  "narwhal-plugin",
@@ -2828,6 +2830,29 @@ dependencies = [
  "tracing",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "narwhal-commands"
+version = "1.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "directories",
+ "narwhal-config",
+ "narwhal-core",
+ "narwhal-domain",
+ "narwhal-history",
+ "narwhal-pool",
+ "narwhal-sql",
+ "narwhal-vim",
+ "rusqlite",
+ "secrecy",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

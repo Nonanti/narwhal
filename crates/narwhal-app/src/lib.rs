@@ -15,29 +15,26 @@
 
 pub mod app;
 pub mod clipboard;
-pub mod commands;
-pub mod completion;
 pub mod core;
-pub mod ddl;
 pub mod draw_scheduler;
-pub mod cell_edit;
-pub mod statements;
-pub mod explain;
-pub mod export;
-pub mod meta;
 pub mod registry;
 pub mod run;
-pub mod session;
-pub mod snippets;
 pub mod terminal;
-pub mod wizard;
 
 pub use app::App;
 pub use core::{
     AppCore, HistoryState, ResultBundle, ResultState, RowDetailState, SnippetsModal, StatusBar,
 };
-pub use export::{ExportError, ExportFormat, QualifiedName};
+pub use narwhal_commands::export::{ExportError, ExportFormat, QualifiedName, write_format};
+pub use narwhal_commands::session::Session;
+pub use narwhal_commands::snippets::{SnippetError, SnippetStore};
 pub use registry::DriverRegistry;
-pub use session::Session;
-pub use snippets::{SnippetError, SnippetStore};
 pub use terminal::TerminalGuard;
+
+// Re-export submodules so existing call sites (`crate::commands`,
+// `crate::completion`, etc.) keep compiling while the migration to
+// `narwhal_commands::*` continues incrementally.
+pub use narwhal_commands::{
+    cell_edit, commands, completion, ddl, explain, export, meta, session, snippets, statements,
+    wizard,
+};

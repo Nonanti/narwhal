@@ -13,6 +13,7 @@ members = [
     "crates/narwhal-driver-clickhouse",
     "crates/narwhal-driver-registry",
     "crates/narwhal-domain",
+    "crates/narwhal-commands",
     "crates/narwhal-plugin",
     "crates/narwhal-plugin-lua",
     "crates/narwhal-vim",
@@ -113,6 +114,7 @@ narwhal-driver-duckdb = { path = "crates/narwhal-driver-duckdb", version = "1.1.
 narwhal-driver-clickhouse = { path = "crates/narwhal-driver-clickhouse", version = "1.1.0" }
 narwhal-driver-registry = { path = "crates/narwhal-driver-registry", version = "1.1.0", default-features = false }
 narwhal-domain = { path = "crates/narwhal-domain", version = "1.1.0" }
+narwhal-commands = { path = "crates/narwhal-commands", version = "1.1.0" }
 narwhal-plugin = { path = "crates/narwhal-plugin", version = "1.1.0" }
 narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "1.1.0" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }

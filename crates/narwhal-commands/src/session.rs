@@ -7,7 +7,7 @@ use narwhal_core::{
 };
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
 use narwhal_sql::Dialect;
-use narwhal_tui::SchemaListing;
+use narwhal_domain::SchemaListing;
 use tokio::sync::Mutex;
 
 /// Pinned connection plus auxiliary transaction state. Created by the

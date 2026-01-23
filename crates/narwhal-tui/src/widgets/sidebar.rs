@@ -16,7 +16,7 @@ use crate::widgets::results::sanitize_for_display;
 
 /// Backwards-compatible alias kept so existing callers can keep building
 /// schema listings the way they did before the sidebar refactor.
-pub type SchemaListing = (narwhal_core::Schema, Vec<narwhal_core::Table>);
+pub use narwhal_domain::SchemaListing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

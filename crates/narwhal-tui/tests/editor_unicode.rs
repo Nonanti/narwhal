@@ -10,7 +10,8 @@
 //!    char boundary, so later edits (`insert_char`, `delete_char`,
 //!    `insert_str("\n")`) panicked inside `String::insert` / `split_off`.
 
-use narwhal_tui::widgets::editor::{editor_cursor_anchor, EditorBuffer};
+use narwhal_tui::widgets::editor::editor_cursor_anchor;
+use narwhal_tui::widgets::EditorBuffer;
 use ratatui::layout::Rect;
 
 const GUTTER_WIDTH: u16 = 6;

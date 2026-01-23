@@ -8,7 +8,6 @@ use narwhal_core::{ColumnHeader, Row, Value};
 
 /// Wire format produced by [`export_rows`] and [`write_format`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ExportFormat {
     /// RFC 4180 CSV with CRLF line endings, header row, fields quoted
     /// when they contain delimiters/quotes.
@@ -68,7 +67,6 @@ impl std::fmt::Display for QualifiedName {
 
 /// Errors produced while exporting.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
 pub enum ExportError {
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
