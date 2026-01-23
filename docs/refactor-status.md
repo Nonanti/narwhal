@@ -8,7 +8,7 @@ Live progress tracker. Updated after every commit.
 | 1 — Feature flags + driver registry | done | `refactor-phase-1-done` |
 | 2 — Rename collisions | done | `refactor-phase-2-done` |
 | 3 — Bootstrap narwhal-domain, move EditorBuffer | done | `refactor-phase-3-done` |
-| 4 — Extract narwhal-commands | not started | — |
+| 4 — Extract narwhal-commands | done | `refactor-phase-4-done` |
 | 5 — Plugin isolation | not started | — |
 | 6 — Binary slimming + final pass | not started | — |
 | 7 — Docs + CHANGELOG rewrite | not started | — |
@@ -76,3 +76,19 @@ Live progress tracker. Updated after every commit.
   Phase 4 where they happen as a byproduct of the
   `narwhal-commands` extraction. ResultView -> ResultModel split
   deferred to Phase 6 (it requires breaking TableState ownership).
+
+### Phase 4 outcome
+
+- New crate `narwhal-commands`. 11 self-contained modules relocated
+  out of narwhal-app: `cell_edit`, `commands`, `completion`, `ddl`,
+  `explain`, `export`, `meta`, `session`, `snippets`, `statements`,
+  `wizard` (5577 LOC).
+- `SchemaListing` type alias moved from `narwhal-tui` to
+  `narwhal-domain`. Both crates re-export it for compatibility.
+- `#[non_exhaustive]` stripped from workspace-internal command enums
+  now that they cross crate boundaries.
+- narwhal-app shrank from 12391 LOC to 6765 LOC (about 46%
+  reduction). The remaining LOC is the runtime / AppCore / event loop
+  layer that genuinely belongs to the app.
+- `narwhal-app::lib.rs` re-exports the moved modules so existing
+  imports keep working; no caller code changed in this commit.
