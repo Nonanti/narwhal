@@ -9,7 +9,7 @@ Live progress tracker. Updated after every commit.
 | 2 — Rename collisions | done | `refactor-phase-2-done` |
 | 3 — Bootstrap narwhal-domain, move EditorBuffer | done | `refactor-phase-3-done` |
 | 4 — Extract narwhal-commands | done | `refactor-phase-4-done` |
-| 5 — Plugin isolation | not started | — |
+| 5 — Plugin isolation | done | `refactor-phase-5-done` |
 | 6 — Binary slimming + final pass | not started | — |
 | 7 — Docs + CHANGELOG rewrite | not started | — |
 
@@ -92,3 +92,14 @@ Live progress tracker. Updated after every commit.
   layer that genuinely belongs to the app.
 - `narwhal-app::lib.rs` re-exports the moved modules so existing
   imports keep working; no caller code changed in this commit.
+
+### Phase 5 outcome
+
+- `narwhal-plugin-lua` no longer depends directly on `narwhal-core`.
+  `cargo tree -p narwhal-plugin-lua` lists `narwhal-plugin` as the
+  only narwhal-side crate. Plugin runtimes see the contract, not the
+  internals.
+- `narwhal-plugin` continues to re-export the narrow `narwhal-core`
+  surface (`ColumnHeader`, `Row`, `Value`, `QueryResult`) plugins
+  need, so the API remains stable while the dependency edge stays
+  one-way.
