@@ -14,7 +14,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-narwhal-core.workspace = true
 narwhal-plugin.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
