@@ -7,7 +7,7 @@ use rusqlite::types::{Value as SqlValue, ValueRef};
 /// binding. Types that have no native `SQLite` representation are encoded as
 /// their canonical textual form (timestamps as RFC 3339, UUIDs as hyphenated
 /// hex, JSON as its serialised form).
-pub fn value_to_sql(value: &Value) -> SqlValue {
+pub(crate) fn value_to_sql(value: &Value) -> SqlValue {
     match value {
         Value::Null => SqlValue::Null,
         Value::Bool(v) => SqlValue::Integer(i64::from(*v)),
@@ -30,7 +30,7 @@ pub fn value_to_sql(value: &Value) -> SqlValue {
 
 /// Convert a borrowed `rusqlite` value reference into the engine-agnostic
 /// representation.
-pub fn value_from_ref(value: ValueRef<'_>) -> Value {
+pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
     match value {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(v) => Value::Int(v),

@@ -25,7 +25,7 @@ use narwhal_pool::Pool;
 /// * the plain `std::sync::Mutex` is fine because every access is short
 ///   (clone the pool out, drop the guard) and never spans an `.await`.
 #[derive(Default)]
-pub struct PluginConnectionState {
+pub(crate) struct PluginConnectionState {
     pub(crate) pool: Option<Pool>,
     pub(crate) in_transaction: bool,
 }

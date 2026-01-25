@@ -14,7 +14,7 @@ use narwhal_core::Value;
 /// binding. Engine-specific types (Date, Timestamp, …) are encoded as
 /// strings so the round-trip remains lossless even when the column is a
 /// VARCHAR; `DuckDB` casts on its end.
-pub fn value_to_sql(value: &Value) -> DuckValue {
+pub(crate) fn value_to_sql(value: &Value) -> DuckValue {
     match value {
         Value::Null => DuckValue::Null,
         Value::Bool(v) => DuckValue::Boolean(*v),
@@ -38,7 +38,7 @@ pub fn value_to_sql(value: &Value) -> DuckValue {
 /// representation. Composite/temporal types that don't have a direct
 /// counterpart in [`Value`] collapse to `Value::String` via their
 /// debug/display form — good enough for read-only browsing.
-pub fn value_from_ref(value: ValueRef<'_>) -> Value {
+pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
     match value {
         ValueRef::Null => Value::Null,
         ValueRef::Boolean(v) => Value::Bool(v),

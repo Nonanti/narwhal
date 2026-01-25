@@ -30,7 +30,7 @@ use narwhal_core::Value;
 /// `AggregateFunction`, …) collapse to `Value::String` — the TSV wire
 /// representation is already human-readable and round-tripping structured
 /// types is out of scope for a TUI client.
-pub fn classify_type(ch_type: &str) -> ValueKind {
+pub(crate) fn classify_type(ch_type: &str) -> ValueKind {
     let ch_type = ch_type.trim();
 
     // Strip Nullable(…) and LowCardinality(…) wrappers — the inner type
@@ -82,7 +82,7 @@ pub fn classify_type(ch_type: &str) -> ValueKind {
 /// Simplified classification result used to decide which [`Value`] variant
 /// to produce when parsing a TSV field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueKind {
+pub(crate) enum ValueKind {
     Int,
     Float,
     Bool,
@@ -155,7 +155,7 @@ fn decode_tsv_string_bytes(field: &[u8]) -> Vec<u8> {
 /// [`Value::Bytes`] otherwise. Numeric/Bool/Uuid fields use strict
 /// `std::str::from_utf8` because those types are always ASCII on the
 /// wire; invalid UTF-8 there produces [`Value::Unknown`].
-pub fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
+pub(crate) fn parse_tsv_value(raw: &[u8], ch_type: &str) -> Value {
     // ClickHouse represents NULL as the two-byte sequence \N in TSV.
     // This check must happen before escape decoding because \N is not
     // an escaped byte — it is a literal backslash followed by 'N'.
@@ -233,7 +233,7 @@ fn is_nullable_type(ch_type: &str) -> bool {
 /// `ClickHouse` honours backslash escapes inside string literals, so both
 /// backslash and single-quote must be escaped. Backslash is doubled
 /// (`\\` → `\\\\`) and single-quote is doubled (`'` → `''`).
-pub fn escape_sql_string(s: &str) -> String {
+pub(crate) fn escape_sql_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -252,7 +252,7 @@ pub fn escape_sql_string(s: &str) -> String {
 /// escaped by doubling (`'` → `''`). Byte arrays are rendered as hex
 /// literals. All other variants use their natural SQL representation.
 /// This function must **never** produce an unescaped interpolation.
-pub fn value_to_sql_literal(value: &Value) -> String {
+pub(crate) fn value_to_sql_literal(value: &Value) -> String {
     match value {
         Value::Null => "NULL".to_owned(),
         Value::Bool(b) => {
@@ -335,7 +335,7 @@ fn split_lines(body: &[u8]) -> Vec<&[u8]> {
 /// `ClickHouse` `String` type is byte-oriented). Header lines (column
 /// names and type strings) are always ASCII identifiers on the wire, so
 /// they are converted to `String` via `from_utf8_lossy` defensively.
-pub fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
+pub(crate) fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<Value>>) {
     let lines = split_lines(body);
     let mut lines_iter = lines.iter().peekable();
 

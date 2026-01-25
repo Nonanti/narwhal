@@ -3,7 +3,7 @@
 //! ratatui binding that turns the buffer into glyphs on the terminal.
 
 use narwhal_domain::editor::{
-    floor_char_boundary, CompletionItemView, CompletionPopupView, EditorBuffer,
+    floor_char_boundary, CompletionPopupView, EditorBuffer,
     EditorSearchHighlight,
 };
 use ratatui::layout::Rect;

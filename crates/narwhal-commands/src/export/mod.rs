@@ -18,7 +18,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use narwhal_core::{ColumnHeader, Row, Value};
+use narwhal_core::{ColumnHeader, Row};
 
 pub fn export_rows(
     columns: &[ColumnHeader],
@@ -83,6 +83,8 @@ pub fn write_format<W: Write>(
 
 #[cfg(test)]
 mod tests {
+    use narwhal_core::Value;
+
     use super::*;
 
     fn fixture() -> (Vec<ColumnHeader>, Vec<Row>) {

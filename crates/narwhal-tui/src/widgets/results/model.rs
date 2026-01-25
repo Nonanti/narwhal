@@ -3,7 +3,7 @@
 //! data half into narwhal-domain. For now the whole bundle lives
 //! together.
 
-use narwhal_core::{ColumnHeader, Row, TableSchema, Value};
+use narwhal_core::{ColumnHeader, Row, TableSchema};
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 

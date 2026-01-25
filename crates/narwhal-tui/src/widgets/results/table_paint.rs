@@ -4,12 +4,12 @@ use narwhal_core::{ColumnHeader, Row};
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Row as TableRow, Table};
+use ratatui::widgets::{Cell, Row as TableRow, Table};
 use ratatui::Frame;
 
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 
-use super::cells::{compute_column_widths, render_for_grid, sanitize_for_display};
+use super::cells::{compute_column_widths, render_for_grid};
 use super::model::{ResultHitRegions, ResultView, SearchHighlight};
 use super::popups::{draw_cell_edit, draw_cell_popup};
 use super::sort::SortDir;

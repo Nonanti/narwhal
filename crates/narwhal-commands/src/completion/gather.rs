@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 use narwhal_core::ColumnHeader;
 use narwhal_domain::SchemaListing;
 
-use super::context::{detect_context_with_schemas, CompletionContext};
+use super::context::CompletionContext;
 use super::items::{Completion, CompletionKind};
 use super::keywords::{FUNCTIONS, KEYWORDS, PHRASES};
 

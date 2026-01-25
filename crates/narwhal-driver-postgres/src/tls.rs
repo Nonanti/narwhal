@@ -23,12 +23,12 @@ use narwhal_core::{ConnectionParams, Error, Result, SslMode};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
-pub use tokio_postgres_rustls::MakeRustlsConnect;
+pub(crate) use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Internal representation that maps the public [`SslMode`] onto the
 /// TLS behaviours rustls supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InternalSslMode {
+pub(crate) enum InternalSslMode {
     /// No TLS handshake.
     Disable,
     /// Chain + hostname verification (system CA or `ssl_root_cert`).
@@ -102,7 +102,7 @@ impl std::fmt::Display for InternalSslMode {
     }
 }
 
-pub fn make_tls_connector(
+pub(crate) fn make_tls_connector(
     mode: InternalSslMode,
     params: &ConnectionParams,
 ) -> Result<MakeRustlsConnect> {

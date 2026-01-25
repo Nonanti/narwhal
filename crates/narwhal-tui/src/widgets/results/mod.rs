@@ -20,15 +20,13 @@ use popups::draw_explain;
 use schema_detail::draw_table_detail;
 use table_paint::draw_table;
 
-use narwhal_core::{ColumnHeader, ForeignKey, Index, Row, TableSchema, UniqueConstraint, Value};
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Wrap,
+    Block, Borders, Paragraph, Wrap,
 };
 use ratatui::Frame;
-use std::cmp::Ordering;
 use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
@@ -308,9 +306,13 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+    use std::time::Duration;
+
+    use narwhal_core::Value;
+
     use super::cells::{is_dangerous_glyph, render_for_grid};
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn format_count_small() {

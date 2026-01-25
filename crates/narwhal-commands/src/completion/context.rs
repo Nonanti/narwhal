@@ -2,9 +2,7 @@
 //! cursor sits, and which kind of completion candidate makes
 //! sense there.
 
-use std::collections::HashMap;
 
-use narwhal_domain::SchemaListing;
 
 use super::tokenizer::{tokenize, Token};
 

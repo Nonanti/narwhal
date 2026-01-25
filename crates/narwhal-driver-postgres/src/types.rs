@@ -11,7 +11,7 @@ use tokio_postgres::Row;
 /// `ToSql` is required when binding parameters through `tokio-postgres`.
 /// `Value` is defined in `narwhal-core` which has no `PostgreSQL` dependency,
 /// so the bridge lives here.
-pub struct Param<'a>(pub &'a Value);
+pub(crate) struct Param<'a>(pub &'a Value);
 
 impl std::fmt::Debug for Param<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,7 +76,7 @@ impl ToSql for Param<'_> {
 }
 
 /// Convert a single column of a `tokio-postgres` row into a [`Value`].
-pub fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value> {
+pub(crate) fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value> {
     macro_rules! get {
         ($t:ty, $map:expr) => {{
             match row.try_get::<_, Option<$t>>(idx) {

@@ -12,7 +12,7 @@ use narwhal_core::{ColumnHeader, Error, Value};
 /// the `u16` range). Date/Time/DateTime components are read directly
 /// from the `chrono` value via the `Datelike`/`Timelike` traits — no
 /// `format("%Y").parse()` round-trip and no silent `unwrap_or(0)`.
-pub fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
+pub(crate) fn try_value_to_my(value: &Value) -> Result<MyValue, Error> {
     let v = match value {
         Value::Null => MyValue::NULL,
         Value::Bool(v) => MyValue::Int(i64::from(*v)),
@@ -89,7 +89,7 @@ const fn is_binary_column(ty: ColumnType) -> bool {
     )
 }
 
-pub fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
+pub(crate) fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     match value {
         MyValue::NULL => Value::Null,
         MyValue::Int(v) => Value::Int(*v),
@@ -141,7 +141,7 @@ pub fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     }
 }
 
-pub fn column_header(column: &MyColumn) -> ColumnHeader {
+pub(crate) fn column_header(column: &MyColumn) -> ColumnHeader {
     ColumnHeader {
         name: column.name_str().to_string(),
         data_type: column_type_name(column.column_type()),

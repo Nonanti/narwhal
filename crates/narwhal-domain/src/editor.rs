@@ -625,6 +625,7 @@ const fn is_word_char(b: u8) -> bool {
 }
 
 /// Snap a byte index backwards to the nearest UTF-8 char boundary.
+///
 /// Clamps to `s.len()` if the index is past the end. Stable Rust
 /// does not expose `str::floor_char_boundary` yet, so we implement
 /// it manually.

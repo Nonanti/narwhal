@@ -32,7 +32,7 @@ struct PkInfo {
 }
 
 /// Build a `CREATE TABLE schema.name ( … );` statement from `pg_catalog`.
-pub async fn build_create_table(
+pub(crate) async fn build_create_table(
     conn: &super::PostgresConnection,
     schema: &str,
     table: &str,

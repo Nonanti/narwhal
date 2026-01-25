@@ -5,7 +5,7 @@ use narwhal_core::{ForeignKey, Index, TableSchema, UniqueConstraint};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::theme::Theme;
@@ -116,6 +116,3 @@ fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
 
-use crate::constants::{
-    RESULT_MAX_COLUMN_WIDTH as MAX_COLUMN_WIDTH, RESULT_MIN_COLUMN_WIDTH as MIN_COLUMN_WIDTH,
-};
