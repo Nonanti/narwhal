@@ -10,7 +10,7 @@ Live progress tracker. Updated after every commit.
 | 3 — Bootstrap narwhal-domain, move EditorBuffer | done | `refactor-phase-3-done` |
 | 4 — Extract narwhal-commands | done | `refactor-phase-4-done` |
 | 5 — Plugin isolation | done | `refactor-phase-5-done` |
-| 6 — Binary slimming + final pass | not started | — |
+| 6 — Binary slimming + final pass | done | `refactor-phase-6-done` |
 | 7 — Docs + CHANGELOG rewrite | not started | — |
 
 ## Open notes
@@ -103,3 +103,24 @@ Live progress tracker. Updated after every commit.
   surface (`ColumnHeader`, `Row`, `Value`, `QueryResult`) plugins
   need, so the API remains stable while the dependency edge stays
   one-way.
+
+### Phase 6 outcome
+
+- `narwhal/src/main.rs` is 358 LOC, under the 400 LOC target.
+- `narwhal-commands/src/export.rs` (1332 LOC) split into nine files
+  under `export/`: csv, json, tsv, table, insert, quoting, source,
+  format, error.
+- `narwhal-commands/src/completion.rs` (1041 LOC) split into six
+  files under `completion/`: context, tokenizer, items, keywords,
+  gather, mod.
+- `narwhal-tui/src/widgets/results.rs` (1301 LOC) split into seven
+  files under `results/`: sort, model, cells, schema_detail,
+  popups, table_paint, mod.
+- Second `cargo clippy --fix` pass against the new layout.
+- 692 tests across the workspace remain green.
+
+Deferred (scope kept to one session):
+- AppCore strip (`narwhal-app/src/core/mod.rs` 1498 LOC).
+- `editor_dispatch.rs` (1066 LOC) split.
+- `wizard.rs` (930 LOC) split.
+- Tail of `pedantic`/`nursery` warnings (307 left).
