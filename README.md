@@ -403,38 +403,45 @@ transaction.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                        narwhal (bin)                     │
-│                    entry point + CLI                     │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────┐
-│                     narwhal-app                          │
-│          event loop · driver registry · lifecycle        │
-├──────────┬──────────┬──────────┬────────────────────────┤
-│narwhal-  │narwhal-  │narwhal-  │narwhal-plugin-lua      │
-│tui       │vim       │plugin    │  mlua runtime           │
-│(ratatui) │(modal    │(trait +  │  └─ scripts via         │
-│          │ keys)    │registry) │     narwhal global      │
-├──────────┴──────────┴──────────┴────────────────────────┤
-│  narwhal-core   ·   narwhal-config   ·   narwhal-pool   │
-│  (traits,       ·   (on-disk cfg,    ·  (async conn     │
-│   value model,  ·    OS keyring)     ·   pool)           │
-│   errors)       ·                    ·                    │
-├──────────────────────────────────────┬───────────────────┤
-│  narwhal-sql · narwhal-history      │narwhal-driver-*   │
-│  (dialect    · (JSONL journal)      │postgres  mysql    │
-│   helpers)   ·                      │sqlite   duckdb   │
-│              ·                      │clickhouse         │
-└──────────────────────────────────────┴───────────────────┘
+              narwhal (bin)
+                   │  entry point + CLI
+                   ▼
+             narwhal-app                       narwhal-mcp
+              orchestrator                       MCP server
+           │     │      │                          │
+           ▼     ▼      ▼                          ▼
+   narwhal-tui  narwhal-commands           narwhal-driver-registry
+     render     completion / export /             (feature-gated
+                wizard / dispatch /                 driver lookup)
+                snippets / DDL / …                       │
+           │         │                                    ▼
+           └─────────┼────────────────┐         narwhal-driver-*
+                    ▼                 │          postgres · sqlite
+              narwhal-domain          │          mysql · duckdb
+              pure model state        │          clickhouse
+           (editor buffer, schema     │
+            listings, no IO,          │
+            no rendering)             │
+                   │                  ▼
+                   └────────►   narwhal-pool · narwhal-sql ·
+                                narwhal-history · narwhal-config ·
+                                narwhal-vim
+                                       │
+                                       ▼
+                                  narwhal-core
+                            driver trait, value model,
+                            schema types, error type
 ```
 
-The split exists so plugin runtimes (today `narwhal-plugin-lua`; in
-future a WASM runtime) stay isolated from the rest of the app and their
-chunky dependencies don't leak into every build. Adding another database
-engine means writing a new crate that implements the `DatabaseDriver`
-and `Connection` traits in `narwhal-core` and registering it in
-`DriverRegistry::with_defaults()` — no core changes required.
+Dependency direction: every arrow points downward. View (`narwhal-tui`)
+and commands (`narwhal-commands`) read domain state by reference; only
+`narwhal-app` is allowed to mutate it in response to user input.
+Concrete drivers are reached exclusively through
+`narwhal-driver-registry`, so cargo features are the only place where
+database engines come and go.
+
+For the full layer map see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
+for the code-style contract see [`docs/STYLE.md`](docs/STYLE.md).
 
 ## Safety
 
