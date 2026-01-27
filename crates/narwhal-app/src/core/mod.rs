@@ -19,7 +19,7 @@ mod results_actions;
 mod run_loop;
 mod sessions;
 mod tabs;
-mod text_utils;
+pub(super) mod text_utils;
 mod transactions;
 use plugin_executor::PluginConnectionState;
 use render_helpers::{display_from_state, sidebar_depth, sidebar_kind, sidebar_label};
