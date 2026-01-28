@@ -5,9 +5,9 @@ use narwhal_core::{
     ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema,
     SshTunnel,
 };
+use narwhal_domain::SchemaListing;
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
 use narwhal_sql::Dialect;
-use narwhal_domain::SchemaListing;
 use tokio::sync::Mutex;
 
 /// Pinned connection plus auxiliary transaction state. Created by the

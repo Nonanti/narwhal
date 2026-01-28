@@ -192,4 +192,3 @@ pub const PHRASES: &[&str] = &[
     "CASE WHEN",
     "ELSE END",
 ];
-

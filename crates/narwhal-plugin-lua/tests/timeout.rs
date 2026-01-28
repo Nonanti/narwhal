@@ -97,7 +97,6 @@ async fn normal_plugin_unaffected() {
     }
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn set_timeout_large_value_no_panic() {
     // Values like 1e20, 1e30, or f64::MAX must not panic inside
@@ -170,7 +169,6 @@ async fn set_timeout_negative_disables() {
         other => panic!("expected Status, got {other:?}"),
     }
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn transform_infinite_loop_times_out() {

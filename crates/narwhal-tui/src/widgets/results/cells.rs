@@ -112,4 +112,3 @@ pub fn sanitize_for_display(s: &str) -> std::borrow::Cow<'_, str> {
     }
     std::borrow::Cow::Owned(out)
 }
-

@@ -384,7 +384,6 @@ pub(crate) fn parse_tsv_body(body: &[u8]) -> (Vec<String>, Vec<String>, Vec<Vec<
 mod tests {
     use super::*;
 
-
     #[test]
     fn classify_integer_types() {
         assert_eq!(classify_type("UInt8"), ValueKind::Int);
@@ -460,7 +459,6 @@ mod tests {
         assert_eq!(classify_type("IPv6"), ValueKind::String);
     }
 
-
     #[test]
     fn parse_null_value() {
         assert!(matches!(
@@ -511,7 +509,6 @@ mod tests {
         assert!(matches!(v, Value::String(_)));
         assert_eq!(v.render(), "hello world");
     }
-
 
     #[test]
     fn sql_literal_string_escapes_quotes() {
@@ -595,7 +592,6 @@ mod tests {
         assert!(result.contains("dead"));
     }
 
-
     #[test]
     fn parse_full_tsv_body() {
         let body = b"id\tname\tactive\nUInt32\tString\tBool\n1\talice\t1\n2\tbob\t0";
@@ -618,7 +614,6 @@ mod tests {
         assert!(matches!(rows[0][0], Value::Int(1)));
         assert!(matches!(rows[0][1], Value::Null));
     }
-
 
     #[test]
     fn parse_tsv_escape_decoded_string() {
@@ -669,7 +664,6 @@ mod tests {
             other => panic!("expected Value::String, got {other:?}"),
         }
     }
-
 
     #[test]
     fn row_returning_keywords() {

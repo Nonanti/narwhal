@@ -1,7 +1,6 @@
 //! `AppCore` read-only accessors used by tests, the renderer and
 //! external callers (e.g. the binary).
 
-
 use narwhal_tui::{EditorBuffer, Pane};
 use narwhal_vim::Mode;
 
@@ -185,7 +184,6 @@ impl AppCore {
 
     // open_help and other help/history/snippets modal handlers moved to
     // `core::modals` (L21).
-
 
     // editor_title_with_tabs moved to `core::tabs` (L21).
 }

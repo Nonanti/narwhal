@@ -142,4 +142,3 @@ pub(super) fn compare_json(a: &serde_json::Value, b: &serde_json::Value) -> Orde
         _ => rank(a).cmp(&rank(b)),
     }
 }
-

@@ -15,8 +15,8 @@ pub use state::{Built, ConnectionWizard, DRIVERS};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::fields::{WizardFieldKind, WizardFieldValue};
+    use super::*;
     use secrecy::{ExposeSecret, SecretString};
     #[test]
     fn defaults_to_sqlite_with_two_fields() {

@@ -134,7 +134,6 @@ mod tests {
         assert!(out.len() <= 3);
     }
 
-
     #[test]
     fn from_keyword_narrows_to_tables() {
         let ctx = detect_context("SELECT * FROM u", 14);
@@ -230,7 +229,6 @@ mod tests {
             .iter()
             .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
     }
-
 
     fn user_cols() -> HashMap<String, (String, Vec<ColumnHeader>)> {
         let mut m = HashMap::new();
@@ -355,4 +353,3 @@ mod tests {
             .any(|c| c.text == "NOW()" && c.kind == CompletionKind::Function));
     }
 }
-

@@ -30,7 +30,6 @@ impl AppCore {
         self.status.message = "cancellation requested".into();
     }
 
-
     /// Receive the next [`RunUpdate`] from the worker channel.
     pub async fn recv_run_update(&mut self) -> Option<RunUpdate> {
         self.run_rx.recv().await

@@ -296,9 +296,7 @@ impl EditorBuffer {
     }
 
     fn current_line(&self) -> &str {
-        self.lines
-            .get(self.cursor_row)
-            .map_or("", String::as_str)
+        self.lines.get(self.cursor_row).map_or("", String::as_str)
     }
 
     fn current_line_mut(&mut self) -> &mut String {
@@ -636,7 +634,6 @@ pub fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
     }
     idx
 }
-
 
 #[cfg(test)]
 mod tests {

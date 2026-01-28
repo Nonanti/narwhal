@@ -2,9 +2,9 @@
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 
+use crate::completion::{detect_context_with_schemas, gather as gather_completions};
 use crate::core::text_utils::longest_common_prefix;
 use crate::core::{AppCore, CompletionState};
-use crate::completion::{detect_context_with_schemas, gather as gather_completions};
 
 impl AppCore {
     pub(crate) fn trigger_completion(&mut self) {

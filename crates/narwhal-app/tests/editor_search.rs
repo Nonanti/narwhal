@@ -18,7 +18,6 @@ fn make_core() -> AppCore {
     )
 }
 
-
 #[test]
 fn forward_search_finds_first_match() {
     let mut core = make_core();
@@ -188,7 +187,6 @@ fn enter_during_prompt_keeps_match_highlighted() {
         .matches
         .is_empty());
 }
-
 
 #[test]
 fn substitute_current_line_no_g() {

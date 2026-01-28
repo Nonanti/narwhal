@@ -231,7 +231,8 @@ fn parse_sqlite(rest: &str) -> ParsedUrl {
     // sqlite:./rel   -> "./rel" (caller strips the `sqlite:` prefix)
     let path = rest.to_owned();
     let display = std::path::Path::new(&path)
-        .file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+        .file_name()
+        .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
     ParsedUrl {
         config: ConnectionConfig {
             id: Uuid::new_v4(),

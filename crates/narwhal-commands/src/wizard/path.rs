@@ -34,7 +34,8 @@ pub(super) fn complete_path(input: &str) -> CompletionResult {
         } else {
             (
                 path.parent()
-                    .filter(|p| !p.as_os_str().is_empty()).map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf),
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf),
                 path.file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default(),

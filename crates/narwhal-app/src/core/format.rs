@@ -71,7 +71,8 @@ impl AppCore {
 
     fn active_driver_name(&self) -> String {
         self.session
-            .as_ref().map_or_else(|| "generic".to_owned(), |s| s.driver.name().to_owned())
+            .as_ref()
+            .map_or_else(|| "generic".to_owned(), |s| s.driver.name().to_owned())
     }
 }
 

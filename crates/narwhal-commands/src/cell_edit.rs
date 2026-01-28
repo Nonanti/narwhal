@@ -1,8 +1,8 @@
 //! Inline cell edit support: parsing user input into a [`Value`] and
 //! generating an UPDATE statement for the originating row.
 //!
-//! Used by [`crate::core::AppCore`] when the user commits a cell edit on a
-//! result that has a [`crate::core::RowSource`] attached (i.e. previewed
+//! Used by the host `AppCore` when the user commits a cell edit on a
+//! result that has a `RowSource` attached (i.e. previewed
 //! tables). Freeform SQL results are not editable because we don't know
 //! which table or primary key to target.
 

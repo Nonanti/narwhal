@@ -146,4 +146,3 @@ pub fn gather(
     out.truncate(limit);
     out
 }
-

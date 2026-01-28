@@ -3,7 +3,7 @@
 //! Long-running metadata queries (`dump_schema all`, `refresh_schemas`,
 //! `open_history`) used to block the UI via `block_in_place + block_on`.
 //! This module provides a request/response channel modelled on
-//! [`crate::run::RunUpdate`] so these operations can run on a tokio
+//! `RunUpdate` (in the host crate) so these operations can run on a tokio
 //! worker without stalling the event loop (H11).
 //!
 //! The channel is intentionally separate from the run channel so that
@@ -13,8 +13,8 @@
 use std::sync::Arc;
 
 use narwhal_core::TableSchema;
-use narwhal_history::HistoryEntry;
 use narwhal_domain::SchemaListing;
+use narwhal_history::HistoryEntry;
 
 /// A request to perform a metadata operation in the background.
 #[derive(Debug)]

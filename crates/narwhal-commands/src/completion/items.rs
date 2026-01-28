@@ -23,4 +23,3 @@ pub struct Completion {
     /// schema for a table or the type for a column).
     pub detail: Option<String>,
 }
-

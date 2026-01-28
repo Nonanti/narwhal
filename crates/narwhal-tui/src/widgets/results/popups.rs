@@ -13,7 +13,12 @@ use crate::theme::Theme;
 
 use crate::widgets::centred_rect;
 
-pub(super) fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
+pub(super) fn draw_cell_edit(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    edit: &CellEditView,
+    theme: &Theme,
+) {
     let width = area
         .width
         .saturating_sub(8)
@@ -102,7 +107,6 @@ pub(super) fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPop
     frame.render_widget(paragraph, inner);
 }
 
-
 pub(super) fn draw_explain(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -137,4 +141,3 @@ pub(super) fn draw_explain(
     let paragraph = Paragraph::new(rendered);
     frame.render_widget(paragraph, area);
 }
-

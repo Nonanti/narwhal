@@ -57,4 +57,3 @@ impl std::fmt::Display for QualifiedName {
         }
     }
 }
-

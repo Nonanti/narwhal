@@ -17,7 +17,6 @@
 
 use narwhal_driver_mysql::__test_only::uses_text_protocol;
 
-
 #[test]
 fn savepoint_uses_text_protocol() {
     assert!(uses_text_protocol("SAVEPOINT sp1"));
@@ -116,7 +115,6 @@ fn leading_block_comment_is_skipped() {
 fn leading_line_comment_is_skipped() {
     assert!(uses_text_protocol("-- explain\nCOMMIT"));
 }
-
 
 #[test]
 fn select_uses_binary_protocol() {

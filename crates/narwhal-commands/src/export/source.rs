@@ -252,4 +252,3 @@ fn skip_alias(s: &str) -> Option<&str> {
 
     Some(rest)
 }
-

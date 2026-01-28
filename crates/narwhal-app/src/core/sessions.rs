@@ -13,10 +13,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::{AppCore, ResultBundle, ResultState, ResultView, SidebarItem};
-use crate::statements::{all_statements, statement_at_cursor};
 use crate::meta::MetaRequest;
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
+use crate::statements::{all_statements, statement_at_cursor};
 use crate::wizard::ConnectionWizard;
 
 impl AppCore {
@@ -110,7 +110,10 @@ impl AppCore {
                 // prior `:begin` state implicitly, so the TX flag
                 // resets here too.
                 {
-                    let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut state = self
+                        .plugin_state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     state.pool = Some(session.pool.clone());
                     state.in_transaction = false;
                 }
@@ -128,7 +131,10 @@ impl AppCore {
 
     pub(super) fn close_session(&mut self) {
         if self.session.take().is_some() {
-            let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = self
+                .plugin_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.pool = None;
             state.in_transaction = false;
             drop(state);
@@ -187,7 +193,6 @@ impl AppCore {
             .abort_handle(),
         );
     }
-
 
     pub(super) fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.as_ref() else {
@@ -456,7 +461,10 @@ impl AppCore {
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
-                let mut state = self.plugin_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut state = self
+                    .plugin_state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 state.pool = None;
                 state.in_transaction = false;
             }

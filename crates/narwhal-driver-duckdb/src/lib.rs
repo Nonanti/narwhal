@@ -806,7 +806,6 @@ impl Connection for DuckdbConnection {
     }
 }
 
-
 /// Look up indexes for `schema.name` via `DuckDB`'s `duckdb_indexes()`
 /// table function. The function exposes the SQL that built the index but
 /// not its column list directly, so we parse the trailing `(col, col)`
@@ -1002,7 +1001,6 @@ async fn describe_foreign_keys(
     }
     Ok(by_name.into_values().collect())
 }
-
 
 struct DuckdbRowStream {
     columns: Vec<ColumnHeader>,

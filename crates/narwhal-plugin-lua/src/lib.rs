@@ -330,7 +330,6 @@ impl Plugin for LuaPlugin {
     }
 }
 
-
 fn install_api(
     lua: &Lua,
     commands_table: &Table,
@@ -397,7 +396,6 @@ fn read_descriptors(descriptors_table: &Table) -> LuaResult<Vec<CommandDescripto
     }
     Ok(out)
 }
-
 
 fn invoke_command(
     lua: &Lua,
@@ -561,7 +559,6 @@ fn outcome_from_lua(value: LuaValue) -> std::result::Result<CommandOutcome, Stri
         other => Err(format!("unsupported return value: {}", other.type_name())),
     }
 }
-
 
 /// Run every registered transform in order over `result`. Returns the
 /// (possibly partially transformed) `QueryResult` alongside the first

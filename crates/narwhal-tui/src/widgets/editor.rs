@@ -3,8 +3,7 @@
 //! ratatui binding that turns the buffer into glyphs on the terminal.
 
 use narwhal_domain::editor::{
-    floor_char_boundary, CompletionPopupView, EditorBuffer,
-    EditorSearchHighlight,
+    floor_char_boundary, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -138,7 +137,9 @@ pub fn render_editor(
 /// CJK 3-byte, emoji 4-byte) render with the cursor sprite over the
 /// correct cell, not the byte index.
 fn cursor_display_col(buffer: &EditorBuffer) -> usize {
-    let row = buffer.cursor_row().min(buffer.lines().len().saturating_sub(1));
+    let row = buffer
+        .cursor_row()
+        .min(buffer.lines().len().saturating_sub(1));
     let line = &buffer.lines()[row];
     let mut col = buffer.cursor_col().min(line.len());
     while col > 0 && !line.is_char_boundary(col) {
@@ -154,7 +155,8 @@ fn cursor_display_col(buffer: &EditorBuffer) -> usize {
 pub fn editor_cursor_anchor(area: Rect, buffer: &EditorBuffer) -> (u16, u16) {
     let inner_x = area.x + 1;
     let inner_y = area.y + 1;
-    let cursor_x = inner_x + (gutter_width(buffer.lines().len()) + cursor_display_col(buffer)) as u16;
+    let cursor_x =
+        inner_x + (gutter_width(buffer.lines().len()) + cursor_display_col(buffer)) as u16;
     let cursor_y = if buffer.cursor_row() >= buffer.scroll() {
         inner_y + (buffer.cursor_row() - buffer.scroll()) as u16
     } else {
@@ -298,7 +300,6 @@ pub fn render_completion_popup(
         items: item_rects,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

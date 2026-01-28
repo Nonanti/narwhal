@@ -470,7 +470,6 @@ mod tests {
         );
     }
 
-
     fn sample_columns_and_rows() -> (Vec<ColumnHeader>, Vec<Row>) {
         let columns = vec![
             ColumnHeader {
@@ -601,4 +600,3 @@ mod tests {
         assert_eq!(ExportFormat::from_token("unknown"), None);
     }
 }
-

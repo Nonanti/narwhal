@@ -272,4 +272,3 @@ impl Default for ResultBundle {
         Self::single(ResultState::Empty, ResultView::new())
     }
 }
-
