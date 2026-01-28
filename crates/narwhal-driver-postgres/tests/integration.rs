@@ -1,4 +1,4 @@
-//! End-to-end integration tests against an ephemeral PostgreSQL container.
+//! End-to-end integration tests against an ephemeral `PostgreSQL` container.
 //!
 //! These tests require Docker to be running and are therefore marked
 //! `#[ignore]`. Run them locally with:

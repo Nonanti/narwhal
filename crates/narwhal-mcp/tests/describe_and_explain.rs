@@ -66,7 +66,7 @@ async fn rpc_one(ctx: ServerContext, request: Value) -> Value {
         server
             .serve(server_read, server_write)
             .await
-            .expect("serve")
+            .expect("serve");
     });
 
     let line = format!("{}\n", serde_json::to_string(&request).expect("encode"));

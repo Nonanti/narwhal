@@ -319,7 +319,7 @@ mod tests {
     }
 
     /// Without the schema list, `public.` falls back to the legacy
-    /// behaviour (ColumnExpected on a non-existent table).
+    /// behaviour (`ColumnExpected` on a non-existent table).
     #[test]
     fn unknown_dotted_prefix_falls_back_to_column_lookup() {
         let buf = "SELECT * FROM public.";

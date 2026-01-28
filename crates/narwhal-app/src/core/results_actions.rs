@@ -573,7 +573,9 @@ impl AppCore {
             _ => Vec::new(),
         };
         let total = matches.len();
-        let search = self.tabs[self.active_tab].search.as_mut().unwrap();
+        let Some(search) = self.tabs[self.active_tab].search.as_mut() else {
+            return;
+        };
         let query = search.query.clone();
         search.matches = matches;
         search.current = if total == 0 { None } else { Some(0) };

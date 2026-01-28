@@ -6,7 +6,6 @@ use std::time::Instant;
 use narwhal_core::{Column, ColumnHeader, Row, TableSchema};
 use narwhal_tui::{ExplainPlanLine, ResultView};
 use narwhal_vim::SearchDirection;
-use uuid::Uuid;
 
 use crate::completion::Completion;
 

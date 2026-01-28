@@ -21,16 +21,6 @@
 //! abstraction without paying for any specific runtime.
 
 #![forbid(unsafe_code)]
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -319,7 +309,7 @@ mod tests {
 
     #[async_trait]
     impl Plugin for EchoPlugin {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "echo"
         }
 
@@ -338,13 +328,13 @@ mod tests {
         }
     }
 
-    /// A trivial transform that appends a synthetic '__row_count' column
+    /// A trivial transform that appends a synthetic '__`row_count`' column
     /// to every result. Lets us exercise the result-transform path.
     struct CounterPlugin;
 
     #[async_trait]
     impl Plugin for CounterPlugin {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "counter"
         }
 
@@ -422,7 +412,7 @@ mod tests {
 
     #[async_trait]
     impl Plugin for FailingTransform {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "failing"
         }
 

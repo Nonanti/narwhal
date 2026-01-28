@@ -1,4 +1,4 @@
-//! AppCore constructors and settings application.
+//! `AppCore` constructors and settings application.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;

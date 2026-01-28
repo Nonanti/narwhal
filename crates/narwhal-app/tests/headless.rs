@@ -1,6 +1,6 @@
 //! Integration tests that exercise [`AppCore`] without a terminal.
 //!
-//! The tests open an in-memory SQLite session, dispatch commands and
+//! The tests open an in-memory `SQLite` session, dispatch commands and
 //! verify the resulting [`ResultState`].
 
 use std::path::PathBuf;

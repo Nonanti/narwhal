@@ -65,8 +65,7 @@ fn fixture_pair(db_a: PathBuf, db_b: PathBuf) -> (DriverRegistry, ConnectionsFil
 /// Count tables visible in the session's schema listing.
 fn table_count(core: &AppCore) -> usize {
     core.session()
-        .map(|s| s.schemas.iter().map(|(_, tables)| tables.len()).sum())
-        .unwrap_or(0)
+        .map_or(0, |s| s.schemas.iter().map(|(_, tables)| tables.len()).sum())
 }
 
 /// 1. Manual `:refresh` re-fetches the schema catalogue and reports

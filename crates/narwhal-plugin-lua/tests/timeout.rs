@@ -178,12 +178,12 @@ async fn transform_infinite_loop_times_out() {
     // the timeout mechanism, just like command handlers are.
     let plugin = LuaPlugin::from_script(
         "hanging-transform",
-        r#"
+        r"
         narwhal.set_timeout(0.1)
         narwhal.register_transform(function(result)
             while true do end
         end)
-        "#,
+        ",
     )
     .unwrap();
 

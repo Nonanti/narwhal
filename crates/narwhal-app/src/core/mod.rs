@@ -22,43 +22,29 @@ mod tabs;
 pub(super) mod text_utils;
 mod transactions;
 use plugin_executor::PluginConnectionState;
-use render_helpers::{display_from_state, sidebar_depth, sidebar_kind, sidebar_label};
-use text_utils::split_head_arg;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Instant;
 
-use crossterm::event::{KeyCode as CtKey, KeyEvent};
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
-use narwhal_core::{Column, ColumnHeader, Row, TableKind, TableSchema};
-use narwhal_history::{HistoryEntry, Journal};
+use narwhal_config::{ConnectionsFile, CredentialStore};
+use narwhal_history::Journal;
 use narwhal_tui::{
-    render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
-    render_wizard, CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
-    ExplainPlanLine, HistoryModalState, HistoryRow, LayoutRegions, Pane, ResultView, RootLayout,
-    RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
-    Theme, WizardFieldView, WizardView,
+    LayoutRegions, Pane, ResultView,
+    Theme,
 };
-use narwhal_vim::{Mode, SearchDirection, Vim};
-use ratatui::layout::Rect;
-use ratatui::Frame;
-use tokio::sync::{mpsc, Mutex};
-use uuid::Uuid;
+use narwhal_vim::Vim;
+use tokio::sync::mpsc;
 
-use crate::clipboard::{Clipboard, InMemoryClipboard};
-use crate::commands::{parse, Command};
-use crate::completion::{Completion, CompletionKind};
+use crate::clipboard::Clipboard;
 
 use crate::meta::MetaUpdate;
 use crate::registry::DriverRegistry;
-use crate::run::{ActiveCancel, RunMode, RunUpdate};
+use crate::run::{ActiveCancel, RunUpdate};
 use crate::session::Session;
 use crate::snippets::SnippetStore;
-use crate::wizard::{ConnectionWizard, DRIVERS};
+use crate::wizard::ConnectionWizard;
 use narwhal_plugin::PluginRegistry;
 
-const RUN_CHANNEL_CAPACITY: usize = 128;
 pub mod state;
 pub use state::{
     CellEdit, CompletionState, EditorSearchState, HistoryState, ResultBundle, ResultSearch,

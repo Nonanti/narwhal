@@ -1,6 +1,6 @@
 //! Integration tests for `:export csv|json|insert <path>`.
 //!
-//! Each test creates an `AppCore` with an in-memory SQLite session,
+//! Each test creates an `AppCore` with an in-memory `SQLite` session,
 //! seeds a result set, then invokes `:export` to verify file output.
 
 use std::path::PathBuf;

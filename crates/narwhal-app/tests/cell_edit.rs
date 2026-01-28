@@ -2,8 +2,8 @@
 //!
 //! Each scenario:
 //!   1. seeds a sqlite database,
-//!   2. opens it through AppCore and previews a table from the sidebar
-//!      (which is the only path that attaches a RowSource right now),
+//!   2. opens it through `AppCore` and previews a table from the sidebar
+//!      (which is the only path that attaches a `RowSource` right now),
 //!   3. simulates the `e` keystroke + buffer edit + Enter,
 //!   4. verifies the on-disk row matches the new value.
 
@@ -18,7 +18,7 @@ use narwhal_tui::Pane;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,
@@ -27,7 +27,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn ctrl(c: char) -> KeyEvent {
+const fn ctrl(c: char) -> KeyEvent {
     KeyEvent {
         code: KeyCode::Char(c),
         modifiers: KeyModifiers::CONTROL,

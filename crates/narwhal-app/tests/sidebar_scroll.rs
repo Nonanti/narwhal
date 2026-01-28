@@ -4,7 +4,7 @@
 //! verifies that:
 //!   * selection beyond the viewport pulls the scroll offset along,
 //!   * mouse wheel pans the viewport without moving the selection,
-//!   * PageDown / PageUp jump 10 rows at a time.
+//!   * `PageDown` / `PageUp` jump 10 rows at a time.
 
 use narwhal_tui::widgets::sidebar::SidebarView;
 

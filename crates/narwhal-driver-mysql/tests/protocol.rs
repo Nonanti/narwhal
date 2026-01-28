@@ -2,14 +2,14 @@
 //!
 //! Without this guard `execute` chose the protocol on `params.is_empty()`
 //! alone: any parameterless SELECT/INSERT/UPDATE went through the *text*
-//! protocol, where MySQL returns every column as `MyValue::Bytes`. After
+//! protocol, where `MySQL` returns every column as `MyValue::Bytes`. After
 //! UTF-8 decoding the application then saw 'SELECT 1' as
-//! 'Value::String("1")' rather than 'Value::Int(1)' — sort order and
+//! '`Value::String("1`")' rather than '`Value::Int(1)`' — sort order and
 //! aggregation broke for any non-string column whenever the caller
 //! happened to omit parameters.
 //!
 //! The fix narrows the text-protocol branch to a small whitelist of
-//! statements that MySQL refuses to prepare (transaction control,
+//! statements that `MySQL` refuses to prepare (transaction control,
 //! session state, catalogue introspection, lock management, bulk load).
 //! Everything else uses the binary prepared-statement protocol — with
 //! `Params::Empty` for parameterless calls — so column types travel

@@ -1,7 +1,7 @@
-//! DDL fetch test for the MySQL driver.
+//! DDL fetch test for the `MySQL` driver.
 //!
 //! Skipped unless the `NARWHAL_TEST_MYSQL_HOST` environment variable is set
-//! (requires a running MySQL instance).
+//! (requires a running `MySQL` instance).
 
 use narwhal_core::{ConnectionConfig, ConnectionParams, DatabaseDriver};
 use narwhal_driver_mysql::MysqlDriver;

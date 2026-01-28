@@ -89,7 +89,7 @@ async fn edit_prefills_wizard_with_existing_id() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("test.db");
     rusqlite::Connection::open(&db_path).unwrap();
-    let (registry, connections) = fixture(db_path.clone());
+    let (registry, connections) = fixture(db_path);
     let saved_id = connections.connections[0].id;
     let mut core = AppCore::new(registry, connections, None);
 

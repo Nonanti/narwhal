@@ -27,7 +27,6 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Wrap,
 };
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
@@ -311,7 +310,7 @@ mod tests {
 
     use narwhal_core::Value;
 
-    use super::cells::{is_dangerous_glyph, render_for_grid};
+    use super::cells::render_for_grid;
     use super::*;
 
     #[test]

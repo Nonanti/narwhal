@@ -1,6 +1,6 @@
 //! Regression tests for `escape_sql_string` backslash handling (bug M4).
 //!
-//! ClickHouse honours backslash escapes inside string literals.
+//! `ClickHouse` honours backslash escapes inside string literals.
 //! Without escaping `\` to `\\`, a string like `C:\Users` would be
 //! rendered as `'C:\Users'` — the `\U` would be interpreted as an
 //! escape sequence, potentially changing the value or even "eating" a
@@ -11,7 +11,7 @@
 use narwhal_core::Value;
 use narwhal_driver_clickhouse::__test_only::{replace_question_marks, substitute_params};
 
-/// `escape_sql_string` must double backslashes so that ClickHouse
+/// `escape_sql_string` must double backslashes so that `ClickHouse`
 /// interprets them as literal backslash characters, not escape leaders.
 #[test]
 fn escape_handles_backslash() {

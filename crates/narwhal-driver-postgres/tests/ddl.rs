@@ -1,7 +1,7 @@
-//! DDL fetch test for the PostgreSQL driver.
+//! DDL fetch test for the `PostgreSQL` driver.
 //!
 //! Skipped unless the `NARWHAL_TEST_PG_HOST` environment variable is set
-//! (requires a running PostgreSQL instance).
+//! (requires a running `PostgreSQL` instance).
 
 use narwhal_core::{ConnectionConfig, ConnectionParams, DatabaseDriver};
 use narwhal_driver_postgres::PostgresDriver;

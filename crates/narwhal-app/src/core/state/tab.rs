@@ -1,10 +1,9 @@
 //! One editor tab: name, buffer, run state, results.
 
 use narwhal_tui::EditorBuffer;
-use narwhal_vim::SearchDirection;
 
 use super::result::{
-    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch, ResultState,
+    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch,
     RowDetailState, RowSource,
 };
 

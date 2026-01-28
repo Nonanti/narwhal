@@ -442,7 +442,7 @@ mod tests {
             .contains("ssl_cert is set but ssl_key is missing"));
     }
 
-    /// H1: Prefer now uses chain verification (not AcceptAny).
+    /// H1: Prefer now uses chain verification (not `AcceptAny`).
     /// This test verifies that the connector builder succeeds with the
     /// new Prefer path. It delegates to `verified_client_config`, which
     /// requires a usable CA store. On CI systems without ca-certificates
@@ -496,7 +496,7 @@ mod tests {
         }
     }
 
-    /// M1: VerifyCa uses chain verification without hostname check.
+    /// M1: `VerifyCa` uses chain verification without hostname check.
     #[test]
     fn verify_ca_uses_chain_verifier_no_hostname() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(mode, InternalSslMode::VerifyCa);
     }
 
-    /// M1: VerifyCa is distinct from VerifyFull (hostname check).
+    /// M1: `VerifyCa` is distinct from `VerifyFull` (hostname check).
     #[test]
     fn verify_ca_not_same_as_verify_full() {
         let ca_mode = InternalSslMode::from_params(&ConnectionParams {

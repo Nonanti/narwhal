@@ -6,8 +6,6 @@
 
 use super::tokenizer::{tokenize, Token};
 
-pub(super) const TABLE_EXPECTED_KEYWORDS_RE: () = ();
-
 pub(super) const TABLE_EXPECTED_KEYWORDS: &[&str] = &[
     "FROM", "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "FULL", "CROSS", "INTO", "UPDATE", "TABLE",
     "DESCRIBE", "DESC",

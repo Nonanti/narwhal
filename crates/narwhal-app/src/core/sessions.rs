@@ -338,9 +338,9 @@ impl AppCore {
     /// name up in `connections.toml` (or parses the argument as a URL)
     /// and opens a one-shot session.
     pub(super) fn test_connection(&mut self, target: Option<&str>) {
-        // No argument: ping the active session by opening a fresh pool
-        // connection. We only check that we can acquire it.
-        if target.is_none() {
+        let Some(target) = target else {
+            // No argument: ping the active session by opening a fresh pool
+            // connection. We only check that we can acquire it.
             let Some(session) = self.session.as_ref() else {
                 self.status.message = "test: no active connection (§ :test <name|url>)".into();
                 return;
@@ -355,8 +355,7 @@ impl AppCore {
                 Err(e) => self.status.message = format!("test failed: {label} — {e}"),
             }
             return;
-        }
-        let target = target.expect("checked above");
+        };
 
         // URL form takes precedence over name lookups so users can
         // sanity-check a DSN before saving it.

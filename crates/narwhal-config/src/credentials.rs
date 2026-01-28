@@ -218,9 +218,9 @@ mod tests {
         );
     }
 
-    /// H8 regression: KeyringStore offloads to spawn_blocking so the
+    /// H8 regression: `KeyringStore` offloads to `spawn_blocking` so the
     /// async runtime is never blocked. We verify the async API compiles
-    /// and the InMemoryStore returns the correct type.
+    /// and the `InMemoryStore` returns the correct type.
     #[tokio::test]
     async fn credential_store_trait_is_async() {
         let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());

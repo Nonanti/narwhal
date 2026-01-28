@@ -1,4 +1,4 @@
-//! Byte-accurate row invariants for the MySQL driver.
+//! Byte-accurate row invariants for the `MySQL` driver.
 //!
 //! These tests verify that NULL, empty strings, invalid UTF-8, embedded
 //! NUL bytes, tab/newline-in-string, and numeric edge values survive a

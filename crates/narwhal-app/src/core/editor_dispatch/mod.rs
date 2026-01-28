@@ -9,16 +9,10 @@ mod search;
 mod sidebar;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_core::ColumnHeader;
-use narwhal_tui::{translate_key_event, Pane};
-use narwhal_vim::{Action, Mode, Operator, SearchDirection};
-use tracing::debug;
+use narwhal_tui::Pane;
+use narwhal_vim::Mode;
 
-use crate::core::text_utils::{
-    find_all, longest_common_prefix, replace_all, replace_first, row_col_to_offset,
-};
-use crate::core::{AppCore, CompletionState, ResultState, RowSource, SidebarItem};
-use crate::completion::{detect_context_with_schemas, gather as gather_completions};
+use crate::core::AppCore;
 use crate::run::RunMode;
 
 impl AppCore {

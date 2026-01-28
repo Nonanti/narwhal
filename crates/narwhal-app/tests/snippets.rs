@@ -1,11 +1,11 @@
 //! Integration tests for the snippet store and modal.
 //!
 //! Five tests as required by plan 07-07:
-//! 1. save_then_load_round_trip
-//! 2. invalid_name_rejected
-//! 3. list_returns_sorted_names
-//! 4. remove_deletes_file
-//! 5. tab_complete_includes_snippets
+//! 1. `save_then_load_round_trip`
+//! 2. `invalid_name_rejected`
+//! 3. `list_returns_sorted_names`
+//! 4. `remove_deletes_file`
+//! 5. `tab_complete_includes_snippets`
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use narwhal_app::core::AppCore;
@@ -13,7 +13,7 @@ use narwhal_app::{DriverRegistry, SnippetStore};
 use narwhal_config::ConnectionsFile;
 use tempfile::TempDir;
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,

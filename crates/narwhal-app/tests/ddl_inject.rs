@@ -28,7 +28,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     (registry, connections)
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,

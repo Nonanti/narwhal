@@ -27,7 +27,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 }
 
 fn open(db_path: PathBuf) -> AppCore {
-    let (registry, connections) = fixture(db_path.clone());
+    let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
     core.execute_command("open tx");
     core

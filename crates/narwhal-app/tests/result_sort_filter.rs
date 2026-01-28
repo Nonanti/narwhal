@@ -1,6 +1,6 @@
 //! Integration tests for result sort and filter (plan 06-04).
 //!
-//! Each test creates an `AppCore` with an in-memory SQLite session,
+//! Each test creates an `AppCore` with an in-memory `SQLite` session,
 //! seeds a result set, then drives key events to exercise sort toggle,
 //! filter prompt, and streaming guard.
 
@@ -31,7 +31,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     (registry, connections)
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,
@@ -40,7 +40,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn ctrl(code: KeyCode) -> KeyEvent {
+const fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::CONTROL,
@@ -78,7 +78,7 @@ async fn seed_result(core: &mut AppCore, db_path: PathBuf) {
     focus_results(core);
 }
 
-/// Compute visible row indices directly from result state + ResultView,
+/// Compute visible row indices directly from result state + `ResultView`,
 /// without needing a render step. This mirrors
 /// `ResultView::visible_rows`.
 fn compute_visible(columns: &[ColumnHeader], rows: &[Row], view: &ResultView) -> Vec<usize> {
@@ -93,7 +93,7 @@ fn get_rows(core: &AppCore) -> (Vec<ColumnHeader>, Vec<Row>) {
     }
 }
 
-/// Get a reference to the active tab's ResultView.
+/// Get a reference to the active tab's `ResultView`.
 fn result_view(core: &AppCore) -> &ResultView {
     core.tabs()[core.active_tab()].results().active()
 }

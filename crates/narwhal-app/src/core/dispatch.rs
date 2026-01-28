@@ -1,4 +1,4 @@
-//! AppCore top-level dispatch: render, key/mouse handling, the
+//! `AppCore` top-level dispatch: render, key/mouse handling, the
 //! `:`-prompt command parser, snippet insertion.
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
@@ -9,7 +9,6 @@ use narwhal_tui::{
     SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
     WizardFieldView, WizardView,
 };
-use narwhal_vim::{Mode, SearchDirection};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
@@ -17,7 +16,7 @@ use super::render_helpers::{display_from_state, sidebar_depth, sidebar_kind, sid
 use super::text_utils::split_head_arg;
 use super::{AppCore, ResultState};
 use crate::commands::{parse, Command};
-use crate::completion::{Completion, CompletionKind};
+use crate::completion::CompletionKind;
 use crate::run::RunMode;
 use crate::wizard::DRIVERS;
 

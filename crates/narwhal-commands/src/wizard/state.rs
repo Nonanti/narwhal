@@ -8,7 +8,7 @@ use narwhal_core::ConnectionConfig;
 use secrecy::SecretString;
 use uuid::Uuid;
 
-use super::fields::{WizardField, WizardFieldKind, WizardFieldValue};
+use super::fields::WizardField;
 
 pub const DRIVERS: &[&str] = &["sqlite", "postgres", "mysql", "clickhouse", "duckdb"];
 

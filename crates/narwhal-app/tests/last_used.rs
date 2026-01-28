@@ -162,7 +162,7 @@ async fn in_memory_ordering_works_without_disk() {
     assert_eq!(first_connection_name(&core), "bravo");
 }
 
-/// Sanity: a fresh AppCore returns the two sqlite fixtures and nothing
+/// Sanity: a fresh `AppCore` returns the two sqlite fixtures and nothing
 /// else (no schemas yet since we haven't opened anything).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fixture_round_trip() {

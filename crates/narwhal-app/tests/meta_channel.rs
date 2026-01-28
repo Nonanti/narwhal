@@ -32,7 +32,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 }
 
 /// H11: `dump_schema all` should not block the UI thread. The command
-/// dispatches a MetaRequest and the result arrives asynchronously via
+/// dispatches a `MetaRequest` and the result arrives asynchronously via
 /// the meta channel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dump_schema_all_does_not_block_ui() {
@@ -78,7 +78,7 @@ async fn dump_schema_all_does_not_block_ui() {
     );
 }
 
-/// H11: `:refresh` dispatches a MetaRequest::RefreshSchemas and returns
+/// H11: `:refresh` dispatches a `MetaRequest::RefreshSchemas` and returns
 /// immediately without blocking.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn refresh_schemas_does_not_block_ui() {
@@ -97,8 +97,7 @@ async fn refresh_schemas_does_not_block_ui() {
     // Initial table count should be 1.
     let initial_count = core
         .session()
-        .map(|s| s.schemas.iter().map(|(_, t)| t.len()).sum::<usize>())
-        .unwrap_or(0);
+        .map_or(0, |s| s.schemas.iter().map(|(_, t)| t.len()).sum::<usize>());
     assert_eq!(initial_count, 1);
 
     // Dispatch refresh. It should return immediately.
@@ -120,7 +119,7 @@ async fn refresh_schemas_does_not_block_ui() {
     );
 }
 
-/// H11: `open_history` dispatches a MetaRequest::LoadHistory and returns
+/// H11: `open_history` dispatches a `MetaRequest::LoadHistory` and returns
 /// immediately without blocking.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn open_history_does_not_block_ui() {

@@ -1,4 +1,4 @@
-//! End-to-end integration tests against an ephemeral MySQL container.
+//! End-to-end integration tests against an ephemeral `MySQL` container.
 //!
 //! These tests require Docker. Run with:
 //!

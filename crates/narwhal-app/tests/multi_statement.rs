@@ -1,6 +1,6 @@
 //! Integration tests for multi-statement output tabs (plan 07-03).
 //!
-//! Each test creates an `AppCore` with an in-memory SQLite session,
+//! Each test creates an `AppCore` with an in-memory `SQLite` session,
 //! dispatches multi-statement batches, and verifies that the
 //! `ResultBundle` correctly holds one entry per statement.
 
@@ -31,7 +31,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     (registry, connections)
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,
@@ -40,7 +40,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn ctrl(code: KeyCode) -> KeyEvent {
+const fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::CONTROL,

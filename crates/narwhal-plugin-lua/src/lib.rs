@@ -64,16 +64,6 @@
 //! `#[tokio::main]` which is multi-thread.
 
 #![forbid(unsafe_code)]
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
 
 use std::path::Path;
 use std::sync::Arc;
@@ -263,7 +253,7 @@ impl LuaPlugin {
     ///
     /// The plugin's identifier is `"lua-{stem}"` where `stem` is the file
     /// name without extension (e.g. `format_json.lua` becomes
-    /// `"lua-format_json""). For paths whose file name is not valid UTF-8
+    /// `"lua-format_json"`). For paths whose file name is not valid UTF-8
     /// we fall back to a path-derived display string so two such plugins
     /// don't collide in the registry display. The name is deterministic
     /// across restarts — no randomized hash.
@@ -915,7 +905,7 @@ mod tests {
         assert!(matches!(err, PluginError::Runtime(_)));
     }
 
-    /// Mock executor used by the sql_run tests. Captures every SQL it
+    /// Mock executor used by the `sql_run` tests. Captures every SQL it
     /// receives and replays a canned [`QueryResult`] back.
     struct MockExecutor {
         seen: std::sync::Mutex<Vec<String>>,
@@ -1087,7 +1077,7 @@ mod tests {
     }
 
     /// M19: Plugin name derived from file stem is deterministic across
-    /// separate loads (no randomized DefaultHasher).
+    /// separate loads (no randomized `DefaultHasher`).
     #[test]
     fn plugin_name_deterministic_across_restarts() {
         let dir = tempfile::tempdir().unwrap();

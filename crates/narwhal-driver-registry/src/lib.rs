@@ -4,16 +4,6 @@
 //! so a build can ship only the engines it needs.
 
 #![forbid(unsafe_code)]
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
 
 use std::collections::HashMap;
 use std::fmt;

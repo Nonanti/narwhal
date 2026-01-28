@@ -95,7 +95,7 @@ mod tests {
         assert!(err.contains("port"));
     }
 
-    /// H13 regression: password field values are SecretString, not plain String.
+    /// H13 regression: password field values are `SecretString`, not plain String.
     #[test]
     fn password_field_is_secret_variant() {
         let w = ConnectionWizard::new();
@@ -146,7 +146,7 @@ mod tests {
         assert!(debug_output.contains("***"));
     }
 
-    /// H13 regression: push_char and pop_char work on Secret fields.
+    /// H13 regression: `push_char` and `pop_char` work on Secret fields.
     #[test]
     fn secret_field_push_pop() {
         let mut w = ConnectionWizard::new();

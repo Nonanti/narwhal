@@ -6,16 +6,6 @@
 //! with plain unit tests.
 
 #![forbid(unsafe_code)]
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
 
 pub mod action;
 pub mod key;

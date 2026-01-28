@@ -1,6 +1,6 @@
 //! Integration tests for mouse support across panes.
 //!
-//! Each test creates an `AppCore` with an in-memory SQLite session,
+//! Each test creates an `AppCore` with an in-memory `SQLite` session,
 //! renders once to populate `LayoutRegions`, then dispatches
 //! `crossterm::event::MouseEvent`s and asserts the side effects.
 
@@ -42,7 +42,7 @@ fn render(core: &mut AppCore) {
         .expect("draw");
 }
 
-fn mouse_at(x: u16, y: u16, kind: MouseEventKind) -> MouseEvent {
+const fn mouse_at(x: u16, y: u16, kind: MouseEventKind) -> MouseEvent {
     MouseEvent {
         kind,
         column: x,
@@ -51,16 +51,16 @@ fn mouse_at(x: u16, y: u16, kind: MouseEventKind) -> MouseEvent {
     }
 }
 
-fn click_at(x: u16, y: u16) -> MouseEvent {
+const fn click_at(x: u16, y: u16) -> MouseEvent {
     mouse_at(x, y, MouseEventKind::Down(MouseButton::Left))
 }
 
-fn scroll_down_at(x: u16, y: u16) -> MouseEvent {
+const fn scroll_down_at(x: u16, y: u16) -> MouseEvent {
     mouse_at(x, y, MouseEventKind::ScrollDown)
 }
 
 #[allow(dead_code)]
-fn scroll_up_at(x: u16, y: u16) -> MouseEvent {
+const fn scroll_up_at(x: u16, y: u16) -> MouseEvent {
     mouse_at(x, y, MouseEventKind::ScrollUp)
 }
 

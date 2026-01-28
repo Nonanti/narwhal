@@ -1,7 +1,7 @@
-//! DDL fetch test for the ClickHouse driver.
+//! DDL fetch test for the `ClickHouse` driver.
 //!
 //! Skipped unless the `NARWHAL_TEST_CH_HOST` environment variable is set
-//! (requires a running ClickHouse instance).
+//! (requires a running `ClickHouse` instance).
 
 use narwhal_core::{ConnectionConfig, ConnectionParams, DatabaseDriver};
 use narwhal_driver_clickhouse::ClickhouseDriver;

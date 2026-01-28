@@ -1,8 +1,8 @@
 //! Regression tests for `Capabilities::streaming` (bug H5).
 //!
 //! The flag describes whether `Connection::stream` yields rows
-//! progressively or materialises the whole result first. Today MySQL
-//! buffers the entire QueryResult before exposing it through a
+//! progressively or materialises the whole result first. Today `MySQL`
+//! buffers the entire `QueryResult` before exposing it through a
 //! `BufferedRowStream`; the UI must know this so it can warn users
 //! against opening open-ended streams over large tables.
 //!

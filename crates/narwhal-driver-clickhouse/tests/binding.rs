@@ -4,7 +4,7 @@
 //! byte as `c as char`. That works for ASCII but mangles any multi-byte
 //! UTF-8 sequence into a sequence of Latin-1 code points
 //! (`kullanıcılar` -> `kullanÄ±cÄ±lar`). Whenever the SQL string also
-//! had parameters, ClickHouse received the corrupted identifier and
+//! had parameters, `ClickHouse` received the corrupted identifier and
 //! returned `Unknown table`.
 //!
 //! Separately, the `$N` placeholder path was triggered by *any* literal

@@ -6,7 +6,7 @@ use narwhal_app::DriverRegistry;
 use narwhal_config::ConnectionsFile;
 use narwhal_vim::SearchDirection;
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 

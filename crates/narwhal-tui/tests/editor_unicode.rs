@@ -1,4 +1,4 @@
-//! Regression tests for editor cursor / set_cursor unicode handling (bug C4).
+//! Regression tests for editor cursor / `set_cursor` unicode handling (bug C4).
 //!
 //! Two failure modes the pre-fix code suffers from:
 //!

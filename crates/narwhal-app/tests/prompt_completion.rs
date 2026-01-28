@@ -13,7 +13,7 @@ use narwhal_vim::Mode;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,

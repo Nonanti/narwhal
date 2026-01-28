@@ -1,6 +1,6 @@
-//! Integration tests for the ClickHouse driver.
+//! Integration tests for the `ClickHouse` driver.
 //!
-//! These tests require a running ClickHouse server and are marked
+//! These tests require a running `ClickHouse` server and are marked
 //! `#[ignore]` so they don't run in CI. To execute them locally with
 //! Docker:
 //!

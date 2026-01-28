@@ -1,4 +1,4 @@
-//! Filesystem path completion for the wizard's SQLite file picker.
+//! Filesystem path completion for the wizard's `SQLite` file picker.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathCompletion {

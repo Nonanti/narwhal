@@ -45,16 +45,6 @@
 //!   DML and `0` for row-returning statements.
 
 #![forbid(unsafe_code)]
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
 
 mod types;
 
@@ -1530,7 +1520,7 @@ mod cancel_tests {
         assert!(active.lock().is_empty());
     }
 
-    /// Verify that cancel() is idempotent — a second call on the same
+    /// Verify that `cancel()` is idempotent — a second call on the same
     /// handle still sees the same query IDs (they are cloned, not drained).
     #[tokio::test]
     async fn cancel_reads_cloned_not_drained() {

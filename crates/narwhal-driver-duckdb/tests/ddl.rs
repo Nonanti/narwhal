@@ -1,4 +1,4 @@
-//! DDL fetch test for the DuckDB driver.
+//! DDL fetch test for the `DuckDB` driver.
 
 use narwhal_core::{ConnectionConfig, ConnectionParams, DatabaseDriver};
 use narwhal_driver_duckdb::DuckdbDriver;
@@ -80,5 +80,5 @@ async fn fetch_ddl_view() {
         ddl.contains("CREATE VIEW"),
         "DDL must contain CREATE VIEW: {ddl}"
     );
-    assert!(ddl.contains("v"), "DDL must contain view name: {ddl}");
+    assert!(ddl.contains('v'), "DDL must contain view name: {ddl}");
 }

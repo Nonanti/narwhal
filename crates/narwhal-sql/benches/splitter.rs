@@ -33,7 +33,7 @@ fn dollar_quoted(count: usize) -> String {
 }
 
 /// 500 statements with `-- line comment` interleaved. Stresses the
-/// LineComment state.
+/// `LineComment` state.
 fn with_line_comments(count: usize) -> String {
     let mut s = String::with_capacity(count * 60);
     for i in 0..count {

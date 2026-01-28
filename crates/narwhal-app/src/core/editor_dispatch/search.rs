@@ -1,17 +1,12 @@
 //! Editor in-pane search and `:s/old/new` substitution.
 
-use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_core::ColumnHeader;
-use narwhal_tui::{translate_key_event, Pane};
-use narwhal_vim::{Action, Mode, Operator, SearchDirection};
-use tracing::debug;
+use crossterm::event::{KeyCode as CtKey, KeyEvent};
+use narwhal_vim::SearchDirection;
 
 use crate::core::text_utils::{
-    find_all, longest_common_prefix, replace_all, replace_first, row_col_to_offset,
+    find_all, replace_all, replace_first, row_col_to_offset,
 };
-use crate::core::{AppCore, CompletionState, ResultState, RowSource, SidebarItem};
-use crate::completion::{detect_context_with_schemas, gather as gather_completions};
-use crate::run::RunMode;
+use crate::core::AppCore;
 
 impl AppCore {
     pub(crate) fn open_editor_search(&mut self, direction: SearchDirection) {

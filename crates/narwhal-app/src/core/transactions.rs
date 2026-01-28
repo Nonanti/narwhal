@@ -134,7 +134,9 @@ impl AppCore {
         }
         // Safe to take the transaction now — the only Arc clone is the
         // one we're about to consume.
-        let txn = session.transaction.take().expect("checked above");
+        let Some(txn) = session.transaction.take() else {
+            return;
+        };
         let conn_arc = txn.conn;
         let outcome = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {

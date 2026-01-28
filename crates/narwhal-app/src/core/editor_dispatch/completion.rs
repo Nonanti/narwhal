@@ -1,17 +1,10 @@
 //! Editor / prompt completion plumbing.
 
-use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_core::ColumnHeader;
-use narwhal_tui::{translate_key_event, Pane};
-use narwhal_vim::{Action, Mode, Operator, SearchDirection};
-use tracing::debug;
+use crossterm::event::{KeyCode as CtKey, KeyEvent};
 
-use crate::core::text_utils::{
-    find_all, longest_common_prefix, replace_all, replace_first, row_col_to_offset,
-};
-use crate::core::{AppCore, CompletionState, ResultState, RowSource, SidebarItem};
+use crate::core::text_utils::longest_common_prefix;
+use crate::core::{AppCore, CompletionState};
 use crate::completion::{detect_context_with_schemas, gather as gather_completions};
-use crate::run::RunMode;
 
 impl AppCore {
     pub(crate) fn trigger_completion(&mut self) {
@@ -24,8 +17,7 @@ impl AppCore {
         let schemas = self
             .session
             .as_ref()
-            .map(|s| s.schemas.as_slice())
-            .unwrap_or(&[]);
+            .map_or(&[][..], |s| s.schemas.as_slice());
         let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();
         let buffer_text = self.tabs[self.active_tab].editor.entire_text();
         let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();

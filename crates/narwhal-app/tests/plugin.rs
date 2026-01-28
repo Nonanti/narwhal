@@ -1,4 +1,4 @@
-//! Integration tests for the Lua-backed plugin pipeline inside AppCore.
+//! Integration tests for the Lua-backed plugin pipeline inside `AppCore`.
 //!
 //! These tests build a real [`AppCore`] (no open connection — plugin
 //! commands don't need one) and drive the `:` prompt through
@@ -23,7 +23,7 @@ fn empty_core() -> AppCore {
     AppCore::new(registry, connections, None)
 }
 
-/// Build an AppCore wired to a freshly-seeded sqlite database with a
+/// Build an `AppCore` wired to a freshly-seeded sqlite database with a
 /// small `items` table, returning the core and the temp dir that owns
 /// the file.
 async fn core_with_items() -> (AppCore, TempDir) {
@@ -364,7 +364,7 @@ async fn transform_chain_continues_past_a_failing_plugin() {
             assert_eq!(columns.last().map(|c| c.name.as_str()), Some("__seen"));
             assert_eq!(rows.len(), 3);
             for row in rows {
-                assert_eq!(row.0.last().map(|v| v.render()), Some("yes".into()));
+                assert_eq!(row.0.last().map(narwhal_core::Value::render), Some("yes".into()));
             }
         }
         other => panic!("expected Rows, got {other:?}"),

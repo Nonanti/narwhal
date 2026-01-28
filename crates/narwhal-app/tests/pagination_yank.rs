@@ -13,7 +13,7 @@ use narwhal_tui::Pane;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,
@@ -22,7 +22,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn ctrl(c: char) -> KeyEvent {
+const fn ctrl(c: char) -> KeyEvent {
     KeyEvent {
         code: KeyCode::Char(c),
         modifiers: KeyModifiers::CONTROL,
@@ -31,7 +31,7 @@ fn ctrl(c: char) -> KeyEvent {
     }
 }
 
-/// Build a fresh AppCore wired to an in-memory clipboard and credential
+/// Build a fresh `AppCore` wired to an in-memory clipboard and credential
 /// store, pointed at a freshly-seeded sqlite database with `items` (1..=count).
 async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
     let dir = TempDir::new().unwrap();

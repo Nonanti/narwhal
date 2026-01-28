@@ -225,8 +225,7 @@ mod tests {
         assert!(outcome.is_err(), "expected failure, got: {outcome:?}");
         assert!(
             elapsed <= READY_TIMEOUT + Duration::from_secs(2),
-            "spawn took {elapsed:?}, expected <= {:?}",
-            READY_TIMEOUT
+            "spawn took {elapsed:?}, expected <= {READY_TIMEOUT:?}"
         );
     }
 }

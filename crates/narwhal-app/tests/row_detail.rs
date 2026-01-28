@@ -1,6 +1,6 @@
 //! Integration tests for the row detail modal (plan 07-02).
 //!
-//! Each test creates an `AppCore` with an in-memory SQLite session,
+//! Each test creates an `AppCore` with an in-memory `SQLite` session,
 //! seeds a result set, then drives key events to exercise the row
 //! detail open, navigation, and dismiss flows.
 
@@ -31,7 +31,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     (registry, connections)
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+const fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,
@@ -40,7 +40,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn ctrl(code: KeyCode) -> KeyEvent {
+const fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::CONTROL,
@@ -84,7 +84,7 @@ async fn seed_result(core: &mut AppCore, db_path: PathBuf) {
 async fn open_with_no_row_shows_status_message() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("test.db");
-    let (registry, connections) = fixture(db_path.clone());
+    let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
     core.execute_command("open row-detail-test");

@@ -1,16 +1,16 @@
-//! Regression tests for `map_table_kind` and the describe_table use
+//! Regression tests for `map_table_kind` and the `describe_table` use
 //! site (bug L30).
 //!
-//! `describe_table` hard-coded 'TableKind::Table' regardless of whether
+//! `describe_table` hard-coded '`TableKind::Table`' regardless of whether
 //! the object was a view, system view, or materialised view. The
 //! sidebar therefore showed every view with the table icon and the
 //! "View Schema" command refused to identify it. `list_tables` already
 //! reported the kind correctly, so the two code paths disagreed.
 //!
-//! The fix is twofold: extract a 'map_table_kind' helper (unit tested
-//! here) and have 'describe_table' query 'information_schema.tables'
+//! The fix is twofold: extract a '`map_table_kind`' helper (unit tested
+//! here) and have '`describe_table`' query '`information_schema.tables`'
 //! to populate the field. Only the helper can be tested without a live
-//! MySQL instance; the describe_table call site is exercised via
+//! `MySQL` instance; the `describe_table` call site is exercised via
 //! integration tests.
 
 use narwhal_core::TableKind;

@@ -145,7 +145,7 @@ async fn throttle_prevents_redraw_storm() {
 ///
 /// After a streaming query completes, the title should switch from
 /// "streaming · <N> rows · <time>s" to "<N> rows · <ms>ms" format.
-/// We verify this by checking the final ResultState::Rows carries the
+/// We verify this by checking the final `ResultState::Rows` carries the
 /// correct `streamed` flag and `elapsed_ms`, which the title builder
 /// uses to format accordingly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

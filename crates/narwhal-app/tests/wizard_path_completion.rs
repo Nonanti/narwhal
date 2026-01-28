@@ -74,7 +74,7 @@ fn multiple_matches_extend_to_common_prefix() {
     assert!(get_path(&w).ends_with("/alp"), "got: {}", get_path(&w));
 }
 
-/// No matches → field unchanged, NoMatch reported.
+/// No matches → field unchanged, `NoMatch` reported.
 #[test]
 fn no_match_leaves_field_intact() {
     let dir = TempDir::new().unwrap();
@@ -88,7 +88,7 @@ fn no_match_leaves_field_intact() {
 }
 
 /// Completion is only wired up for path-shaped fields. Asking on the
-/// Name field is a no-op (NoMatch + value untouched).
+/// Name field is a no-op (`NoMatch` + value untouched).
 #[test]
 fn non_path_field_is_a_noop() {
     let mut w = ConnectionWizard::new();

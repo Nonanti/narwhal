@@ -51,7 +51,7 @@ ssl_key = "/etc/ssl/client-key.pem"
     );
 }
 
-/// 2. verify-ca / verify-full without ssl_root_cert should reject at
+/// 2. verify-ca / verify-full without `ssl_root_cert` should reject at
 ///    config load time.
 #[test]
 fn verify_ca_without_root_cert_rejects() {
@@ -81,7 +81,7 @@ ssl_mode = "verify-ca"
     }
 }
 
-/// 3. sqlite with non-disable ssl_mode should reject at config load time.
+/// 3. sqlite with non-disable `ssl_mode` should reject at config load time.
 #[test]
 fn sqlite_with_non_disable_rejects() {
     let toml = r#"
@@ -112,7 +112,7 @@ ssl_mode = "require"
 }
 
 /// 3b. Backwards-compat: a sqlite (or duckdb) connection WITHOUT any
-///     ssl_mode field still parses.  The default is `Prefer` but
+///     `ssl_mode` field still parses.  The default is `Prefer` but
 ///     validation tolerates it for file-local drivers — anything else
 ///     would break every pre-TLS connections.toml that exists in the
 ///     wild.
@@ -136,7 +136,7 @@ path = "/tmp/legacy.db"
     assert_eq!(file.connections[0].driver, "sqlite");
 }
 
-/// 4a. Partial mTLS: only ssl_cert without ssl_key must be rejected.
+/// 4a. Partial mTLS: only `ssl_cert` without `ssl_key` must be rejected.
 #[test]
 fn mtls_partial_cert_only_rejected() {
     let toml = r#"
@@ -164,7 +164,7 @@ ssl_cert = "/etc/ssl/client-cert.pem"
     }
 }
 
-/// 4b. Partial mTLS: only ssl_key without ssl_cert must be rejected.
+/// 4b. Partial mTLS: only `ssl_key` without `ssl_cert` must be rejected.
 #[test]
 fn mtls_partial_key_only_rejected() {
     let toml = r#"
@@ -192,7 +192,7 @@ ssl_key = "/etc/ssl/client-key.pem"
     }
 }
 
-/// 4c. Both ssl_cert and ssl_key set together passes validation.
+/// 4c. Both `ssl_cert` and `ssl_key` set together passes validation.
 #[test]
 fn mtls_full_pair_accepted() {
     let toml = r#"
@@ -213,7 +213,7 @@ ssl_key = "/etc/ssl/client-key.pem"
     assert_eq!(file.connections.len(), 1);
 }
 
-/// 5. TOML missing all SSL fields parses, ssl_mode defaults to Prefer
+/// 5. TOML missing all SSL fields parses, `ssl_mode` defaults to Prefer
 ///    for network drivers.
 #[test]
 fn default_ssl_mode_prefer_for_network() {
@@ -238,7 +238,7 @@ username = "root"
     assert!(conn.params.ssl_key.is_none());
 }
 
-/// M3: ssl_mode=disable with ssl_root_cert set should be rejected at
+/// M3: `ssl_mode=disable` with `ssl_root_cert` set should be rejected at
 ///    config load time (contradictory — user misconfiguration).
 #[test]
 fn disable_mode_with_ssl_files_rejected() {
@@ -272,7 +272,7 @@ ssl_root_cert = "/etc/ssl/certs/ca-bundle.crt"
     }
 }
 
-/// M3 variant: ssl_mode=disable with ssl_cert set should also be rejected.
+/// M3 variant: `ssl_mode=disable` with `ssl_cert` set should also be rejected.
 #[test]
 fn disable_mode_with_ssl_cert_rejected() {
     let toml = r#"

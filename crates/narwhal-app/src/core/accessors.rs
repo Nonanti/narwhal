@@ -1,7 +1,6 @@
-//! AppCore read-only accessors used by tests, the renderer and
+//! `AppCore` read-only accessors used by tests, the renderer and
 //! external callers (e.g. the binary).
 
-use std::sync::Arc;
 
 use narwhal_tui::{EditorBuffer, Pane};
 use narwhal_vim::Mode;
@@ -9,7 +8,6 @@ use narwhal_vim::Mode;
 use super::{
     AppCore, HistoryState, ResultState, RowDetailState, SidebarItem, SnippetsModal, StatusBar, Tab,
 };
-use crate::clipboard::Clipboard;
 use crate::session::Session;
 use crate::snippets::SnippetStore;
 

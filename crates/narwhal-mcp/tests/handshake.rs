@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Build a `ServerContext` populated with a single in-memory sqlite
-/// connection. SQLite needs no on-disk file when the path is `:memory:`,
+/// connection. `SQLite` needs no on-disk file when the path is `:memory:`,
 /// so each test stays hermetic and gets a fresh database.
 fn ctx_with_in_memory_sqlite() -> ServerContext {
     let params = ConnectionParams {
@@ -247,7 +247,7 @@ async fn invalid_json_yields_parse_error_with_null_id() {
         server
             .serve(server_read, server_write)
             .await
-            .expect("serve")
+            .expect("serve");
     });
 
     client_write

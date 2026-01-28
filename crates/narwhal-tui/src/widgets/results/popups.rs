@@ -6,7 +6,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 use super::cells::sanitize_for_display;
 use super::model::{CellEditView, CellPopup, ExplainPlanLine};

@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use uuid::Uuid;
 
 #[allow(dead_code)]
-fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+const fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent {
         code,
         modifiers,
@@ -182,7 +182,7 @@ async fn history_esc_closes_without_change() {
     );
 }
 
-/// 5. Without a journal, open_history shows a status message and
+/// 5. Without a journal, `open_history` shows a status message and
 ///    `history_state` stays None.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_no_journal_shows_message() {

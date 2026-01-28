@@ -44,7 +44,7 @@ fn wizard_emits_ssh_config_for_postgres() {
 }
 
 /// `ssh_host` without `ssh_user` is a user error — fail clearly
-/// rather than producing a half-built SshConfig.
+/// rather than producing a half-built `SshConfig`.
 #[test]
 fn wizard_rejects_half_filled_ssh_block() {
     let mut w = ConnectionWizard::new();
@@ -58,7 +58,7 @@ fn wizard_rejects_half_filled_ssh_block() {
     assert!(err.contains("ssh_user"), "got: {err}");
 }
 
-/// Setting any non-host ssh field without ssh_host is also an error.
+/// Setting any non-host ssh field without `ssh_host` is also an error.
 #[test]
 fn wizard_rejects_ssh_user_without_host() {
     let mut w = ConnectionWizard::new();
@@ -72,7 +72,7 @@ fn wizard_rejects_ssh_user_without_host() {
     assert!(err.contains("ssh_host"), "got: {err}");
 }
 
-/// Round-trip an SshConfig through `from_config` → `build`.
+/// Round-trip an `SshConfig` through `from_config` → `build`.
 #[test]
 fn wizard_round_trips_existing_ssh_block() {
     use narwhal_core::{ConnectionConfig, ConnectionParams};

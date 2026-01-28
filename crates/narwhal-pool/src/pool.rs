@@ -348,7 +348,7 @@ mod tests {
         drop(pool);
     }
 
-    /// H19: idle_count does not panic under load (parking_lot Mutex has
+    /// H19: `idle_count` does not panic under load (`parking_lot` Mutex has
     /// no poison).
     #[tokio::test]
     async fn idle_count_does_not_panic_under_load() {

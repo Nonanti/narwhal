@@ -4,16 +4,16 @@
 //! through `v.format("%Y").to_string().parse().unwrap_or(0)`. That had
 //! three bad failure modes:
 //!
-//! 1. Years outside the `u16` range silently became 0 — MySQL then either
+//! 1. Years outside the `u16` range silently became 0 — `MySQL` then either
 //!    rejected the bind or stored `0000-00-00`.
 //! 2. Six string allocations and six parses per bind on the hot path.
 //! 3. Any other parse error (corrupt `format` output, broken locale) was
 //!    silently swallowed via `unwrap_or(0)`.
 //!
 //! These tests pin the new behaviour:
-//! * Valid Date / Time / DateTime values bind to their exact MyValue
+//! * Valid Date / Time / `DateTime` values bind to their exact `MyValue`
 //!   counterparts (year/month/day/h/m/s/micro).
-//! * `Value::Timestamp` is normalised to UTC and bound as a MySQL
+//! * `Value::Timestamp` is normalised to UTC and bound as a `MySQL`
 //!   DATETIME literal (`MyValue::Date`, not RFC3339 bytes).
 //! * Years outside `u16` return a typed error instead of silently
 //!   writing `0`.
