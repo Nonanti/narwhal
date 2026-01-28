@@ -39,8 +39,20 @@ keymap, config schema and MCP protocol are unchanged.
 
 #### Changed
 
-- **narwhal-app shrunk from 12 391 LOC to 6 765 LOC** (46 %). The
+- **narwhal-app shrunk from 12 391 LOC to 6 909 LOC** (−44 %). The
   remaining code is the genuine event loop and `AppCore` glue.
+- **`AppCore` god-struct cracked open.** `core/mod.rs` went from
+  1 498 LOC to 150 LOC. State type definitions moved to
+  `core/state/{result, tab, sidebar, history, snippets_modal,
+  status}`. The `impl AppCore` block split into `construct.rs`
+  (constructors, settings, sidebar rebuild), `accessors.rs`
+  (read-only getters), `dispatch.rs` (render + key/mouse +
+  `:`-prompt).
+- **`editor_dispatch.rs`** (1 066 LOC) split into a directory:
+  `mod.rs` (global dispatcher), `editor_keys.rs`, `search.rs`,
+  `completion.rs`, `sidebar.rs`.
+- **`wizard.rs`** (930 LOC) split into a directory: `mod.rs`,
+  `fields.rs`, `state.rs`, `logic.rs`, `path.rs`.
 - **narwhal-plugin-lua no longer depends on narwhal-core directly.**
   Plugin runtimes consume the narrow surface exported by
   `narwhal-plugin`. Future runtimes (WASM, native Rust) follow the
@@ -55,10 +67,18 @@ keymap, config schema and MCP protocol are unchanged.
   `completion.rs` (1041 LOC) →
   `completion/{context,tokenizer,items,keywords,gather}`.
 - **Workspace lints upgraded** to `clippy::pedantic` + `clippy::nursery`
-  with a documented allow-list. Production-only lints
-  (`unwrap_used`, `expect_used`, `panic`, `dbg_macro`, `print_*`,
-  `todo`, `unimplemented`) are scoped to each crate's `lib.rs` /
-  `main.rs` so test code stays ergonomic.
+  with a documented allow-list, and the build now passes under
+  `cargo clippy --workspace --all-targets -- -D warnings` with zero
+  warnings. Style-only lints with false-positive heavy reports
+  (`match_same_arms`, `significant_drop_tightening`,
+  `option_if_let_else`, `items_after_statements`, `too_many_lines`,
+  ...) are documented allow-entries in the workspace `Cargo.toml`.
+  Production `unwrap`/`expect` sites in `core/results_actions`,
+  `core/sessions` and `core/transactions` rewritten as `let-else`.
+- **Workspace formatted** with `cargo fmt --all`; the CI step
+  `cargo fmt --check` now passes.
+- **Rustdoc clean** under `RUSTDOCFLAGS='-D warnings'`; stale
+  intra-doc links pointing at moved items rewritten.
 - **File renames** that fixed a long-standing naming collision:
   `narwhal-app/src/edit.rs` → `cell_edit.rs`, `editor.rs` →
   `statements.rs`, `core/editor_handlers.rs` →
