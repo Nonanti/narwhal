@@ -119,11 +119,19 @@ Live progress tracker. Updated after every commit.
 - Second `cargo clippy --fix` pass against the new layout.
 - 692 tests across the workspace remain green.
 
-Deferred (scope kept to one session):
-- AppCore strip (`narwhal-app/src/core/mod.rs` 1498 LOC).
-- `editor_dispatch.rs` (1066 LOC) split.
-- `wizard.rs` (930 LOC) split.
-- Tail of `pedantic`/`nursery` warnings (307 left).
+Deferred items resolved in a follow-up pass:
+- **AppCore strip** — `core/mod.rs` 1498 → 150 LOC. Type
+  definitions moved to `core/state/*`. `impl AppCore` block split
+  into `construct.rs`, `accessors.rs`, `dispatch.rs`.
+- **`editor_dispatch.rs`** (1066 LOC) split into a directory:
+  `mod.rs` (global dispatcher), `editor_keys.rs`, `search.rs`,
+  `completion.rs`, `sidebar.rs`.
+- **`wizard.rs`** (930 LOC) split into a directory: `mod.rs`,
+  `fields.rs`, `state.rs`, `logic.rs`, `path.rs`.
+
+Still outstanding (lint hygiene, not architecture):
+- ~300 `pedantic` / `nursery` warnings, mostly mechanical and
+  collected per-file as code is touched in follow-up work.
 
 ### Phase 7 outcome
 
