@@ -101,7 +101,13 @@ pub(super) fn display_from_state<'a>(
             planning_time_ms: *planning_time_ms,
             execution_time_ms: *execution_time_ms,
         },
-        ResultState::TableDetail { schema } => ResultDisplay::TableDetail { schema },
+        ResultState::TableDetail {
+            schema,
+            active_meta_tab,
+        } => ResultDisplay::TableDetail {
+            schema,
+            active_tab: *active_meta_tab,
+        },
         ResultState::Cancelled {
             rows_so_far,
             elapsed_ms,

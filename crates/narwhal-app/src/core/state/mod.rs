@@ -10,10 +10,10 @@ pub mod tab;
 
 pub use history::HistoryState;
 pub use result::{
-    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch, ResultState,
-    RowDetailState, RowSource,
+    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
+    ResultState, RowDetailState, RowSource,
 };
 pub use sidebar::SidebarItem;
 pub use snippets_modal::SnippetsModal;
 pub use status::StatusBar;
-pub use tab::Tab;
+pub use tab::{PendingPreviewState, Tab};

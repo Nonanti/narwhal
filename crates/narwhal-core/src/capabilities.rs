@@ -29,6 +29,18 @@ pub struct Capabilities {
     /// implementation) must leave this `false` so the UI can warn the
     /// user and refuse to launch open-ended streams over large tables.
     pub streaming: bool,
+    /// Driver supports row-level DML through the standard
+    /// `INSERT`/`UPDATE`/`DELETE` grammar that
+    /// [`crate::Connection::execute`] accepts.
+    ///
+    /// Most engines do; the notable exception is `ClickHouse`, where
+    /// row-level changes have to go through `ALTER TABLE ... UPDATE`
+    /// or `ALTER TABLE ... DELETE` async mutations. The pending-changes
+    /// pipeline gates `o`/`O`/`d`/cell-edit on this flag so it never
+    /// emits a statement the driver cannot consume. Defaults to
+    /// `false`; drivers opt in explicitly via
+    /// [`Self::with_row_level_dml`].
+    pub row_level_dml: bool,
 }
 
 impl Capabilities {
@@ -72,6 +84,12 @@ impl Capabilities {
     #[must_use]
     pub const fn with_streaming(mut self, value: bool) -> Self {
         self.streaming = value;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_row_level_dml(mut self, value: bool) -> Self {
+        self.row_level_dml = value;
         self
     }
 }

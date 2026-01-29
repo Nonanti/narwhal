@@ -9,6 +9,80 @@ use ratatui::widgets::TableState;
 
 use super::sort::{compare_values, SortDir};
 
+/// Which metadata sub-view of [`ResultDisplay::TableDetail`] is on
+/// screen. Mapped 1:1 from the numeric chord (`1`..=`5`) on the
+/// Results pane and round-trips through [`MetaTab::index`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MetaTab {
+    /// `1`: the row preview (paged `SELECT *`). Selecting this tab
+    /// from any other dispatches a preview query against the table;
+    /// the active state becomes [`ResultDisplay::Rows`] until the
+    /// user navigates back.
+    Records,
+    /// `2`: columns table with type / nullability / PK / default.
+    #[default]
+    Columns,
+    /// `3`: primary key + unique constraints.
+    Constraints,
+    /// `4`: foreign keys with ON UPDATE/ON DELETE actions.
+    ForeignKeys,
+    /// `5`: secondary indexes.
+    Indexes,
+}
+
+impl MetaTab {
+    /// 1-based display index used both in the tab strip and as the
+    /// numeric keybinding (`1` selects `Records`, etc.).
+    pub const fn index(self) -> u8 {
+        match self {
+            Self::Records => 1,
+            Self::Columns => 2,
+            Self::Constraints => 3,
+            Self::ForeignKeys => 4,
+            Self::Indexes => 5,
+        }
+    }
+
+    /// Inverse of [`Self::index`]; `None` for out-of-range inputs so
+    /// future chord additions can grow without panicking.
+    pub const fn from_index(n: u8) -> Option<Self> {
+        match n {
+            1 => Some(Self::Records),
+            2 => Some(Self::Columns),
+            3 => Some(Self::Constraints),
+            4 => Some(Self::ForeignKeys),
+            5 => Some(Self::Indexes),
+            _ => None,
+        }
+    }
+
+    /// Short label shown in the tab strip. Stays ASCII so the renderer
+    /// width math (one column per character) keeps working in TTYs
+    /// that lack wide-glyph support.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Records => "Records",
+            Self::Columns => "Columns",
+            Self::Constraints => "Constraints",
+            Self::ForeignKeys => "FKs",
+            Self::Indexes => "Indexes",
+        }
+    }
+
+    /// All variants in display order. Iterating is preferred over
+    /// hand-rolled lists so a new variant lights up everywhere at
+    /// once.
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::Records,
+            Self::Columns,
+            Self::Constraints,
+            Self::ForeignKeys,
+            Self::Indexes,
+        ]
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ResultView {
     /// Ratatui table state — `pub(crate)` so a future ratatui major
@@ -212,6 +286,11 @@ pub enum ResultDisplay<'a> {
     },
     TableDetail {
         schema: &'a TableSchema,
+        /// Active metadata sub-view. The renderer paints a tab strip
+        /// across the top and only the matching block beneath; `Records`
+        /// is short-circuited by the host before reaching us (it swaps
+        /// the entire `ResultState` to `Rows`).
+        active_tab: MetaTab,
     },
     Cancelled {
         rows_so_far: usize,

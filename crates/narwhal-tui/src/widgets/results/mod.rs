@@ -11,8 +11,8 @@ mod table_paint;
 
 pub use cells::sanitize_for_display;
 pub use model::{
-    CellEditView, CellPopup, ExplainPlanLine, ResultDisplay, ResultHitRegions, ResultView,
-    SearchHighlight,
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions,
+    ResultView, SearchHighlight,
 };
 pub use sort::{compare_values, SortDir};
 
@@ -142,8 +142,8 @@ pub fn render_results(
             search,
             ..
         } => draw_table(frame, content_area, columns, rows, *search, theme, view),
-        ResultDisplay::TableDetail { schema } => {
-            draw_table_detail(frame, content_area, schema, theme);
+        ResultDisplay::TableDetail { schema, active_tab } => {
+            draw_table_detail(frame, content_area, schema, *active_tab, theme);
             ResultHitRegions::default()
         }
         ResultDisplay::Explain {
@@ -267,16 +267,17 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
             Some(ms) => format!(" results · explain · {ms:.3} ms "),
             None => " results · explain ".to_owned(),
         },
-        ResultDisplay::TableDetail { schema } => {
+        ResultDisplay::TableDetail { schema, active_tab } => {
             let qualifier = if schema.table.schema.is_empty() {
                 String::new()
             } else {
                 format!("{}.", schema.table.schema)
             };
             format!(
-                " {}{} · {} cols · {} idx · {} fk ",
+                " {}{} · {} · {} cols · {} idx · {} fk ",
                 qualifier,
                 schema.table.name,
+                active_tab.label().to_ascii_lowercase(),
                 schema.columns.len(),
                 schema.indexes.len(),
                 schema.foreign_keys.len()

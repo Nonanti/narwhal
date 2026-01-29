@@ -65,6 +65,7 @@ impl PostgresDriver {
             // tokio_postgres::Client::query_raw exposes a server-side
             // cursor; rows arrive incrementally without buffering.
             .with_streaming(true)
+            .with_row_level_dml(true)
     }
 }
 

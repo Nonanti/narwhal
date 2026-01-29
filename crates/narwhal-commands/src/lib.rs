@@ -11,12 +11,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod action;
 pub mod cell_edit;
 pub mod commands;
 pub mod completion;
 pub mod ddl;
 pub mod explain;
 pub mod export;
+pub mod keymap;
+pub mod pending;
 pub mod meta;
 pub mod session;
 pub mod snippets;

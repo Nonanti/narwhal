@@ -35,6 +35,18 @@ pub struct Settings {
     pub theme: Theme,
     pub editor: EditorSettings,
     pub keybindings: KeybindingSettings,
+    /// Per-group keymap overrides. Keys are group names
+    /// (`results`, `row-detail`, ...), values map a chord string
+    /// (`"ctrl+s"`, `"K"`, ...) to an action name
+    /// (`"results-commit-pending"`). See the `narwhal-commands::keymap`
+    /// crate for the full vocabulary. Unknown chords or actions surface
+    /// at start-up as a status-bar warning; the rest of the bindings
+    /// still load.
+    ///
+    /// L36 introduced this section. Empty by default; the built-in keymap
+    /// continues to apply for every chord the user has not overridden.
+    #[serde(default)]
+    pub keymap: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,7 +63,7 @@ impl AppCore {
 
         let names: Vec<(String, String)> = match target {
             DumpTarget::Current => {
-                if let ResultState::TableDetail { schema } =
+                if let ResultState::TableDetail { schema, .. } =
                     self.tabs[self.active_tab].results.active_state()
                 {
                     vec![(schema.table.schema.clone(), schema.table.name.clone())]

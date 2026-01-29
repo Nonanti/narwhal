@@ -102,12 +102,14 @@ async fn edit_string_cell_updates_database() {
     type_str(&mut core, "gamma");
     core.handle_key(key(KeyCode::Enter));
 
+    // L36: the edit is now staged. The in-memory grid reflects the
+    // queued value, but the database has not been touched yet.
     assert!(
-        core.status_message().starts_with("updated 1 row"),
+        core.status_message().contains("queued UPDATE")
+            && core.status_message().contains("1 pending"),
         "got status: {}",
         core.status_message()
     );
-
     match core.result() {
         ResultState::Rows { rows, .. } => match &rows[0].0[1] {
             Value::String(s) => assert_eq!(s, "gamma"),
@@ -115,6 +117,24 @@ async fn edit_string_cell_updates_database() {
         },
         other => panic!("expected Rows, got {other:?}"),
     }
+
+    // Database still holds the original value until Ctrl-S.
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let label: String = conn
+            .query_row("SELECT label FROM items WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(label, "alpha", "DB must not change before Ctrl-S");
+    }
+
+    // Ctrl-S commits the pending queue. `commit_pending` runs the
+    // transaction synchronously and then kicks off an async preview
+    // refresh; the status bar passes through "committed"
+    // → "executing…" → "done" by the time we observe it, so we
+    // verify the commit by inspecting the database directly
+    // (transactional truth) rather than racing the status bar.
+    core.handle_key(ctrl('s'));
+    core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
     let label: String = conn
@@ -152,8 +172,13 @@ async fn edit_with_null_token_sets_null() {
     }
     type_str(&mut core, "NULL");
     core.handle_key(key(KeyCode::Enter));
-
-    assert!(core.status_message().starts_with("updated 1 row"));
+    assert!(
+        core.status_message().contains("queued UPDATE"),
+        "got: {}",
+        core.status_message()
+    );
+    core.handle_key(ctrl('s'));
+    core.drain_run_updates().await;
     let conn = rusqlite::Connection::open(&db_path).unwrap();
     let null: Option<String> = conn
         .query_row("SELECT label FROM items WHERE id = 1", [], |r| r.get(0))

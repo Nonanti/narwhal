@@ -17,6 +17,8 @@ narwhal-sql.workspace = true
 narwhal-config.workspace = true
 narwhal-vim.workspace = true
 
+crossterm.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 secrecy.workspace = true
 tokio = { workspace = true, features = ["sync"] }

@@ -81,6 +81,7 @@ impl MysqlDriver {
             // into `BufferedRowStream`; advertise that until a real
             // `stream_and_drop` implementation lands (bug H5).
             .with_streaming(false)
+            .with_row_level_dml(true)
     }
 }
 

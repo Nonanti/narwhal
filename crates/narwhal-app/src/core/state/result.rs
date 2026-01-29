@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use narwhal_core::{Column, ColumnHeader, Row, TableSchema};
-use narwhal_tui::{ExplainPlanLine, ResultView};
+use narwhal_tui::{ExplainPlanLine, MetaTab, ResultView};
 use narwhal_vim::SearchDirection;
 
 use crate::completion::Completion;
@@ -59,6 +59,14 @@ pub enum ResultState {
     },
     TableDetail {
         schema: TableSchema,
+        /// Active metadata sub-view. Defaults to [`MetaTab::Columns`]
+        /// because that is the historical behaviour: pressing Enter on
+        /// a sidebar table used to land in the column listing.
+        ///
+        /// L36 introduced the tab strip; the Records tab does not live
+        /// here — selecting it swaps the entire state for a `Rows`
+        /// preview.
+        active_meta_tab: MetaTab,
     },
     /// Stream was cancelled by the user (F4 / Ctrl-C). Shows
     /// how many rows were received before cancellation.
@@ -141,6 +149,29 @@ pub struct EditorSearchState {
     pub current: Option<usize>,
     /// Whether matches are highlighted in the editor.
     pub highlight: bool,
+}
+
+/// In-flight JSON viewer modal (L36).
+///
+/// Opened by `z` from the result pane (cell origin) or `Z` from the
+/// row-detail modal (selected-column origin). The state owns the
+/// pretty-printed payload, the raw cell text (for the `Y` yank-raw
+/// shortcut), and the scroll cursor. Dispatched as a modal stacked on
+/// top of every other overlay; closes via `q` or `Esc`.
+#[derive(Debug, Clone)]
+pub struct JsonViewerState {
+    /// Label rendered in the modal title (e.g. `"payload (jsonb)"`).
+    pub title: String,
+    /// Pretty-printed JSON. When `parse_error` is `Some`, this is the
+    /// raw text again so the user still sees *something*.
+    pub pretty: String,
+    /// Untouched cell text. The `Y` shortcut yanks this verbatim.
+    pub raw: String,
+    /// First visible line index (0-based).
+    pub scroll: u16,
+    /// Filled in when `serde_json::from_str` failed; surfaces as a
+    /// muted footer hint.
+    pub parse_error: Option<String>,
 }
 
 /// In-flight row detail modal. `R` (or Shift+Enter) opens it from the

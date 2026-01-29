@@ -2837,6 +2837,7 @@ name = "narwhal-commands"
 version = "1.1.0"
 dependencies = [
  "base64 0.22.1",
+ "crossterm",
  "directories",
  "narwhal-config",
  "narwhal-core",
@@ -2847,6 +2848,7 @@ dependencies = [
  "narwhal-vim",
  "rusqlite",
  "secrecy",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",

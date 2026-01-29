@@ -5,7 +5,8 @@ use narwhal_tui::{EditorBuffer, Pane};
 use narwhal_vim::Mode;
 
 use super::{
-    AppCore, HistoryState, ResultState, RowDetailState, SidebarItem, SnippetsModal, StatusBar, Tab,
+    AppCore, HistoryState, JsonViewerState, ResultState, RowDetailState, SidebarItem,
+    SnippetsModal, StatusBar, Tab,
 };
 use crate::session::Session;
 use crate::snippets::SnippetStore;
@@ -33,12 +34,28 @@ impl AppCore {
         self.tabs[self.active_tab].completion.is_some()
     }
 
+    /// Test helper: borrow the JSON viewer modal state, if open. Lives
+    /// here (alongside the other modal accessors) so integration tests
+    /// don't have to plumb through the full `Tab` graph.
+    #[doc(hidden)]
+    pub fn json_viewer_for_test(&self) -> Option<&JsonViewerState> {
+        self.tabs[self.active_tab].json_viewer.as_ref()
+    }
+
     pub fn editor(&self) -> &EditorBuffer {
         &self.tab().editor
     }
 
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
+    }
+
+    /// Test helper: mutable handle to the tab list. Used by
+    /// integration tests that pre-populate fields (notably the
+    /// staged-mutation queue) before exercising a public path.
+    #[doc(hidden)]
+    pub fn tabs_mut(&mut self) -> &mut Vec<Tab> {
+        &mut self.tabs
     }
 
     pub const fn active_tab(&self) -> usize {

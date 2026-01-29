@@ -3,9 +3,10 @@
 use narwhal_tui::EditorBuffer;
 
 use super::result::{
-    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch, RowDetailState,
-    RowSource,
+    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
+    RowDetailState, RowSource,
 };
+use crate::pending::PendingChanges;
 
 pub struct Tab {
     pub(crate) name: String,
@@ -26,6 +27,29 @@ pub struct Tab {
     /// Sits at the same layer as the cell popup; only one of them
     /// should be open at a time.
     pub(crate) row_detail: Option<RowDetailState>,
+    /// When `Some`, the JSON viewer modal (L36) is open. Stacks above
+    /// every other result-pane overlay; receives every key until
+    /// dismissed with `q`/`Esc`.
+    pub(crate) json_viewer: Option<JsonViewerState>,
+    /// L36: staged row-level mutations awaiting commit. Persists for
+    /// the lifetime of the tab; the user dismisses it with Ctrl-X or
+    /// commits it with Ctrl-S. Cross-table batches are explicitly
+    /// allowed — useful for fixing foreign-key chains in one
+    /// transaction.
+    pub(crate) pending: PendingChanges,
+    /// When `Some`, the pending-preview modal is open. The state is
+    /// minimal (just a scroll cursor); the body is reconstructed from
+    /// `pending` every render.
+    pub(crate) pending_preview: Option<PendingPreviewState>,
+}
+
+/// Lightweight modal state for the pending-preview overlay. Only
+/// carries the scroll cursor; the body comes from the live
+/// [`PendingChanges`] queue at render time so commits/discards reflect
+/// immediately.
+#[derive(Debug, Clone, Default)]
+pub struct PendingPreviewState {
+    pub scroll: u16,
 }
 
 impl Tab {
@@ -41,6 +65,9 @@ impl Tab {
             page_size: 100,
             pending_source: None,
             row_detail: None,
+            json_viewer: None,
+            pending: PendingChanges::new(),
+            pending_preview: None,
         }
     }
 
@@ -82,5 +109,23 @@ impl Tab {
     /// Active completion popup, if any.
     pub const fn completion(&self) -> Option<&CompletionState> {
         self.completion.as_ref()
+    }
+
+    /// L36: read-only access to the staged-mutation queue.
+    pub const fn pending(&self) -> &PendingChanges {
+        &self.pending
+    }
+
+    /// L36: mutable handle to the staged-mutation queue. Used by
+    /// tests and any future inline-edit path that needs to populate
+    /// values on an `Insert` row without going through the cell
+    /// editor.
+    pub fn pending_mut(&mut self) -> &mut PendingChanges {
+        &mut self.pending
+    }
+
+    /// L36: pending-preview modal state, if open.
+    pub const fn pending_preview(&self) -> Option<&PendingPreviewState> {
+        self.pending_preview.as_ref()
     }
 }

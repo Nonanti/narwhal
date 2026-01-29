@@ -18,6 +18,8 @@ pub(crate) fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
 pub mod editor;
 pub mod help;
 pub mod history;
+pub mod json_viewer;
+pub mod pending_preview;
 pub mod results;
 pub mod row_detail;
 pub mod sidebar;
@@ -29,12 +31,14 @@ pub use editor::{
 };
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow};
+pub use json_viewer::{render_json_viewer, JsonViewerView};
+pub use pending_preview::{render_pending_preview, PendingPreviewView};
 pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
 pub use results::{
     compare_values, render_results, sanitize_for_display, CellEditView, CellPopup, ExplainPlanLine,
-    ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,
+    MetaTab, ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,
 };
 pub use row_detail::{render_row_detail, RowDetailView};
 pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};

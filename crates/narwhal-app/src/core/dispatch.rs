@@ -48,6 +48,8 @@ impl AppCore {
             focused: self.focus == Pane::Sidebar,
         };
         let editor_title = self.editor_title_with_tabs();
+        // Read pending count before the mutable borrow below.
+        let pending_count = self.tabs[self.active_tab].pending.len();
 
         let tab = &mut self.tabs[self.active_tab];
         let search_view = tab.search.as_ref().map(|s| SearchHighlight {
@@ -101,6 +103,7 @@ impl AppCore {
                 connection: self.status.connection.as_deref(),
                 message: &self.status.message,
                 transaction: self.status.transaction.as_deref(),
+                pending: Some(pending_count),
             },
             running: self.running,
             theme: &self.theme,
@@ -186,11 +189,59 @@ impl AppCore {
             };
             render_row_detail(frame, area, &view, &self.theme);
         }
+
+        // Pending-changes preview (L36) — stacks above the result
+        // pane but below the JSON viewer (which is the very top layer).
+        if self.tabs[self.active_tab].pending_preview.is_some() {
+            let mutations: Vec<String> = self.tabs[self.active_tab]
+                .pending
+                .iter()
+                .map(crate::pending::PendingMutation::summary)
+                .collect();
+            let scroll = self.tabs[self.active_tab]
+                .pending_preview
+                .as_ref()
+                .map_or(0, |s| s.scroll);
+            let view = narwhal_tui::PendingPreviewView {
+                mutations: &mutations,
+                scroll,
+            };
+            narwhal_tui::render_pending_preview(frame, area, &view, &self.theme);
+        }
+
+        // JSON viewer (L36) — stacks above every other overlay so it
+        // can be opened from the cell popup *or* from inside the row
+        // detail modal.
+        if let Some(state) = self.tabs[self.active_tab].json_viewer.as_ref() {
+            let view = narwhal_tui::JsonViewerView {
+                title: &state.title,
+                pretty: &state.pretty,
+                raw: &state.raw,
+                scroll: state.scroll,
+                parse_error: state.parse_error.as_deref(),
+            };
+            narwhal_tui::render_json_viewer(frame, area, &view, &self.theme);
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.wizard.is_some() {
             self.handle_wizard_key(key);
+            return;
+        }
+        // L36: JSON viewer sits at the very top of the modal stack and
+        // gets first refusal on every key. Once open, no other handler
+        // (help, history, wizard, ...) sees the keypress.
+        if self.tabs[self.active_tab].json_viewer.is_some() {
+            self.handle_json_viewer_key(key);
+            return;
+        }
+        // L36: pending preview modal is the next layer down. Owns its
+        // own scroll vocabulary; commit/discard/close are forwarded to
+        // the regular Results pane handlers so users can keep their
+        // muscle memory.
+        if self.tabs[self.active_tab].pending_preview.is_some() {
+            self.handle_pending_preview_key(key);
             return;
         }
         // When the help modal is open, it intercepts Esc / ? / F1 to

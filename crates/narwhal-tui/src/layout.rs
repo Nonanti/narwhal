@@ -84,6 +84,11 @@ pub struct StatusBarView<'a> {
     pub message: &'a str,
     /// Optional fourth slot — transaction isolation level.
     pub transaction: Option<&'a str>,
+    /// Optional badge — number of staged mutations awaiting commit
+    /// (L36). Rendered next to the connection slot so the user is
+    /// always aware that there are uncommitted changes to commit or
+    /// discard.
+    pub pending: Option<usize>,
 }
 
 pub struct RootLayout<'a> {
@@ -215,6 +220,12 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     };
     let txn_width = txn_text.width() as u16;
 
+    let pending_text = match view.status_bar.pending {
+        Some(n) if n > 0 => format!(" ⏳{n} pending "),
+        _ => String::new(),
+    };
+    let pending_width = pending_text.width() as u16;
+
     let running_prefix = if view.running { "⏳ " } else { "" };
     let msg_text = format!(" {}{}", running_prefix, view.status_bar.message);
     let msg_width: u16 = 20; // minimum for the right slot
@@ -225,6 +236,7 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
             Constraint::Length(left_width),
             Constraint::Length(conn_width),
             Constraint::Length(txn_width),
+            Constraint::Length(pending_width),
             Constraint::Min(msg_width),
         ])
         .split(area);
@@ -246,10 +258,20 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         );
     }
 
+    // Optional fifth slot: pending mutations badge (L36). Reuses the
+    // transaction-badge style so both "uncommitted state" cues read
+    // the same way to the user.
+    if !pending_text.is_empty() {
+        frame.render_widget(
+            Paragraph::new(pending_text).style(view.theme.transaction_badge()),
+            parts[3],
+        );
+    }
+
     // Right slot: message
     frame.render_widget(
         Paragraph::new(msg_text).style(view.theme.status_bar()),
-        parts[3],
+        parts[4],
     );
 }
 

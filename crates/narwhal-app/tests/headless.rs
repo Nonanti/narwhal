@@ -152,7 +152,7 @@ async fn sidebar_enter_opens_table_detail() {
     core.handle_key(enter);
 
     match core.result() {
-        ResultState::TableDetail { schema } => {
+        ResultState::TableDetail { schema, .. } => {
             assert_eq!(schema.table.name, "orders");
             assert_eq!(schema.columns.len(), 3);
             assert_eq!(schema.foreign_keys.len(), 1);

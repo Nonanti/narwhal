@@ -79,7 +79,13 @@ impl AppCore {
                     self.trigger_completion();
                     return true;
                 }
-                CtKey::Char('s') => {
+                // L36: Ctrl-S is now reserved for the Results pane's
+                // "commit pending" action. Streaming still has F7 and
+                // `:stream`, so we drop the global binding here rather
+                // than overload the chord with two meanings. Without
+                // this, the global handler would short-circuit before
+                // the pending-commit action ever ran.
+                CtKey::Char('s') if self.focus == Pane::Editor => {
                     self.dispatch_current_statement(RunMode::Stream);
                     return true;
                 }

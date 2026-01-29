@@ -25,6 +25,6 @@ pub use terminal::TerminalGuard;
 // `crate::completion`, etc.) keep compiling while the migration to
 // `narwhal_commands::*` continues incrementally.
 pub use narwhal_commands::{
-    cell_edit, commands, completion, ddl, explain, export, meta, session, snippets, statements,
-    wizard,
+    action, cell_edit, commands, completion, ddl, explain, export, keymap, meta, pending, session,
+    snippets, statements, wizard,
 };

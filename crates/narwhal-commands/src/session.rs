@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use narwhal_core::{
-    ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema,
-    SshTunnel,
+    Capabilities, ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result,
+    Schema, SshTunnel,
 };
 use narwhal_domain::SchemaListing;
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
@@ -26,6 +26,11 @@ pub struct TxnHandle {
 pub struct Session {
     pub config: ConnectionConfig,
     pub driver: Arc<dyn DatabaseDriver>,
+    /// Snapshot of the driver's [`Capabilities`] taken at session
+    /// open. Cached here so the host doesn't have to acquire a pool
+    /// connection on every capability check (notably the L36 row-CRUD
+    /// gate, which runs on every keystroke).
+    pub capabilities: Capabilities,
     pub pool: Pool,
     pub schemas: Vec<SchemaListing>,
     pub transaction: Option<TxnHandle>,
@@ -61,6 +66,7 @@ impl Session {
         let probe = driver
             .connect(&effective_config, password.as_deref())
             .await?;
+        let capabilities = probe.capabilities();
         if let Err(error) = probe.close().await {
             tracing::debug!(
                 target: "narwhal::session",
@@ -81,6 +87,7 @@ impl Session {
             // still show the user-facing host instead of `127.0.0.1`.
             config,
             driver,
+            capabilities,
             pool,
             schemas: Vec::new(),
             transaction: None,

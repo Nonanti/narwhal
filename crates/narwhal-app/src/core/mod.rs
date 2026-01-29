@@ -12,6 +12,7 @@ mod dump_export;
 mod editor_dispatch;
 mod format;
 mod modals;
+mod pending_actions;
 mod plugin_executor;
 mod plugins;
 mod render_helpers;
@@ -33,6 +34,7 @@ use narwhal_vim::Vim;
 use tokio::sync::mpsc;
 
 use crate::clipboard::Clipboard;
+use crate::keymap::Keymap;
 
 use crate::meta::MetaUpdate;
 use crate::registry::DriverRegistry;
@@ -44,8 +46,9 @@ use narwhal_plugin::PluginRegistry;
 
 pub mod state;
 pub use state::{
-    CellEdit, CompletionState, EditorSearchState, HistoryState, ResultBundle, ResultSearch,
-    ResultState, RowDetailState, RowSource, SidebarItem, SnippetsModal, StatusBar, Tab,
+    CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ResultBundle,
+    ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem, SnippetsModal, StatusBar,
+    Tab,
 };
 
 /// Pure, IO-free application state and behaviour.
@@ -125,6 +128,16 @@ pub struct AppCore {
     /// the debounce timer task to know whether a refresh is still
     /// pending.
     pub(super) refresh_pending: Arc<AtomicBool>,
+    /// Active key map. Starts as the built-in defaults; mutated in place
+    /// by [`Self::apply_settings`] whenever the user's `config.toml`
+    /// supplies a `[keymap.<group>]` override. Cloned reads are not
+    /// taken on the hot path — the dispatcher borrows immutably.
+    pub(super) keymap: Keymap,
+    /// One-shot warnings collected from the most recent keymap override
+    /// pass. Surfaced to the status bar once on the first render so the
+    /// user notices malformed bindings without us having to plumb a
+    /// dedicated banner widget.
+    pub(super) keymap_warnings: Vec<String>,
 }
 
 mod accessors;

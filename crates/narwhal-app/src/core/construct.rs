@@ -148,6 +148,8 @@ impl AppCore {
             meta_rx,
             refresh_task: None,
             refresh_pending: Arc::new(AtomicBool::new(false)),
+            keymap: crate::keymap::Keymap::builtin(),
+            keymap_warnings: Vec::new(),
         }
     }
 
@@ -205,6 +207,28 @@ impl AppCore {
             // variants fall back to DARK rather than refusing to start.
             _ => Theme::DARK,
         };
+
+        // L36: turn the `[keymap.<group>]` TOML sections into a typed
+        // override table, apply on top of the built-in defaults, and
+        // stash diagnostics so the first render surfaces them.
+        if !settings.keymap.is_empty() {
+            let mut typed: std::collections::HashMap<
+                crate::action::KeyGroup,
+                std::collections::HashMap<String, String>,
+            > = std::collections::HashMap::new();
+            for (raw_group, table) in &settings.keymap {
+                if let Some(group) = crate::action::KeyGroup::from_str_opt(raw_group) {
+                    typed.insert(group, table.clone());
+                } else {
+                    self.keymap_warnings
+                        .push(format!("unknown keymap group: '{raw_group}'"));
+                }
+            }
+            let diags = self.keymap.apply_overrides(&typed);
+            for d in diags {
+                self.keymap_warnings.push(d.to_string());
+            }
+        }
     }
 
     pub(super) fn rebuild_sidebar(&mut self) {

@@ -89,6 +89,7 @@ impl ClickhouseDriver {
             // Native HTTP TSV response is consumed chunk-by-chunk via
             // `stream_tsv_chunks`, so rows are surfaced progressively.
             .with_streaming(true)
+            .with_row_level_dml(false)
     }
 }
 
