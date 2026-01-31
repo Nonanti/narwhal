@@ -3,9 +3,14 @@
 //! Renders a centred modal overlay listing recent journal entries.
 //! The caller provides a [`HistoryModalState`] with entries, filter
 //! string, and selected index; rendering is pure — no I/O.
+//!
+//! L36 #5: rows now carry the entry's outcome (rendered as a coloured
+//! status glyph), elapsed milliseconds, and a rows-affected /
+//! rows-returned summary so the user can spot slow queries and
+//! failed statements without paging the underlying journal.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
@@ -28,6 +33,16 @@ pub struct HistoryModalState<'a> {
     pub selected: usize,
 }
 
+/// Outcome marker shown as a coloured glyph in front of every row.
+/// Mirrors `narwhal_history::Outcome` but kept locally so the tui
+/// crate doesn't have to depend on the history crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryRowOutcome {
+    Success,
+    Cancelled,
+    Failed,
+}
+
 /// One row in the history modal.
 pub struct HistoryRow<'a> {
     /// Formatted timestamp: `YYYY-MM-DD HH:MM:SS`.
@@ -36,6 +51,13 @@ pub struct HistoryRow<'a> {
     pub connection: &'a str,
     /// Single-line SQL preview (pre-truncated by the caller).
     pub sql: &'a str,
+    /// L36 #5: outcome glyph colour.
+    pub outcome: HistoryRowOutcome,
+    /// Pre-formatted elapsed timing (`"12ms"`, `"1.4s"`, ...).
+    pub elapsed: &'a str,
+    /// Pre-formatted rows summary (`"↓42"` for returned, `"~3"` for
+    /// affected, empty for none).
+    pub rows: &'a str,
 }
 
 /// Render the history modal on top of the current frame.
@@ -83,14 +105,20 @@ pub fn render_history_modal(
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
+    let outcome_width: usize = 1;
     let timestamp_width: usize = 19;
     let connection_width: usize = 12;
+    let elapsed_width: usize = 7;
+    let rows_width: usize = 7;
     let sql_min_width: usize = 20;
     let inner_width = inner.width as usize;
     let sql_width = inner_width
+        .saturating_sub(outcome_width)
         .saturating_sub(timestamp_width)
         .saturating_sub(connection_width)
-        .saturating_sub(6) // padding/separators
+        .saturating_sub(elapsed_width)
+        .saturating_sub(rows_width)
+        .saturating_sub(10) // padding/separators
         .max(sql_min_width);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
@@ -102,10 +130,13 @@ pub fn render_history_modal(
         .bg(theme.accent)
         .fg(ratatui::style::Color::Black);
 
-    // Column header
+    // Column header.
     lines.push(Line::from(vec![
+        Span::styled(format!(" {:outcome_width$}", "·"), header_style),
         Span::styled(format!(" {:timestamp_width$}", "TIMESTAMP"), header_style),
         Span::styled(format!(" {:connection_width$}", "CONNECTION"), header_style),
+        Span::styled(format!(" {:>elapsed_width$}", "TIME"), header_style),
+        Span::styled(format!(" {:>rows_width$}", "ROWS"), header_style),
         Span::styled(format!(" {:sql_width$}", "SQL"), header_style),
     ]));
 
@@ -115,12 +146,27 @@ pub fn render_history_modal(
         } else {
             normal_style
         };
+        let (glyph, glyph_colour) = match row.outcome {
+            HistoryRowOutcome::Success => ("●", Color::Green),
+            HistoryRowOutcome::Cancelled => ("●", Color::Yellow),
+            HistoryRowOutcome::Failed => ("●", Color::Red),
+        };
+        let glyph_style = if i == state.selected {
+            selected_style.fg(glyph_colour)
+        } else {
+            Style::default().fg(glyph_colour)
+        };
         let sql_truncated = truncate_display(&sanitize_for_display(row.sql), sql_width);
         let ts = pad_to_width(row.timestamp, timestamp_width);
         let conn = pad_to_width(row.connection, connection_width);
+        let elapsed = format!("{:>elapsed_width$}", row.elapsed);
+        let rows = format!("{:>rows_width$}", row.rows);
         lines.push(Line::from(vec![
+            Span::styled(format!(" {glyph}"), glyph_style),
             Span::styled(format!(" {ts}"), style),
             Span::styled(format!(" {conn}"), style),
+            Span::styled(format!(" {elapsed}"), style),
+            Span::styled(format!(" {rows}"), style),
             Span::styled(format!(" {sql_truncated}"), style),
         ]));
     }

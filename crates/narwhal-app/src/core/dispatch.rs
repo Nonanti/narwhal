@@ -5,8 +5,9 @@ use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_tui::{
     render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
     render_wizard, CompletionItemView, CompletionPopupView, EditorSearchHighlight,
-    HistoryModalState, HistoryRow, Pane, RootLayout, RowDetailView, SearchHighlight, SidebarRow,
-    SidebarView, SnippetsModalState, StatusBarView, WizardFieldView, WizardView,
+    HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout, RowDetailView,
+    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,
+    WizardView,
 };
 use ratatui::layout::Rect;
 use ratatui::Frame;
@@ -144,23 +145,43 @@ impl AppCore {
         }
 
         if let Some(state) = self.history_state.as_ref() {
-            let visible_data: Vec<(String, String, String)> = state
-                .visible_entries()
-                .iter()
-                .map(|e| {
-                    let ts = e.timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
-                    let conn = e.connection_name.as_deref().unwrap_or("<local>").to_owned();
-                    (ts, conn, e.sql.clone())
-                })
-                .collect();
+            // Pre-format every per-row string into one owned tuple so
+            // the borrowed view can reference stable storage.
+            // Tuple layout: (timestamp, connection, sql, elapsed, rows,
+            // outcome). Output strings are short and built once per
+            // render — fine for a modal that only opens on demand.
+            let visible_data: Vec<(String, String, String, String, String, HistoryRowOutcome)> =
+                state
+                    .visible_entries()
+                    .iter()
+                    .map(|e| {
+                        let ts = e.timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
+                        let conn = e.connection_name.as_deref().unwrap_or("<local>").to_owned();
+                        let elapsed = format_elapsed(e.elapsed_ms);
+                        let rows = format_rows(e.rows_returned, e.rows_affected);
+                        let outcome = match e.outcome {
+                            narwhal_history::Outcome::Success => HistoryRowOutcome::Success,
+                            narwhal_history::Outcome::Cancelled => HistoryRowOutcome::Cancelled,
+                            narwhal_history::Outcome::Failed => HistoryRowOutcome::Failed,
+                            // Forward-compat: any future outcome
+                            // variant renders as the cautious yellow
+                            // "cancelled" glyph until classified.
+                            _ => HistoryRowOutcome::Cancelled,
+                        };
+                        (ts, conn, e.sql.clone(), elapsed, rows, outcome)
+                    })
+                    .collect();
             let modal_state = HistoryModalState {
                 total: state.entries.len(),
                 visible: visible_data
                     .iter()
-                    .map(|(ts, conn, sql)| HistoryRow {
+                    .map(|(ts, conn, sql, elapsed, rows, outcome)| HistoryRow {
                         timestamp: ts.as_str(),
                         connection: conn.as_str(),
                         sql: sql.as_str(),
+                        outcome: *outcome,
+                        elapsed: elapsed.as_str(),
+                        rows: rows.as_str(),
                     })
                     .collect(),
                 filter: &state.filter,
@@ -573,4 +594,65 @@ impl AppCore {
 
     // Run-loop / meta-update / finalize_statement / spawn_cancel moved to
     // `core::run_loop` (L21).
+}
+
+/// L36 #5: format a millisecond duration the way the history modal
+/// wants to see it: `"-"` when zero (entry predates timing capture),
+/// `"12ms"` under one second, `"1.4s"` between one second and one
+/// minute, otherwise `"1m23s"`.
+fn format_elapsed(ms: u64) -> String {
+    if ms == 0 {
+        return "-".into();
+    }
+    if ms < 1_000 {
+        return format!("{ms}ms");
+    }
+    let total_secs = ms / 1_000;
+    if total_secs < 60 {
+        let tenths = (ms % 1_000) / 100;
+        return format!("{total_secs}.{tenths}s");
+    }
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{minutes}m{seconds:02}s")
+}
+
+/// L36 #5: format the rows-returned / rows-affected pair into a single
+/// column. `↓` prefix for returned rows (the SELECT-style case),
+/// `∼` prefix for affected rows (the UPDATE/DELETE-style case),
+/// empty when both are absent.
+fn format_rows(returned: Option<u64>, affected: Option<u64>) -> String {
+    if let Some(r) = returned {
+        return format!("↓{r}");
+    }
+    if let Some(a) = affected {
+        return format!("∼{a}");
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_elapsed_thresholds() {
+        assert_eq!(format_elapsed(0), "-");
+        assert_eq!(format_elapsed(7), "7ms");
+        assert_eq!(format_elapsed(999), "999ms");
+        assert_eq!(format_elapsed(1_000), "1.0s");
+        assert_eq!(format_elapsed(1_450), "1.4s");
+        assert_eq!(format_elapsed(59_999), "59.9s");
+        assert_eq!(format_elapsed(60_000), "1m00s");
+        assert_eq!(format_elapsed(83_000), "1m23s");
+    }
+
+    #[test]
+    fn format_rows_variants() {
+        assert_eq!(format_rows(Some(42), None), "↓42");
+        assert_eq!(format_rows(None, Some(3)), "∼3");
+        assert_eq!(format_rows(None, None), "");
+        // Returned takes precedence over affected.
+        assert_eq!(format_rows(Some(1), Some(2)), "↓1");
+    }
 }

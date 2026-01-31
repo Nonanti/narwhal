@@ -50,6 +50,20 @@ impl AppCore {
         &self.tabs
     }
 
+    /// L36 #4 v1: read-only access to the live keymap. Used by tests
+    /// and any future help/config tooling that wants to introspect
+    /// the currently-active bindings.
+    pub const fn keymap(&self) -> &narwhal_commands::keymap::Keymap {
+        &self.keymap
+    }
+
+    /// L36 #4 v1: diagnostics collected the last time
+    /// `Settings::keymap` was applied. Empty when the user-supplied
+    /// overrides parsed cleanly.
+    pub fn keymap_warnings(&self) -> &[String] {
+        &self.keymap_warnings
+    }
+
     /// Test helper: mutable handle to the tab list. Used by
     /// integration tests that pre-populate fields (notably the
     /// staged-mutation queue) before exercising a public path.

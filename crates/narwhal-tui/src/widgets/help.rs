@@ -186,6 +186,41 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
                 keys: ":next / :prev",
                 description: "page through results",
             },
+            // ─── L36: row CRUD + pending changes ──────────────
+            CheatsheetEntry {
+                keys: "o / O",
+                description: "queue INSERT (empty / duplicate row)",
+            },
+            CheatsheetEntry {
+                keys: "d",
+                description: "queue DELETE for the focused row",
+            },
+            CheatsheetEntry {
+                keys: "Ctrl-S",
+                description: "commit every staged mutation in a txn",
+            },
+            CheatsheetEntry {
+                keys: "Ctrl-X",
+                description: "discard the staged-mutation queue",
+            },
+            CheatsheetEntry {
+                keys: "Ctrl-P",
+                description: "toggle the pending-changes preview modal",
+            },
+            // ─── L36: metadata tabs ────────────────────────────
+            CheatsheetEntry {
+                keys: "1 / 2 / 3 / 4 / 5",
+                description: "switch metadata tab: Records / Columns / Constraints / FKs / Indexes",
+            },
+            // ─── L36: JSON viewer ──────────────────────────────
+            CheatsheetEntry {
+                keys: "z / Z",
+                description: "open JSON viewer (cell / whole row)",
+            },
+            CheatsheetEntry {
+                keys: "j/k/Ctrl-D/U/g/G in viewer",
+                description: "scroll JSON viewer; y/Y yank, q/Esc close",
+            },
         ],
     },
     CheatsheetSection {

@@ -1,5 +1,6 @@
 ---
 source: crates/narwhal-app/tests/snapshots.rs
+assertion_line: 131
 expression: "snapshot_core_sized(&mut core, 130, 66)"
 ---
 ┌ narwhal ───────────────────────┐┌ editor ──────────────────────────────────────────────────────────────────────────────────────┐
@@ -47,6 +48,14 @@ expression: "snapshot_core_sized(&mut core, 130, 66)"
 │                            │  n / N                       next / prev search match                │                            │
 │                            │  g / G                       jump to first / last row                │                            │
 │                            │  :next / :prev               page through results                    │                            │
+│                            │  o / O                       queue INSERT (empty / duplicate row)    │                            │
+│                            │  d                           queue DELETE for the focused row        │                            │
+│                            │  Ctrl-S                      commit every staged mutation in a txn   │                            │
+│                            │  Ctrl-X                      discard the staged-mutation queue       │                            │
+│                            │  Ctrl-P                      toggle the pending-changes preview modal│                            │
+│                            │  1 / 2 / 3 / 4 / 5           switch metadata tab: Records / Columns /│                            │
+│                            │  z / Z                       open JSON viewer (cell / whole row)     │                            │
+│                            │  j/k/Ctrl-D/U/g/G in viewer  scroll JSON viewer; y/Y yank, q/Esc clos│                            │
 │                            │                                                                      │                            │
 │                            │ Connections                                                          │                            │
 │                            │  :add                        open the connection wizard (empty form) │                            │
@@ -55,14 +64,6 @@ expression: "snapshot_core_sized(&mut core, 130, 66)"
 │                            │  :edit <name>                edit a saved connection in the wizard   │                            │
 │                            │  :open <name|url>            connect to a saved entry or an ad-hoc UR│                            │
 │                            │  :remove <name>              delete a saved connection (also :rm)    │                            │
-│                            │  ssh tunnel                  fill ssh_host + ssh_user in :add (or ?ss│                            │
-│                            │  pgpass / env                PGPASSWORD / MYSQL_PWD / ~/.pgpass picke│                            │
-│                            │  Tab on path field           filesystem completion in the wizard     │                            │
-│                            │                                                                      │                            │
-│                            │ Snippets                                                             │                            │
-│                            │  :save <name>                save editor buffer as a named snippet   │                            │
-│                            │  :load <name>                load a snippet into a new tab           │                            │
-│                            │  :rm-snippet <name>          delete a saved snippet                  │                            │
 │                            └──────────────────────────────────────────────────────────────────────┘                            │
 │                                ││                                                                                              │
 │                                ││                                                                                              │

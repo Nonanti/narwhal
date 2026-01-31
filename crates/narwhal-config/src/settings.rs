@@ -144,6 +144,16 @@ impl ConnectionsFile {
     }
 }
 
+impl Settings {
+    /// Parse a TOML string into a [`Settings`] value. Companion to
+    /// [`Self::load`] for test fixtures and other in-memory callers
+    /// that already have the file contents in hand.
+    pub fn load_from_str(text: &str) -> Result<Self, ConfigError> {
+        let s: Self = toml::from_str(text)?;
+        Ok(s)
+    }
+}
+
 /// Validate TLS-related constraints across all connections:
 ///
 /// - `verify-ca` / `verify-full` requires `ssl_root_cert` to be set.
