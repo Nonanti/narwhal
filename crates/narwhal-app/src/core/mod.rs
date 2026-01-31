@@ -138,6 +138,11 @@ pub struct AppCore {
     /// user notices malformed bindings without us having to plumb a
     /// dedicated banner widget.
     pub(super) keymap_warnings: Vec<String>,
+    /// L36 #11: global read-only switch. When `true`, every row-CRUD
+    /// entry point refuses to stage mutations regardless of the
+    /// driver's `row_level_dml` capability. Driven by the `--read-only`
+    /// CLI flag.
+    pub(super) read_only: bool,
 }
 
 mod accessors;

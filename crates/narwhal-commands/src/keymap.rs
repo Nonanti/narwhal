@@ -108,9 +108,7 @@ impl KeyChord {
             return Err(ChordParseError::Empty);
         }
         let parts: Vec<&str> = trimmed.split('+').map(str::trim).collect();
-        let (key_name, modifier_names) = parts
-            .split_last()
-            .ok_or(ChordParseError::Empty)?;
+        let (key_name, modifier_names) = parts.split_last().ok_or(ChordParseError::Empty)?;
         let mut mods = KeyModifiers::NONE;
         for raw in modifier_names {
             let bit = match raw.to_ascii_lowercase().as_str() {
@@ -130,8 +128,7 @@ impl KeyChord {
         // (`ctrl+S`) is treated as case-insensitive — the user almost
         // certainly meant Ctrl+S, not Ctrl+Shift+S.
         let normalised_key: String;
-        let key_name_lookup: &str = if !modifier_names.is_empty() && key_name.chars().count() == 1
-        {
+        let key_name_lookup: &str = if !modifier_names.is_empty() && key_name.chars().count() == 1 {
             let ch = key_name.chars().next().unwrap_or(' ');
             if ch.is_ascii_uppercase() {
                 normalised_key = ch.to_ascii_lowercase().to_string();
@@ -257,12 +254,7 @@ impl Keymap {
 
     /// Bind `chord` in `group` to `action`. Returns the previous binding, if
     /// any — useful for user-facing override diagnostics.
-    pub fn bind(
-        &mut self,
-        group: KeyGroup,
-        chord: KeyChord,
-        action: Action,
-    ) -> Option<Action> {
+    pub fn bind(&mut self, group: KeyGroup, chord: KeyChord, action: Action) -> Option<Action> {
         self.bindings.insert((group, chord), action)
     }
 
@@ -327,13 +319,29 @@ impl Keymap {
 
         // ─── Results pane: navigation ──────────────────────────────────
         self.bind(Results, KeyChord::ch('j'), A::ResultsMoveDown);
-        self.bind(Results, KeyChord::new(KeyCode::Down, KeyModifiers::NONE), A::ResultsMoveDown);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Down, KeyModifiers::NONE),
+            A::ResultsMoveDown,
+        );
         self.bind(Results, KeyChord::ch('k'), A::ResultsMoveUp);
-        self.bind(Results, KeyChord::new(KeyCode::Up, KeyModifiers::NONE), A::ResultsMoveUp);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Up, KeyModifiers::NONE),
+            A::ResultsMoveUp,
+        );
         self.bind(Results, KeyChord::ch('h'), A::ResultsMoveLeft);
-        self.bind(Results, KeyChord::new(KeyCode::Left, KeyModifiers::NONE), A::ResultsMoveLeft);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Left, KeyModifiers::NONE),
+            A::ResultsMoveLeft,
+        );
         self.bind(Results, KeyChord::ch('l'), A::ResultsMoveRight);
-        self.bind(Results, KeyChord::new(KeyCode::Right, KeyModifiers::NONE), A::ResultsMoveRight);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Right, KeyModifiers::NONE),
+            A::ResultsMoveRight,
+        );
         self.bind(Results, KeyChord::ch('g'), A::ResultsFirstRow);
         self.bind(Results, KeyChord::shift('g'), A::ResultsLastRow);
 
@@ -342,11 +350,23 @@ impl Keymap {
         self.bind(Results, KeyChord::ch('/'), A::ResultsOpenFilterPrompt);
         self.bind(Results, KeyChord::ch('n'), A::ResultsNextMatch);
         self.bind(Results, KeyChord::shift('n'), A::ResultsPrevMatch);
-        self.bind(Results, KeyChord::new(KeyCode::Esc, KeyModifiers::NONE), A::ResultsEscape);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Esc, KeyModifiers::NONE),
+            A::ResultsEscape,
+        );
 
         // ─── Per-cell / per-row ────────────────────────────────────────
-        self.bind(Results, KeyChord::new(KeyCode::Enter, KeyModifiers::NONE), A::ResultsOpenCellPopup);
-        self.bind(Results, KeyChord::new(KeyCode::Enter, KeyModifiers::SHIFT), A::ResultsOpenRowDetail);
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Enter, KeyModifiers::NONE),
+            A::ResultsOpenCellPopup,
+        );
+        self.bind(
+            Results,
+            KeyChord::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            A::ResultsOpenRowDetail,
+        );
         self.bind(Results, KeyChord::shift('r'), A::ResultsOpenRowDetail);
         self.bind(Results, KeyChord::ch('e'), A::ResultsStartCellEdit);
         self.bind(Results, KeyChord::ch('y'), A::ResultsYankCell);
@@ -373,7 +393,11 @@ impl Keymap {
 
         // ─── JSON viewer ───────────────────────────────────────────────
         self.bind(Results, KeyChord::ch('z'), A::OpenJsonViewerCell);
-        self.bind(KeyGroup::RowDetail, KeyChord::shift('z'), A::OpenJsonViewerRow);
+        self.bind(
+            KeyGroup::RowDetail,
+            KeyChord::shift('z'),
+            A::OpenJsonViewerRow,
+        );
     }
 }
 
@@ -396,11 +420,11 @@ pub enum KeymapOverrideError {
 impl std::fmt::Display for KeymapOverrideError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Chord { group, input, source } => write!(
-                f,
-                "[keymap.{}] '{input}': {source}",
-                group.as_str()
-            ),
+            Self::Chord {
+                group,
+                input,
+                source,
+            } => write!(f, "[keymap.{}] '{input}': {source}", group.as_str()),
             Self::Action {
                 group,
                 chord,
@@ -501,7 +525,15 @@ mod tests {
 
     #[test]
     fn canonical_string_roundtrips() {
-        for raw in ["j", "G", "ctrl+s", "alt+f4", "shift+enter", "/", "ctrl+space"] {
+        for raw in [
+            "j",
+            "G",
+            "ctrl+s",
+            "alt+f4",
+            "shift+enter",
+            "/",
+            "ctrl+space",
+        ] {
             let chord = KeyChord::parse(raw).unwrap();
             let canon = chord.to_string_canonical();
             let again = KeyChord::parse(&canon).unwrap();
@@ -538,10 +570,7 @@ mod tests {
     #[test]
     fn builtin_does_not_bind_random_chord() {
         let map = Keymap::builtin();
-        assert_eq!(
-            map.resolve(KeyGroup::Results, KeyChord::ctrl('q')),
-            None
-        );
+        assert_eq!(map.resolve(KeyGroup::Results, KeyChord::ctrl('q')), None);
     }
 
     #[test]
@@ -568,10 +597,7 @@ mod tests {
         all.insert(KeyGroup::Results, group);
         let diags = map.apply_overrides(&all);
         assert!(diags.is_empty());
-        assert_eq!(
-            map.resolve(KeyGroup::Results, KeyChord::ctrl('s')),
-            None
-        );
+        assert_eq!(map.resolve(KeyGroup::Results, KeyChord::ctrl('s')), None);
     }
 
     #[test]

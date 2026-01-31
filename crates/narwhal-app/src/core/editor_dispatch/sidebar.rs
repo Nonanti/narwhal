@@ -282,11 +282,10 @@ impl AppCore {
                 self.status.message = format!(
                     "{table_schema}.{table_name}: {col_count} cols·{idx_count} idx·{fk_count} fk"
                 );
-                *self.tabs[self.active_tab].results.active_state_mut() =
-                    ResultState::TableDetail {
-                        schema: ts,
-                        active_meta_tab: narwhal_tui::MetaTab::default(),
-                    };
+                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::TableDetail {
+                    schema: ts,
+                    active_meta_tab: narwhal_tui::MetaTab::default(),
+                };
                 // L36: hand focus to the results pane so 1–5 land on
                 // the new tab strip without the user first having to
                 // cycle panes with Ctrl-W.

@@ -24,9 +24,7 @@ use tokio::runtime::Handle;
 
 use super::state::PendingPreviewState;
 use super::{AppCore, ResultState};
-use crate::pending::{
-    CompiledMutation, ExpectedRows, PendingChanges, PendingMutation, TableId,
-};
+use crate::pending::{CompiledMutation, ExpectedRows, PendingChanges, PendingMutation, TableId};
 use crate::run::RunTarget;
 
 /// Tuple returned by [`AppCore::snapshot_focused_row`]: target table,
@@ -42,11 +40,17 @@ type FocusedRowSnapshot = (
 );
 
 impl AppCore {
-    /// Guard: every row-CRUD entry point bails early when the active
-    /// driver does not expose row-level DML. Today only `ClickHouse`
-    /// trips this; the user gets a single-line explanation rather
-    /// than a generic engine error after the commit.
+    /// Guard: every row-CRUD entry point bails early when either the
+    /// process was launched with `--read-only` (L36 #11) or the active
+    /// driver does not expose row-level DML. The two checks are kept
+    /// distinct in the status message so the user can tell why an
+    /// action was refused.
     fn dml_supported(&mut self) -> bool {
+        if self.read_only {
+            self.status.message =
+                "read-only mode: row-level DML disabled (relaunch without --read-only)".into();
+            return false;
+        }
         let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
             return false;
@@ -292,11 +296,7 @@ impl AppCore {
             }
             pk_values.insert(pk.name.clone(), value);
         }
-        let old_value = row
-            .0
-            .get(edit.column_index)
-            .cloned()
-            .unwrap_or(Value::Null);
+        let old_value = row.0.get(edit.column_index).cloned().unwrap_or(Value::Null);
         let target = TableId::new(source.schema.clone(), source.table.clone());
         self.tabs[self.active_tab]
             .pending
@@ -543,16 +543,10 @@ impl AppCore {
 /// Execute every compiled mutation in declaration order inside a single
 /// transaction (or savepoint, when called from inside an existing
 /// transaction). Returns the *total* rows affected across the batch.
-async fn execute_batch(
-    target: RunTarget,
-    compiled: Vec<CompiledMutation>,
-) -> Result<u64, String> {
+async fn execute_batch(target: RunTarget, compiled: Vec<CompiledMutation>) -> Result<u64, String> {
     match target {
         RunTarget::Pool(pool) => {
-            let mut conn = pool
-                .acquire()
-                .await
-                .map_err(|e| format!("acquire: {e}"))?;
+            let mut conn = pool.acquire().await.map_err(|e| format!("acquire: {e}"))?;
             conn.begin().await.map_err(|e| format!("begin: {e}"))?;
             match run_all(&mut *conn, &compiled).await {
                 Ok(n) => {

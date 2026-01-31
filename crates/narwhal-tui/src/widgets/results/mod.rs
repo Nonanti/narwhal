@@ -11,8 +11,8 @@ mod table_paint;
 
 pub use cells::sanitize_for_display;
 pub use model::{
-    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions,
-    ResultView, SearchHighlight,
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions, ResultView,
+    SearchHighlight,
 };
 pub use sort::{compare_values, SortDir};
 

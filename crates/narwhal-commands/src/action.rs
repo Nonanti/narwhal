@@ -213,7 +213,10 @@ mod tests {
     #[test]
     fn default_group_routes_actions_correctly() {
         assert_eq!(Action::ResultsMoveDown.default_group(), KeyGroup::Results);
-        assert_eq!(Action::OpenJsonViewerRow.default_group(), KeyGroup::RowDetail);
+        assert_eq!(
+            Action::OpenJsonViewerRow.default_group(),
+            KeyGroup::RowDetail
+        );
         assert_eq!(Action::MetaTabRecords.default_group(), KeyGroup::Results);
     }
 }

@@ -32,10 +32,10 @@ pub use editor::{
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow};
 pub use json_viewer::{render_json_viewer, JsonViewerView};
-pub use pending_preview::{render_pending_preview, PendingPreviewView};
 pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
+pub use pending_preview::{render_pending_preview, PendingPreviewView};
 pub use results::{
     compare_values, render_results, sanitize_for_display, CellEditView, CellPopup, ExplainPlanLine,
     MetaTab, ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,

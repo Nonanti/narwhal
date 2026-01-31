@@ -42,7 +42,12 @@ pub struct JsonViewerView<'a> {
 /// Render the modal on top of `area`. Always centred; the modal claims
 /// 80% of width and height so the underlying result pane stays visible
 /// at the edges as context.
-pub fn render_json_viewer(frame: &mut Frame<'_>, area: Rect, view: &JsonViewerView<'_>, theme: &Theme) {
+pub fn render_json_viewer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view: &JsonViewerView<'_>,
+    theme: &Theme,
+) {
     let modal = centred_rect(80, 80, area);
     frame.render_widget(Clear, modal);
 
@@ -52,7 +57,9 @@ pub fn render_json_viewer(frame: &mut Frame<'_>, area: Rect, view: &JsonViewerVi
         .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
             title,
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(modal);
     frame.render_widget(block, modal);
@@ -77,7 +84,9 @@ pub fn render_json_viewer(frame: &mut Frame<'_>, area: Rect, view: &JsonViewerVi
         Some(err) => format!(
             "  raw cell text shown (parse failed: {err}) · j/k scroll · y copy · q/Esc close",
         ),
-        None => "  j/k scroll · Ctrl-D/U page · g/G first/last · y copy · Y raw · q/Esc close".into(),
+        None => {
+            "  j/k scroll · Ctrl-D/U page · g/G first/last · y copy · Y raw · q/Esc close".into()
+        }
     };
     let hint = Paragraph::new(Line::from(Span::styled(
         hint_text,
