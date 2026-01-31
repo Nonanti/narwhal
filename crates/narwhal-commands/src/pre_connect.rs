@@ -22,6 +22,7 @@
 //!   diagnostics into connection strings.
 
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::time::Duration;
 
 use narwhal_core::PreConnectStep;
@@ -102,17 +103,40 @@ async fn run_one(step: &PreConnectStep) -> Result<String, PreConnectError> {
     Ok(stdout.trim().to_owned())
 }
 
+/// Build the shell child with the three hardening flags every
+/// long-lived terminal app wants:
+///
+/// * `stdin(Stdio::null())` — a child that asks for a password / TTY
+///   confirmation (sudo, ssh-add, kubectl exec without `-T`) would
+///   otherwise hang until the per-step timeout. Mirrors what
+///   `narwhal-core::ssh::SshTunnel` does for the very same reason.
+/// * `kill_on_drop(true)` — when `tokio::time::timeout` cancels the
+///   future, dropping the child handle must actually kill the
+///   process; otherwise a wedged `kubectl port-forward` or `sleep`
+///   leaks for the lifetime of the narwhal process.
+/// * stdout/stderr piped (the default) so `output()` can collect
+///   both — we deliberately don't `null` them.
 #[cfg(unix)]
 fn shell_command(line: &str) -> Command {
     let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(line);
+    cmd.arg("-c")
+        .arg(line)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
     cmd
 }
 
 #[cfg(windows)]
 fn shell_command(line: &str) -> Command {
+    // NOTE: Windows quoting differs from POSIX `sh -c`; `&`, `|`,
+    // `^`, `"` and `%VAR%` follow `cmd.exe` rules. For complex
+    // pipelines users are advised to dispatch through PowerShell:
+    //   command = 'powershell -Command "Get-Secret | ConvertTo-Json"'
     let mut cmd = Command::new("cmd");
-    cmd.arg("/C").arg(line);
+    cmd.arg("/C")
+        .arg(line)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
     cmd
 }
 

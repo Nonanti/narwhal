@@ -45,11 +45,38 @@ pub struct Session {
     pub _ssh_tunnel: Option<Arc<SshTunnel>>,
 }
 
+/// Options that modulate [`Session::open`] without bloating its
+/// positional signature.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionOpenOptions {
+    /// When `true`, [`crate::pre_connect`] shell steps are **skipped**
+    /// entirely. The CLI flips this on under `--read-only` so an
+    /// auditor who thought they were only reading a database can't be
+    /// tricked into running an arbitrary `kubectl delete pod …` or
+    /// `rm -rf` step that someone left in their connections file.
+    /// Any `${preconnect:NAME}` placeholder in the params then fails
+    /// substitution (no var saved → `MissingVar`), surfacing the
+    /// situation immediately instead of silently dropping the step.
+    pub skip_pre_connect: bool,
+}
+
 impl Session {
     pub async fn open(
         driver: Arc<dyn DatabaseDriver>,
         config: ConnectionConfig,
         password: Option<String>,
+    ) -> Result<Self> {
+        Self::open_with(driver, config, password, SessionOpenOptions::default()).await
+    }
+
+    /// Variant of [`Self::open`] that takes a [`SessionOpenOptions`].
+    /// Existing callers stay on the three-arg shortcut; the TUI's
+    /// read-only path threads its CLI flag through this entry point.
+    pub async fn open_with(
+        driver: Arc<dyn DatabaseDriver>,
+        config: ConnectionConfig,
+        password: Option<String>,
+        opts: SessionOpenOptions,
     ) -> Result<Self> {
         // L36 #7: pre-connect step pipeline. Runs *before* the SSH
         // tunnel because users typically need to fetch credentials
@@ -59,13 +86,27 @@ impl Session {
         // substitutions are applied to the connection params in
         // place — the SSH tunnel + driver see the fully-resolved
         // string fields.
+        //
+        // L36 #C4: when `opts.skip_pre_connect` is set the whole
+        // pipeline is skipped — see [`SessionOpenOptions`] for why.
         let mut config = config;
-        let pc_vars = crate::pre_connect::run_pre_connect(&config.params.pre_connect)
-            .await
-            .map_err(|e| Error::Connection(format!("pre-connect: {e}")))?;
-        if !pc_vars.is_empty() {
-            crate::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
-                .map_err(|e| Error::Connection(format!("pre-connect substitution: {e}")))?;
+        if opts.skip_pre_connect {
+            if !config.params.pre_connect.is_empty() {
+                tracing::warn!(
+                    target: "narwhal::session",
+                    name = %config.name,
+                    steps = config.params.pre_connect.len(),
+                    "skipping pre-connect steps because session was opened in read-only mode"
+                );
+            }
+        } else {
+            let pc_vars = crate::pre_connect::run_pre_connect(&config.params.pre_connect)
+                .await
+                .map_err(|e| Error::Connection(format!("pre-connect: {e}")))?;
+            if !pc_vars.is_empty() {
+                crate::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
+                    .map_err(|e| Error::Connection(format!("pre-connect substitution: {e}")))?;
+            }
         }
         // Bring up the SSH tunnel (if any) before the driver touches
         // the network. The returned `effective_config` carries the

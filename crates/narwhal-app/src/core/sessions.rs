@@ -83,9 +83,15 @@ impl AppCore {
 
         let driver = driver.clone();
         let password_for_open = password;
+        // L36 #C4: forward the global `--read-only` flag so the
+        // pre-connect shell pipeline is skipped under audit mode.
+        let session_opts = narwhal_commands::session::SessionOpenOptions {
+            skip_pre_connect: self.read_only,
+        };
         let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { Session::open(driver, config, password_for_open).await })
+            tokio::runtime::Handle::current().block_on(async {
+                Session::open_with(driver, config, password_for_open, session_opts).await
+            })
         });
         match result {
             Ok(mut session) => {
@@ -406,9 +412,16 @@ impl AppCore {
         // Open a transient session and drop it on the spot. Session::open
         // already performs the handshake, so a successful return is the
         // signal that credentials + network are fine.
+        // L36 #C4: same read-only gate as `open_named` — we never want
+        // a `:test` to fire arbitrary shell commands when the auditor
+        // explicitly asked for a sandbox.
+        let session_opts = narwhal_commands::session::SessionOpenOptions {
+            skip_pre_connect: self.read_only,
+        };
         let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { Session::open(driver, config, password).await })
+            tokio::runtime::Handle::current().block_on(async {
+                Session::open_with(driver, config, password, session_opts).await
+            })
         });
         match outcome {
             Ok(session) => {
