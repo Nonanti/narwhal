@@ -103,6 +103,10 @@ pub enum Command {
     PluginList,
     /// Open the Ctrl+R history modal.
     History,
+    /// L36 #1: open the staged-mutation preview modal. Discoverable
+    /// counterpart to the `Ctrl-P` chord for users who live in the
+    /// command line.
+    Pending,
     Help(Option<String>),
     /// Substitute command: `:s/old/new/[g][c]` or `:%s/old/new/[g][c]`.
     Substitute {
@@ -504,6 +508,7 @@ pub fn parse(input: &str) -> Command {
         }
         "plug-list" | "pluglist" | "plugins" => Command::PluginList,
         "history" => Command::History,
+        "pending" | "diff" => Command::Pending,
         "new" | "tabnew" => Command::NewTab,
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,

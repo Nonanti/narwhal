@@ -70,6 +70,81 @@ pub struct ConnectionParams {
     /// rewrites `host`/`port` to the loopback side of the tunnel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
+    /// L36 #7: ordered list of shell commands executed before the
+    /// connection is opened. Each step's stdout can be captured into
+    /// a named variable and substituted into the remaining string
+    /// fields of [`ConnectionParams`] via `${preconnect:NAME}`
+    /// placeholders. The canonical use case is fetching a short-lived
+    /// password from a secrets manager (`vault kv get …`) or a
+    /// kubectl pod IP before the driver dials in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_connect: Vec<PreConnectStep>,
+}
+
+/// One pre-connect command.
+///
+/// The `command` string is handed to `sh -c` so users can compose
+/// pipes / redirections without us shipping a parser. Stdout is
+/// captured (trimmed of trailing whitespace) and, when
+/// `save_output_to` is set, stored under that key in the
+/// pre-connect variable map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreConnectStep {
+    /// Shell command line. Run via `sh -c`.
+    pub command: String,
+    /// When set, the trimmed stdout of `command` is stored under
+    /// this key in the variable map exposed to the rest of the
+    /// connection params via `${preconnect:NAME}` placeholders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save_output_to: Option<String>,
+    /// Time budget for this step. Defaults to 30 seconds. The whole
+    /// pre-connect sequence is capped at the sum of its steps'
+    /// timeouts so a wedged kubectl call cannot freeze the UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u32>,
+    /// When `true`, a non-zero exit aborts the entire connection
+    /// open. When `false`, the failure is logged and the sequence
+    /// continues to the next step. Defaults to `true`.
+    #[serde(default = "default_required")]
+    pub required: bool,
+}
+
+const fn default_required() -> bool {
+    true
+}
+
+impl PreConnectStep {
+    /// Build a step from the bare command line. Convenience for
+    /// tests and any future config-tooling that wants to assemble a
+    /// step without going through serde.
+    #[must_use]
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            save_output_to: None,
+            timeout_secs: None,
+            required: true,
+        }
+    }
+
+    #[must_use]
+    pub fn with_save_output_to(mut self, key: impl Into<String>) -> Self {
+        self.save_output_to = Some(key.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn with_timeout_secs(mut self, secs: u32) -> Self {
+        self.timeout_secs = Some(secs);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_required(mut self, required: bool) -> Self {
+        self.required = required;
+        self
+    }
 }
 
 /// SSH tunnel parameters. Only the host + user are required; everything
