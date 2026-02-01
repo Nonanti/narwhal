@@ -27,6 +27,16 @@ use thiserror::Error;
 
 use crate::settings::ConnectionsFile;
 
+/// Hard cap on `${env:OUTER:${env:INNER:…}}` nesting.
+///
+/// L36 #m5: chosen empirically — every real-world chain we've seen
+/// (vault → env → literal fallback, kubernetes-secret → env →
+/// literal, …) tops out at three levels. Eight gives ample headroom
+/// for unforeseen combinations while still being small enough that
+/// a hand-rolled cycle (a fallback that references its own name)
+/// bails out in microseconds rather than blowing the stack. Lifting
+/// this is safe in principle but the *intent* is to flag suspicious
+/// configurations early rather than enable deep recursion.
 const MAX_DEPTH: u8 = 8;
 
 #[derive(Debug, Error)]

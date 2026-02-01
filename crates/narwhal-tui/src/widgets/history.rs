@@ -180,6 +180,58 @@ pub fn render_history_modal(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// L36 #m2: format a millisecond duration the way the history modal
+/// wants to see it. Lives in the widget crate (alongside the
+/// columns that consume it) so the formatting choices stay close to
+/// the rendered layout.
+///
+/// Output shape:
+///
+/// * `0`      → `"-"` (entry predates timing capture)
+/// * `< 1s`   → `"12ms"`
+/// * `< 1m`   → `"1.4s"` (one tenth of a second)
+/// * `≥ 1m`   → `"1m23s"` (drops the tenths in the minutes branch —
+///   anything that took a minute is already "slow" and the user just
+///   wants to know the order of magnitude)
+#[must_use]
+pub fn format_elapsed(ms: u64) -> String {
+    if ms == 0 {
+        return "-".into();
+    }
+    if ms < 1_000 {
+        return format!("{ms}ms");
+    }
+    let total_secs = ms / 1_000;
+    if total_secs < 60 {
+        let tenths = (ms % 1_000) / 100;
+        return format!("{total_secs}.{tenths}s");
+    }
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{minutes}m{seconds:02}s")
+}
+
+/// L36 #m2: format the rows-returned / rows-affected pair into a
+/// single column.
+///
+/// * `↓N` for rows returned (the SELECT-style case)
+/// * `∼N` for rows affected (the UPDATE/DELETE-style case)
+/// * empty when both are absent
+///
+/// Returned takes precedence so a SELECT that *also* set
+/// `rows_affected` (some drivers do) still shows the result-set
+/// size.
+#[must_use]
+pub fn format_rows(returned: Option<u64>, affected: Option<u64>) -> String {
+    if let Some(r) = returned {
+        return format!("↓{r}");
+    }
+    if let Some(a) = affected {
+        return format!("∼{a}");
+    }
+    String::new()
+}
+
 /// Truncate a string so its **display width** does not exceed `max_width`
 /// cells, appending `…` if truncated. Uses `unicode_width` so CJK,
 /// emoji, and other wide characters are counted correctly.
@@ -204,6 +256,10 @@ fn truncate_display(s: &str, max_width: usize) -> String {
 /// Pad a string with trailing spaces so its **display width** equals
 /// `target_width` cells. Handles wide characters correctly by computing
 /// the difference between display width and target.
+///
+/// L36 #m4: stayed on `repeat(…).take(N)` because the workspace MSRV
+/// is 1.75; `iter::repeat_n` is only available from 1.82. Worth
+/// revisiting when the MSRV moves — it's a one-line swap.
 fn pad_to_width(s: &str, target_width: usize) -> String {
     let display_w = s.width();
     let mut out = s.to_owned();
@@ -251,5 +307,28 @@ mod tests {
     fn pad_to_width_ascii() {
         let result = pad_to_width("abc", 6);
         assert_eq!(result, "abc   ");
+    }
+
+    // L36 #m2: tests live with the formatter now that it ships from
+    // the widget crate. The host-side dispatch helper is gone.
+
+    #[test]
+    fn format_elapsed_thresholds() {
+        assert_eq!(format_elapsed(0), "-");
+        assert_eq!(format_elapsed(7), "7ms");
+        assert_eq!(format_elapsed(999), "999ms");
+        assert_eq!(format_elapsed(1_000), "1.0s");
+        assert_eq!(format_elapsed(1_450), "1.4s");
+        assert_eq!(format_elapsed(59_999), "59.9s");
+        assert_eq!(format_elapsed(60_000), "1m00s");
+        assert_eq!(format_elapsed(83_000), "1m23s");
+    }
+
+    #[test]
+    fn format_rows_variants() {
+        assert_eq!(format_rows(Some(42), None), "↓42");
+        assert_eq!(format_rows(None, Some(3)), "∼3");
+        assert_eq!(format_rows(None, None), "");
+        assert_eq!(format_rows(Some(1), Some(2)), "↓1");
     }
 }

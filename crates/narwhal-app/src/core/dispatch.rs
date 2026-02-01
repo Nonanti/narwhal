@@ -157,8 +157,11 @@ impl AppCore {
                     .map(|e| {
                         let ts = e.timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
                         let conn = e.connection_name.as_deref().unwrap_or("<local>").to_owned();
-                        let elapsed = format_elapsed(e.elapsed_ms);
-                        let rows = format_rows(e.rows_returned, e.rows_affected);
+                        let elapsed = narwhal_tui::widgets::history::format_elapsed(e.elapsed_ms);
+                        let rows = narwhal_tui::widgets::history::format_rows(
+                            e.rows_returned,
+                            e.rows_affected,
+                        );
                         let outcome = match e.outcome {
                             narwhal_history::Outcome::Success => HistoryRowOutcome::Success,
                             narwhal_history::Outcome::Cancelled => HistoryRowOutcome::Cancelled,
@@ -595,65 +598,4 @@ impl AppCore {
 
     // Run-loop / meta-update / finalize_statement / spawn_cancel moved to
     // `core::run_loop` (L21).
-}
-
-/// L36 #5: format a millisecond duration the way the history modal
-/// wants to see it: `"-"` when zero (entry predates timing capture),
-/// `"12ms"` under one second, `"1.4s"` between one second and one
-/// minute, otherwise `"1m23s"`.
-fn format_elapsed(ms: u64) -> String {
-    if ms == 0 {
-        return "-".into();
-    }
-    if ms < 1_000 {
-        return format!("{ms}ms");
-    }
-    let total_secs = ms / 1_000;
-    if total_secs < 60 {
-        let tenths = (ms % 1_000) / 100;
-        return format!("{total_secs}.{tenths}s");
-    }
-    let minutes = total_secs / 60;
-    let seconds = total_secs % 60;
-    format!("{minutes}m{seconds:02}s")
-}
-
-/// L36 #5: format the rows-returned / rows-affected pair into a single
-/// column. `↓` prefix for returned rows (the SELECT-style case),
-/// `∼` prefix for affected rows (the UPDATE/DELETE-style case),
-/// empty when both are absent.
-fn format_rows(returned: Option<u64>, affected: Option<u64>) -> String {
-    if let Some(r) = returned {
-        return format!("↓{r}");
-    }
-    if let Some(a) = affected {
-        return format!("∼{a}");
-    }
-    String::new()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_elapsed_thresholds() {
-        assert_eq!(format_elapsed(0), "-");
-        assert_eq!(format_elapsed(7), "7ms");
-        assert_eq!(format_elapsed(999), "999ms");
-        assert_eq!(format_elapsed(1_000), "1.0s");
-        assert_eq!(format_elapsed(1_450), "1.4s");
-        assert_eq!(format_elapsed(59_999), "59.9s");
-        assert_eq!(format_elapsed(60_000), "1m00s");
-        assert_eq!(format_elapsed(83_000), "1m23s");
-    }
-
-    #[test]
-    fn format_rows_variants() {
-        assert_eq!(format_rows(Some(42), None), "↓42");
-        assert_eq!(format_rows(None, Some(3)), "∼3");
-        assert_eq!(format_rows(None, None), "");
-        // Returned takes precedence over affected.
-        assert_eq!(format_rows(Some(1), Some(2)), "↓1");
-    }
 }
