@@ -90,6 +90,7 @@ impl Session {
         // L36 #C4: when `opts.skip_pre_connect` is set the whole
         // pipeline is skipped — see [`SessionOpenOptions`] for why.
         let mut config = config;
+        let mut password = password;
         if opts.skip_pre_connect {
             if !config.params.pre_connect.is_empty() {
                 tracing::warn!(
@@ -106,6 +107,12 @@ impl Session {
             if !pc_vars.is_empty() {
                 crate::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
                     .map_err(|e| Error::Connection(format!("pre-connect substitution: {e}")))?;
+                // L36 #C3: expand `${preconnect:NAME}` in the password
+                // channel too — this is the headline use case (vault
+                // step writes the password, keyring stores the
+                // placeholder).
+                password = crate::pre_connect::substitute_password(password, &pc_vars)
+                    .map_err(|e| Error::Connection(format!("pre-connect password: {e}")))?;
             }
         }
         // Bring up the SSH tunnel (if any) before the driver touches

@@ -143,7 +143,12 @@ fn shell_command(line: &str) -> Command {
 /// In-place substitution of `${preconnect:NAME}` placeholders in
 /// every string field of `params` against the variable map produced
 /// by [`run_pre_connect`]. Missing keys are surfaced as
-/// [`PreConnectError::Substitution`].
+/// [`SubstitutionError::MissingVar`].
+///
+/// NOTE: the `password` channel is *not* on `ConnectionParams` (it
+/// arrives separately from the keyring / pgpass / env-var chain).
+/// Use [`substitute_password`] alongside this call to expand a
+/// `${preconnect:NAME}` reference inside a fetched password.
 pub fn substitute_pre_connect(
     params: &mut narwhal_core::ConnectionParams,
     vars: &HashMap<String, String>,
@@ -157,6 +162,31 @@ pub fn substitute_pre_connect(
         *value = replaced;
     }
     Ok(())
+}
+
+/// L36 #C3: expand `${preconnect:NAME}` placeholders inside the
+/// optional password value the credential store handed us.
+///
+/// This closes the most important pre-connect use case — a vault
+/// step that produces a short-lived password, referenced by name
+/// in the keyring entry (or in `PGPASSWORD`, etc.). Without this
+/// step the placeholder would reach the driver verbatim and the
+/// connection would fail with an opaque authentication error.
+///
+/// `None` passes through unchanged. A password that has no
+/// placeholder also passes through unchanged — callers can invoke
+/// this unconditionally.
+pub fn substitute_password(
+    password: Option<String>,
+    vars: &HashMap<String, String>,
+) -> Result<Option<String>, SubstitutionError> {
+    let Some(pw) = password else {
+        return Ok(None);
+    };
+    if !pw.contains("${preconnect:") {
+        return Ok(Some(pw));
+    }
+    Ok(Some(substitute_str(&pw, vars)?))
 }
 
 #[derive(Debug, Error)]
@@ -288,6 +318,34 @@ mod tests {
         let vars = HashMap::new();
         let err = substitute_pre_connect(&mut params, &vars).unwrap_err();
         assert!(matches!(err, SubstitutionError::MissingVar(ref n) if n == "NOPE"));
+    }
+
+    #[test]
+    fn substitute_password_none_passes_through() {
+        let vars = HashMap::new();
+        assert_eq!(substitute_password(None, &vars).unwrap(), None);
+    }
+
+    #[test]
+    fn substitute_password_without_placeholder_passes_through() {
+        let vars = HashMap::new();
+        let out = substitute_password(Some("plain-secret".into()), &vars).unwrap();
+        assert_eq!(out.as_deref(), Some("plain-secret"));
+    }
+
+    #[test]
+    fn substitute_password_expands_placeholder() {
+        let mut vars = HashMap::new();
+        vars.insert("VAULT_PASS".into(), "hunter2".into());
+        let out = substitute_password(Some("${preconnect:VAULT_PASS}".into()), &vars).unwrap();
+        assert_eq!(out.as_deref(), Some("hunter2"));
+    }
+
+    #[test]
+    fn substitute_password_errors_on_missing_var() {
+        let vars = HashMap::new();
+        let err = substitute_password(Some("${preconnect:GONE}".into()), &vars).unwrap_err();
+        assert!(matches!(err, SubstitutionError::MissingVar(ref n) if n == "GONE"));
     }
 
     #[test]

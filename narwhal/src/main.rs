@@ -294,6 +294,33 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
     let driver = registry
         .get(&config.driver)
         .map_err(|e| anyhow::anyhow!("driver: {e}"))?;
+
+    // L36 #7 + #C3 + #C4: run the pre-connect pipeline before the
+    // driver dials in. Skipped entirely under `--read-only` so an
+    // auditor can't be tricked into shell exec; the password channel
+    // is also passed through substitute_password so a vault step's
+    // output can land in the keyring placeholder.
+    let mut config = config;
+    let mut password = password;
+    if global_read_only {
+        if !config.params.pre_connect.is_empty() {
+            tracing::warn!(
+                steps = config.params.pre_connect.len(),
+                "exec: skipping pre-connect under --read-only"
+            );
+        }
+    } else {
+        let pc_vars = narwhal_commands::pre_connect::run_pre_connect(&config.params.pre_connect)
+            .await
+            .context("running pre-connect steps")?;
+        if !pc_vars.is_empty() {
+            narwhal_commands::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
+                .context("applying pre-connect substitution")?;
+            password = narwhal_commands::pre_connect::substitute_password(password, &pc_vars)
+                .context("applying pre-connect password substitution")?;
+        }
+    }
+
     let mut conn: Box<dyn Connection> = driver
         .connect(&config, password.as_deref())
         .await
