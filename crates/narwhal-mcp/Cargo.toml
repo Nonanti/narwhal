@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+readme = "README.md"
 repository.workspace = true
 description = "Model Context Protocol (MCP) server for narwhal — exposes connections, schema and queries to AI agents"
 keywords = ["mcp", "database", "ai", "agent"]
