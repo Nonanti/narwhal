@@ -1,13 +1,13 @@
 # narwhal
 
-[![CI](https://github.com/berkant/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/berkant/narwhal/actions/workflows/ci.yml)
+[![CI](https://github.com/nonantiy/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/nonantiy/narwhal/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
-[![Version](https://img.shields.io/badge/version-1.1.0-brightgreen)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
 
 > A TUI database client that doesn't feel like the 90s.
 
-![hero](./docs/img/hero.gif)
+![narwhal](./docs/img/hero.png)
 
 ## Why narwhal
 
@@ -25,7 +25,7 @@ cargo install narwhal
 ### Nix
 
 ```sh
-nix run github:berkant/narwhal
+nix run github:nonantiy/narwhal
 ```
 
 Or add the flake to your inputs and reference the default package.
@@ -33,7 +33,7 @@ Or add the flake to your inputs and reference the default package.
 ### Build from source
 
 ```sh
-git clone https://github.com/berkant/narwhal.git
+git clone https://github.com/nonantiy/narwhal.git
 cd narwhal
 cargo build --release
 # binary at target/release/narwhal
@@ -42,21 +42,25 @@ cargo build --release
 ### Pre-built binaries
 
 Download native tarballs (with SHA-256 checksums) from the
-[latest GitHub Release](https://github.com/berkant/narwhal/releases):
+[latest GitHub Release](https://github.com/nonantiy/narwhal/releases):
 
 - `x86_64-unknown-linux-gnu`
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 
 ```sh
-curl -LO https://github.com/berkant/narwhal/releases/latest/download/narwhal-<version>-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/nonantiy/narwhal/releases/latest/download/narwhal-<version>-x86_64-unknown-linux-gnu.tar.gz
 tar -xzf narwhal-*-x86_64-unknown-linux-gnu.tar.gz
 mv narwhal-*/narwhal ~/.local/bin/
 ```
 
 ### AUR / Homebrew
 
-Planned for the v1.0 release window — track [packaging issues](https://github.com/berkant/narwhal/labels/packaging) for status.
+A PKGBUILD lives at [`packaging/aur/PKGBUILD`](./packaging/aur/PKGBUILD)
+and a Homebrew formula at [`packaging/homebrew/narwhal.rb`](./packaging/homebrew/narwhal.rb).
+Publishing to the AUR and a Homebrew tap is on the post-2.0 roadmap —
+see [packaging issues](https://github.com/nonantiy/narwhal/labels/packaging)
+for status.
 
 ## Quick start
 
@@ -64,8 +68,6 @@ Planned for the v1.0 release window — track [packaging issues](https://github.
 2. **Hit `:add`** — the connection wizard appears. Pick a driver, fill in host + database (or use `:url postgres://user:pass@host/db` to skip the form).
 3. **`:open <name>`** — the saved entry connects; the sidebar fills with schemas and tables.
 4. **F6 to run** — the whole buffer executes; results appear in the lower pane. Press **F1** any time for the full keymap reference.
-
-![wizard](./docs/img/wizard.png)
 
 ### `connections.toml` schema
 
@@ -216,8 +218,6 @@ the generic `options` map.
 | o | Preview table data |
 | d | Inject DDL into editor |
 
-![completion](./docs/img/completion.png)
-
 ### Results
 
 | Keys | Action |
@@ -239,8 +239,6 @@ the generic `options` map.
 | :load \<name\> | Load a snippet into a new tab |
 | :rm-snippet \<name\> | Delete a saved snippet |
 | :snippets | Browse saved snippets |
-
-![help](./docs/img/help.png)
 
 ## Plugins
 

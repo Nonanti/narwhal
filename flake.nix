@@ -41,7 +41,7 @@
 
           meta = with pkgs.lib; {
             description = "A TUI database client — DataGrip in your terminal";
-            homepage = "https://github.com/berkant/narwhal";
+            homepage = "https://github.com/nonantiy/narwhal";
             license = with licenses; [ mit asl20 ];
             mainProgram = "narwhal";
           };

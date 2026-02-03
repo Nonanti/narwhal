@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [1.0.0] — 2026-05-24
+
+First public release.
+
 ### L36: DataGrip-parity feature pack
 
 First wave of editor-first quality-of-life features inspired by
@@ -164,13 +170,4 @@ keymap, config schema and MCP protocol are unchanged.
 - `#[non_exhaustive]` from workspace-internal enums that now cross
   crate boundaries (these are internal types, not public API).
 
-## [1.1.0] — 2025
 
-The 1.1 release line predates this file's rewrite. See the git history
-(`git log --oneline v1.0.0..v1.1.0`) for individual commits.
-
-## [1.0.0] — 2025
-
-Initial release. Three-phase development: phase 1 (engine), phase 2
-(navigation + table editing), phase 3 (multi-driver, export, plugins,
-headless mode, MCP server).
