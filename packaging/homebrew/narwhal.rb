@@ -1,10 +1,10 @@
 class Narwhal < Formula
-  desc "A TUI database client"
-  homepage "https://github.com/berkant/narwhal"
-  url "https://github.com/berkant/narwhal/archive/v1.0.0.tar.gz"
-  sha256 "..."  # filled at release time
+  desc "TUI database client — DataGrip in your terminal"
+  homepage "https://github.com/nonantiy/narwhal"
+  url "https://github.com/nonantiy/narwhal/archive/v1.0.0.tar.gz"
+  sha256 "REPLACE_AT_RELEASE_TIME"  # filled by `shasum -a 256 <tarball>`
   license any_of: ["MIT", "Apache-2.0"]
-  head "https://github.com/berkant/narwhal.git", branch: "main"
+  head "https://github.com/nonantiy/narwhal.git", branch: "main"
 
   depends_on "rust" => :build
   depends_on "postgresql"

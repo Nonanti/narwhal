@@ -1,10 +1,10 @@
-# Maintainer: <packager-name> <packager-email>
+# Maintainer: Nonantiy <nonantiy1@gmail.com>
 pkgname=narwhal
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="A TUI database client"
+pkgdesc="A TUI database client — DataGrip in your terminal"
 arch=('x86_64' 'aarch64')
-url="https://github.com/berkant/narwhal"
+url="https://github.com/nonantiy/narwhal"
 license=('MIT' 'Apache')
 depends=('postgresql-libs' 'mariadb-libs' 'gcc-libs')
 makedepends=('cargo' 'pkgconf')
