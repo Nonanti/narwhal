@@ -8,7 +8,9 @@
 #![forbid(unsafe_code)]
 
 pub mod editor;
+pub mod motion;
 pub mod schema;
 
 pub use editor::EditorBuffer;
+pub use motion::Motion;
 pub use schema::SchemaListing;

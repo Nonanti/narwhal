@@ -5,7 +5,7 @@
 //! and is host-agnostic: terminal, GUI or headless renderers can all
 //! consume it through immutable accessors.
 
-use narwhal_vim::Motion;
+use crate::motion::Motion;
 
 /// Search highlight information passed from the app to the editor renderer.
 #[derive(Debug, Clone, Default)]
@@ -245,8 +245,6 @@ impl EditorBuffer {
                     // it doesn't move the cursor — the operator handler
                     // processes the current line.
                 }
-                // Forward-compatible: future motions are ignored until wired.
-                _ => {}
             }
         }
     }

@@ -7,7 +7,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use narwhal_tui::EditorBuffer;
-use narwhal_vim::Motion;
+use narwhal_domain::Motion;
 
 fn lorem_buffer(lines: usize) -> EditorBuffer {
     let mut buf = EditorBuffer::new();

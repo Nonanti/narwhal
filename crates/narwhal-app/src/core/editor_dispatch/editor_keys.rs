@@ -2,11 +2,35 @@
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_core::ColumnHeader;
+use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::translate_key_event;
-use narwhal_vim::{Action, Mode, Operator};
+use narwhal_vim::{Action, Mode, Motion as VimMotion, Operator};
 
 use crate::completion::{detect_context_with_schemas, gather as gather_completions};
 use crate::core::{AppCore, CompletionState};
+
+/// Convert a `narwhal_vim::Motion` to `narwhal_domain::Motion`.
+///
+/// The two enums are isomorphic but live in separate crates to avoid
+/// a domain-level dependency on the vim crate.
+const fn domain_motion(m: VimMotion) -> DomainMotion {
+    match m {
+        VimMotion::Left => DomainMotion::Left,
+        VimMotion::Right => DomainMotion::Right,
+        VimMotion::Up => DomainMotion::Up,
+        VimMotion::Down => DomainMotion::Down,
+        VimMotion::WordForward => DomainMotion::WordForward,
+        VimMotion::WordBackward => DomainMotion::WordBackward,
+        VimMotion::LineStart => DomainMotion::LineStart,
+        VimMotion::LineEnd => DomainMotion::LineEnd,
+        VimMotion::FileStart => DomainMotion::FileStart,
+        VimMotion::FileEnd => DomainMotion::FileEnd,
+        VimMotion::CurrentLine => DomainMotion::CurrentLine,
+        // `narwhal_vim::Motion` is #[non_exhaustive]; future variants
+        // map to a no-op motion.
+        _ => DomainMotion::CurrentLine,
+    }
+}
 
 impl AppCore {
     pub(crate) fn accept_completion_at(&mut self, index: usize) {
@@ -147,7 +171,7 @@ impl AppCore {
             Action::Move { motion, count } => {
                 self.tabs[self.active_tab]
                     .editor
-                    .apply_motion(motion, count);
+                    .apply_motion(domain_motion(motion), count);
             }
             Action::InsertText(text) => {
                 self.tabs[self.active_tab].editor.insert_str(&text);
