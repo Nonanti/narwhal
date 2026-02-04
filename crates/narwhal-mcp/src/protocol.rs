@@ -34,6 +34,22 @@ impl Request {
     pub const fn is_request(&self) -> bool {
         self.id.is_some()
     }
+
+    /// Validate that the `jsonrpc` field is exactly `"2.0"`.
+    ///
+    /// Per JSON-RPC 2.0 spec, the field MUST be present and exactly
+    /// `"2.0"`. Previously we deserialized but never checked it,
+    /// allowing malformed or version-mismatched messages to be
+    /// dispatched silently.
+    pub fn validate_jsonrpc(&self) -> std::result::Result<(), String> {
+        if self._jsonrpc != JSONRPC_VERSION {
+            return Err(format!(
+                "invalid jsonrpc version: expected '{JSONRPC_VERSION}', got '{}'",
+                self._jsonrpc
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// A JSON-RPC 2.0 response — either `result` xor `error`, never both.

@@ -292,14 +292,31 @@ fn guard_read_only(sql: &str) -> Result<(), String> {
         "TABLE",    // PG `TABLE foo;` shorthand
     ];
 
-    if ALLOWED.contains(&first_token.as_str()) {
-        Ok(())
-    } else {
-        Err(format!(
+    if !ALLOWED.contains(&first_token.as_str()) {
+        return Err(format!(
             "first token `{first_token}` is not in the read-only allow-list \
              (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE/DESC/PRAGMA/VALUES/TABLE)"
-        ))
+        ));
     }
+
+    // Even when the first token is allowed, block known dangerous
+    // function calls that can hold a connection or mutate state.
+    let upper_sql = stripped.to_ascii_uppercase();
+    const BLOCKED_PATTERNS: &[&str] = &[
+        "PG_SLEEP",       // holds a connection indefinitely
+        "SLEEP",           // MySQL equivalent
+        "SLEEP(",           // with parenthesis
+    ];
+    for pattern in BLOCKED_PATTERNS {
+        if upper_sql.contains(pattern) {
+            return Err(format!(
+                "statement contains blocked function `{pattern}` which can \
+                 hold a connection — pass `read_only=false` if intentional"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Skip leading whitespace and SQL comments. Returns the remainder.

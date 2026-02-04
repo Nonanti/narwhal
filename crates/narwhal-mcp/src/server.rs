@@ -89,6 +89,24 @@ impl McpServer {
     /// notification (no response expected) or unparseable in a way that
     /// JSON-RPC says should be silently dropped.
     async fn handle_line(&self, line: &str) -> Option<Response> {
+        // Hard cap on incoming payload size to prevent OOM from oversized
+        // messages. 1 MiB is generous for any legitimate MCP call.
+        const MAX_LINE_BYTES: usize = 1024 * 1024;
+        if line.len() > MAX_LINE_BYTES {
+            tracing::warn!(
+                len = line.len(),
+                max = MAX_LINE_BYTES,
+                "rejecting oversized JSON-RPC message"
+            );
+            return Some(Response::error(
+                Value::Null,
+                RpcError::invalid_request(format!(
+                    "message too large: {} bytes (max {MAX_LINE_BYTES})",
+                    line.len()
+                )),
+            ));
+        }
+
         let request: Request = match serde_json::from_str(line) {
             Ok(req) => req,
             Err(error) => {
@@ -101,6 +119,13 @@ impl McpServer {
                 ));
             }
         };
+
+        // Validate the jsonrpc version field before dispatching.
+        if let Err(reason) = request.validate_jsonrpc() {
+            tracing::warn!(%reason, "jsonrpc version mismatch");
+            let id = request.id.clone().unwrap_or(Value::Null);
+            return Some(Response::error(id, RpcError::invalid_request(reason)));
+        }
 
         let is_request = request.is_request();
         let id = request.id.clone().unwrap_or(Value::Null);
