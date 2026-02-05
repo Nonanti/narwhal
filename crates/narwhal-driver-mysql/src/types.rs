@@ -93,7 +93,17 @@ pub(crate) fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     match value {
         MyValue::NULL => Value::Null,
         MyValue::Int(v) => Value::Int(*v),
-        MyValue::UInt(v) => Value::Int(*v as i64),
+        MyValue::UInt(v) => {
+            // MySQL UNSIGNED BIGINT can exceed i64::MAX. Values that fit
+            // losslessly in i64 are stored as Int; larger values are
+            // stored as their decimal string representation to avoid
+            // silent truncation (u64 → i64 cast overflow).
+            if i64::try_from(*v).is_ok() {
+                Value::Int(*v as i64)
+            } else {
+                Value::String(v.to_string())
+            }
+        }
         MyValue::Float(v) => Value::Float(f64::from(*v)),
         MyValue::Double(v) => Value::Float(*v),
         MyValue::Bytes(bytes) if is_binary_column(ty) => Value::Bytes(bytes.clone()),
