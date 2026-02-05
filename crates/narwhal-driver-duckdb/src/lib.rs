@@ -66,7 +66,7 @@ impl DuckdbDriver {
             .with_cancellation(true)
             .with_multiple_schemas(true)
             .with_prepared_statements(true)
-            .with_savepoints(true)
+            .with_savepoints(false)
             .with_rows_affected(true)
             // DuckDB returns Arrow chunks lazily through PreparedStatement::query.
             .with_streaming(true)
