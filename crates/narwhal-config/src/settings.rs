@@ -103,7 +103,7 @@ impl Settings {
             std::fs::create_dir_all(parent)?;
         }
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text)?;
+        atomic_write(path, &text)?;
         Ok(())
     }
 }
@@ -129,8 +129,10 @@ impl ConnectionsFile {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Validate before writing so corrupt configs are never persisted.
+        validate_connections(&self.connections)?;
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text)?;
+        atomic_write(path, &text)?;
         Ok(())
     }
 
@@ -152,6 +154,23 @@ impl Settings {
         let s: Self = toml::from_str(text)?;
         Ok(s)
     }
+}
+
+/// Write `data` to `path` atomically by writing to a temporary file
+/// in the same directory and renaming. This prevents partial writes
+/// from corrupting the config file on crash or power loss.
+fn atomic_write(path: &Path, data: &str) -> Result<(), ConfigError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let temp_name = format!(
+        ".narwhal-{}.tmp",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("config")
+    );
+    let temp_path = parent.join(temp_name);
+    std::fs::write(&temp_path, data)?;
+    std::fs::rename(&temp_path, path)?;
+    Ok(())
 }
 
 /// Validate TLS-related constraints across all connections:

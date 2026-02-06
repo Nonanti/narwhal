@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -67,8 +68,8 @@ impl KeyringStore {
         }
     }
 
-    fn set_blocking(connection_id: Uuid, secret: String) -> Result<(), CredentialError> {
-        Self::entry(connection_id)?.set_password(&secret)?;
+    fn set_blocking(connection_id: Uuid, secret: &str) -> Result<(), CredentialError> {
+        Self::entry(connection_id)?.set_password(secret)?;
         Ok(())
     }
 
@@ -95,10 +96,17 @@ impl CredentialStore for KeyringStore {
         // We must extract the secret for the blocking closure. The keyring
         // crate takes &str, so we expose it here — the only place the
         // secret material is read outside of its protective wrapper.
-        let plain = secret.expose_secret().to_owned();
-        tokio::task::spawn_blocking(move || Self::set_blocking(id, plain))
-            .await
-            .map_err(|e| CredentialError::Keyring(format!("spawn_blocking join error: {e}")))?
+        // The extracted String is zeroized after use to avoid leaving
+        // plaintext credentials on the heap.
+        let mut plain = secret.expose_secret().to_owned();
+        let result = tokio::task::spawn_blocking(move || {
+            let res = Self::set_blocking(id, &plain);
+            plain.zeroize();
+            res
+        })
+        .await
+        .map_err(|e| CredentialError::Keyring(format!("spawn_blocking join error: {e}")))?;
+        result
     }
 
     async fn delete(&self, connection_id: Uuid) -> Result<(), CredentialError> {
@@ -113,7 +121,7 @@ impl CredentialStore for KeyringStore {
 /// when no OS keyring is available (e.g. headless CI).
 #[derive(Debug, Default)]
 pub struct InMemoryStore {
-    secrets: Mutex<HashMap<Uuid, String>>,
+    secrets: Mutex<HashMap<Uuid, SecretString>>,
 }
 
 impl InMemoryStore {
@@ -131,7 +139,7 @@ impl CredentialStore for InMemoryStore {
             .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
         Ok(guard
             .get(&connection_id)
-            .map(|s| secrecy::SecretString::new(s.clone().into_boxed_str())))
+            .cloned())
     }
 
     async fn set(&self, connection_id: Uuid, secret: SecretString) -> Result<(), CredentialError> {
@@ -139,10 +147,7 @@ impl CredentialStore for InMemoryStore {
             .secrets
             .lock()
             .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
-        // Store the secret as a plain String inside the HashMap. We accept
-        // this compromise for the in-memory test store; the keyring store
-        // is the production path where zeroize matters.
-        guard.insert(connection_id, secret.expose_secret().to_owned());
+        guard.insert(connection_id, secret);
         Ok(())
     }
 
