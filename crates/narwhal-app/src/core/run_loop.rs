@@ -120,17 +120,22 @@ impl AppCore {
             } => {
                 self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
             }
-            RunUpdate::Failed { error, elapsed_ms } => {
-                // If a streaming query was cancelled, produce a Cancelled
-                // state so the title bar shows the partial row count.
-                if let ResultState::Running {
-                    rows,
-                    streaming: true,
-                    started_at,
-                    ..
-                } = self.tabs[rt].results.active_state()
-                {
-                    if error.contains("cancelled") {
+            RunUpdate::Failed {
+                error,
+                elapsed_ms,
+                cancelled,
+            } => {
+                // When a streaming query was cancelled by the user,
+                // transition to Cancelled state so the title bar shows
+                // the partial row count instead of an error message.
+                if cancelled {
+                    if let ResultState::Running {
+                        rows,
+                        streaming: true,
+                        started_at,
+                        ..
+                    } = self.tabs[rt].results.active_state()
+                    {
                         let rows_so_far = rows.len();
                         let elapsed_ms = started_at
                             .elapsed()

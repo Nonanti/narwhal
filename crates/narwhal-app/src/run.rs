@@ -118,7 +118,14 @@ pub enum RunUpdate {
         streamed: bool,
     },
     /// The current statement failed; the batch is aborted.
-    Failed { error: String, elapsed_ms: u64 },
+    /// `cancelled` is `true` when the failure was caused by a user-initiated
+    /// cancellation (e.g. Ctrl+C), allowing the UI to distinguish cancellation
+    /// from a genuine query error.
+    Failed {
+        error: String,
+        elapsed_ms: u64,
+        cancelled: bool,
+    },
     /// The whole batch has terminated.
     AllDone {
         successes: usize,
@@ -185,6 +192,7 @@ pub fn spawn_run(
                         .send(RunUpdate::Failed {
                             error: error.to_string(),
                             elapsed_ms: 0,
+                            cancelled: false,
                         })
                         .await;
                     let _ = tx
@@ -297,10 +305,12 @@ async fn run_execute(
         }
         Err(error) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
+            let cancelled = matches!(&error, narwhal_core::Error::Cancelled);
             let _ = tx
                 .send(RunUpdate::Failed {
                     error: error.to_string(),
                     elapsed_ms,
+                    cancelled,
                 })
                 .await;
             StatementOutcome::Err { error, elapsed_ms }
@@ -318,10 +328,12 @@ async fn run_stream(
         Ok(s) => s,
         Err(error) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
+            let cancelled = matches!(&error, narwhal_core::Error::Cancelled);
             let _ = tx
                 .send(RunUpdate::Failed {
                     error: error.to_string(),
                     elapsed_ms,
+                    cancelled,
                 })
                 .await;
             return StatementOutcome::Err { error, elapsed_ms };
@@ -366,10 +378,12 @@ async fn run_stream(
     }
 
     if let Some(error) = terminal_error {
+        let cancelled = matches!(&error, narwhal_core::Error::Cancelled);
         let _ = tx
             .send(RunUpdate::Failed {
                 error: error.to_string(),
                 elapsed_ms,
+                cancelled,
             })
             .await;
         StatementOutcome::Err { error, elapsed_ms }
