@@ -46,7 +46,7 @@ pub fn statement_at_cursor(buf: &EditorBuffer, dialect: Dialect) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use narwhal_vim::Motion;
+    use narwhal_domain::Motion;
 
     #[test]
     fn statement_under_cursor_picks_the_right_one() {
