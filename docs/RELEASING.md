@@ -33,31 +33,48 @@ release commit.
 ## 2. Commit and tag
 
 ```sh
-git commit -am "chore: release v1.1.0"
-git tag -s v1.1.0 -m "v1.1.0"
+git commit -am "chore: release vX.Y.Z"
+git tag -s vX.Y.Z -m "vX.Y.Z"
 ```
 
 ## 3. Publish to crates.io (in dependency order)
 
+The order below respects the workspace dependency graph: every crate
+is published before any crate that depends on it. crates.io takes a
+few seconds to index a new version, so if a downstream publish fails
+with `no matching package`, wait 30s and retry.
+
 ```sh
+# 1. Foundation — no internal deps
 cargo publish -p narwhal-core
-cargo publish -p narwhal-config
+cargo publish -p narwhal-vim
 cargo publish -p narwhal-sql
+
+# 2. Single-crate consumers of -core
 cargo publish -p narwhal-pool
 cargo publish -p narwhal-history
+cargo publish -p narwhal-config
+cargo publish -p narwhal-domain
+cargo publish -p narwhal-plugin
+
+# 3. Plugins + drivers
+cargo publish -p narwhal-plugin-lua
 cargo publish -p narwhal-driver-postgres
 cargo publish -p narwhal-driver-mysql
 cargo publish -p narwhal-driver-sqlite
 cargo publish -p narwhal-driver-duckdb
 cargo publish -p narwhal-driver-clickhouse
-cargo publish -p narwhal-plugin
-cargo publish -p narwhal-plugin-lua
-cargo publish -p narwhal-vim
+
+# 4. Registry (after all drivers) + UI + command surface
+cargo publish -p narwhal-driver-registry
 cargo publish -p narwhal-tui
+cargo publish -p narwhal-commands
+
+# 5. App + MCP server
 cargo publish -p narwhal-app
-# `narwhal-mcp` depends on -core, -config, -history and every driver,
-# so it must publish *after* all of them but *before* the bin.
 cargo publish -p narwhal-mcp
+
+# 6. Binary crate (last)
 cargo publish -p narwhal
 ```
 
@@ -73,7 +90,7 @@ cargo build --release --bin narwhal
 ## 5. Push the tag
 
 ```sh
-git push origin v1.1.0
+git push origin vX.Y.Z
 ```
 
 ## 6. Update packaging templates
