@@ -137,9 +137,7 @@ impl CredentialStore for InMemoryStore {
             .secrets
             .lock()
             .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
-        Ok(guard
-            .get(&connection_id)
-            .cloned())
+        Ok(guard.get(&connection_id).cloned())
     }
 
     async fn set(&self, connection_id: Uuid, secret: SecretString) -> Result<(), CredentialError> {
