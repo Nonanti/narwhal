@@ -92,7 +92,7 @@ impl KeyChord {
     ///
     /// Format: zero or more modifiers separated by `+`, then a key name.
     /// Modifiers are case-insensitive (`ctrl`, `CTRL`, `Ctrl` all work);
-    /// key names follow the spellings under [`parse_key_name`].
+    /// key names follow the spellings under `parse_key_name`.
     ///
     /// Examples that all succeed:
     /// - `"j"` → `Char('j')` no mods
@@ -231,7 +231,7 @@ fn key_name(code: KeyCode) -> String {
 /// Resolved keymap: maps `(group, chord) → action`.
 ///
 /// Populated by [`Keymap::default`] then overlaid with user TOML via
-/// [`Keymap::apply_override`].
+/// [`Keymap::apply_overrides`].
 #[derive(Debug, Clone, Default)]
 pub struct Keymap {
     bindings: HashMap<(KeyGroup, KeyChord), Action>,

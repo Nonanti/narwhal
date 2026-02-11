@@ -1,9 +1,10 @@
 //! Line-oriented text buffer for the SQL editor pane.
 //!
 //! The buffer is a `Vec<String>` of lines plus a cursor and viewport
-//! offset. It pairs with [`narwhal_vim`] to interpret modal keystrokes
-//! and is host-agnostic: terminal, GUI or headless renderers can all
-//! consume it through immutable accessors.
+//! offset. The buffer accepts a [`Motion`] from the caller — the app
+//! layer converts from `narwhal_vim::Motion` at the boundary — and is
+//! host-agnostic: terminal, GUI or headless renderers can all consume
+//! it through immutable accessors.
 
 use crate::motion::Motion;
 
