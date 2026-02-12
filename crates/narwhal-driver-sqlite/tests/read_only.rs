@@ -17,9 +17,15 @@ async fn sqlite_set_read_only_blocks_writes() {
     let mut conn = driver.connect(&config, None).await.unwrap();
     conn.execute("CREATE TABLE t (x INT)", &[]).await.unwrap();
     conn.set_read_only(true).await.unwrap();
-    let err = conn.execute("INSERT INTO t VALUES (1)", &[]).await.unwrap_err();
+    let err = conn
+        .execute("INSERT INTO t VALUES (1)", &[])
+        .await
+        .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("read") || msg.contains("query_only") || msg.contains("attempt to write"), "got: {msg}");
+    assert!(
+        msg.contains("read") || msg.contains("query_only") || msg.contains("attempt to write"),
+        "got: {msg}"
+    );
     conn.set_read_only(false).await.unwrap();
     conn.execute("INSERT INTO t VALUES (2)", &[]).await.unwrap();
     let result = conn.execute("SELECT * FROM t", &[]).await.unwrap();

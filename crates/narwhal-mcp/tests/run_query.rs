@@ -503,7 +503,10 @@ async fn rejected_write_lands_in_audit_journal() {
         entry.sql
     );
     assert!(
-        entry.error.as_deref().is_some_and(|e| e.contains("rejected")),
+        entry
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("rejected")),
         "audit outcome must be a failure: {entry:?}"
     );
     // The DROP must NOT have run.
@@ -619,4 +622,117 @@ async fn small_response_is_not_flagged_as_truncated() {
     let body = tool_body(&response);
     assert_eq!(body["cell_truncated"], false);
     assert_eq!(body["truncated"], false);
+}
+
+/// Issue A (sprint 5): a payload that would balloon past
+/// `MAX_RESPONSE_BYTES` must be replaced with the truncation envelope.
+#[tokio::test]
+async fn oversized_response_is_replaced_with_envelope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "CREATE TABLE fat(payload TEXT);\n\
+             INSERT INTO fat(payload) SELECT hex(randomblob(40000)) FROM generate_series(1, 20);",
+        )
+        .ok();
+        // sqlite ships without `generate_series` in some builds — fall
+        // back to a hand-rolled population if that path failed.
+        for _ in 0..20 {
+            conn.execute("INSERT INTO fat(payload) SELECT hex(randomblob(40000))", [])
+                .expect("insert fat row");
+        }
+    }
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT payload FROM fat",
+            "read_only": true,
+            "limit": 20,
+        })),
+    )
+    .await;
+    let body = tool_body(&response);
+    // The truncation envelope replaces the regular row payload.
+    assert_eq!(body["truncated"], true);
+    assert_eq!(body["tool"], "run_query");
+    assert!(body.get("rows").is_none(), "envelope should replace rows");
+}
+
+/// Issue D (sprint 5): substrings inside identifiers must not be
+/// treated as blocked SLEEP calls — `sleeping_bags` table reads should
+/// pass the read-only guard.
+#[tokio::test]
+async fn sleeping_identifier_is_not_blocked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "CREATE TABLE sleeping_bags(id INTEGER); INSERT INTO sleeping_bags VALUES (1);",
+        )
+        .expect("seed");
+    }
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT id FROM sleeping_bags",
+            "read_only": true,
+        })),
+    )
+    .await;
+    let body = tool_body(&response);
+    // Should NOT be an error.
+    let is_err = response["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(
+        !is_err,
+        "guard wrongly rejected a sleeping_bags read: {body:?}"
+    );
+}
+
+/// Issue D (sprint 5): a keyword sitting inside a quoted SQL literal
+/// must not trip the SLEEP denylist.
+#[tokio::test]
+async fn sleep_inside_string_literal_is_not_blocked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    seed_sqlite(&path);
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT 'pg_sleep' AS x",
+            "read_only": true,
+        })),
+    )
+    .await;
+    let body = tool_body(&response);
+    let is_err = response["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(!is_err, "literal 'pg_sleep' must not trip guard: {body:?}");
+}
+
+/// Issue D (sprint 5): a bare WAITFOR call must be rejected.
+#[tokio::test]
+async fn waitfor_is_blocked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("db.sqlite");
+    seed_sqlite(&path);
+
+    let response = rpc_one(
+        ctx_for(&path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT WAITFOR(1)",
+            "read_only": true,
+        })),
+    )
+    .await;
+    let is_err = response["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(is_err, "WAITFOR must trip the denylist");
 }

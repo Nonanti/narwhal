@@ -428,10 +428,7 @@ impl Journal {
         // path so the hot path (no secrets, no truncation) stays
         // allocation-free.
         let redacted_sql = redact_secrets(&entry.sql);
-        let redacted_error: Option<Cow<'_, str>> = entry
-            .error
-            .as_deref()
-            .map(redact_secrets);
+        let redacted_error: Option<Cow<'_, str>> = entry.error.as_deref().map(redact_secrets);
         // Apply truncation on top of the redaction result. Both are
         // expressed as a single owned `String` when either fires; we
         // pay one allocation, not two.
@@ -462,9 +459,7 @@ impl Journal {
             // Prefer the redacted error when produced, otherwise pass
             // through the original reference. Both paths borrow — no
             // clones either way.
-            let err_ref: Option<&str> = redacted_error
-                .as_deref()
-                .or(entry.error.as_deref());
+            let err_ref: Option<&str> = redacted_error.as_deref().or(entry.error.as_deref());
             let view = HistoryEntryView::from(entry, &final_sql, err_ref);
             serde_json::to_vec(&view)?
         };
@@ -769,17 +764,14 @@ mod tests {
 
     #[test]
     fn redact_jdbc_password_kv() {
-        let r = redact_secrets(
-            "jdbc:postgresql://h/db?user=app&password=hunter2&sslmode=require",
-        );
+        let r = redact_secrets("jdbc:postgresql://h/db?user=app&password=hunter2&sslmode=require");
         assert!(!r.contains("hunter2"), "got: {r}");
         assert!(r.contains("sslmode=require"), "got: {r}");
     }
 
     #[test]
     fn redact_dsn_userinfo() {
-        let r =
-            redact_secrets("failed to connect: postgres://app:hunter2@db.local:5432/orders");
+        let r = redact_secrets("failed to connect: postgres://app:hunter2@db.local:5432/orders");
         assert!(!r.contains("hunter2"), "got: {r}");
         assert!(r.contains("postgres://app:***@"), "got: {r}");
     }
@@ -824,9 +816,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("history.jsonl");
         let journal = Journal::open(&path).await.unwrap();
-        let entry = HistoryEntry::success("SELECT 1").with_failure(
-            "syntax error at or near \"CREATE USER x PASSWORD 's3cret'\"",
-        );
+        let entry = HistoryEntry::success("SELECT 1")
+            .with_failure("syntax error at or near \"CREATE USER x PASSWORD 's3cret'\"");
         journal.append(&entry).await.unwrap();
         drop(journal);
 

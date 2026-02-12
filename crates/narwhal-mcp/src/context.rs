@@ -173,11 +173,21 @@ impl ServerContext {
         if self.force_read_only {
             if let Err(error) = connection.set_read_only(true).await {
                 match error {
-                    narwhal_core::Error::Unsupported(_) => {
-                        tracing::debug!(
+                    narwhal_core::Error::Unsupported(reason) => {
+                        // Issue C (sprint 5): raised from debug → warn.
+                        // When `--read-only` is in force the operator
+                        // has explicitly asked for belt-and-suspenders;
+                        // silently falling back to a single belt is
+                        // surprising and was reported in the re-review.
+                        // The driver-supplied `reason` (e.g. the DuckDB
+                        // "reopen with access_mode='READ_ONLY'" hint) is
+                        // surfaced so the operator can act on it.
+                        tracing::warn!(
                             target: "narwhal::mcp",
                             connection = %name,
-                            "driver does not support set_read_only; relying on statement guard only",
+                            %reason,
+                            "driver lacks session-level read-only enforcement; \
+                             falling back to statement guard only",
                         );
                     }
                     other => {
@@ -263,12 +273,7 @@ impl ServerContext {
     /// a `Failed`-outcome entry tagged `source = "mcp"` with a
     /// `-- mcp: rejected (<reason>)` comment prefix so the audit trail
     /// captures *every* attempt, accepted or not.  (Bug H1 fix.)
-    pub async fn audit_rejected(
-        &self,
-        connection_name: Option<&str>,
-        sql: &str,
-        reason: &str,
-    ) {
+    pub async fn audit_rejected(&self, connection_name: Option<&str>, sql: &str, reason: &str) {
         let Some(journal) = self.journal.as_ref() else {
             return;
         };
@@ -277,12 +282,7 @@ impl ServerContext {
             .with_source(AUDIT_SOURCE)
             .with_failure(format!("rejected: {reason}"));
         if let Some(name) = connection_name {
-            if let Some(config) = self
-                .connections
-                .connections
-                .iter()
-                .find(|c| c.name == name)
-            {
+            if let Some(config) = self.connections.connections.iter().find(|c| c.name == name) {
                 entry = entry
                     .with_connection(config.id, &config.name)
                     .with_driver(&config.driver);

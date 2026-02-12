@@ -123,7 +123,7 @@ async fn throttle_prevents_redraw_storm() {
                         saw_rows_appended = true;
                     }
                 }
-                core.handle_run_update(update);
+                core.handle_run_update(update).await;
             }
             None => break,
         }

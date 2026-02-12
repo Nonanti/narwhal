@@ -334,11 +334,9 @@ async fn force_read_only_flag_rejects_writes_even_with_permissive_workspace() {
 
     let conn = rusqlite::Connection::open(&db).expect("open");
     let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM users WHERE name='mallory'",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM users WHERE name='mallory'", [], |r| {
+            r.get(0)
+        })
         .expect("count");
     assert_eq!(count, 0, "the write must not have happened");
 }

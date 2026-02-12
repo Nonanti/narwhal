@@ -377,7 +377,10 @@ async fn oversized_frame_aborts_transport_without_oom() {
 
     let server = McpServer::new(ctx);
     let task = tokio::spawn(async move {
-        server.serve(server_read, server_write).await.expect("serve");
+        server
+            .serve(server_read, server_write)
+            .await
+            .expect("serve");
     });
 
     // Stream 1.5 MiB without a newline. Use a write loop because the

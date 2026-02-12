@@ -792,6 +792,26 @@ impl Connection for DuckdbConnection {
         self.execute_batch("SELECT 1").await
     }
 
+    /// Issue C (sprint 5): `DuckDB` enforces read-only at open time via
+    /// the `access_mode='READ_ONLY'` connection-string option; there is
+    /// no session-level toggle equivalent to PG's
+    /// `default_transaction_read_only` or `SQLite`'s `PRAGMA query_only`.
+    /// Returning a *typed* [`Error::Unsupported`] with a precise hint
+    /// lets the MCP context surface the gap loudly (warn-level log) and
+    /// gives operators concrete guidance.
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        if read_only {
+            Err(Error::unsupported(
+                "DuckDB does not expose a session-level read-only flag; \
+                 reopen the connection with `access_mode = 'READ_ONLY'` to \
+                 enforce write rejection at the engine level",
+            ))
+        } else {
+            // Turning enforcement OFF when it was never ON is a no-op.
+            Ok(())
+        }
+    }
+
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         Some(Box::new(DuckdbCancel {
             handle: self.interrupt.clone(),
