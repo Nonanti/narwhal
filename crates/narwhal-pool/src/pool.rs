@@ -507,7 +507,7 @@ mod tests {
         let _ = fresh.execute("SELECT 1", &[]).await.unwrap();
     }
 
-    /// H14: idle_timeout discards connections that sat in the pool too long.
+    /// H14: `idle_timeout` discards connections that sat in the pool too long.
     #[tokio::test]
     async fn idle_timeout_discards_stale_connection() {
         let driver: Arc<dyn DatabaseDriver> = Arc::new(SqliteDriver::new());
@@ -538,7 +538,7 @@ mod tests {
         drop(guard);
     }
 
-    /// H14: max_lifetime discards connections older than the cap.
+    /// H14: `max_lifetime` discards connections older than the cap.
     #[tokio::test]
     async fn max_lifetime_caps_connection_age() {
         let driver: Arc<dyn DatabaseDriver> = Arc::new(SqliteDriver::new());

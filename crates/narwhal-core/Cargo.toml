@@ -21,3 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+# M2: needed for SshTunnel::spawn_async — wraps the synchronous
+# `spawn` in `spawn_blocking` so the async runtime stays responsive
+# during the up-to-8s readiness wait.
+tokio = { workspace = true, features = ["rt"] }

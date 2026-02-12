@@ -55,6 +55,30 @@ impl SshTunnel {
     /// caller can wrap them in the driver-agnostic
     /// [`crate::Error::Connection`] variant without losing the
     /// original message.
+    /// Async wrapper around [`Self::spawn`] suitable for the tokio
+    /// runtime.
+    ///
+    /// M2: the legacy `spawn` method internally `std::thread::sleep`s
+    /// for up to [`READY_TIMEOUT`] (8s) while polling the forwarded
+    /// port. Calling that directly from an async task blocks the
+    /// scheduler thread — if the runtime is `current_thread`, the
+    /// whole UI freezes for the duration. Hopping onto a blocking
+    /// thread via `spawn_blocking` keeps the runtime responsive while
+    /// preserving the synchronous OS-process semantics that the rest
+    /// of the impl depends on.
+    ///
+    /// Prefer this over `spawn` in async code paths; the sync version
+    /// stays public for tests and the rare CLI-only entry point.
+    pub async fn spawn_async(
+        config: SshConfig,
+        target_host: String,
+        target_port: u16,
+    ) -> io::Result<Self> {
+        tokio::task::spawn_blocking(move || Self::spawn(&config, &target_host, target_port))
+            .await
+            .map_err(|e| io::Error::other(format!("ssh tunnel spawn task panicked: {e}")))?
+    }
+
     pub fn spawn(config: &SshConfig, target_host: &str, target_port: u16) -> io::Result<Self> {
         let local_port = pick_free_port()?;
         let target = format!("{target_host}:{target_port}");
@@ -213,6 +237,43 @@ mod tests {
     fn pick_free_port_yields_bindable_port() {
         let port = pick_free_port().unwrap();
         let _l = TcpListener::bind(("127.0.0.1", port)).unwrap();
+    }
+
+    /// M2: `spawn_async` must complete without blocking the runtime
+    /// thread — prove it by running it inside a `current_thread`
+    /// runtime with a single worker and a separately-spawned
+    /// concurrent task that bumps a counter while the tunnel is
+    /// being set up. If the runtime were blocked, the counter would
+    /// stall.
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawn_async_does_not_block_current_thread_runtime() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&counter);
+        let s = Arc::clone(&stop);
+        let bumper = tokio::spawn(async move {
+            while s.load(Ordering::Relaxed) == 0 {
+                c.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+        });
+
+        // Hits the failure path (TEST-NET-1 unroutable address).
+        let cfg = SshConfig::new("192.0.2.1", "nobody");
+        let outcome = SshTunnel::spawn_async(cfg, "127.0.0.1".into(), 1).await;
+        assert!(outcome.is_err(), "expected failure, got: {outcome:?}");
+
+        stop.store(1, Ordering::Relaxed);
+        let _ = bumper.await;
+        let n = counter.load(Ordering::Relaxed);
+        // If the runtime had been blocked for ~8s the bumper would
+        // have made zero progress. A few hundred increments is the
+        // worst-case for a heavily loaded CI box; we just need to
+        // see *some* concurrent progress.
+        assert!(n > 10, "expected concurrent progress, got {n} increments");
     }
 
     /// Spawning against a deliberately invalid host fails within the

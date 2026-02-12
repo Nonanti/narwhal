@@ -135,7 +135,11 @@ impl Session {
         // loopback host/port the driver should target; the tunnel
         // handle is parked in the session so its Drop tears the
         // forward down when the user runs `:close`.
-        let (effective_config, tunnel) = maybe_open_tunnel(config.clone())?;
+        //
+        // M2: `maybe_open_tunnel` is now `async` so the up-to-8s ssh
+        // readiness wait runs on a blocking thread rather than the
+        // async scheduler.
+        let (effective_config, tunnel) = maybe_open_tunnel(config.clone()).await?;
 
         // Verify reachability eagerly so the user gets immediate feedback.
         // Use the trait's async `close` instead of letting the box drop
@@ -224,7 +228,7 @@ impl Session {
 /// effective host/port to the loopback side. Returns the (possibly
 /// rewritten) config plus the tunnel handle that must outlive every
 /// connection opened against it.
-fn maybe_open_tunnel(
+async fn maybe_open_tunnel(
     mut config: ConnectionConfig,
 ) -> Result<(ConnectionConfig, Option<Arc<SshTunnel>>)> {
     let Some(ssh) = config.params.ssh.clone() else {
@@ -239,7 +243,8 @@ fn maybe_open_tunnel(
         .params
         .port
         .ok_or_else(|| Error::Connection("ssh tunnel requested but port is empty".into()))?;
-    let tunnel = SshTunnel::spawn(&ssh, &target_host, target_port)
+    let tunnel = SshTunnel::spawn_async(ssh, target_host, target_port)
+        .await
         .map_err(|e| Error::Connection(format!("ssh tunnel: {e}")))?;
     config.params.host = Some(tunnel.local_host().to_owned());
     config.params.port = Some(tunnel.local_port());
