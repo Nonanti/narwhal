@@ -283,3 +283,92 @@ async fn run_query_read_only_still_works_under_strict_workspace() {
     let payload = body(&response);
     assert_eq!(payload["row_count"], 1);
 }
+
+#[tokio::test]
+async fn force_read_only_flag_rejects_writes_even_with_permissive_workspace() {
+    // Reproduces C1: `narwhal --read-only mcp` MUST refuse `read_only=false`
+    // even when the workspace ACL says `allow_writes = true`. Before the
+    // fix, the global flag was silently dropped at the `run_mcp` entry
+    // point and the write would land in the database.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("db.sqlite");
+    seed_sqlite(&db);
+
+    let workspace = Workspace {
+        root: dir.path().to_path_buf(),
+        file: WorkspaceFile {
+            allowed_connections: vec![],
+            // Permissive workspace — normally would let writes through.
+            allow_writes: true,
+        },
+    };
+
+    let ctx = ctx_with(two_connections(&db), Some(workspace)).with_force_read_only(true);
+
+    let response = rpc_one(
+        ctx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "run_query",
+                "arguments": {
+                    "connection": "staging",
+                    "sql": "INSERT INTO users(name) VALUES ('mallory')",
+                    "read_only": false
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(response["result"]["isError"], true);
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("error text");
+    assert!(
+        text.contains("--read-only"),
+        "error must explain the flag, not the workspace: {text}"
+    );
+
+    let conn = rusqlite::Connection::open(&db).expect("open");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE name='mallory'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(count, 0, "the write must not have happened");
+}
+
+#[tokio::test]
+async fn force_read_only_flag_still_allows_reads() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("db.sqlite");
+    seed_sqlite(&db);
+
+    let ctx = ctx_with(two_connections(&db), None).with_force_read_only(true);
+
+    let response = rpc_one(
+        ctx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "run_query",
+                "arguments": {
+                    "connection": "staging",
+                    "sql": "SELECT name FROM users"
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_ne!(response["result"]["isError"], true);
+    let payload = body(&response);
+    assert_eq!(payload["row_count"], 1);
+}
