@@ -30,7 +30,7 @@ impl AppCore {
                 // H11: Offload to the meta channel so the UI stays
                 // responsive during long-running dump_schema all.
                 self.dispatch_meta(MetaRequest::DumpSchemaAll {
-                    tab: self.active_tab,
+                    tab_id: self.tabs[self.active_tab].id(),
                 });
                 self.status.message = "dump-schema: fetching DDL for all tables…".into();
             }

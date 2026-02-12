@@ -23,6 +23,49 @@ pub use explain_query::ExplainQueryTool;
 pub use list_connections::ListConnectionsTool;
 pub use run_query::RunQueryTool;
 
+/// Hard ceiling on the serialised JSON body that a single tool call
+/// may return.
+///
+/// MCP responses travel inline to the agent's host (Claude Desktop,
+/// Cursor, Aider) which typically caps a single tool reply at ~512 KiB
+/// before truncating or refusing. A `describe_schema` against a
+/// 50k-table catalog, or an `EXPLAIN (VERBOSE, BUFFERS)` on a complex
+/// query, can easily exceed that. Tools call [`cap_response`] on their
+/// final serialised body to enforce the cap with a uniform
+/// `truncated: true` marker so the agent knows to drill down.  (Bug H2 fix.)
+pub const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+
+/// Truncate a serialised JSON body so it stays under
+/// [`MAX_RESPONSE_BYTES`].
+///
+/// Returns `(body, truncated_flag)`. When the input is already under
+/// the cap the body is returned untouched and the flag is `false`.
+/// When it exceeds the cap we cannot keep the JSON structurally valid
+/// (truncating mid-array breaks the parser), so we replace it with a
+/// minimal JSON envelope that surfaces the truncation reason. Agents
+/// then know to re-issue a narrower query.
+pub fn cap_response(body: String, tool: &str) -> (String, bool) {
+    if body.len() <= MAX_RESPONSE_BYTES {
+        return (body, false);
+    }
+    let envelope = serde_json::json!({
+        "truncated": true,
+        "tool": tool,
+        "reason": format!(
+            "response body ({} bytes) exceeded MAX_RESPONSE_BYTES ({} bytes); \
+             narrow the query (e.g. specific schema/table, smaller LIMIT) and retry",
+            body.len(),
+            MAX_RESPONSE_BYTES
+        ),
+        "original_byte_length": body.len(),
+        "max_byte_length": MAX_RESPONSE_BYTES,
+    });
+    (
+        serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| "{\"truncated\":true}".into()),
+        true,
+    )
+}
+
 /// A single MCP tool callable via `tools/call`.
 ///
 /// `name()` doubles as the registry key and the on-the-wire identifier; it

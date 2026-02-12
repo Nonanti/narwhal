@@ -25,7 +25,7 @@ use tracing::warn;
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::value_to_json;
-use crate::tools::{Tool, ToolOutput};
+use crate::tools::{cap_response, Tool, ToolOutput};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -166,9 +166,12 @@ impl Tool for ExplainQueryTool {
             "rows": rows,
         });
 
-        Ok(ToolOutput::ok(
-            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string()),
-        ))
+        // H2: PG `EXPLAIN (VERBOSE, BUFFERS)` plans on complex queries
+        // routinely exceed 100 KB; clamp the body so the agent gets a
+        // structured truncation signal instead of a wall of text.
+        let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+        let (body, _truncated) = cap_response(body, "explain_query");
+        Ok(ToolOutput::ok(body))
     }
 }
 

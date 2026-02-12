@@ -20,8 +20,18 @@ impl AppCore {
     pub(super) fn spawn_cancel(&mut self) {
         let slot = self.cancel_slot.clone();
         tokio::spawn(async move {
-            let guard = slot.lock().await;
-            if let Some(handle) = guard.as_ref() {
+            // H6: Take the handle out of the slot under a short-lived
+            // guard so the mutex is NOT held across `.await` on
+            // `cancel()`. Holding a tokio `Mutex` across an await
+            // serialises concurrent cancel attempts and violates the
+            // project's lock-across-await rule. The run loop replaces
+            // `cancel_slot` to `None` once the statement settles, so
+            // taking is safe — there is nothing useful to put back.
+            let handle = {
+                let mut guard = slot.lock().await;
+                guard.take()
+            };
+            if let Some(handle) = handle {
                 if let Err(error) = handle.cancel().await {
                     tracing::warn!(target: "narwhal::app", error = %error, "cancel failed");
                 }
@@ -232,26 +242,60 @@ impl AppCore {
     /// for non-query metadata operations (H11).
     pub fn handle_meta_update(&mut self, update: MetaUpdate) {
         match update {
-            MetaUpdate::DumpSchemaReady { tab, tables } => {
+            MetaUpdate::DumpSchemaReady { tab_id, tables } => {
                 let Some(session) = self.session.as_ref() else {
                     self.status.message = "no active connection".into();
                     return;
                 };
                 let dialect = session.dialect();
+                // C5: resolve the stable id to the *current* index;
+                // if the originating tab was closed, drop the reply
+                // with a status message instead of writing DDL into
+                // an arbitrary tab.
+                let Some(idx) = self.tabs.iter().position(|t| t.id() == tab_id) else {
+                    tracing::debug!(
+                        target: "narwhal::app",
+                        tab_id,
+                        "dropping dump-schema reply: originating tab closed"
+                    );
+                    self.status.message =
+                        "dump-schema cancelled: target tab was closed".into();
+                    return;
+                };
                 let ddl = if tables.len() == 1 {
                     build_table_ddl(&tables[0], dialect)
                 } else {
                     build_dump(&tables, dialect)
                 };
-                self.tabs[tab].editor.clear();
-                self.tabs[tab].editor.insert_str(&ddl);
+                self.tabs[idx].editor.clear();
+                self.tabs[idx].editor.insert_str(&ddl);
                 self.status.message = format!(
                     "dump-schema: wrote {} table(s) into the editor buffer",
                     tables.len()
                 );
-                self.focus = Pane::Editor;
+                // Only switch focus / surface to the user if the user
+                // is still on the originating tab; otherwise stay put.
+                if idx == self.active_tab {
+                    self.focus = Pane::Editor;
+                }
             }
-            MetaUpdate::SchemasRefreshed { schemas } => {
+            MetaUpdate::SchemasRefreshed {
+                session_id,
+                schemas,
+            } => {
+                // H8: drop the reply if the user switched sessions since
+                // the refresh was dispatched; otherwise we'd overwrite
+                // the new session's listing with stale data.
+                let current = self.session.as_ref().map(|s| s.config.id);
+                if current != Some(session_id) {
+                    tracing::debug!(
+                        target: "narwhal::app",
+                        ?session_id,
+                        ?current,
+                        "dropping stale SchemasRefreshed; session changed"
+                    );
+                    return;
+                }
                 if let Some(session) = self.session.as_mut() {
                     session.schemas = schemas;
                 }

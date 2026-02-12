@@ -168,3 +168,131 @@ async fn open_history_does_not_block_ui() {
         .expect("modal should be open after meta update");
     assert_eq!(state.entries.len(), 2);
 }
+
+/// C5 regression: `dump_schema all` addresses the originating tab by
+/// its stable id. If the user closes that tab between dispatch and
+/// reply, the DDL must NOT be written into an unrelated tab; instead
+/// the update is dropped with a status message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dump_schema_drops_reply_when_originating_tab_closed() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("close.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE alpha (id INTEGER PRIMARY KEY);
+             CREATE TABLE beta  (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+    }
+
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+    core.execute_command("open meta-test");
+
+    // Open a second tab and dispatch dump-schema *from there*. The
+    // originating tab is tab 1 (id=2); tab 0 carries id=1.
+    core.execute_command("tabnew");
+    assert_eq!(core.tabs().len(), 2);
+    assert_eq!(core.active_tab(), 1);
+    let originating_tab_id = core.tabs()[1].id();
+    core.execute_command("dump-schema all");
+
+    // Close the originating tab BEFORE the reply arrives. `tabclose`
+    // closes whichever tab is active, so we close tab 1 directly
+    // (no need to switch first). With index-based addressing this
+    // would (a) panic on `self.tabs[1]` access, or (b) write into
+    // the only remaining tab — both wrong. The stable-id resolution
+    // should drop the reply and surface a status message.
+    core.execute_command("tabclose");
+
+    // Sanity: tab 0 (the original initial tab) is now alone and its
+    // id is NOT the originating id.
+    assert_eq!(core.tabs().len(), 1);
+    assert_ne!(core.tabs()[0].id(), originating_tab_id);
+    let editor_before = core.editor().entire_text();
+
+    core.drain_meta_updates().await;
+
+    let editor_after = core.editor().entire_text();
+    assert_eq!(
+        editor_before, editor_after,
+        "the surviving tab's editor must NOT be overwritten with DDL meant for a closed tab"
+    );
+    assert!(
+        core.status_message().contains("target tab was closed"),
+        "expected drop-on-close status, got: {}",
+        core.status_message()
+    );
+}
+
+/// H8 regression: `SchemasRefreshed` carries the originating session
+/// id; replies that arrive after the user switched (or closed) the
+/// session must NOT overwrite the new session's listing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refresh_schemas_drops_reply_when_session_changed() {
+    let dir = TempDir::new().unwrap();
+    let db_a = dir.path().join("a.db");
+    let db_b = dir.path().join("b.db");
+    {
+        let conn = rusqlite::Connection::open(&db_a).unwrap();
+        conn.execute_batch("CREATE TABLE a_only (id INTEGER PRIMARY KEY)")
+            .unwrap();
+        let conn = rusqlite::Connection::open(&db_b).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE b_one (id INTEGER PRIMARY KEY);
+             CREATE TABLE b_two (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+    }
+
+    let registry = DriverRegistry::with_defaults();
+    let connections = ConnectionsFile {
+        connections: vec![
+            ConnectionConfig {
+                id: Uuid::new_v4(),
+                name: "conn-a".into(),
+                driver: "sqlite".into(),
+                params: ConnectionParams {
+                    path: Some(db_a.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            },
+            ConnectionConfig {
+                id: Uuid::new_v4(),
+                name: "conn-b".into(),
+                driver: "sqlite".into(),
+                params: ConnectionParams {
+                    path: Some(db_b.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            },
+        ],
+    };
+    let mut core = AppCore::new(registry, connections, None);
+
+    // Open A, dispatch refresh (stale reply will target A).
+    core.execute_command("open conn-a");
+    core.execute_command("refresh");
+
+    // Before draining the stale reply, switch to B and let B's
+    // schemas be loaded directly via `open` (B has 2 tables).
+    core.execute_command("open conn-b");
+    let b_table_count_before = core
+        .session()
+        .map_or(0, |s| s.schemas.iter().map(|(_, t)| t.len()).sum::<usize>());
+    assert_eq!(b_table_count_before, 2);
+
+    // Now drain. The stale A-refresh reply arrives carrying A's
+    // session id; the handler must drop it instead of overwriting
+    // B's schema listing.
+    core.drain_meta_updates().await;
+
+    let b_table_count_after = core
+        .session()
+        .map_or(0, |s| s.schemas.iter().map(|(_, t)| t.len()).sum::<usize>());
+    assert_eq!(
+        b_table_count_after, 2,
+        "B's schemas must be intact after a stale A-refresh reply"
+    );
+}

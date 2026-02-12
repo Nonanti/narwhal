@@ -152,13 +152,17 @@ impl AppCore {
     }
 
     pub(super) fn refresh_schema(&mut self) {
-        let Some(_session) = self.session.as_ref() else {
+        let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
         // H11: Offload to the meta channel so the UI stays responsive
         // during schema refreshes on databases with many schemas/tables.
-        self.dispatch_meta(MetaRequest::RefreshSchemas);
+        // H8: pass the active session_id so a reply that lands after the
+        // user switched sessions is dropped instead of clobbering the
+        // new session's listing.
+        let session_id = session.config.id;
+        self.dispatch_meta(MetaRequest::RefreshSchemas { session_id });
         self.status.message = "refreshing schema…".into();
     }
 

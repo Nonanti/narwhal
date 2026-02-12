@@ -42,6 +42,15 @@ const DEFAULT_LIMIT: usize = 1_000;
 /// payload below the protocol's practical size budget.
 const MAX_LIMIT: usize = 10_000;
 
+/// Per-cell byte ceiling for serialised string values. A single 1 GB
+/// `TEXT` / `BYTEA` cell would otherwise blow the agent's context
+/// budget and can be used as a denial-of-service against the MCP host
+/// (Claude Desktop, Cursor, Aider). Cells above this cap are truncated
+/// in place with a `…<N bytes truncated>` suffix and the response
+/// flag `cell_truncated = true` is set so the agent knows to drill
+/// down with a tighter query.  (Bug H2 fix.)
+const MAX_CELL_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Args {
@@ -182,6 +191,15 @@ impl Tool for RunQueryTool {
                         .unwrap_or_default()
                 )
             };
+            // H1: audit the rejection so the operator sees blocked
+            // write attempts in the history journal.
+            let tag = if ctx.force_read_only() {
+                "force_read_only"
+            } else {
+                "workspace_acl"
+            };
+            ctx.audit_rejected(Some(&args.connection), &args.sql, tag)
+                .await;
             return Ok(ToolOutput::err(reason));
         } else {
             args.read_only
@@ -189,6 +207,13 @@ impl Tool for RunQueryTool {
 
         if read_only {
             if let Err(reason) = guard_read_only(&args.sql) {
+                // H1: audit the guard rejection.
+                ctx.audit_rejected(
+                    Some(&args.connection),
+                    &args.sql,
+                    &format!("read_only_guard: {reason}"),
+                )
+                .await;
                 return Ok(ToolOutput::err(format!(
                     "read-only guard rejected the statement: {reason}. \
                      Pass `read_only=false` if a write is intended."
@@ -199,6 +224,15 @@ impl Tool for RunQueryTool {
         let mut conn = match ctx.open_connection(&args.connection).await {
             Ok(c) => c,
             Err(McpError::UnknownConnection(_)) => {
+                // H1: audit the unknown-connection rejection. Workspace
+                // ACL violations land here too (open_connection maps
+                // them to UnknownConnection on purpose).
+                ctx.audit_rejected(
+                    Some(&args.connection),
+                    &args.sql,
+                    "unknown_or_hidden_connection",
+                )
+                .await;
                 return Ok(ToolOutput::err(format!(
                     "unknown connection: {}. Call `list_connections` to see valid names.",
                     args.connection
@@ -244,11 +278,23 @@ impl Tool for RunQueryTool {
             .map(|c| json!({"name": c.name, "type": c.data_type}))
             .collect();
 
+        // H2: per-cell byte cap. Walk every cell as we serialise it
+        // and replace any string/bytes value that exceeds MAX_CELL_BYTES
+        // with a truncated marker so a single fat blob can't pin the
+        // agent or the MCP host's process.
+        let mut cell_truncated = false;
         let rows: Vec<Value> = query_result
             .rows
             .iter()
             .take(limit)
-            .map(|row| Value::Array(row.0.iter().map(value_to_json).collect()))
+            .map(|row| {
+                Value::Array(
+                    row.0
+                        .iter()
+                        .map(|v| cap_cell_size(value_to_json(v), &mut cell_truncated))
+                        .collect(),
+                )
+            })
             .collect();
 
         let payload = json!({
@@ -259,6 +305,8 @@ impl Tool for RunQueryTool {
             "rows": rows,
             "row_count": row_count_total,
             "truncated": truncated,
+            "cell_truncated": cell_truncated,
+            "cell_byte_cap": MAX_CELL_BYTES,
             "limit": limit,
             "rows_affected": query_result.rows_affected,
         });
@@ -327,6 +375,45 @@ fn guard_read_only(sql: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// H2: clamp a single JSON cell to [`MAX_CELL_BYTES`] so a fat
+/// `TEXT` / `BYTEA` blob cannot blow the agent's context or the
+/// MCP host's memory.
+///
+/// Only string values are truncated — numbers, booleans, null, and
+/// structured arrays/objects are left intact. The `$bytes_base64`
+/// envelope is a JSON object with a single string field; we walk into
+/// it so its inner string is capped too.
+fn cap_cell_size(value: Value, truncated_flag: &mut bool) -> Value {
+    match value {
+        Value::String(s) if s.len() > MAX_CELL_BYTES => {
+            *truncated_flag = true;
+            let mut cut = MAX_CELL_BYTES;
+            // Snap back to the previous UTF-8 char boundary so the
+            // resulting `String` stays valid (`is_char_boundary` is
+            // O(1) and always true at 0, so the loop terminates).
+            while cut > 0 && !s.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            let omitted = s.len() - cut;
+            let mut out = String::with_capacity(cut + 32);
+            out.push_str(&s[..cut]);
+            out.push_str(&format!("…<{omitted} bytes truncated>"));
+            Value::String(out)
+        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k, cap_cell_size(v, truncated_flag)))
+                .collect(),
+        ),
+        Value::Array(arr) => Value::Array(
+            arr.into_iter()
+                .map(|v| cap_cell_size(v, truncated_flag))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Skip leading whitespace and SQL comments. Returns the remainder.

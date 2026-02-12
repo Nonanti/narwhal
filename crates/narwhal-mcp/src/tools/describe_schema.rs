@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{Tool, ToolOutput};
+use crate::tools::{cap_response, Tool, ToolOutput};
 
 pub struct DescribeSchemaTool;
 
@@ -106,6 +106,9 @@ impl Tool for DescribeSchemaTool {
         }))
         .unwrap_or_else(|_| "{}".to_string());
 
+        // H2: clamp the response body so a catalog with tens of
+        // thousands of tables cannot blow the agent's context budget.
+        let (text, _truncated) = cap_response(text, "describe_schema");
         Ok(ToolOutput::ok(text))
     }
 }

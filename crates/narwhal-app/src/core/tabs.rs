@@ -37,9 +37,10 @@ impl AppCore {
             self.status.message = "cannot open a new tab while a query is running".into();
             return;
         }
-        let name = format!("untitled-{}", self.next_tab_id);
+        let id = self.next_tab_id as u64;
+        let name = format!("untitled-{id}");
         self.next_tab_id += 1;
-        self.tabs.push(Tab::new(name));
+        self.tabs.push(Tab::new(id, name));
         self.active_tab = self.tabs.len() - 1;
         self.status.message = format!("tab {} opened", self.active_tab + 1);
         self.focus = Pane::Editor;

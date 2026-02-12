@@ -226,4 +226,43 @@ impl ServerContext {
             tracing::warn!(error = %error, "MCP audit append failed");
         }
     }
+
+    /// Append an audit entry for a tool call that was rejected before
+    /// the database was touched.
+    ///
+    /// Rejected attempts (read-only guard, workspace ACL, unknown
+    /// connection) used to leave zero trace in the history journal,
+    /// hiding agent misbehaviour from the operator. This method writes
+    /// a `Failed`-outcome entry tagged `source = "mcp"` with a
+    /// `-- mcp: rejected (<reason>)` comment prefix so the audit trail
+    /// captures *every* attempt, accepted or not.  (Bug H1 fix.)
+    pub async fn audit_rejected(
+        &self,
+        connection_name: Option<&str>,
+        sql: &str,
+        reason: &str,
+    ) {
+        let Some(journal) = self.journal.as_ref() else {
+            return;
+        };
+        let annotated_sql = format!("-- mcp: rejected ({reason})\n{sql}");
+        let mut entry = HistoryEntry::success(annotated_sql)
+            .with_source(AUDIT_SOURCE)
+            .with_failure(format!("rejected: {reason}"));
+        if let Some(name) = connection_name {
+            if let Some(config) = self
+                .connections
+                .connections
+                .iter()
+                .find(|c| c.name == name)
+            {
+                entry = entry
+                    .with_connection(config.id, &config.name)
+                    .with_driver(&config.driver);
+            }
+        }
+        if let Err(error) = journal.append(&entry).await {
+            tracing::warn!(error = %error, "MCP audit (rejected) append failed");
+        }
+    }
 }
