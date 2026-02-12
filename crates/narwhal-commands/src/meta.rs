@@ -12,13 +12,16 @@
 
 use std::sync::Arc;
 
-use narwhal_core::TableSchema;
+use narwhal_config::CredentialStore;
+use narwhal_core::{ConnectionConfig, DatabaseDriver, TableSchema};
 use narwhal_domain::SchemaListing;
 use narwhal_history::HistoryEntry;
+use secrecy::ExposeSecret;
 use uuid::Uuid;
 
+use crate::session::{Session, SessionOpenOptions};
+
 /// A request to perform a metadata operation in the background.
-#[derive(Debug)]
 pub enum MetaRequest {
     /// Fetch DDL for every table in the current session's schema listing.
     DumpSchemaAll {
@@ -43,6 +46,50 @@ pub enum MetaRequest {
         /// Maximum number of entries to return.
         limit: usize,
     },
+
+    /// Open a session in the background (keyring lookup + dial + initial
+    /// schema refresh) and deliver the result via
+    /// [`MetaUpdate::SessionOpened`]. The event loop hands the request
+    /// off so the user sees `connecting to …` immediately instead of a
+    /// frozen UI while a slow DNS / TLS handshake completes.  (Bug H7
+    /// fix — the highest-impact `block_in_place` call.)
+    OpenSession {
+        /// Driver instance (cloneable `Arc`) for the connection.
+        driver: Arc<dyn DatabaseDriver>,
+        /// Connection metadata. Boxed to keep the enum slim —
+        /// `ConnectionConfig` carries a `ConnectionParams` blob that
+        /// is the biggest variant by far.
+        config: Box<ConnectionConfig>,
+        /// Optional pre-resolved password. When `None`, the worker
+        /// consults the credential store and the pgpass / env fallback.
+        password_hint: Option<String>,
+        /// Pass through to [`Session::open_with`]. The CLI flips
+        /// `skip_pre_connect` under `--read-only`.
+        opts: SessionOpenOptions,
+    },
+}
+
+impl std::fmt::Debug for MetaRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DumpSchemaAll { tab_id } => f
+                .debug_struct("DumpSchemaAll")
+                .field("tab_id", tab_id)
+                .finish(),
+            Self::RefreshSchemas { session_id } => f
+                .debug_struct("RefreshSchemas")
+                .field("session_id", session_id)
+                .finish(),
+            Self::LoadHistory { limit } => {
+                f.debug_struct("LoadHistory").field("limit", limit).finish()
+            }
+            Self::OpenSession { config, opts, .. } => f
+                .debug_struct("OpenSession")
+                .field("config.name", &config.name)
+                .field("opts", opts)
+                .finish(),
+        }
+    }
 }
 
 /// The result of a background metadata operation, delivered back to
@@ -74,6 +121,21 @@ pub enum MetaUpdate {
         entries: Vec<HistoryEntry>,
     },
 
+    /// Response to [`MetaRequest::OpenSession`].
+    SessionOpened {
+        /// The id of the [`ConnectionConfig`] we tried to open. The
+        /// event loop matches this against the pending-open ledger so a
+        /// stale reply (user opened another connection in the meantime)
+        /// can be silently dropped instead of clobbering the current
+        /// session.
+        config_id: Uuid,
+        /// `Ok(session)` on success. The handler swaps it into
+        /// `self.session` and runs the standard post-open wiring
+        /// (sidebar rebuild, plugin pool publish, status line). On
+        /// `Err`, the message goes to the status line.
+        result: Result<Box<Session>, String>,
+    },
+
     /// A metadata operation failed.
     MetaFailed {
         /// Human-readable error message.
@@ -85,11 +147,13 @@ pub enum MetaUpdate {
 /// and sends the result back on `tx`.
 ///
 /// `pool` is required for `DumpSchemaAll` and `RefreshSchemas`; it is
-/// unused for `LoadHistory` (the caller may pass `None`).
+/// unused for `LoadHistory` and `OpenSession` (the caller may pass
+/// `None`). `credentials` is consulted only by `OpenSession`.
 pub fn spawn_meta_request(
     request: MetaRequest,
     pool: Option<narwhal_pool::Pool>,
     history: Option<Arc<narwhal_history::Journal>>,
+    credentials: Option<Arc<dyn CredentialStore>>,
     tx: tokio::sync::mpsc::Sender<MetaUpdate>,
 ) {
     tokio::spawn(async move {
@@ -126,6 +190,41 @@ pub fn spawn_meta_request(
                     },
                 }
             }
+            MetaRequest::OpenSession {
+                driver,
+                config,
+                password_hint,
+                opts,
+            } => {
+                let config_id = config.id;
+                // Resolve credentials inside the task so the keyring
+                // round-trip does not stall the event loop.
+                let password = match password_hint {
+                    Some(p) => Some(p),
+                    None => resolve_password(credentials.as_deref(), &config).await,
+                };
+                let result = match Session::open_with(
+                    Arc::clone(&driver),
+                    (*config).clone(),
+                    password,
+                    opts,
+                )
+                .await
+                {
+                    Ok(mut session) => {
+                        if let Err(error) = session.refresh_schemas().await {
+                            tracing::debug!(
+                                target: "narwhal::meta",
+                                error = %error,
+                                "initial schema refresh failed after open; continuing"
+                            );
+                        }
+                        Ok(Box::new(session))
+                    }
+                    Err(error) => Err(error.to_string()),
+                };
+                MetaUpdate::SessionOpened { config_id, result }
+            }
             MetaRequest::LoadHistory { limit } => {
                 let Some(journal) = history else {
                     let _ = tx
@@ -152,6 +251,18 @@ pub fn spawn_meta_request(
         };
         let _ = tx.send(update).await;
     });
+}
+
+async fn resolve_password(
+    credentials: Option<&dyn CredentialStore>,
+    config: &ConnectionConfig,
+) -> Option<String> {
+    if let Some(store) = credentials {
+        if let Ok(Some(secret)) = store.get(config.id).await {
+            return Some(secret.expose_secret().to_owned());
+        }
+    }
+    narwhal_config::resolve_fallback_password(&config.driver, &config.params)
 }
 
 async fn dump_schema_all(

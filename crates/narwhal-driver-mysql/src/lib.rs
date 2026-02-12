@@ -694,6 +694,27 @@ impl Connection for MysqlConnection {
         .await
     }
 
+    /// `MySQL`'s session-level read-only flag rejects any subsequent
+    /// non-temporary write at the server side (`SUPER` privilege bypasses
+    /// it, but mortals are stopped). The transaction-scoped variant is
+    /// not enough by itself because implicit DDL (e.g. `CREATE TABLE`)
+    /// auto-commits and starts a fresh transaction.
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        let sql = if read_only {
+            "SET SESSION TRANSACTION READ ONLY"
+        } else {
+            "SET SESSION TRANSACTION READ WRITE"
+        };
+        self.with_conn(|conn| {
+            Box::pin(async move {
+                conn.query_drop(sql)
+                    .await
+                    .map_err(|e| Error::Connection(e.to_string()))
+            })
+        })
+        .await
+    }
+
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         // L31: opens a *second* connection to issue KILL QUERY against
         // our thread id. This is the same shape PostgreSQL's cancel

@@ -592,6 +592,19 @@ impl Connection for SqliteConnection {
         self.execute_batch("SELECT 1").await
     }
 
+    /// `PRAGMA query_only` is per-connection in `SQLite` and survives
+    /// until explicitly cleared. Toggling to `false` re-enables writes;
+    /// callers driving the global `--read-only` flag should never
+    /// re-enable.
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        let pragma = if read_only {
+            "PRAGMA query_only = ON"
+        } else {
+            "PRAGMA query_only = OFF"
+        };
+        self.execute_batch(pragma).await
+    }
+
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         None
     }

@@ -162,7 +162,34 @@ impl ServerContext {
         let config = self.find_by_name(name)?;
         let driver = self.drivers.get(&config.driver)?;
         let password = self.resolve_password(&config).await?;
-        let connection = driver.connect(&config, password.as_deref()).await?;
+        let mut connection = driver.connect(&config, password.as_deref()).await?;
+        // H13: when `--read-only` is in force, push the constraint down
+        // to the engine so the trip wire fires at the server even if
+        // a statement-level guard misclassifies a write. Driver-side
+        // `Unsupported` is non-fatal here — the upper layers still
+        // refuse writes via `writes_allowed()`. We only log so the
+        // operator notices when belt-and-suspenders defence is
+        // single-belt.
+        if self.force_read_only {
+            if let Err(error) = connection.set_read_only(true).await {
+                match error {
+                    narwhal_core::Error::Unsupported(_) => {
+                        tracing::debug!(
+                            target: "narwhal::mcp",
+                            connection = %name,
+                            "driver does not support set_read_only; relying on statement guard only",
+                        );
+                    }
+                    other => {
+                        // Hard failure setting the flag means the engine
+                        // didn't honour our request — fail closed.
+                        return Err(McpError::Internal(format!(
+                            "failed to enforce session read-only on `{name}`: {other}"
+                        )));
+                    }
+                }
+            }
+        }
         Ok(connection)
     }
 

@@ -46,27 +46,13 @@ impl AppCore {
     }
 
     fn open_connection(&mut self, config: ConnectionConfig) {
-        let password = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.credentials.get(config.id))
-        });
-        let password = match password {
-            Ok(secret) => secret,
-            Err(error) => {
-                debug!(target: "narwhal::app", error = %error, "keyring lookup failed; continuing without password");
-                None
-            }
-        };
-        // Convert SecretString → Option<String> for the Session::open API.
-        // The driver layer still expects plain String; we expose the secret
-        // only here and let it drop naturally after the call.
-        let plain_password = password.map(|s| s.expose_secret().to_owned());
-        // Keyring miss → fall back to the same env / `~/.pgpass`
-        // lookups that `psql` honours. Keeps the keyring as the
-        // primary store while letting users who already curate a
-        // pgpass file connect without re-entering passwords.
-        let plain_password = plain_password
-            .or_else(|| narwhal_config::resolve_fallback_password(&config.driver, &config.params));
-        self.open_connection_with_password(config, plain_password);
+        // H7: keyring lookup + dial + initial schema refresh all run in
+        // the background OpenSession meta worker so the event loop is
+        // free to draw frames and service the run/meta channels while
+        // the (possibly slow) connect proceeds. We do NOT pre-resolve
+        // the password here — the worker handles keyring + pgpass +
+        // env fallback in one place.
+        self.open_connection_with_password(config, None);
     }
 
     fn open_connection_with_password(
@@ -79,60 +65,72 @@ impl AppCore {
             return;
         };
         let label = config.name.clone();
+        let config_id = config.id;
         self.status.message = format!("connecting to {label}…");
 
-        let driver = driver.clone();
-        let password_for_open = password;
         // L36 #C4: forward the global `--read-only` flag so the
         // pre-connect shell pipeline is skipped under audit mode.
         let session_opts = narwhal_commands::session::SessionOpenOptions {
             skip_pre_connect: self.read_only,
         };
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                Session::open_with(driver, config, password_for_open, session_opts).await
-            })
+
+        // H7 (partial fix): the open work runs on a dedicated tokio
+        // task via the meta channel so cancellation, retry, and
+        // future fully-async event-loop wiring all share a single
+        // code path. For backward compatibility with the legacy
+        // synchronous semantics (tests assert `session().is_some()`
+        // immediately after `:open`, and the TUI's status bar wants
+        // "connecting" → "connected" to feel sequential), we wait
+        // inline for the reply via `block_in_place`. This still uses
+        // a worker thread instead of the event-loop task, so other
+        // runtime workers continue to make progress.
+        //
+        // TODO H7 follow-up: drop the inline wait and let the
+        // event loop's `select!` arm pick up `SessionOpened` from
+        // `meta_rx`. The tests need to be migrated to an
+        // `await_pending_session_opens` step first.
+        self.pending_session_opens.insert(config_id);
+        let dispatched = self.dispatch_meta(crate::meta::MetaRequest::OpenSession {
+            driver: driver.clone(),
+            config: Box::new(config),
+            password_hint: password,
+            opts: session_opts,
         });
-        match result {
-            Ok(mut session) => {
-                if let Err(error) = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(session.refresh_schemas())
-                }) {
-                    debug!(target: "narwhal::app", error = %error, "schema refresh on connect failed");
-                }
-                self.status.connection = Some(format!(
-                    "{} · {}",
-                    session.config.name,
-                    session.driver.name()
-                ));
-                self.status.message = format!(
-                    "connected · {} · {}",
-                    session.config.name,
-                    session.driver.name()
-                );
-                // Publish the new pool to the plugin executor so any
-                // `narwhal.sql_run` calls hit the freshly-opened
-                // connection. Opening a connection always closes any
-                // prior `:begin` state implicitly, so the TX flag
-                // resets here too.
-                {
-                    let mut state = self
-                        .plugin_state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    state.pool = Some(session.pool.clone());
-                    state.in_transaction = false;
-                }
-                let opened_id = session.config.id;
-                self.session = Some(session);
-                self.touch_last_used(opened_id);
-                self.rebuild_sidebar();
-                self.focus = Pane::Editor;
-            }
-            Err(error) => {
-                self.status.message = format!("connect failed: {error}");
-            }
+        if !dispatched {
+            self.pending_session_opens.remove(&config_id);
+            self.status.message = "connect failed: meta channel closed".into();
+            return;
         }
+        self.await_pending_session_opens_sync();
+    }
+
+    /// Side-effects shared between the foreground sync path (legacy
+    /// tests) and the H7 async path: install the new session, publish
+    /// the pool, refresh sidebar/focus, bump last-used.
+    pub(super) fn apply_opened_session(&mut self, session: Session) {
+        self.status.connection = Some(format!(
+            "{} · {}",
+            session.config.name,
+            session.driver.name()
+        ));
+        self.status.message = format!(
+            "connected · {} · {}",
+            session.config.name,
+            session.driver.name()
+        );
+        {
+            let mut state = self
+                .plugin_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.pool = Some(session.pool.clone());
+            state.in_transaction = false;
+        }
+        let opened_id = session.config.id;
+        self.session = Some(session);
+        self.touch_last_used(opened_id);
+        self.rebuild_sidebar();
+        self.focus = Pane::Editor;
     }
 
     pub(super) fn close_session(&mut self) {

@@ -1044,6 +1044,22 @@ impl Connection for ClickhouseConnection {
         // refcount drop is the only cleanup needed.
     }
 
+    /// `ClickHouse` exposes session read-only as the `readonly` setting
+    /// with three levels: `0` (writes allowed), `1` (only SELECT/SHOW,
+    /// settings frozen), `2` (only SELECT/SHOW, but `SET` is still
+    /// allowed so callers can tweak query-time parameters).
+    /// Narwhal uses level `2` — it is the safe choice that still lets
+    /// the agent/UI emit `SET max_execution_time = ...` style guards
+    /// before the SELECT.
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        let sql = if read_only {
+            "SET readonly = 2"
+        } else {
+            "SET readonly = 0"
+        };
+        self.http_query(sql, None).await.map(|_| ())
+    }
+
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         Some(Box::new(ClickhouseCancel {
             state: Arc::clone(&self.inner),

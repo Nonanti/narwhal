@@ -862,6 +862,26 @@ impl Connection for PostgresConnection {
             .map_err(|e| Error::Connection(e.to_string()))
     }
 
+    /// Postgres has both a session-scoped *and* a transaction-scoped
+    /// read-only flag. We toggle the session flag (covers ad-hoc
+    /// statements) and the `default_transaction_read_only` GUC (covers
+    /// implicit BEGINs from BEGIN…COMMIT blocks). Together they ensure
+    /// every subsequent statement on this connection is rejected by the
+    /// server with `25006` (`read_only_sql_transaction`) if it tries to
+    /// write.
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        let mode = if read_only { "ON" } else { "OFF" };
+        let sql = format!(
+            "SET default_transaction_read_only TO {mode}; \
+             SET SESSION CHARACTERISTICS AS TRANSACTION {};",
+            if read_only { "READ ONLY" } else { "READ WRITE" }
+        );
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| Error::Connection(e.to_string()))
+    }
+
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
         let tls_factory: Arc<dyn Fn() -> Result<MakeRustlsConnect> + Send + Sync> =
             if self.tls_mode == InternalSslMode::Disable {
