@@ -343,9 +343,25 @@ impl AppCore {
         }
     }
 
-    /// Send a metadata request to the background worker. Returns false
-    /// if no session is active (for requests that need one) or if the
-    /// channel is closed.
+    /// Send a metadata request to the background worker.
+    ///
+    /// Sprint 7 (LOW): the historical docstring promised a `false`
+    /// return when no session was active or the channel was closed,
+    /// but the body always returned `true`. The signature is kept for
+    /// API stability — the return value is now intentionally
+    /// `true` ("request was queued") and per-request gating is the
+    /// caller's responsibility:
+    ///
+    /// - `LoadHistory` succeeds even without a session (handled by
+    ///   the meta worker's own "no history journal" branch).
+    /// - `RefreshSchemas` / `DumpSchemaAll` need a pool; the worker
+    ///   surfaces `MetaFailed { message: "no active connection" }` if
+    ///   the session disappeared between dispatch and execution.
+    /// - `OpenSession` always succeeds at dispatch time.
+    ///
+    /// Callers that need pre-dispatch validation should check
+    /// `self.session.is_some()` themselves before constructing the
+    /// request.
     pub(super) fn dispatch_meta(&mut self, request: MetaRequest) -> bool {
         let pool = self.session.as_ref().map(|s| s.pool.clone());
         spawn_meta_request(

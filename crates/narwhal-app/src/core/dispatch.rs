@@ -333,6 +333,18 @@ impl AppCore {
         }
     }
 
+    /// Sprint 7 (LOW): paste handler. Inserts the pasted text into
+    /// the active tab's editor in one shot so newlines are preserved
+    /// instead of being interpreted as `Enter` keypresses one-by-one
+    /// (which would trip motion handlers and the modal command
+    /// prompt). Other panes do not currently accept paste.
+    pub fn editor_paste(&mut self, text: &str) {
+        if matches!(self.focus, Pane::Editor) {
+            self.tabs[self.active_tab].editor.insert_str(text);
+            self.status.message = format!("pasted {} char(s)", text.chars().count());
+        }
+    }
+
     /// Route a crossterm `MouseEvent` through the same handlers the
     /// keyboard path uses. `LayoutRegions` from the most recent render
     /// provides the hit-test rects.

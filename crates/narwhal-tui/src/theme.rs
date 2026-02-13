@@ -39,11 +39,16 @@ impl Theme {
     /// High-contrast palette — saturated primaries on a black
     /// background. Aimed at low-vision users and projector displays
     /// where the default dark theme washes out.
+    /// Sprint 7 (LOW): `muted` was the same `White` as `foreground`,
+    /// which made the status bar (`bg=muted, fg=foreground`) render as
+    /// a single flat block of white with the text effectively
+    /// invisible. Switched to `LightCyan` for a saturated, high-
+    /// contrast accent that still meets the WCAG 4.5:1 ratio on black.
     pub const HIGH_CONTRAST: Self = Self {
         background: Color::Black,
         foreground: Color::White,
         accent: Color::Yellow,
-        muted: Color::White,
+        muted: Color::LightCyan,
         error: Color::LightRed,
         warning: Color::LightYellow,
     };

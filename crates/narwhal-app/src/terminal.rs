@@ -1,7 +1,9 @@
 use std::io::{self, Stdout};
 
 use anyhow::Result;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -22,7 +24,16 @@ impl TerminalGuard {
     pub fn enter() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        // Sprint 7 (LOW): enable bracketed paste so multi-line pastes
+        // arrive as a single `Event::Paste("…")` event instead of
+        // being chunked into individual keypresses (which would tab
+        // through modal commands and trip motion handlers).
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         Ok(Self { terminal })
@@ -31,6 +42,7 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        let _ = execute!(self.terminal.backend_mut(), DisableBracketedPaste);
         let _ = execute!(self.terminal.backend_mut(), DisableMouseCapture);
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);

@@ -176,6 +176,15 @@ impl App {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.core.handle_key(key),
             Event::Mouse(m) => self.core.handle_mouse(m),
             Event::Resize(_, _) => debug!(target: "narwhal::app", "terminal resized"),
+            // Sprint 7 (LOW): bracketed-paste support. crossterm emits
+            // `Event::Paste(s)` for OSC 200 paste sequences when paste
+            // mode is enabled at terminal init. Route the payload
+            // straight into the editor so multi-line pastes preserve
+            // their newlines instead of being interpreted as `Enter`
+            // keystrokes one-by-one (which would trip motion handlers
+            // and modal commands). Other panes ignore paste — only
+            // the editor accepts text input today.
+            Event::Paste(text) => self.core.editor_paste(&text),
             _ => {}
         }
     }
