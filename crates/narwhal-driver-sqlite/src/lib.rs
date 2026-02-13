@@ -552,9 +552,15 @@ impl Connection for SqliteConnection {
 
         let indexes = self.list_indexes(&escaped).await.unwrap_or_default();
         let foreign_keys = self.list_foreign_keys(&escaped).await.unwrap_or_default();
+        // Sprint 6 (M16): align with the MySQL driver's policy —
+        // every UNIQUE index that isn't the implicit PRIMARY is a
+        // surfaced constraint, including single-column ones. The old
+        // `columns.len() > 1` filter dropped single-column UNIQUEs and
+        // produced a different table-schema shape across drivers,
+        // which surprised cross-driver tooling.
         let unique_constraints = indexes
             .iter()
-            .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+            .filter(|i| i.unique && !i.primary)
             .map(|i| UniqueConstraint {
                 name: i.name.clone(),
                 columns: i.columns.clone(),

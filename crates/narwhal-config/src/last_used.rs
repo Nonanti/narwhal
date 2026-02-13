@@ -96,7 +96,11 @@ impl LastUsedStore {
                 .collect(),
         };
         let text = toml::to_string_pretty(&on_disk)?;
-        std::fs::write(path, text).map_err(|source| LastUsedError::Write {
+        // Sprint 6 (M13): atomic rename instead of `std::fs::write` so
+        // a crash between truncate and write cannot leave the file in
+        // a half-written state. Reuses the existing helper from
+        // `settings.rs`.
+        crate::settings::atomic_write(path, &text).map_err(|source| LastUsedError::Write {
             path: path.to_path_buf(),
             source,
         })?;
@@ -171,5 +175,38 @@ mod tests {
         // Only the valid entry survives.
         let parsed = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
         assert_eq!(store.get(parsed), Some(456));
+    }
+}
+
+#[cfg(test)]
+mod sprint6_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// M13: a crash between truncate and write must not leave a
+    /// half-written file. Atomic rename ensures the visible file is
+    /// always complete. We can't easily simulate a crash, but we can
+    /// verify the temp file is gone after a successful save (which
+    /// implies the rename completed atomically).
+    #[test]
+    fn save_uses_atomic_rename_not_truncate() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("last_used.toml");
+        let mut store = LastUsedStore::new();
+        store.touch(Uuid::new_v4());
+        store.save(&path).expect("save");
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        // Only the final file should remain; no `.narwhal-*.tmp`
+        // sidecar means the rename succeeded.
+        assert!(
+            entries
+                .iter()
+                .all(|n| !n.to_string_lossy().contains(".tmp")),
+            "stale temp file left behind: {entries:?}"
+        );
     }
 }

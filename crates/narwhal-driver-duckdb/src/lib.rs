@@ -746,9 +746,13 @@ impl Connection for DuckdbConnection {
                 Vec::new()
             }
         };
+        // Sprint 6 (M16): align with the MySQL/SQLite policy — every
+        // non-PRIMARY UNIQUE index is surfaced, including single-column
+        // ones. The previous `> 1` filter produced inconsistent
+        // table-schema shapes across drivers.
         let unique_constraints = indexes
             .iter()
-            .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+            .filter(|i| i.unique && !i.primary)
             .map(|i| UniqueConstraint {
                 name: i.name.clone(),
                 columns: i.columns.clone(),

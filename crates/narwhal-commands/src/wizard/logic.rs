@@ -284,14 +284,23 @@ impl ConnectionWizard {
                         // Clone the SecretString — the only copy beyond the
                         // field itself, and it will be consumed by
                         // `commit_wizard` → `credentials.set`.
-                        password = Some(match &field.value {
+                        // Sprint 6 (M10): drop the prod `unreachable!`.
+                        // A future field-mutation bug that lands a
+                        // Public value here would panic in release; we
+                        // now log + skip so the wizard surfaces the
+                        // misconfiguration instead of crashing.
+                        password = match &field.value {
                             WizardFieldValue::Public(_) => {
-                                unreachable!("password field is always Secret")
+                                tracing::warn!(
+                                    target: "narwhal::wizard",
+                                    "password field unexpectedly held a Public value; skipping",
+                                );
+                                None
                             }
-                            WizardFieldValue::Secret(s) => {
-                                SecretString::new(s.expose_secret().to_owned().into_boxed_str())
-                            }
-                        });
+                            WizardFieldValue::Secret(s) => Some(SecretString::new(
+                                s.expose_secret().to_owned().into_boxed_str(),
+                            )),
+                        };
                     }
                 }
                 WizardFieldKind::Path => {
