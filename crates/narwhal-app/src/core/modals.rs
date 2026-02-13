@@ -274,6 +274,16 @@ impl AppCore {
                     }
                 }
                 if let Some(secret) = secret {
+                    // Sprint 9 (H7): keep this synchronous on purpose.
+                    // The user just pressed Enter to commit the
+                    // wizard; surfacing the keyring outcome inline lets
+                    // us populate `wizard_error` *before* the modal
+                    // closes so the user sees "saved, but keyring
+                    // failed" instead of a silent dismissal. The
+                    // expected duration is sub-second (libsecret is
+                    // already unlocked) and the wizard view is the
+                    // user's mental "loading" surface for the entire
+                    // commit step.
                     if let Err(error) = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current()
                             .block_on(self.credentials.set(connection_id, secret))

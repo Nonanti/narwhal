@@ -169,17 +169,27 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
             ssl_opts = ssl_opts.with_root_certs(vec![path.clone().into()]);
         }
 
-        if config.params.ssl_cert.is_some() && config.params.ssl_key.is_some() {
-            let cert_path = config.params.ssl_cert.clone();
-            let key_path = config.params.ssl_key.clone();
-            let identity = ClientIdentity::new(cert_path.unwrap().into(), key_path.unwrap().into());
+        // Sprint 8 (H12): the previous implementation guarded with
+        // `is_some() && is_some()` and then called `.unwrap()` on both
+        // — a project-style violation that would panic if a future
+        // refactor split the guard from the unwrap. Use `if let`
+        // pattern matching so the guarantee comes from the type
+        // system, not from the eyeball check.
+        if let (Some(cert_path), Some(key_path)) = (&config.params.ssl_cert, &config.params.ssl_key)
+        {
+            let identity = ClientIdentity::new(cert_path.clone().into(), key_path.clone().into());
             ssl_opts = ssl_opts.with_client_identity(Some(identity));
         }
 
-        // M2: For verify-ca / verify-full, enforce server certificate
-        // verification. For prefer/require, chain-verify but skip hostname.
-        // Neither prefer nor require accepts invalid (self-signed) certs.
-        let skip_domain = !matches!(config.params.ssl_mode, SslMode::VerifyFull);
+        // Sprint 8 (H11): tighten `SslMode::Prefer` to also enforce
+        // hostname verification, matching the PostgreSQL driver's
+        // policy. The previous behaviour silently downgraded `Prefer`
+        // to chain-only verification, which surprised operators who
+        // assumed the two drivers behaved identically when configured
+        // with the same `SslMode`. Only `Require` (the documented
+        // "encryption without identity check" mode) keeps the lax
+        // hostname behaviour now.
+        let skip_domain = matches!(config.params.ssl_mode, SslMode::Require);
         let accept_invalid_certs = false;
 
         ssl_opts = ssl_opts.with_danger_skip_domain_validation(skip_domain);

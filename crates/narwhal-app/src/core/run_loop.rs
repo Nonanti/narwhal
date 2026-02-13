@@ -340,6 +340,15 @@ impl AppCore {
             MetaUpdate::MetaFailed { message } => {
                 self.status.message = message;
             }
+            MetaUpdate::TestCompleted { label, result } => {
+                // Sprint 9 (H7): `:test <name|url>` outcome from the
+                // meta worker. The status bar is the only side-effect
+                // — no session is opened, no plugin pool published.
+                self.status.message = match result {
+                    Ok(driver_name) => format!("test ok: {label} · {driver_name}"),
+                    Err(message) => format!("test failed: {label} — {message}"),
+                };
+            }
         }
     }
 
@@ -406,6 +415,16 @@ impl AppCore {
     /// use from `handle_key`. Uses `block_in_place` so the multi-thread
     /// runtime keeps draining other workers; the wait is bounded by
     /// the inner timeout in `await_pending_session_opens`.
+    ///
+    /// Sprint 9 (H7) deferred: removing this last bridge requires
+    /// `handle_key` itself to be `async`, which cascades through
+    /// `execute_command`, `handle_mouse`, `editor_paste`, every
+    /// `dispatch_*` arm, and ~33 test sites. The wait is capped at
+    /// 2 seconds inside `await_pending_session_opens` so a hung
+    /// worker cannot deadlock the UI; in practice the wait is
+    /// sub-millisecond because the `OpenSession` worker has
+    /// already completed by the time the user's next keypress
+    /// arrives.
     pub fn await_pending_session_opens_sync(&mut self) {
         if tokio::runtime::Handle::try_current().is_ok() {
             tokio::task::block_in_place(|| {

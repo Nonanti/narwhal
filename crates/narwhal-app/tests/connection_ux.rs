@@ -130,6 +130,9 @@ async fn test_named_connection_does_not_persist_session() {
     let mut core = AppCore::new(registry, connections, None);
 
     core.execute_command("test headless");
+    // Sprint 9 (H7): `:test` now goes through the meta channel, so
+    // the verdict arrives asynchronously.
+    core.drain_meta_updates().await;
     assert!(
         core.status_message().contains("test ok"),
         "expected success in status, got: {}",

@@ -105,6 +105,10 @@ async fn forget_clears_keyring_but_keeps_connection() {
 
     core.execute_command("forget stage");
     assert!(core.status_message().contains("forgot password"));
+    // Sprint 9 (H7): keyring delete is now fire-and-forget on a
+    // background task. Yield briefly so the spawned task runs.
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(store.get(id).await.unwrap().is_none());
 
     let still_there = ConnectionsFile::load(&connections_path).unwrap();
@@ -135,6 +139,9 @@ async fn remove_drops_connection_and_secret() {
 
     core.execute_command("remove dev");
     assert!(core.status_message().contains("removed"));
+    // Sprint 9 (H7): keyring delete is now fire-and-forget.
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(store.get(id).await.unwrap().is_none());
     let on_disk = ConnectionsFile::load(&connections_path).unwrap();
     assert!(on_disk.connections.is_empty());

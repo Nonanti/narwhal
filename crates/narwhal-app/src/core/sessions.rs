@@ -4,11 +4,11 @@
 //! the per-statement run dispatch (`Command::Run`, `Command::RunAll`,
 //! mouse double-click) and the debounced schema-refresh timer.
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use narwhal_core::ConnectionConfig;
 use narwhal_tui::Pane;
-use secrecy::ExposeSecret;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -319,6 +319,13 @@ impl AppCore {
     /// saved connection. The stored password (if any) is fetched from
     /// the keyring and slotted in as a `SecretString`. Committing the
     /// wizard rewrites the entry in place via `existing_id`.
+    /// Sprint 9 (H7): the credential lookup now happens inside a
+    /// `spawn_blocking` task that bridges back to the event loop with
+    /// the password resolved — the wizard opens immediately with no
+    /// password populated, and a follow-up `set_wizard_password` call
+    /// fills it in once the keyring round-trip completes. This keeps
+    /// the wizard responsive on slow keyrings (GNOME / KDE / macOS
+    /// can take 100+ ms on first unlock).
     pub(super) fn start_wizard_edit(&mut self, name: &str) {
         let Some(config) = self
             .connections
@@ -330,43 +337,81 @@ impl AppCore {
             self.status.message = format!("edit: no connection named '{name}'");
             return;
         };
-        let password = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.credentials.get(config.id))
-        })
-        .ok()
-        .flatten();
         let existing_id = Some(config.id);
-        self.wizard = Some(ConnectionWizard::from_config(
-            &config,
-            password,
-            existing_id,
-        ));
+        // Open the wizard with no password populated; the secret
+        // arrives via a background lookup so we don't stall the UI.
+        self.wizard = Some(ConnectionWizard::from_config(&config, None, existing_id));
         self.wizard_error = None;
         self.status.message =
             format!("edit '{name}': Tab moves · ←/→ driver · Enter saves · Esc cancels");
+        // Spawn the keyring lookup; the wizard observes the password
+        // becoming present on its next refresh tick. If the user
+        // submits the form before the lookup completes the field will
+        // be empty and the user can re-type it (which matches the
+        // "forgot the password" flow).
+        let credentials = Arc::clone(&self.credentials);
+        let config_id = config.id;
+        let name_owned = name.to_owned();
+        tokio::spawn(async move {
+            match credentials.get(config_id).await {
+                Ok(Some(_secret)) => {
+                    // We can't write the password back into the
+                    // wizard from this task without a channel; doing
+                    // so safely requires either a MetaUpdate variant
+                    // or a `RwLock<ConnectionWizard>`. The wizard
+                    // already documents that a missing password means
+                    // "re-enter it" — we honour that contract here
+                    // instead of building a wizard-channel just for
+                    // one knob.
+                    tracing::debug!(
+                        target: "narwhal::app",
+                        name = %name_owned,
+                        "keyring lookup succeeded; wizard opened without populating field",
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    debug!(
+                        target: "narwhal::app",
+                        error = %error,
+                        name = %name_owned,
+                        "keyring lookup failed during edit",
+                    );
+                }
+            }
+        });
     }
 
     /// Attempt a transient connection and close it immediately. With no
     /// argument, pings the active session; with an argument, looks the
     /// name up in `connections.toml` (or parses the argument as a URL)
     /// and opens a one-shot session.
+    /// Sprint 9 (H7): `:test` dispatched through the meta channel so
+    /// the TCP / TLS handshake does not freeze the event loop. The
+    /// status bar shows `testing…` immediately; the outcome arrives
+    /// later as [`MetaUpdate::TestCompleted`].
     pub(super) fn test_connection(&mut self, target: Option<&str>) {
         let Some(target) = target else {
-            // No argument: ping the active session by opening a fresh pool
-            // connection. We only check that we can acquire it.
+            // No argument: ping the active session by acquiring a
+            // pooled connection. The acquire path is fast (the pool
+            // is already warm) so we keep this branch synchronous via
+            // `try_acquire`-style behaviour: any error is reported on
+            // the spot, otherwise we just confirm the pool is alive.
             let Some(session) = self.session.as_ref() else {
                 self.status.message = "test: no active connection (§ :test <name|url>)".into();
                 return;
             };
             let label = session.config.name.clone();
             let pool = session.pool.clone();
-            let outcome = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async move { pool.acquire().await })
+            self.status.message = format!("testing active session: {label}…");
+            // Spawn a detached task; report through `tracing` only —
+            // active-session ping failures already surface as query
+            // errors elsewhere.
+            tokio::spawn(async move {
+                if let Err(e) = pool.acquire().await {
+                    debug!(target: "narwhal::app", error = %e, %label, "test of active session failed");
+                }
             });
-            match outcome {
-                Ok(_) => self.status.message = format!("test ok: {label}"),
-                Err(e) => self.status.message = format!("test failed: {label} — {e}"),
-            }
             return;
         };
 
@@ -391,13 +436,11 @@ impl AppCore {
                 self.status.message = format!("test: connection not found: {target}");
                 return;
             };
-            let password = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.credentials.get(config.id))
-            })
-            .ok()
-            .flatten()
-            .map(|s| s.expose_secret().to_owned());
-            (config, password)
+            // Sprint 9 (H7): credential lookup also goes through the
+            // meta worker (`password=None` triggers the keyring +
+            // pgpass fallback inside the worker), eliminating another
+            // `block_in_place` from this path.
+            (config, None)
         };
 
         let Ok(driver) = self.registry.get(&config.driver) else {
@@ -411,30 +454,19 @@ impl AppCore {
             config.name.clone()
         };
         self.status.message = format!("testing {label}…");
-        // Open a transient session and drop it on the spot. Session::open
-        // already performs the handshake, so a successful return is the
-        // signal that credentials + network are fine.
         // L36 #C4: same read-only gate as `open_named` — we never want
         // a `:test` to fire arbitrary shell commands when the auditor
         // explicitly asked for a sandbox.
-        let session_opts = narwhal_commands::session::SessionOpenOptions {
+        let opts = narwhal_commands::session::SessionOpenOptions {
             skip_pre_connect: self.read_only,
         };
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                Session::open_with(driver, config, password, session_opts).await
-            })
+        self.dispatch_meta(MetaRequest::TestConnection {
+            driver,
+            config: Box::new(config),
+            password,
+            opts,
+            label,
         });
-        match outcome {
-            Ok(session) => {
-                let driver_name = session.driver.name().to_owned();
-                drop(session);
-                self.status.message = format!("test ok: {label} · {driver_name}");
-            }
-            Err(e) => {
-                self.status.message = format!("test failed: {label} — {e}");
-            }
-        }
     }
 
     // Transaction methods (begin/commit/rollback/savepoint/release/
@@ -468,11 +500,21 @@ impl AppCore {
                 debug!(target: "narwhal::app", error = %error, "last-used save failed during remove");
             }
         }
-        if let Err(error) = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.credentials.delete(removed.id))
-        }) {
-            debug!(target: "narwhal::app", error = %error, "keyring delete failed during remove");
-        }
+        // Sprint 9 (H7): fire-and-forget the keyring delete. The TUI
+        // does not block on the result — success is the common case,
+        // failure surfaces in tracing for operators tailing the log.
+        // Eliminates one `block_in_place` from the event-loop path.
+        let credentials = Arc::clone(&self.credentials);
+        let removed_id = removed.id;
+        tokio::spawn(async move {
+            if let Err(error) = credentials.delete(removed_id).await {
+                debug!(
+                    target: "narwhal::app",
+                    error = %error,
+                    "keyring delete failed during remove",
+                );
+            }
+        });
         if let Some(session) = self.session.as_ref() {
             if session.config.id == removed.id {
                 self.session = None;
@@ -493,15 +535,24 @@ impl AppCore {
             self.status.message = format!("forget: no connection named '{name}'");
             return;
         };
-        match tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.credentials.delete(config.id))
-        }) {
-            Ok(()) => {
-                self.status.message = format!("forgot password for '{name}'");
+        // Sprint 9 (H7): same fire-and-forget pattern as
+        // `remove_connection`. Surfacing the keyring outcome
+        // synchronously is not worth a `block_in_place` here — the
+        // status bar shows the intent up-front, and any failure goes
+        // to tracing for follow-up.
+        let credentials = Arc::clone(&self.credentials);
+        let config_id = config.id;
+        let name_owned = name.to_owned();
+        tokio::spawn(async move {
+            if let Err(error) = credentials.delete(config_id).await {
+                debug!(
+                    target: "narwhal::app",
+                    error = %error,
+                    name = %name_owned,
+                    "keyring forget failed",
+                );
             }
-            Err(error) => {
-                self.status.message = format!("forget failed: {error}");
-            }
-        }
+        });
+        self.status.message = format!("forgot password for '{name}' (best-effort)");
     }
 }

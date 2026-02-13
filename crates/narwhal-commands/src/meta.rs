@@ -67,6 +67,27 @@ pub enum MetaRequest {
         /// `skip_pre_connect` under `--read-only`.
         opts: SessionOpenOptions,
     },
+
+    /// Sprint 9 (H7): a `:test <name|url>` request. The worker
+    /// resolves credentials, dials the database, drops the session,
+    /// and reports the outcome via [`MetaUpdate::TestCompleted`].
+    /// Eliminates the `block_in_place` that previously froze the UI
+    /// for the full TCP / TLS handshake when the user invoked `:test`.
+    TestConnection {
+        /// Driver instance for the connection under test.
+        driver: Arc<dyn DatabaseDriver>,
+        /// Connection metadata. Boxed for the same reason as
+        /// `OpenSession::config`.
+        config: Box<ConnectionConfig>,
+        /// Optional pre-resolved password (parsed from the DSN form).
+        /// `None` triggers the credential-store + pgpass lookup.
+        password: Option<String>,
+        /// Sandbox flag mirrored from `OpenSession`.
+        opts: SessionOpenOptions,
+        /// Label shown in the status bar ("test ok: <label>" /
+        /// "test failed: <label>").
+        label: String,
+    },
 }
 
 impl std::fmt::Debug for MetaRequest {
@@ -86,6 +107,11 @@ impl std::fmt::Debug for MetaRequest {
             Self::OpenSession { config, opts, .. } => f
                 .debug_struct("OpenSession")
                 .field("config.name", &config.name)
+                .field("opts", opts)
+                .finish(),
+            Self::TestConnection { label, opts, .. } => f
+                .debug_struct("TestConnection")
+                .field("label", label)
                 .field("opts", opts)
                 .finish(),
         }
@@ -140,6 +166,16 @@ pub enum MetaUpdate {
     MetaFailed {
         /// Human-readable error message.
         message: String,
+    },
+
+    /// Response to [`MetaRequest::TestConnection`]. `Ok(driver_name)`
+    /// indicates a successful round-trip; `Err(message)` carries the
+    /// engine-level reason. The status bar applies the verdict.
+    TestCompleted {
+        /// Label echoed back from the request.
+        label: String,
+        /// `Ok(driver_name)` on success, `Err(message)` on failure.
+        result: Result<String, String>,
     },
 }
 
@@ -227,6 +263,36 @@ pub fn spawn_meta_request(
                     Err(error) => Err(error.to_string()),
                 };
                 MetaUpdate::SessionOpened { config_id, result }
+            }
+            MetaRequest::TestConnection {
+                driver,
+                config,
+                password,
+                opts,
+                label,
+            } => {
+                let resolved = match password {
+                    Some(p) => Some(p),
+                    None => resolve_password(credentials.as_deref(), &config).await,
+                };
+                let result = match Session::open_with(
+                    Arc::clone(&driver),
+                    (*config).clone(),
+                    resolved,
+                    opts,
+                )
+                .await
+                {
+                    Ok(session) => {
+                        let driver_name = session.driver.name().to_owned();
+                        // Drop the session immediately — we only
+                        // needed to know the handshake worked.
+                        drop(session);
+                        Ok(driver_name)
+                    }
+                    Err(e) => Err(e.to_string()),
+                };
+                MetaUpdate::TestCompleted { label, result }
             }
             MetaRequest::LoadHistory { limit } => {
                 let Some(journal) = history else {

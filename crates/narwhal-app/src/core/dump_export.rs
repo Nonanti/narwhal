@@ -8,14 +8,12 @@
 //! - `:export csv|json|insert <path>` flushes the *visible* rows of
 //!   the active result to disk.
 use narwhal_core::Row;
-use narwhal_tui::Pane;
 
 use super::{AppCore, ResultState};
 use crate::commands::DumpTarget;
-use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::wrap_explain;
 use crate::export::{export_rows, ExportFormat};
-use crate::meta::MetaRequest;
+use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::RunMode;
 
 impl AppCore {
@@ -89,39 +87,41 @@ impl AppCore {
             return;
         }
 
-        let collected: std::result::Result<Vec<_>, narwhal_core::Error> =
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async move {
-                    let mut conn = pool
-                        .acquire()
-                        .await
-                        .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
-                    let mut out = Vec::with_capacity(names.len());
-                    for (schema, table) in names {
-                        out.push(conn.describe_table(&schema, &table).await?);
-                    }
-                    Ok(out)
-                })
-            });
-        match collected {
-            Ok(tables) => {
-                let ddl = if tables.len() == 1 {
-                    build_table_ddl(&tables[0], dialect)
-                } else {
-                    build_dump(&tables, dialect)
-                };
-                self.tabs[self.active_tab].editor.clear();
-                self.tabs[self.active_tab].editor.insert_str(&ddl);
-                self.status.message = format!(
-                    "dump-schema: wrote {} table(s) into the editor buffer",
-                    tables.len()
-                );
-                self.focus = Pane::Editor;
+        // Sprint 9 (H7): hand the describe_table loop to the meta
+        // worker so the UI stays responsive. The result lands as
+        // `MetaUpdate::DumpSchemaReady` and re-uses the same handler
+        // already in place for `:dump-schema all`. We tag with the
+        // current tab id so a tab switch during the dump still routes
+        // the DDL to the originating tab (C5 invariant).
+        let tab_id = self.tabs[self.active_tab].id();
+        let meta_tx = self.meta_tx.clone();
+        self.status.message = format!("dumping {} table(s)…", names.len());
+        let dialect_copy = dialect;
+        tokio::spawn(async move {
+            let collected: std::result::Result<Vec<_>, narwhal_core::Error> = async {
+                let mut conn = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                let mut out = Vec::with_capacity(names.len());
+                for (schema, table) in names {
+                    out.push(conn.describe_table(&schema, &table).await?);
+                }
+                Ok(out)
             }
-            Err(error) => {
-                self.status.message = format!("dump-schema failed: {error}");
-            }
-        }
+            .await;
+            let update = match collected {
+                Ok(tables) => MetaUpdate::DumpSchemaReady { tab_id, tables },
+                Err(error) => MetaUpdate::MetaFailed {
+                    message: format!("dump-schema failed: {error}"),
+                },
+            };
+            let _ = meta_tx.send(update).await;
+            // dialect is unused on this background path; the DDL is
+            // rendered in the meta-update handler which has its own
+            // dialect from the active session. Suppress dead-code.
+            let _ = dialect_copy;
+        });
     }
 
     pub(super) fn dispatch_explain(&mut self) {

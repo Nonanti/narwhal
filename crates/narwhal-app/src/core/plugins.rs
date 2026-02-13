@@ -152,9 +152,18 @@ impl AppCore {
             .map_or_else(|| command.to_owned(), |p| p.name().to_owned());
         let plugins = Arc::clone(&self.plugins);
         let command_owned = command.to_owned();
-        // Plugin dispatch is async by trait definition; bridge to the
-        // synchronous command handler via block_in_place + the current
-        // Tokio handle, the same pattern used elsewhere in AppCore.
+        // Sprint 9 (H7) deferred: an earlier attempt routed plugin
+        // dispatch through the meta channel, but 11 integration tests
+        // read `core.status_message()` synchronously right after
+        // `core.execute_command("<plugin>")` — making the outcome
+        // async requires either adding `core.drain_meta_updates()`
+        // calls to ~33 test sites or building a synchronous waiting
+        // shim that re-introduces the block. The trade-off was judged
+        // to favour keeping the test surface stable; the plugin
+        // dispatch path is also the shortest-running of the remaining
+        // bridges (handler bodies are user-controlled Lua and almost
+        // always complete in < 50 ms outside of intentional
+        // `narwhal.sql_run` round-trips). Tracked as a follow-up.
         let outcome = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async move { plugins.dispatch(&command_owned, ctx).await })

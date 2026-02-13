@@ -465,6 +465,14 @@ impl AppCore {
         let compiled = std::sync::Arc::new(compiled);
         let started = std::time::Instant::now();
         let exec_compiled = std::sync::Arc::clone(&compiled);
+        // Sprint 9 (H7) deferred: the audit path needs the outcome
+        // *and* the timing in the same scope so it can record one
+        // HistoryEntry per mutation with attributable elapsed_ms.
+        // Moving this to the meta channel would require shipping the
+        // compiled batch + journal handle to the worker (currently
+        // owned by AppCore) plus a `PendingCommitted` MetaUpdate that
+        // carries the audit payload back. Tracked as a follow-up;
+        // for now the multi-thread runtime absorbs the freeze.
         let outcome = tokio::task::block_in_place(|| {
             Handle::current().block_on(execute_batch(target, exec_compiled))
         });

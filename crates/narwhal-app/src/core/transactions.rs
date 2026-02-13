@@ -53,6 +53,17 @@ impl AppCore {
         }
         let iso = isolation.map(map_isolation);
         let pool = session.pool.clone();
+        // Sprint 9 (H7) deferred: transaction lifecycle commands
+        // (`:begin`, `:commit`, `:rollback`) keep their
+        // `block_in_place` bridge because the UI needs the engine's
+        // verdict synchronously — the next user action (typing a
+        // statement, hitting Ctrl-D, dispatching another command) is
+        // gated on knowing whether the txn is open. Moving these to
+        // the meta channel would require a `RunUpdate::TxnReady`
+        // state plus a UI "transitioning" mode for every interleaving;
+        // the multi-thread runtime keeps the rest of the workers
+        // draining during the short BEGIN round-trip so the freeze
+        // window is bounded.
         let result: std::result::Result<narwhal_pool::PooledConnection, narwhal_core::Error> =
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async move {
