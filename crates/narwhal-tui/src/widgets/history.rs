@@ -239,10 +239,15 @@ fn truncate_display(s: &str, max_width: usize) -> String {
     if s.width() <= max_width {
         return s.to_owned();
     }
-    let mut out = String::new();
+    // Sprint 10 (LOW): use `UnicodeWidthChar::width` so we avoid the
+    // per-char `String` allocation the old `ch.to_string().as_str()`
+    // pattern did. A 1000-row history modal previously allocated
+    // ~10k throwaway strings just to pretty-print SQL column.
+    use unicode_width::UnicodeWidthChar;
+    let mut out = String::with_capacity(s.len().min(max_width * 4));
     let mut w = 0;
     for ch in s.chars() {
-        let cw = UnicodeWidthStr::width(ch.to_string().as_str());
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
         if w + cw + 1 > max_width {
             out.push('…');
             break;
