@@ -275,6 +275,15 @@ impl AppCore {
             return;
         };
         let conn_arc = txn.conn.clone();
+        // Sprint 11 (Opus m1): same rationale as the begin/commit/
+        // rollback bridges above — savepoint operations
+        // (`:savepoint`, `:release`, `:rollback-to`) must complete
+        // before the next user action so the txn state is observable
+        // to the next keypress. Routing through the meta channel
+        // requires a UI "transitioning" mode plus a savepoint-aware
+        // RunUpdate variant. Deferred to the same epic as the other
+        // txn bridges. Wait window is bounded by the engine's
+        // savepoint round-trip (single-digit ms on local engines).
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 let mut guard = conn_arc.lock().await;

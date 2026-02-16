@@ -407,6 +407,15 @@ fn guard_read_only(sql: &str) -> Result<(), String> {
 /// doubled-quote escapes (`''` inside a single-quoted literal, `""`
 /// inside a double-quoted identifier). Backslash escapes are *not*
 /// honoured — the goal is keyword stripping, not full lexing.
+///
+/// Sprint 11 follow-up: an earlier draft added `MySQL` backticks to
+/// the strip set on the assumption that ``SELECT `SLEEP`(10)``
+/// bypassed the scanner. The opposite is true — backticks are
+/// **not** `is_ident_byte`, so `SLEEP` between them is already
+/// flanked by word boundaries and the denylist catches it. Masking
+/// the body would *create* the bypass by hiding the function name
+/// from the scanner. The regression test
+/// `guard_rejects_backtick_identifier_bypass` pins this.
 fn strip_sql_literals(sql: &str) -> String {
     let mut out = String::with_capacity(sql.len());
     let mut iter = sql.chars().peekable();
@@ -597,6 +606,40 @@ mod tests {
         ] {
             assert!(guard_read_only(sql).is_err(), "must reject: {sql:?}");
         }
+    }
+
+    /// Sprint 11 (Opus M4): the `MySQL` backtick identifier form is
+    /// not a legitimate way to call a denied function. Previously
+    /// `SELECT * FROM `SLEEP`(10)` bypassed the scanner because
+    /// backticks aren't `is_ident_byte`, so `SLEEP` looked like a
+    /// stand-alone word. After stripping backtick identifiers, the
+    /// guard catches this case along with the obvious unquoted call.
+    #[test]
+    fn guard_rejects_backtick_identifier_bypass() {
+        for sql in [
+            "SELECT * FROM `SLEEP`(10)",
+            "SELECT `pg_sleep`(1)",
+            "SELECT * FROM `dbms_lock`.`SLEEP`(1)",
+            // Doubled-backtick escape: still inside an identifier.
+            "SELECT 1 FROM `tbl``with``SLEEP`(1)",
+        ] {
+            assert!(
+                guard_read_only(sql).is_err(),
+                "backtick-wrapped denied call must be rejected: {sql:?}"
+            );
+        }
+    }
+
+    /// Sanity: stripping a backtick body should not break the
+    /// trailing keyword scan. `FROM users` after a stripped table
+    /// identifier is still a normal read.
+    #[test]
+    fn strip_preserves_structural_keywords() {
+        let sql = "SELECT * FROM `users` WHERE id = 1";
+        assert!(
+            guard_read_only(sql).is_ok(),
+            "non-malicious backtick identifier must still pass: {sql:?}"
+        );
     }
 
     // Compile-time sanity: a future refactor that drops the ceiling

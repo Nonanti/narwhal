@@ -74,6 +74,11 @@ async fn d_on_sidebar_table_injects_ddl() {
     // Press 'd' to fetch DDL.
     core.handle_key(key(KeyCode::Char('d')));
 
+    // Sprint 11 (Opus M1): DDL fetch now goes through the meta
+    // channel, so the reply arrives asynchronously. Drain pending
+    // updates before asserting on the editor state.
+    core.drain_meta_updates().await;
+
     // The editor should now contain the DDL.
     let editor_text = core.editor().entire_text();
     assert!(

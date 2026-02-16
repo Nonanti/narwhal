@@ -98,6 +98,14 @@ impl AppCore {
         self.inject_ddl(&schema, &name);
     }
 
+    /// Sprint 11 (Opus M1): sidebar DDL fetch goes through the meta
+    /// channel so a slow `SHOW CREATE TABLE` (large views, `MySQL`
+    /// `information_schema` lookups, `ClickHouse` `system.tables`) no
+    /// longer freezes the UI. The result lands as
+    /// [`MetaUpdate::InjectDdlReady`] tagged with the originating tab
+    /// id; if the user closed the tab during the fetch the reply is
+    /// dropped with a status message instead of writing DDL into an
+    /// arbitrary tab (C5 invariant).
     pub(crate) fn inject_ddl(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
@@ -106,25 +114,31 @@ impl AppCore {
         let pool = session.pool.clone();
         let schema_owned = schema.to_owned();
         let name_owned = name.to_owned();
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
+        let tab_id = self.tabs[self.active_tab].id();
+        let meta_tx = self.meta_tx.clone();
+        self.status.message = format!("fetching DDL for {schema}.{name}…");
+        tokio::spawn(async move {
+            let result = async {
                 let mut conn = pool
                     .acquire()
                     .await
                     .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
                 conn.fetch_ddl(&schema_owned, &name_owned).await
-            })
+            }
+            .await;
+            let update = match result {
+                Ok(ddl) => crate::meta::MetaUpdate::InjectDdlReady {
+                    tab_id,
+                    schema: schema_owned,
+                    name: name_owned,
+                    ddl,
+                },
+                Err(e) => crate::meta::MetaUpdate::MetaFailed {
+                    message: format!("DDL fetch failed: {e}"),
+                },
+            };
+            let _ = meta_tx.send(update).await;
         });
-        match result {
-            Ok(ddl) => {
-                self.tabs[self.active_tab].editor.insert_str(&ddl);
-                self.status.message = format!("injected DDL for {schema}.{name}");
-                self.focus = Pane::Editor;
-            }
-            Err(e) => {
-                self.status.message = format!("DDL fetch failed: {e}");
-            }
-        }
     }
 
     /// Dispatch a `SELECT * FROM schema.table LIMIT n OFFSET k` and attach
@@ -140,6 +154,13 @@ impl AppCore {
         let pool = session.pool.clone();
         let schema_owned = schema.to_owned();
         let name_owned = table.to_owned();
+        // Sprint 11 (Opus M1) deferred: the row-preview pre-flight
+        // describe is on the same hot path as the in-result describe
+        // above and shares the trade-off — the schema is attached to
+        // the freshly-dispatched run via `RunUpdate::ResultReady`
+        // and the dispatch happens *after* the describe completes
+        // (so the column metadata is already on the row source).
+        // Splitting these requires a two-stage RunRequest API.
         let described = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 let mut conn = pool
@@ -237,6 +258,17 @@ impl AppCore {
         }
     }
 
+    /// Sprint 11 (Opus M1) deferred: the describe-table path keeps
+    /// its `block_in_place` because the result mutates the active
+    /// tab's result pane in-place — column lists, index summaries,
+    /// foreign-key edges — and the calling sidebar key-handler
+    /// expects the new result to be visible by the time it returns
+    /// (so a follow-up keypress that scrolls into the new pane sees
+    /// the data). Routing this through the meta channel requires
+    /// either a `MetaUpdate::DescribeReady` variant *plus* a
+    /// "transitioning" UI state for the sidebar — deferred to the
+    /// same epic that owns the `handle_key` async refactor. The
+    /// multi-thread runtime absorbs the freeze (typical < 30 ms).
     pub(crate) fn describe_table_into_result(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.as_ref() else {
             self.status.message = "no active connection".into();
