@@ -104,11 +104,16 @@ async fn forget_clears_keyring_but_keeps_connection() {
     core.set_connections_path(connections_path.clone());
 
     core.execute_command("forget stage");
-    assert!(core.status_message().contains("forgot password"));
-    // Sprint 9 (H7): keyring delete is now fire-and-forget on a
-    // background task. Yield briefly so the spawned task runs.
-    tokio::task::yield_now().await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // The delete now reports back through the meta channel so the
+    // status line shows a real verdict (instead of the previous
+    // "(best-effort)" placeholder). Drain pending updates before
+    // asserting on the keyring state.
+    core.drain_meta_updates().await;
+    assert!(
+        core.status_message().contains("forgot password"),
+        "expected real success message, got: {}",
+        core.status_message()
+    );
     assert!(store.get(id).await.unwrap().is_none());
 
     let still_there = ConnectionsFile::load(&connections_path).unwrap();
@@ -189,4 +194,146 @@ async fn open_pulls_password_from_credentials() {
             .map(|s| s.expose_secret() as &str),
         Some("ignored-by-sqlite")
     );
+}
+
+/// Bug-fix regression: `:edit <name>` must prefill the wizard's
+/// password field with the stored secret. An earlier refactor moved
+/// the keyring lookup off the synchronous open path but failed to
+/// inject the result, leaving the field empty and forcing the user
+/// to retype their password every time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn edit_prefills_password_from_keyring() {
+    use narwhal_commands::wizard::WizardFieldKind;
+
+    let dir = TempDir::new().unwrap();
+    let connections_path = dir.path().join("connections.toml");
+    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+
+    let id = Uuid::new_v4();
+    let connections = ConnectionsFile {
+        connections: vec![ConnectionConfig {
+            id,
+            name: "prod".into(),
+            driver: "postgres".into(),
+            params: ConnectionParams::default(),
+        }],
+    };
+    connections.save(&connections_path).unwrap();
+    store
+        .set(id, SecretString::new("hunter2".into()))
+        .await
+        .unwrap();
+
+    let registry = DriverRegistry::with_defaults();
+    let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
+    core.set_connections_path(connections_path);
+
+    core.execute_command("edit prod");
+    assert!(core.wizard().is_some(), "wizard must open");
+    // Background keyring lookup completes via meta channel.
+    core.drain_meta_updates().await;
+
+    let wizard = core.wizard().expect("wizard still open");
+    let password_field = wizard
+        .fields
+        .iter()
+        .find(|f| f.kind == WizardFieldKind::Password)
+        .expect("password field exists");
+    assert_eq!(
+        password_field.value.expose(),
+        "hunter2",
+        "password field must be prefilled with the stored secret",
+    );
+}
+
+/// Bug-fix regression: `:test` with no argument used to send the
+/// result of `pool.acquire()` to `tracing::debug` only — the status
+/// line stayed stuck on "testing…" forever, so the user could not
+/// tell if the active session was healthy. The fix routes the ping
+/// through the meta channel and produces a real verdict.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_active_session_reports_real_verdict() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("t.db");
+    rusqlite::Connection::open(&db_path).unwrap();
+
+    let id = Uuid::new_v4();
+    let connections = ConnectionsFile {
+        connections: vec![ConnectionConfig {
+            id,
+            name: "local".into(),
+            driver: "sqlite".into(),
+            params: ConnectionParams {
+                path: Some(db_path.to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+        }],
+    };
+    let registry = DriverRegistry::with_defaults();
+    let mut core = AppCore::new(registry, connections, None);
+
+    core.execute_command("open local");
+    assert!(core.session().is_some());
+
+    core.execute_command("test");
+    // The ping is dispatched on the meta channel; wait for the
+    // verdict to arrive.
+    core.drain_meta_updates().await;
+
+    let msg = core.status_message();
+    assert!(
+        msg.contains("test ok"),
+        "`:test` (no arg) must report a real verdict, got: {msg}",
+    );
+}
+
+/// Bug-fix regression: `:forget <name>` used to show the misleading
+/// status "forgot password for 'X' (best-effort)" before the delete
+/// had actually happened (or possibly even succeeded). The fix waits
+/// for the worker's reply and surfaces a real "forgot password" or
+/// "forget failed: …" message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forget_status_reflects_real_outcome_not_best_effort() {
+    let dir = TempDir::new().unwrap();
+    let connections_path = dir.path().join("connections.toml");
+    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+
+    let id = Uuid::new_v4();
+    let connections = ConnectionsFile {
+        connections: vec![ConnectionConfig {
+            id,
+            name: "stage".into(),
+            driver: "postgres".into(),
+            params: ConnectionParams::default(),
+        }],
+    };
+    connections.save(&connections_path).unwrap();
+    store.set(id, SecretString::new("pw".into())).await.unwrap();
+
+    let registry = DriverRegistry::with_defaults();
+    let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
+    core.set_connections_path(connections_path);
+
+    core.execute_command("forget stage");
+    // Pre-drain: status should be the in-flight placeholder, *not*
+    // the misleading "(best-effort)" jargon.
+    assert!(
+        core.status_message().contains("forgetting"),
+        "in-flight status must be a progress indicator, got: {}",
+        core.status_message()
+    );
+    assert!(
+        !core.status_message().contains("best-effort"),
+        "(best-effort) placeholder must not appear, got: {}",
+        core.status_message()
+    );
+
+    core.drain_meta_updates().await;
+
+    assert!(
+        core.status_message().contains("forgot password"),
+        "final status must reflect the real outcome, got: {}",
+        core.status_message()
+    );
+    assert!(store.get(id).await.unwrap().is_none());
 }

@@ -13,7 +13,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::{AppCore, ResultBundle, ResultState, ResultView, SidebarItem};
-use crate::meta::MetaRequest;
+use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
 use crate::statements::{all_statements, statement_at_cursor};
@@ -319,13 +319,13 @@ impl AppCore {
     /// saved connection. The stored password (if any) is fetched from
     /// the keyring and slotted in as a `SecretString`. Committing the
     /// wizard rewrites the entry in place via `existing_id`.
-    /// Sprint 9 (H7): the credential lookup now happens inside a
-    /// `spawn_blocking` task that bridges back to the event loop with
-    /// the password resolved — the wizard opens immediately with no
-    /// password populated, and a follow-up `set_wizard_password` call
-    /// fills it in once the keyring round-trip completes. This keeps
-    /// the wizard responsive on slow keyrings (GNOME / KDE / macOS
-    /// can take 100+ ms on first unlock).
+    /// Open the wizard prefilled with the stored secret. The wizard
+    /// itself opens synchronously; the secret arrives on the meta
+    /// channel as [`MetaUpdate::CredentialReady`] and is injected
+    /// into the password field by `handle_meta_update`. This keeps
+    /// the open responsive on slow keyrings (GNOME / KDE / macOS
+    /// can take 100+ ms on first unlock) *without* losing the
+    /// prefill behaviour the user expects from `:edit <name>`.
     pub(super) fn start_wizard_edit(&mut self, name: &str) {
         let Some(config) = self
             .connections
@@ -338,38 +338,31 @@ impl AppCore {
             return;
         };
         let existing_id = Some(config.id);
-        // Open the wizard with no password populated; the secret
-        // arrives via a background lookup so we don't stall the UI.
+        // Open the wizard with no password populated yet; the secret
+        // is delivered on the meta channel below.
         self.wizard = Some(ConnectionWizard::from_config(&config, None, existing_id));
         self.wizard_error = None;
         self.status.message =
             format!("edit '{name}': Tab moves · ←/→ driver · Enter saves · Esc cancels");
-        // Spawn the keyring lookup; the wizard observes the password
-        // becoming present on its next refresh tick. If the user
-        // submits the form before the lookup completes the field will
-        // be empty and the user can re-type it (which matches the
-        // "forgot the password" flow).
+        // Spawn the keyring lookup and ship the result through the
+        // meta channel. The handler in `handle_meta_update` injects
+        // the secret only if the wizard is *still* open against the
+        // same connection id, so a fast typist who hits Esc before
+        // the keyring replies does not get a surprise field update.
         let credentials = Arc::clone(&self.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
+        let meta_tx = self.meta_tx.clone();
         tokio::spawn(async move {
             match credentials.get(config_id).await {
-                Ok(Some(_secret)) => {
-                    // We can't write the password back into the
-                    // wizard from this task without a channel; doing
-                    // so safely requires either a MetaUpdate variant
-                    // or a `RwLock<ConnectionWizard>`. The wizard
-                    // already documents that a missing password means
-                    // "re-enter it" — we honour that contract here
-                    // instead of building a wizard-channel just for
-                    // one knob.
-                    tracing::debug!(
-                        target: "narwhal::app",
-                        name = %name_owned,
-                        "keyring lookup succeeded; wizard opened without populating field",
-                    );
+                Ok(password) => {
+                    let _ = meta_tx
+                        .send(MetaUpdate::CredentialReady {
+                            connection_id: config_id,
+                            password,
+                        })
+                        .await;
                 }
-                Ok(None) => {}
                 Err(error) => {
                     debug!(
                         target: "narwhal::app",
@@ -377,6 +370,18 @@ impl AppCore {
                         name = %name_owned,
                         "keyring lookup failed during edit",
                     );
+                    // Surface the failure to the user instead of
+                    // dropping it on the floor — the wizard will
+                    // open with an empty password but at least the
+                    // status bar tells them why.
+                    let _ = meta_tx
+                        .send(MetaUpdate::MetaFailed {
+                            message: format!(
+                                "edit '{name_owned}': keyring lookup failed — \
+                                 enter password manually ({error})"
+                            ),
+                        })
+                        .await;
                 }
             }
         });
@@ -393,24 +398,27 @@ impl AppCore {
     pub(super) fn test_connection(&mut self, target: Option<&str>) {
         let Some(target) = target else {
             // No argument: ping the active session by acquiring a
-            // pooled connection. The acquire path is fast (the pool
-            // is already warm) so we keep this branch synchronous via
-            // `try_acquire`-style behaviour: any error is reported on
-            // the spot, otherwise we just confirm the pool is alive.
+            // pooled connection. The result lands on the meta
+            // channel as `TestCompleted` so a slow or failing pool
+            // produces a visible status line instead of staying on
+            // the "testing…" placeholder forever.
             let Some(session) = self.session.as_ref() else {
                 self.status.message = "test: no active connection (§ :test <name|url>)".into();
                 return;
             };
             let label = session.config.name.clone();
+            let driver_name = session.driver.name().to_owned();
             let pool = session.pool.clone();
+            let meta_tx = self.meta_tx.clone();
             self.status.message = format!("testing active session: {label}…");
-            // Spawn a detached task; report through `tracing` only —
-            // active-session ping failures already surface as query
-            // errors elsewhere.
             tokio::spawn(async move {
-                if let Err(e) = pool.acquire().await {
-                    debug!(target: "narwhal::app", error = %e, %label, "test of active session failed");
-                }
+                let result = match pool.acquire().await {
+                    Ok(_) => Ok(driver_name),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = meta_tx
+                    .send(MetaUpdate::TestCompleted { label, result })
+                    .await;
             });
             return;
         };
@@ -535,24 +543,28 @@ impl AppCore {
             self.status.message = format!("forget: no connection named '{name}'");
             return;
         };
-        // Sprint 9 (H7): same fire-and-forget pattern as
-        // `remove_connection`. Surfacing the keyring outcome
-        // synchronously is not worth a `block_in_place` here — the
-        // status bar shows the intent up-front, and any failure goes
-        // to tracing for follow-up.
+        // The keyring delete runs on a tokio task and reports the
+        // outcome back through the meta channel as
+        // `MetaUpdate::ForgetCompleted`. The status bar then shows a
+        // real verdict ("forgot password" / "forget failed: …")
+        // instead of the previous "(best-effort)" placeholder that
+        // left the user guessing.
         let credentials = Arc::clone(&self.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
+        let meta_tx = self.meta_tx.clone();
+        self.status.message = format!("forgetting password for '{name}'…");
         tokio::spawn(async move {
-            if let Err(error) = credentials.delete(config_id).await {
-                debug!(
-                    target: "narwhal::app",
-                    error = %error,
-                    name = %name_owned,
-                    "keyring forget failed",
-                );
-            }
+            let result = credentials
+                .delete(config_id)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = meta_tx
+                .send(MetaUpdate::ForgetCompleted {
+                    name: name_owned,
+                    result,
+                })
+                .await;
         });
-        self.status.message = format!("forgot password for '{name}' (best-effort)");
     }
 }

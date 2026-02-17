@@ -340,6 +340,36 @@ impl AppCore {
             MetaUpdate::MetaFailed { message } => {
                 self.status.message = message;
             }
+            MetaUpdate::CredentialReady {
+                connection_id,
+                password,
+            } => {
+                // Inject the secret into the open wizard *only if*
+                // the wizard is still pointed at the same connection
+                // the user asked to edit. Closed wizard, swapped to
+                // a different `:edit`, or fresh ":new" wizard — the
+                // reply is dropped on the floor instead of
+                // surprising the user with a stale prefill.
+                let Some(wizard) = self.wizard.as_mut() else {
+                    return;
+                };
+                if wizard.existing_id != Some(connection_id) {
+                    return;
+                }
+                if let Some(secret) = password {
+                    wizard.set_password(secret);
+                }
+                // Deliberately do not touch the status line here —
+                // the user already saw the "edit …" hint when they
+                // opened the wizard and a second message would just
+                // shove their cursor instructions off-screen.
+            }
+            MetaUpdate::ForgetCompleted { name, result } => {
+                self.status.message = match result {
+                    Ok(()) => format!("forgot password for '{name}'"),
+                    Err(message) => format!("forget failed for '{name}': {message}"),
+                };
+            }
             MetaUpdate::InjectDdlReady {
                 tab_id,
                 schema,
