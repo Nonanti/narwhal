@@ -19,7 +19,7 @@ use crate::run::RunMode;
 impl AppCore {
     pub(super) fn dump_schema(&mut self, target: DumpTarget) {
         let Some(_) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
 
@@ -28,9 +28,9 @@ impl AppCore {
                 // H11: Offload to the meta channel so the UI stays
                 // responsive during long-running dump_schema all.
                 self.dispatch_meta(MetaRequest::DumpSchemaAll {
-                    tab_id: self.tabs[self.active_tab].id(),
+                    tab_id: self.ui.tabs[self.ui.active_tab].id(),
                 });
-                self.status.message = "dump-schema: fetching DDL for all tables…".into();
+                self.ui.status.message = "dump-schema: fetching DDL for all tables…".into();
             }
             DumpTarget::Current | DumpTarget::Named(_) => {
                 // Current/Named targets fetch a single table's DDL;
@@ -44,7 +44,7 @@ impl AppCore {
     /// Fetch DDL for a single named or current table (synchronous path).
     fn dump_schema_single(&mut self, target: DumpTarget) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
@@ -62,11 +62,11 @@ impl AppCore {
         let names: Vec<(String, String)> = match target {
             DumpTarget::Current => {
                 if let ResultState::TableDetail { schema, .. } =
-                    self.tabs[self.active_tab].results.active_state()
+                    self.ui.tabs[self.ui.active_tab].results.active_state()
                 {
                     vec![(schema.table.schema.clone(), schema.table.name.clone())]
                 } else {
-                    self.status.message =
+                    self.ui.status.message =
                         "dump-schema: select a table in the sidebar or pass a name".into();
                     return;
                 }
@@ -75,7 +75,7 @@ impl AppCore {
                 if let Some(pair) = schemas.iter().find(|(_, t)| t == name).cloned() {
                     vec![pair]
                 } else {
-                    self.status.message = format!("dump-schema: table not found: {name}");
+                    self.ui.status.message = format!("dump-schema: table not found: {name}");
                     return;
                 }
             }
@@ -83,7 +83,7 @@ impl AppCore {
         };
 
         if names.is_empty() {
-            self.status.message = "dump-schema: nothing to dump".into();
+            self.ui.status.message = "dump-schema: nothing to dump".into();
             return;
         }
 
@@ -93,9 +93,9 @@ impl AppCore {
         // already in place for `:dump-schema all`. We tag with the
         // current tab id so a tab switch during the dump still routes
         // the DDL to the originating tab (C5 invariant).
-        let tab_id = self.tabs[self.active_tab].id();
+        let tab_id = self.ui.tabs[self.ui.active_tab].id();
         let meta_tx = self.process.meta_tx.clone();
-        self.status.message = format!("dumping {} table(s)…", names.len());
+        self.ui.status.message = format!("dumping {} table(s)…", names.len());
         let dialect_copy = dialect;
         tokio::spawn(async move {
             let collected: std::result::Result<Vec<_>, narwhal_core::Error> = async {
@@ -126,53 +126,53 @@ impl AppCore {
 
     pub(super) fn dispatch_explain(&mut self) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         if session.driver.name() != "postgres" {
-            self.status.message = "explain is only supported on postgres for now".into();
+            self.ui.status.message = "explain is only supported on postgres for now".into();
             return;
         }
         let Some(sql) = crate::statements::statement_at_cursor(
-            &self.tabs[self.active_tab].editor,
+            &self.ui.tabs[self.ui.active_tab].editor,
             session.dialect(),
         ) else {
-            self.status.message = "no statement under cursor".into();
+            self.ui.status.message = "no statement under cursor".into();
             return;
         };
         let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
         if trimmed.is_empty() {
-            self.status.message = "no statement under cursor".into();
+            self.ui.status.message = "no statement under cursor".into();
             return;
         }
         self.dispatch_batch(vec![wrap_explain(&trimmed)], RunMode::Execute);
-        self.status.message = "explaining…".into();
+        self.ui.status.message = "explaining…".into();
     }
 
     pub(super) fn export_results(&mut self, format: &str, path: &str) {
         let Some(format) = ExportFormat::from_token(format) else {
-            self.status.message = format!("unknown export format: {format} (csv|json|insert)");
+            self.ui.status.message = format!("unknown export format: {format} (csv|json|insert)");
             return;
         };
-        let (columns, rows, source_table) = match self.tabs[self.active_tab].results.active_state()
-        {
-            ResultState::Rows {
-                columns,
-                rows,
-                source_table,
-                ..
-            } => (columns.clone(), rows.clone(), source_table.clone()),
-            ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
-                (columns.clone(), rows.clone(), None)
-            }
-            _ => {
-                self.status.message = "no tabular result to export".into();
-                return;
-            }
-        };
+        let (columns, rows, source_table) =
+            match self.ui.tabs[self.ui.active_tab].results.active_state() {
+                ResultState::Rows {
+                    columns,
+                    rows,
+                    source_table,
+                    ..
+                } => (columns.clone(), rows.clone(), source_table.clone()),
+                ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
+                    (columns.clone(), rows.clone(), None)
+                }
+                _ => {
+                    self.ui.status.message = "no tabular result to export".into();
+                    return;
+                }
+            };
 
         // Respect active filter/sort: export only the visible rows.
-        let visible_indices = self.tabs[self.active_tab]
+        let visible_indices = self.ui.tabs[self.ui.active_tab]
             .results
             .active()
             .visible_rows(&columns, &rows);
@@ -187,7 +187,7 @@ impl AppCore {
             source_table.as_ref(),
         ) {
             Ok(()) => {
-                self.status.message = format!(
+                self.ui.status.message = format!(
                     "exported {} rows to {} ({})",
                     visible_rows.len(),
                     path_buf.display(),
@@ -195,7 +195,7 @@ impl AppCore {
                 );
             }
             Err(error) => {
-                self.status.message = format!("export failed: {error}");
+                self.ui.status.message = format!("export failed: {error}");
             }
         }
     }

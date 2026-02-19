@@ -23,8 +23,9 @@ use crate::wizard::DRIVERS;
 
 impl AppCore {
     pub fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let labels: Vec<String> = self.sidebar_items.iter().map(sidebar_label).collect();
+        let labels: Vec<String> = self.ui.sidebar_items.iter().map(sidebar_label).collect();
         let rows: Vec<SidebarRow<'_>> = self
+            .ui
             .sidebar_items
             .iter()
             .zip(labels.iter())
@@ -40,20 +41,25 @@ impl AppCore {
         // consistent with what the renderer is about to draw. The
         // renderer itself also clamps, but doing it here too keeps the
         // host's view of the world honest.
-        let visible = SidebarView::visible_rows(self.last_layout.sidebar.height.saturating_sub(2));
-        self.sidebar_scroll =
-            SidebarView::clamp_scroll(self.sidebar_index, self.sidebar_scroll, visible, rows.len());
+        let visible =
+            SidebarView::visible_rows(self.ui.last_layout.sidebar.height.saturating_sub(2));
+        self.ui.sidebar_scroll = SidebarView::clamp_scroll(
+            self.ui.sidebar_index,
+            self.ui.sidebar_scroll,
+            visible,
+            rows.len(),
+        );
         let sidebar_view = SidebarView {
             items: &rows,
-            selected_index: self.sidebar_index,
-            scroll_offset: self.sidebar_scroll,
-            focused: self.focus == Pane::Sidebar,
+            selected_index: self.ui.sidebar_index,
+            scroll_offset: self.ui.sidebar_scroll,
+            focused: self.ui.focus == Pane::Sidebar,
         };
         let editor_title = self.editor_title_with_tabs();
         // Read pending count before the mutable borrow below.
-        let pending_count = self.tabs[self.active_tab].pending.len();
+        let pending_count = self.ui.tabs[self.ui.active_tab].pending.len();
 
-        let tab = &mut self.tabs[self.active_tab];
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
         let search_view = tab.search.as_ref().map(|s| SearchHighlight {
             matches: &s.matches,
             current: s.current,
@@ -99,17 +105,17 @@ impl AppCore {
             };
         let result_count = tab.results.len();
         let mut layout = RootLayout {
-            mode: self.vim.mode(),
-            focus: self.focus,
+            mode: self.ui.vim.mode(),
+            focus: self.ui.focus,
             status_bar: StatusBarView {
-                connection: self.status.connection.as_deref(),
-                message: &self.status.message,
-                transaction: self.status.transaction.as_deref(),
+                connection: self.ui.status.connection.as_deref(),
+                message: &self.ui.status.message,
+                transaction: self.ui.status.transaction.as_deref(),
                 pending: Some(pending_count),
                 read_only: self.session.read_only,
             },
             running: self.process.running,
-            theme: &self.theme,
+            theme: &self.ui.theme,
             sidebar: sidebar_view,
             editor: &mut tab.editor,
             editor_title: &editor_title,
@@ -120,7 +126,7 @@ impl AppCore {
             result_count,
             active_result: active_idx,
         };
-        self.last_layout = render_root(frame, area, &mut layout);
+        self.ui.last_layout = render_root(frame, area, &mut layout);
 
         if let Some(wizard) = self.modals.wizard.as_ref() {
             let view = WizardView {
@@ -138,11 +144,11 @@ impl AppCore {
                 focused: wizard.focused,
                 error: self.modals.wizard_error.as_deref(),
             };
-            render_wizard(frame, area, &view, &self.theme);
+            render_wizard(frame, area, &view, &self.ui.theme);
         }
 
         if self.modals.help_open {
-            render_help_modal(frame, area, &self.theme);
+            render_help_modal(frame, area, &self.ui.theme);
         }
 
         if let Some(state) = self.modals.history.as_ref() {
@@ -191,7 +197,7 @@ impl AppCore {
                 filter: &state.filter,
                 selected: state.selected,
             };
-            render_history_modal(frame, area, &modal_state, &self.theme);
+            render_history_modal(frame, area, &modal_state, &self.ui.theme);
         }
 
         // Snippets modal.
@@ -200,12 +206,12 @@ impl AppCore {
                 entries: modal.entries.iter().map(String::as_str).collect(),
                 selected: modal.selected,
             };
-            render_snippets_modal(frame, area, &modal_state, &self.theme);
+            render_snippets_modal(frame, area, &modal_state, &self.ui.theme);
         }
 
         // Row detail modal — same layer as cell popup, rendered on
         // top of the result pane.
-        if let Some(state) = self.tabs[self.active_tab].row_detail.as_ref() {
+        if let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_ref() {
             let view = RowDetailView {
                 columns: &state.columns,
                 values: &state.values,
@@ -213,18 +219,18 @@ impl AppCore {
                 scroll_offset: state.scroll_offset,
                 row_index: state.row_index,
             };
-            render_row_detail(frame, area, &view, &self.theme);
+            render_row_detail(frame, area, &view, &self.ui.theme);
         }
 
         // Pending-changes preview (L36) — stacks above the result
         // pane but below the JSON viewer (which is the very top layer).
-        if self.tabs[self.active_tab].pending_preview.is_some() {
-            let mutations: Vec<String> = self.tabs[self.active_tab]
+        if self.ui.tabs[self.ui.active_tab].pending_preview.is_some() {
+            let mutations: Vec<String> = self.ui.tabs[self.ui.active_tab]
                 .pending
                 .iter()
                 .map(crate::pending::PendingMutation::summary)
                 .collect();
-            let scroll = self.tabs[self.active_tab]
+            let scroll = self.ui.tabs[self.ui.active_tab]
                 .pending_preview
                 .as_ref()
                 .map_or(0, |s| s.scroll);
@@ -232,13 +238,13 @@ impl AppCore {
                 mutations: &mutations,
                 scroll,
             };
-            narwhal_tui::render_pending_preview(frame, area, &view, &self.theme);
+            narwhal_tui::render_pending_preview(frame, area, &view, &self.ui.theme);
         }
 
         // JSON viewer (L36) — stacks above every other overlay so it
         // can be opened from the cell popup *or* from inside the row
         // detail modal.
-        if let Some(state) = self.tabs[self.active_tab].json_viewer.as_ref() {
+        if let Some(state) = self.ui.tabs[self.ui.active_tab].json_viewer.as_ref() {
             let view = narwhal_tui::JsonViewerView {
                 title: &state.title,
                 pretty: &state.pretty,
@@ -246,7 +252,7 @@ impl AppCore {
                 scroll: state.scroll,
                 parse_error: state.parse_error.as_deref(),
             };
-            narwhal_tui::render_json_viewer(frame, area, &view, &self.theme);
+            narwhal_tui::render_json_viewer(frame, area, &view, &self.ui.theme);
         }
     }
 
@@ -270,7 +276,7 @@ impl AppCore {
         // L36: JSON viewer sits at the very top of the modal stack and
         // gets first refusal on every key. Once open, no other handler
         // (help, history, wizard, ...) sees the keypress.
-        if self.tabs[self.active_tab].json_viewer.is_some() {
+        if self.ui.tabs[self.ui.active_tab].json_viewer.is_some() {
             self.handle_json_viewer_key(key);
             return;
         }
@@ -278,7 +284,7 @@ impl AppCore {
         // own scroll vocabulary; commit/discard/close are forwarded to
         // the regular Results pane handlers so users can keep their
         // muscle memory.
-        if self.tabs[self.active_tab].pending_preview.is_some() {
+        if self.ui.tabs[self.ui.active_tab].pending_preview.is_some() {
             self.handle_pending_preview_key(key);
             return;
         }
@@ -314,7 +320,7 @@ impl AppCore {
         }
         // Pending result-tab leader: `]` or `[` was pressed, waiting
         // for `r` to complete the sequence. Any other key cancels.
-        if let Some(leader) = self.pending_result_leader.take() {
+        if let Some(leader) = self.ui.pending_result_leader.take() {
             if key.code == CtKey::Char('r') && key.modifiers.is_empty() {
                 match leader {
                     ']' => self.cycle_result_tab(1),
@@ -324,7 +330,7 @@ impl AppCore {
             }
             return;
         }
-        match self.focus {
+        match self.ui.focus {
             Pane::Editor => self.handle_editor_key(key),
             Pane::Sidebar => self.handle_sidebar_key(key),
             Pane::Results => self.handle_results_key(key),
@@ -339,9 +345,9 @@ impl AppCore {
     /// (which would trip motion handlers and the modal command
     /// prompt). Other panes do not currently accept paste.
     pub fn editor_paste(&mut self, text: &str) {
-        if matches!(self.focus, Pane::Editor) {
-            self.tabs[self.active_tab].editor.insert_str(text);
-            self.status.message = format!("pasted {} char(s)", text.chars().count());
+        if matches!(self.ui.focus, Pane::Editor) {
+            self.ui.tabs[self.ui.active_tab].editor.insert_str(text);
+            self.ui.status.message = format!("pasted {} char(s)", text.chars().count());
         }
     }
 
@@ -369,7 +375,7 @@ impl AppCore {
     }
 
     fn handle_left_click(&mut self, pos: (u16, u16)) {
-        let layout = self.last_layout.clone();
+        let layout = self.ui.last_layout.clone();
 
         // Priority: completion popup > sidebar tables > result headers/rows > pane focus.
         for (rect, item_index) in &layout.completion_items {
@@ -396,7 +402,10 @@ impl AppCore {
         for (rect, col_idx) in &layout.result_headers {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
                 // Sort cycle action: move column focus and toggle sort.
-                self.tabs[self.active_tab].results.active_mut().column_index = *col_idx;
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .column_index = *col_idx;
                 self.toggle_sort();
                 return;
             }
@@ -404,12 +413,12 @@ impl AppCore {
 
         for (rect, row_idx) in &layout.result_rows {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
-                self.tabs[self.active_tab]
+                self.ui.tabs[self.ui.active_tab]
                     .results
                     .active_mut()
                     .select(Some(*row_idx));
-                self.focus = Pane::Results;
-                self.status.message = format!("focus → {}", Pane::Results.label());
+                self.ui.focus = Pane::Results;
+                self.ui.status.message = format!("focus → {}", Pane::Results.label());
                 return;
             }
         }
@@ -419,41 +428,44 @@ impl AppCore {
             .sidebar
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            self.focus = Pane::Sidebar;
-            self.status.message = format!("focus → {}", Pane::Sidebar.label());
+            self.ui.focus = Pane::Sidebar;
+            self.ui.status.message = format!("focus → {}", Pane::Sidebar.label());
         } else if layout
             .editor
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            self.focus = Pane::Editor;
-            self.status.message = format!("focus → {}", Pane::Editor.label());
+            self.ui.focus = Pane::Editor;
+            self.ui.status.message = format!("focus → {}", Pane::Editor.label());
         } else if layout
             .results
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            self.focus = Pane::Results;
-            self.status.message = format!("focus → {}", Pane::Results.label());
+            self.ui.focus = Pane::Results;
+            self.ui.status.message = format!("focus → {}", Pane::Results.label());
         }
     }
 
     fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
-        let layout = &self.last_layout;
+        let layout = &self.ui.last_layout;
 
         if layout
             .results
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            let row_count = match self.tabs[self.active_tab].results.active_state() {
+            let row_count = match self.ui.tabs[self.ui.active_tab].results.active_state() {
                 ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows.len(),
                 _ => return,
             };
             if delta > 0 {
-                self.tabs[self.active_tab]
+                self.ui.tabs[self.ui.active_tab]
                     .results
                     .active_mut()
                     .move_down(row_count);
             } else {
-                self.tabs[self.active_tab].results.active_mut().move_up();
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .move_up();
             }
         } else if layout
             .editor
@@ -464,7 +476,7 @@ impl AppCore {
             if height == 0 {
                 return;
             }
-            let buf = &mut self.tabs[self.active_tab].editor;
+            let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
             if delta > 0 {
                 // Scroll down: move cursor down
                 buf.apply_motion(DomainMotion::Down, 1);
@@ -516,10 +528,13 @@ impl AppCore {
             Command::StreamAll => self.dispatch_all_statements(RunMode::Stream),
             Command::Cancel => self.spawn_cancel(),
             Command::Clear => {
-                self.tabs[self.active_tab].editor.clear();
-                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Empty;
-                self.tabs[self.active_tab].results.active_mut().reset();
-                self.status.message = "buffer cleared".into();
+                self.ui.tabs[self.ui.active_tab].editor.clear();
+                *self.ui.tabs[self.ui.active_tab].results.active_state_mut() = ResultState::Empty;
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .reset();
+                self.ui.status.message = "buffer cleared".into();
             }
             Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
@@ -550,7 +565,7 @@ impl AppCore {
             Command::NextTab => self.cycle_tab(1),
             Command::PrevTab => self.cycle_tab(-1),
             Command::Help(None) => {
-                self.status.message =
+                self.ui.status.message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json|insert> <path> · cancel · quit"
                         .into();
             }
@@ -562,7 +577,7 @@ impl AppCore {
                     .iter()
                     .find(|(key, _)| *key == resolved)
                 {
-                    self.status.message = format!(":{name} — {desc}");
+                    self.ui.status.message = format!(":{name} — {desc}");
                 } else if let Some(plugin) = self.plugins.plugin_for(&name) {
                     // Plugin command: pull the descriptor straight off
                     // the owning plugin instead of walking the full
@@ -572,9 +587,9 @@ impl AppCore {
                         .into_iter()
                         .find(|cmd| cmd.name == name)
                         .map_or_else(|| "(no description)".into(), |cmd| cmd.description);
-                    self.status.message = format!(":{name} — {desc}");
+                    self.ui.status.message = format!(":{name} — {desc}");
                 } else {
-                    self.status.message = format!("unknown command: {name}");
+                    self.ui.status.message = format!("unknown command: {name}");
                 }
             }
             Command::Substitute {
@@ -585,11 +600,17 @@ impl AppCore {
                 confirm,
             } => self.execute_substitute(range, &pattern, &replacement, global, confirm),
             Command::NoHlSearch => {
-                self.tabs[self.active_tab].editor_search.highlight = false;
-                self.tabs[self.active_tab].editor_search.needle.clear();
-                self.tabs[self.active_tab].editor_search.matches.clear();
-                self.tabs[self.active_tab].editor_search.current = None;
-                self.status.message = "search highlight cleared".into();
+                self.ui.tabs[self.ui.active_tab].editor_search.highlight = false;
+                self.ui.tabs[self.ui.active_tab]
+                    .editor_search
+                    .needle
+                    .clear();
+                self.ui.tabs[self.ui.active_tab]
+                    .editor_search
+                    .matches
+                    .clear();
+                self.ui.tabs[self.ui.active_tab].editor_search.current = None;
+                self.ui.status.message = "search highlight cleared".into();
             }
             Command::SaveSnippet { name } => self.save_snippet(&name),
             Command::LoadSnippet { name } => self.load_snippet_by_name(&name),
@@ -605,7 +626,7 @@ impl AppCore {
                 if self.plugins.plugin_for(head).is_some() {
                     self.dispatch_plugin(head, arg);
                 } else {
-                    self.status.message = format!("unknown command: {text}");
+                    self.ui.status.message = format!("unknown command: {text}");
                 }
             }
         }
@@ -616,7 +637,7 @@ impl AppCore {
     /// Insert raw text into the editor buffer. Used by tests to seed
     /// statements without simulating individual key presses.
     pub fn insert_into_editor(&mut self, text: &str) {
-        self.tabs[self.active_tab].editor.insert_str(text);
+        self.ui.tabs[self.ui.active_tab].editor.insert_str(text);
     }
 
     // Session lifecycle (open_named, open_connection*, close_session),

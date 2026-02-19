@@ -18,15 +18,16 @@ impl AppCore {
             Some(d) => format!("editor · {d}"),
             None => "editor".to_owned(),
         };
-        if self.tabs.len() == 1 {
+        if self.ui.tabs.len() == 1 {
             return base;
         }
         let labels: Vec<String> = self
+            .ui
             .tabs
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                if i == self.active_tab {
+                if i == self.ui.active_tab {
                     format!("[{}*] {}", i + 1, t.name)
                 } else {
                     format!("[{}] {}", i + 1, t.name)
@@ -38,50 +39,50 @@ impl AppCore {
 
     pub(super) fn new_tab(&mut self) {
         if self.process.running {
-            self.status.message = "cannot open a new tab while a query is running".into();
+            self.ui.status.message = "cannot open a new tab while a query is running".into();
             return;
         }
-        let id = self.next_tab_id as u64;
+        let id = self.ui.next_tab_id as u64;
         let name = format!("untitled-{id}");
-        self.next_tab_id += 1;
-        self.tabs.push(Tab::new(id, name));
-        self.active_tab = self.tabs.len() - 1;
-        self.status.message = format!("tab {} opened", self.active_tab + 1);
-        self.focus = Pane::Editor;
+        self.ui.next_tab_id += 1;
+        self.ui.tabs.push(Tab::new(id, name));
+        self.ui.active_tab = self.ui.tabs.len() - 1;
+        self.ui.status.message = format!("tab {} opened", self.ui.active_tab + 1);
+        self.ui.focus = Pane::Editor;
     }
 
     pub(super) fn close_tab(&mut self) {
         if self.process.running {
-            self.status.message = "cannot close a tab while a query is running".into();
+            self.ui.status.message = "cannot close a tab while a query is running".into();
             return;
         }
-        if self.tabs.len() == 1 {
-            self.status.message = "last tab; use :q to quit".into();
+        if self.ui.tabs.len() == 1 {
+            self.ui.status.message = "last tab; use :q to quit".into();
             return;
         }
-        self.tabs.remove(self.active_tab);
-        if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
+        self.ui.tabs.remove(self.ui.active_tab);
+        if self.ui.active_tab >= self.ui.tabs.len() {
+            self.ui.active_tab = self.ui.tabs.len() - 1;
         }
-        self.status.message = format!("tab closed; now on {}", self.active_tab + 1);
+        self.ui.status.message = format!("tab closed; now on {}", self.ui.active_tab + 1);
     }
 
     pub(super) fn cycle_tab(&mut self, delta: i32) {
         if self.process.running {
-            self.status.message = "cannot switch tabs while a query is running".into();
+            self.ui.status.message = "cannot switch tabs while a query is running".into();
             return;
         }
-        if self.tabs.len() <= 1 {
+        if self.ui.tabs.len() <= 1 {
             return;
         }
-        let len = self.tabs.len() as i32;
-        let next = ((self.active_tab as i32) + delta).rem_euclid(len) as usize;
-        self.active_tab = next;
-        self.status.message = format!(
+        let len = self.ui.tabs.len() as i32;
+        let next = ((self.ui.active_tab as i32) + delta).rem_euclid(len) as usize;
+        self.ui.active_tab = next;
+        self.ui.status.message = format!(
             "tab {} of {} · {}",
-            self.active_tab + 1,
-            self.tabs.len(),
-            self.tabs[self.active_tab].name
+            self.ui.active_tab + 1,
+            self.ui.tabs.len(),
+            self.ui.tabs[self.ui.active_tab].name
         );
     }
 
@@ -89,7 +90,7 @@ impl AppCore {
     /// [`super::ResultBundle`]. `delta` +1 goes forward, −1 goes backward.
     /// Does nothing when the bundle has only one result.
     pub(super) fn cycle_result_tab(&mut self, delta: i32) {
-        let bundle = &mut self.tabs[self.active_tab].results;
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
         if !bundle.is_multi() {
             return;
         }
@@ -100,6 +101,6 @@ impl AppCore {
         }
         let active = bundle.active;
         let total = bundle.states.len();
-        self.status.message = format!("result {} of {total}", active + 1);
+        self.ui.status.message = format!("result {} of {total}", active + 1);
     }
 }

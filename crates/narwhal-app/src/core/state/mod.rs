@@ -10,6 +10,7 @@ pub mod sidebar;
 pub mod snippets_modal;
 pub mod status;
 pub mod tab;
+pub mod ui;
 
 pub use history::HistoryState;
 pub use modals::ModalState;
@@ -23,3 +24,4 @@ pub use sidebar::SidebarItem;
 pub use snippets_modal::SnippetsModal;
 pub use status::StatusBar;
 pub use tab::{PendingPreviewState, Tab};
+pub use ui::UiState;

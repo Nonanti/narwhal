@@ -10,13 +10,13 @@ use crate::run::RunMode;
 
 impl AppCore {
     pub(crate) fn click_sidebar_table(&mut self, sidebar_idx: usize) {
-        let Some(item) = self.sidebar_items.get(sidebar_idx).cloned() else {
+        let Some(item) = self.ui.sidebar_items.get(sidebar_idx).cloned() else {
             return;
         };
         let SidebarItem::Table { schema, name, .. } = item else {
             return;
         };
-        self.sidebar_index = sidebar_idx;
+        self.ui.sidebar_index = sidebar_idx;
         self.run_preview(&schema, &name, 0);
     }
 
@@ -28,31 +28,31 @@ impl AppCore {
         // step (3) to feel closer to the OS scroll cadence.
         const PAGE_STEP: usize = 10;
         match key.code {
-            CtKey::Char('j') | CtKey::Down if !self.sidebar_items.is_empty() => {
-                self.sidebar_index = (self.sidebar_index + 1) % self.sidebar_items.len();
+            CtKey::Char('j') | CtKey::Down if !self.ui.sidebar_items.is_empty() => {
+                self.ui.sidebar_index = (self.ui.sidebar_index + 1) % self.ui.sidebar_items.len();
             }
-            CtKey::Char('k') | CtKey::Up if !self.sidebar_items.is_empty() => {
-                let len = self.sidebar_items.len();
-                self.sidebar_index = (self.sidebar_index + len - 1) % len;
+            CtKey::Char('k') | CtKey::Up if !self.ui.sidebar_items.is_empty() => {
+                let len = self.ui.sidebar_items.len();
+                self.ui.sidebar_index = (self.ui.sidebar_index + len - 1) % len;
             }
             CtKey::PageDown | CtKey::Char('d')
                 if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !self.sidebar_items.is_empty() =>
+                    && !self.ui.sidebar_items.is_empty() =>
             {
-                let len = self.sidebar_items.len();
-                self.sidebar_index = (self.sidebar_index + PAGE_STEP).min(len - 1);
+                let len = self.ui.sidebar_items.len();
+                self.ui.sidebar_index = (self.ui.sidebar_index + PAGE_STEP).min(len - 1);
             }
             CtKey::PageUp | CtKey::Char('u')
                 if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !self.sidebar_items.is_empty() =>
+                    && !self.ui.sidebar_items.is_empty() =>
             {
-                self.sidebar_index = self.sidebar_index.saturating_sub(PAGE_STEP);
+                self.ui.sidebar_index = self.ui.sidebar_index.saturating_sub(PAGE_STEP);
             }
-            CtKey::Home if !self.sidebar_items.is_empty() => {
-                self.sidebar_index = 0;
+            CtKey::Home if !self.ui.sidebar_items.is_empty() => {
+                self.ui.sidebar_index = 0;
             }
-            CtKey::End if !self.sidebar_items.is_empty() => {
-                self.sidebar_index = self.sidebar_items.len() - 1;
+            CtKey::End if !self.ui.sidebar_items.is_empty() => {
+                self.ui.sidebar_index = self.ui.sidebar_items.len() - 1;
             }
             CtKey::Enter => self.activate_sidebar_selection(),
             CtKey::Char('o') => self.preview_sidebar_selection(),
@@ -65,20 +65,20 @@ impl AppCore {
     /// the selection. Mouse-wheel handlers call this so the user can
     /// inspect off-screen rows before committing to a click.
     pub(crate) fn scroll_sidebar(&mut self, delta: isize) {
-        if self.sidebar_items.is_empty() {
+        if self.ui.sidebar_items.is_empty() {
             return;
         }
-        let max = self.sidebar_items.len().saturating_sub(1);
-        let new = (self.sidebar_scroll as isize + delta).clamp(0, max as isize) as usize;
-        self.sidebar_scroll = new;
+        let max = self.ui.sidebar_items.len().saturating_sub(1);
+        let new = (self.ui.sidebar_scroll as isize + delta).clamp(0, max as isize) as usize;
+        self.ui.sidebar_scroll = new;
     }
 
     pub(crate) fn preview_sidebar_selection(&mut self) {
-        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+        let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
         let SidebarItem::Table { schema, name, .. } = item else {
-            self.status.message = "select a table to preview".into();
+            self.ui.status.message = "select a table to preview".into();
             return;
         };
         self.run_preview(&schema, &name, 0);
@@ -88,11 +88,11 @@ impl AppCore {
     /// injects it into the editor at the cursor. No auto-run — the
     /// user inspects and decides.
     pub(crate) fn ddl_sidebar_selection(&mut self) {
-        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+        let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
         let SidebarItem::Table { schema, name, .. } = item else {
-            self.status.message = "select a table to fetch DDL".into();
+            self.ui.status.message = "select a table to fetch DDL".into();
             return;
         };
         self.inject_ddl(&schema, &name);
@@ -108,15 +108,15 @@ impl AppCore {
     /// arbitrary tab (C5 invariant).
     pub(crate) fn inject_ddl(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let pool = session.pool.clone();
         let schema_owned = schema.to_owned();
         let name_owned = name.to_owned();
-        let tab_id = self.tabs[self.active_tab].id();
+        let tab_id = self.ui.tabs[self.ui.active_tab].id();
         let meta_tx = self.process.meta_tx.clone();
-        self.status.message = format!("fetching DDL for {schema}.{name}…");
+        self.ui.status.message = format!("fetching DDL for {schema}.{name}…");
         tokio::spawn(async move {
             let result = async {
                 let mut conn = pool
@@ -146,11 +146,11 @@ impl AppCore {
     /// pagination work.
     pub(crate) fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
-        let limit = self.tabs[self.active_tab].page_size;
+        let limit = self.ui.tabs[self.ui.active_tab].page_size;
         let pool = session.pool.clone();
         let schema_owned = schema.to_owned();
         let name_owned = table.to_owned();
@@ -203,41 +203,41 @@ impl AppCore {
             }
         };
         let sql = crate::ddl::preview_query_paged(schema, table, limit, offset, dialect);
-        self.tabs[self.active_tab].pending_source = source;
+        self.ui.tabs[self.ui.active_tab].pending_source = source;
         self.dispatch_batch(vec![sql], RunMode::Execute);
-        self.focus = Pane::Results;
+        self.ui.focus = Pane::Results;
     }
 
     pub(crate) fn next_page(&mut self) {
         let Some((schema, table, offset)) = self.current_preview_target() else {
-            self.status.message = "no preview to paginate; select a table first".into();
+            self.ui.status.message = "no preview to paginate; select a table first".into();
             return;
         };
-        let limit = self.tabs[self.active_tab].page_size;
+        let limit = self.ui.tabs[self.ui.active_tab].page_size;
         self.run_preview(&schema, &table, offset + limit);
     }
 
     pub(crate) fn prev_page(&mut self) {
         let Some((schema, table, offset)) = self.current_preview_target() else {
-            self.status.message = "no preview to paginate; select a table first".into();
+            self.ui.status.message = "no preview to paginate; select a table first".into();
             return;
         };
         if offset == 0 {
-            self.status.message = "already on the first page".into();
+            self.ui.status.message = "already on the first page".into();
             return;
         }
-        let limit = self.tabs[self.active_tab].page_size;
+        let limit = self.ui.tabs[self.ui.active_tab].page_size;
         let new_offset = offset.saturating_sub(limit);
         self.run_preview(&schema, &table, new_offset);
     }
 
     pub(crate) fn set_page_size(&mut self, size: usize) {
-        self.tabs[self.active_tab].page_size = size;
-        self.status.message = format!("page size set to {size}");
+        self.ui.tabs[self.ui.active_tab].page_size = size;
+        self.ui.status.message = format!("page size set to {size}");
     }
 
     pub(crate) fn current_preview_target(&self) -> Option<(String, String, usize)> {
-        match self.tabs[self.active_tab].results.active_state() {
+        match self.ui.tabs[self.ui.active_tab].results.active_state() {
             ResultState::Rows {
                 source: Some(s), ..
             } => Some((s.schema.clone(), s.table.clone(), s.offset)),
@@ -246,7 +246,7 @@ impl AppCore {
     }
 
     pub(crate) fn activate_sidebar_selection(&mut self) {
-        let Some(item) = self.sidebar_items.get(self.sidebar_index).cloned() else {
+        let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
         match item {
@@ -271,7 +271,7 @@ impl AppCore {
     /// multi-thread runtime absorbs the freeze (typical < 30 ms).
     pub(crate) fn describe_table_into_result(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let pool = session.pool.clone();
@@ -310,21 +310,25 @@ impl AppCore {
                         ),
                     );
                 }
-                self.tabs[self.active_tab].results.active_mut().reset();
-                self.status.message = format!(
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .reset();
+                self.ui.status.message = format!(
                     "{table_schema}.{table_name}: {col_count} cols·{idx_count} idx·{fk_count} fk"
                 );
-                *self.tabs[self.active_tab].results.active_state_mut() = ResultState::TableDetail {
-                    schema: ts,
-                    active_meta_tab: narwhal_tui::MetaTab::default(),
-                };
+                *self.ui.tabs[self.ui.active_tab].results.active_state_mut() =
+                    ResultState::TableDetail {
+                        schema: ts,
+                        active_meta_tab: narwhal_tui::MetaTab::default(),
+                    };
                 // L36: hand focus to the results pane so 1–5 land on
                 // the new tab strip without the user first having to
                 // cycle panes with Ctrl-W.
-                self.focus = narwhal_tui::Pane::Results;
+                self.ui.focus = narwhal_tui::Pane::Results;
             }
             Err(error) => {
-                self.status.message = format!("describe failed: {error}");
+                self.ui.status.message = format!("describe failed: {error}");
             }
         }
     }

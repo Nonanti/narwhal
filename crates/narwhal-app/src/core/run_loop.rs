@@ -11,7 +11,9 @@ use narwhal_tui::{ExplainPlanLine, Pane};
 
 use super::render_helpers::{extract_explain_plan, is_explain_result};
 use super::text_utils::truncate;
-use super::{AppCore, HistoryState, ResultBundle, ResultState, ResultView};
+use narwhal_tui::ResultView;
+
+use super::{AppCore, HistoryState, ResultBundle, ResultState};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::meta::{spawn_meta_request, MetaRequest, MetaUpdate};
 use crate::run::RunUpdate;
@@ -37,7 +39,7 @@ impl AppCore {
                 }
             }
         });
-        self.status.message = "cancellation requested".into();
+        self.ui.status.message = "cancellation requested".into();
     }
 
     /// Receive the next [`RunUpdate`] from the worker channel.
@@ -60,7 +62,7 @@ impl AppCore {
         match update {
             RunUpdate::StatementStarted { index, total, sql } => {
                 let streaming = matches!(
-                    self.tabs[rt].results.active_state(),
+                    self.ui.tabs[rt].results.active_state(),
                     ResultState::Running {
                         streaming: true,
                         ..
@@ -73,13 +75,13 @@ impl AppCore {
                 // Note: `index` is 1-based, so index > 1 means we are
                 // past the first StatementStarted.
                 if index > 1 {
-                    let state = self.tabs[rt].results.states.swap_remove(0);
-                    let view = self.tabs[rt].results.views.swap_remove(0);
-                    self.pending_result_entries_states.push(state);
-                    self.pending_result_entries_views.push(view);
+                    let state = self.ui.tabs[rt].results.states.swap_remove(0);
+                    let view = self.ui.tabs[rt].results.views.swap_remove(0);
+                    self.ui.pending_result_entries_states.push(state);
+                    self.ui.pending_result_entries_views.push(view);
                 }
                 // Create a fresh entry for the new statement.
-                self.tabs[rt].results = ResultBundle::single(
+                self.ui.tabs[rt].results = ResultBundle::single(
                     ResultState::Running {
                         sql: sql.clone(),
                         index,
@@ -92,11 +94,11 @@ impl AppCore {
                     },
                     ResultView::new(),
                 );
-                self.status.message = format!("running {index}/{total}: {}", truncate(&sql, 60));
+                self.ui.status.message = format!("running {index}/{total}: {}", truncate(&sql, 60));
             }
             RunUpdate::HeaderReady { columns: cols } => {
                 if let ResultState::Running { columns, .. } =
-                    self.tabs[rt].results.active_state_mut()
+                    self.ui.tabs[rt].results.active_state_mut()
                 {
                     *columns = cols;
                 }
@@ -107,7 +109,7 @@ impl AppCore {
                     last_render,
                     streaming: true,
                     ..
-                } = self.tabs[rt].results.active_state_mut()
+                } = self.ui.tabs[rt].results.active_state_mut()
                 {
                     rows.extend(new_rows);
                     let now = Instant::now();
@@ -117,7 +119,7 @@ impl AppCore {
                         *last_render = now;
                     }
                 } else if let ResultState::Running { rows, .. } =
-                    self.tabs[rt].results.active_state_mut()
+                    self.ui.tabs[rt].results.active_state_mut()
                 {
                     rows.extend(new_rows);
                 }
@@ -145,7 +147,7 @@ impl AppCore {
                         streaming: true,
                         started_at,
                         ..
-                    } = self.tabs[rt].results.active_state()
+                    } = self.ui.tabs[rt].results.active_state()
                     {
                         let rows_so_far = rows.len();
                         let elapsed_ms = started_at
@@ -153,19 +155,19 @@ impl AppCore {
                             .as_millis()
                             .try_into()
                             .unwrap_or(u64::MAX);
-                        *self.tabs[rt].results.active_state_mut() = ResultState::Cancelled {
+                        *self.ui.tabs[rt].results.active_state_mut() = ResultState::Cancelled {
                             rows_so_far,
                             elapsed_ms,
                         };
-                        self.tabs[rt].results.active_mut().reset();
+                        self.ui.tabs[rt].results.active_mut().reset();
                         return;
                     }
                 }
-                *self.tabs[rt].results.active_state_mut() = ResultState::Error {
+                *self.ui.tabs[rt].results.active_state_mut() = ResultState::Error {
                     message: error,
                     elapsed_ms,
                 };
-                self.tabs[rt].results.active_mut().reset();
+                self.ui.tabs[rt].results.active_mut().reset();
             }
             RunUpdate::AllDone {
                 successes,
@@ -178,14 +180,14 @@ impl AppCore {
                 // Build the final ResultBundle from collected entries.
                 // Push the current (last) active entry into the pending
                 // list first so everything is in order.
-                let current_state = self.tabs[rt].results.states.swap_remove(0);
-                let current_view = self.tabs[rt].results.views.swap_remove(0);
-                self.pending_result_entries_states.push(current_state);
-                self.pending_result_entries_views.push(current_view);
+                let current_state = self.ui.tabs[rt].results.states.swap_remove(0);
+                let current_view = self.ui.tabs[rt].results.views.swap_remove(0);
+                self.ui.pending_result_entries_states.push(current_state);
+                self.ui.pending_result_entries_views.push(current_view);
 
-                let states = std::mem::take(&mut self.pending_result_entries_states);
-                let views = std::mem::take(&mut self.pending_result_entries_views);
-                self.tabs[rt].results = if states.len() == 1 {
+                let states = std::mem::take(&mut self.ui.pending_result_entries_states);
+                let views = std::mem::take(&mut self.ui.pending_result_entries_views);
+                self.ui.tabs[rt].results = if states.len() == 1 {
                     // Single result — no strip, behaviour-preserving.
                     ResultBundle::single(
                         states.into_iter().next().unwrap_or(ResultState::Empty),
@@ -207,7 +209,7 @@ impl AppCore {
                 } else {
                     format!("done · {successes} ok · {failures} failed")
                 };
-                self.status.message = match self.process.plugin_warning.take() {
+                self.ui.status.message = match self.process.plugin_warning.take() {
                     Some(warning) => format!("{base} · {warning}"),
                     None => base,
                 };
@@ -245,7 +247,7 @@ impl AppCore {
         match update {
             MetaUpdate::DumpSchemaReady { tab_id, tables } => {
                 let Some(session) = self.session.active.as_ref() else {
-                    self.status.message = "no active connection".into();
+                    self.ui.status.message = "no active connection".into();
                     return;
                 };
                 let dialect = session.dialect();
@@ -253,13 +255,13 @@ impl AppCore {
                 // if the originating tab was closed, drop the reply
                 // with a status message instead of writing DDL into
                 // an arbitrary tab.
-                let Some(idx) = self.tabs.iter().position(|t| t.id() == tab_id) else {
+                let Some(idx) = self.ui.tabs.iter().position(|t| t.id() == tab_id) else {
                     tracing::debug!(
                         target: "narwhal::app",
                         tab_id,
                         "dropping dump-schema reply: originating tab closed"
                     );
-                    self.status.message = "dump-schema cancelled: target tab was closed".into();
+                    self.ui.status.message = "dump-schema cancelled: target tab was closed".into();
                     return;
                 };
                 let ddl = if tables.len() == 1 {
@@ -267,16 +269,16 @@ impl AppCore {
                 } else {
                     build_dump(&tables, dialect)
                 };
-                self.tabs[idx].editor.clear();
-                self.tabs[idx].editor.insert_str(&ddl);
-                self.status.message = format!(
+                self.ui.tabs[idx].editor.clear();
+                self.ui.tabs[idx].editor.insert_str(&ddl);
+                self.ui.status.message = format!(
                     "dump-schema: wrote {} table(s) into the editor buffer",
                     tables.len()
                 );
                 // Only switch focus / surface to the user if the user
                 // is still on the originating tab; otherwise stay put.
-                if idx == self.active_tab {
-                    self.focus = Pane::Editor;
+                if idx == self.ui.active_tab {
+                    self.ui.focus = Pane::Editor;
                 }
             }
             MetaUpdate::SchemasRefreshed {
@@ -301,7 +303,7 @@ impl AppCore {
                 }
                 self.rebuild_sidebar();
                 let table_count = self.count_sidebar_tables();
-                self.status.message = format!("schema refreshed · {table_count} tables");
+                self.ui.status.message = format!("schema refreshed · {table_count} tables");
             }
             MetaUpdate::SessionOpened { config_id, result } => {
                 // H7: drop the reply if the user opened another
@@ -319,14 +321,14 @@ impl AppCore {
                         self.apply_opened_session(*session);
                     }
                     Err(message) => {
-                        self.status.connection = None;
-                        self.status.message = format!("connect failed: {message}");
+                        self.ui.status.connection = None;
+                        self.ui.status.message = format!("connect failed: {message}");
                     }
                 }
             }
             MetaUpdate::HistoryReady { entries } => {
                 if entries.is_empty() {
-                    self.status.message = "no history entries".into();
+                    self.ui.status.message = "no history entries".into();
                     return;
                 }
                 self.modals.history = Some(HistoryState {
@@ -334,11 +336,11 @@ impl AppCore {
                     filter: String::new(),
                     selected: 0,
                 });
-                self.status.message =
+                self.ui.status.message =
                     "history: type to filter · Enter insert · Shift-Enter run · Esc close".into();
             }
             MetaUpdate::MetaFailed { message } => {
-                self.status.message = message;
+                self.ui.status.message = message;
             }
             MetaUpdate::CredentialReady {
                 connection_id,
@@ -365,7 +367,7 @@ impl AppCore {
                 // shove their cursor instructions off-screen.
             }
             MetaUpdate::ForgetCompleted { name, result } => {
-                self.status.message = match result {
+                self.ui.status.message = match result {
                     Ok(()) => format!("forgot password for '{name}'"),
                     Err(message) => format!("forget failed for '{name}': {message}"),
                 };
@@ -381,30 +383,30 @@ impl AppCore {
                 // closed the tab while the DDL fetch was in flight
                 // the reply is dropped with a status message rather
                 // than written into an arbitrary tab.
-                let Some(idx) = self.tabs.iter().position(|t| t.id() == tab_id) else {
+                let Some(idx) = self.ui.tabs.iter().position(|t| t.id() == tab_id) else {
                     tracing::debug!(
                         target: "narwhal::app",
                         tab_id,
                         "dropping inject-ddl reply: originating tab closed",
                     );
-                    self.status.message = "inject-ddl cancelled: target tab was closed".into();
+                    self.ui.status.message = "inject-ddl cancelled: target tab was closed".into();
                     return;
                 };
-                self.tabs[idx].editor.insert_str(&ddl);
+                self.ui.tabs[idx].editor.insert_str(&ddl);
                 // Refocus the editor only if the user is currently
                 // looking at the originating tab; otherwise the
                 // insert is silent so we don't yank focus from
                 // wherever the user moved on to.
-                if idx == self.active_tab {
-                    self.focus = narwhal_tui::Pane::Editor;
+                if idx == self.ui.active_tab {
+                    self.ui.focus = narwhal_tui::Pane::Editor;
                 }
-                self.status.message = format!("injected DDL for {schema}.{name}");
+                self.ui.status.message = format!("injected DDL for {schema}.{name}");
             }
             MetaUpdate::TestCompleted { label, result } => {
                 // Sprint 9 (H7): `:test <name|url>` outcome from the
                 // meta worker. The status bar is the only side-effect
                 // — no session is opened, no plugin pool published.
-                self.status.message = match result {
+                self.ui.status.message = match result {
                     Ok(driver_name) => format!("test ok: {label} · {driver_name}"),
                     Err(message) => format!("test failed: {label} — {message}"),
                 };
@@ -615,7 +617,7 @@ impl AppCore {
     ) {
         let rt = self.run_tab_index();
         let (columns, rows, index, total, sql) =
-            match std::mem::take(self.tabs[rt].results.active_state_mut()) {
+            match std::mem::take(self.ui.tabs[rt].results.active_state_mut()) {
                 ResultState::Running {
                     columns,
                     rows,
@@ -625,12 +627,12 @@ impl AppCore {
                     ..
                 } => (columns, rows, index, total, sql),
                 other => {
-                    *self.tabs[rt].results.active_state_mut() = other;
+                    *self.ui.tabs[rt].results.active_state_mut() = other;
                     return;
                 }
             };
         if columns.is_empty() {
-            *self.tabs[rt].results.active_state_mut() = ResultState::Affected {
+            *self.ui.tabs[rt].results.active_state_mut() = ResultState::Affected {
                 rows: rows_affected.unwrap_or(0),
                 elapsed_ms,
                 index,
@@ -639,7 +641,7 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    *self.tabs[rt].results.active_state_mut() = ResultState::Explain {
+                    *self.ui.tabs[rt].results.active_state_mut() = ResultState::Explain {
                         lines: plan
                             .lines
                             .into_iter()
@@ -651,11 +653,11 @@ impl AppCore {
                         planning_time_ms: plan.planning_time_ms,
                         execution_time_ms: plan.execution_time_ms,
                     };
-                    self.status.message = format!("explain ok · {elapsed_ms} ms");
+                    self.ui.status.message = format!("explain ok · {elapsed_ms} ms");
                     return;
                 }
                 Err(error) => {
-                    *self.tabs[rt].results.active_state_mut() = ResultState::Error {
+                    *self.ui.tabs[rt].results.active_state_mut() = ResultState::Error {
                         message: format!("explain parse failed: {error}"),
                         elapsed_ms,
                     };
@@ -666,12 +668,12 @@ impl AppCore {
             // Take the pending row source (set by preview_sidebar_selection)
             // and attach it to the result so cell edits can target the
             // originating table.
-            let source = self.tabs[rt].pending_source.take();
+            let source = self.ui.tabs[rt].pending_source.take();
             let source_table = crate::export::extract_source_table(&sql);
             let (columns, rows) = self
                 .apply_plugin_transforms(columns, rows, elapsed_ms)
                 .await;
-            *self.tabs[rt].results.active_state_mut() = ResultState::Rows {
+            *self.ui.tabs[rt].results.active_state_mut() = ResultState::Rows {
                 columns,
                 rows,
                 elapsed_ms,
@@ -682,7 +684,7 @@ impl AppCore {
                 source_table,
             };
         }
-        self.status.message = match rows_affected {
+        self.ui.status.message = match rows_affected {
             Some(n) => format!("ok {index}/{total} · {n} affected · {elapsed_ms} ms"),
             None => format!("ok {index}/{total} · {rows_returned} rows · {elapsed_ms} ms"),
         };

@@ -12,7 +12,9 @@ use narwhal_tui::Pane;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::{AppCore, ResultBundle, ResultState, ResultView, SidebarItem};
+use narwhal_tui::ResultView;
+
+use super::{AppCore, ResultBundle, ResultState, SidebarItem};
 use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
@@ -27,7 +29,7 @@ impl AppCore {
                     self.open_connection_with_password(parsed.config, parsed.password);
                 }
                 Err(error) => {
-                    self.status.message = format!("invalid url: {error}");
+                    self.ui.status.message = format!("invalid url: {error}");
                 }
             }
             return;
@@ -40,7 +42,7 @@ impl AppCore {
             .find(|c| c.name == target)
             .cloned()
         else {
-            self.status.message = format!("connection not found: {target}");
+            self.ui.status.message = format!("connection not found: {target}");
             return;
         };
         self.open_connection(config);
@@ -62,12 +64,12 @@ impl AppCore {
         password: Option<String>,
     ) {
         let Ok(driver) = self.registry.get(&config.driver) else {
-            self.status.message = format!("driver not registered: {}", config.driver);
+            self.ui.status.message = format!("driver not registered: {}", config.driver);
             return;
         };
         let label = config.name.clone();
         let config_id = config.id;
-        self.status.message = format!("connecting to {label}…");
+        self.ui.status.message = format!("connecting to {label}…");
 
         // L36 #C4: forward the global `--read-only` flag so the
         // pre-connect shell pipeline is skipped under audit mode.
@@ -99,7 +101,7 @@ impl AppCore {
         });
         if !dispatched {
             self.session.pending_session_opens.remove(&config_id);
-            self.status.message = "connect failed: meta channel closed".into();
+            self.ui.status.message = "connect failed: meta channel closed".into();
             return;
         }
         self.await_pending_session_opens_sync();
@@ -109,12 +111,12 @@ impl AppCore {
     /// tests) and the H7 async path: install the new session, publish
     /// the pool, refresh sidebar/focus, bump last-used.
     pub(super) fn apply_opened_session(&mut self, session: Session) {
-        self.status.connection = Some(format!(
+        self.ui.status.connection = Some(format!(
             "{} · {}",
             session.config.name,
             session.driver.name()
         ));
-        self.status.message = format!(
+        self.ui.status.message = format!(
             "connected · {} · {}",
             session.config.name,
             session.driver.name()
@@ -131,7 +133,7 @@ impl AppCore {
         self.session.active = Some(session);
         self.touch_last_used(opened_id);
         self.rebuild_sidebar();
-        self.focus = Pane::Editor;
+        self.ui.focus = Pane::Editor;
     }
 
     pub(super) fn close_session(&mut self) {
@@ -143,16 +145,16 @@ impl AppCore {
             state.pool = None;
             state.in_transaction = false;
             drop(state);
-            self.status.connection = None;
-            self.status.transaction = None;
-            self.status.message = "connection closed".into();
+            self.ui.status.connection = None;
+            self.ui.status.transaction = None;
+            self.ui.status.message = "connection closed".into();
             self.rebuild_sidebar();
         }
     }
 
     pub(super) fn refresh_schema(&mut self) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         // H11: Offload to the meta channel so the UI stays responsive
@@ -162,12 +164,13 @@ impl AppCore {
         // new session's listing.
         let session_id = session.config.id;
         self.dispatch_meta(MetaRequest::RefreshSchemas { session_id });
-        self.status.message = "refreshing schema…".into();
+        self.ui.status.message = "refreshing schema…".into();
     }
 
     /// Count the number of tables currently shown in the sidebar.
     pub(super) fn count_sidebar_tables(&self) -> usize {
-        self.sidebar_items
+        self.ui
+            .sidebar_items
             .iter()
             .filter(|item| matches!(item, SidebarItem::Table { .. }))
             .count()
@@ -205,17 +208,18 @@ impl AppCore {
 
     pub(super) fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
-        let Some(sql) = statement_at_cursor(&self.tabs[self.active_tab].editor, session.dialect())
+        let Some(sql) =
+            statement_at_cursor(&self.ui.tabs[self.ui.active_tab].editor, session.dialect())
         else {
-            self.status.message = "no statement under cursor".into();
+            self.ui.status.message = "no statement under cursor".into();
             return;
         };
         let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
         if trimmed.is_empty() {
-            self.status.message = "no statement under cursor".into();
+            self.ui.status.message = "no statement under cursor".into();
             return;
         }
         self.dispatch_batch(vec![trimmed], mode);
@@ -223,12 +227,13 @@ impl AppCore {
 
     pub(super) fn dispatch_all_statements(&mut self, mode: RunMode) {
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
-        let statements = all_statements(&self.tabs[self.active_tab].editor, session.dialect());
+        let statements =
+            all_statements(&self.ui.tabs[self.ui.active_tab].editor, session.dialect());
         if statements.is_empty() {
-            self.status.message = "buffer contains no statements".into();
+            self.ui.status.message = "buffer contains no statements".into();
             return;
         }
         self.dispatch_batch(statements, mode);
@@ -236,7 +241,7 @@ impl AppCore {
 
     pub(super) fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
         if self.process.running {
-            self.status.message = "a query is already running".into();
+            self.ui.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.active.as_ref() else {
@@ -255,13 +260,13 @@ impl AppCore {
         };
         let request = RunRequest { statements, mode };
         self.process.running = true;
-        self.process.run_tab = Some(self.active_tab);
-        self.pending_result_entries_states.clear();
-        self.pending_result_entries_views.clear();
-        self.tabs[self.active_tab].row_detail = None;
+        self.process.run_tab = Some(self.ui.active_tab);
+        self.ui.pending_result_entries_states.clear();
+        self.ui.pending_result_entries_views.clear();
+        self.ui.tabs[self.ui.active_tab].row_detail = None;
         let now = Instant::now();
         // Reset the bundle to a single empty entry for the running state.
-        self.tabs[self.active_tab].results = ResultBundle::single(
+        self.ui.tabs[self.ui.active_tab].results = ResultBundle::single(
             ResultState::Running {
                 sql: String::new(),
                 index: 0,
@@ -274,7 +279,7 @@ impl AppCore {
             },
             ResultView::new(),
         );
-        self.status.message = match mode {
+        self.ui.status.message = match mode {
             RunMode::Execute => "executing…".into(),
             RunMode::Stream => "streaming…".into(),
         };
@@ -289,7 +294,7 @@ impl AppCore {
     pub(super) fn start_wizard(&mut self) {
         self.modals.wizard = Some(ConnectionWizard::new());
         self.modals.wizard_error = None;
-        self.status.message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
+        self.ui.status.message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
     }
 
     /// Pre-fill the wizard from a connection URL. The user still gets to
@@ -300,7 +305,7 @@ impl AppCore {
         let parsed = match narwhal_config::parse_url(dsn) {
             Ok(p) => p,
             Err(error) => {
-                self.status.message = format!("url: {error}");
+                self.ui.status.message = format!("url: {error}");
                 return;
             }
         };
@@ -318,7 +323,8 @@ impl AppCore {
             .map(|p| secrecy::SecretString::new(p.into_boxed_str()));
         self.modals.wizard = Some(ConnectionWizard::from_config(&config, password, None));
         self.modals.wizard_error = None;
-        self.status.message = "url: review fields · Tab moves · Enter saves · Esc cancels".into();
+        self.ui.status.message =
+            "url: review fields · Tab moves · Enter saves · Esc cancels".into();
     }
 
     /// Open the wizard with every field pre-populated from an existing
@@ -341,7 +347,7 @@ impl AppCore {
             .find(|c| c.name == name)
             .cloned()
         else {
-            self.status.message = format!("edit: no connection named '{name}'");
+            self.ui.status.message = format!("edit: no connection named '{name}'");
             return;
         };
         let existing_id = Some(config.id);
@@ -349,7 +355,7 @@ impl AppCore {
         // is delivered on the meta channel below.
         self.modals.wizard = Some(ConnectionWizard::from_config(&config, None, existing_id));
         self.modals.wizard_error = None;
-        self.status.message =
+        self.ui.status.message =
             format!("edit '{name}': Tab moves · ←/→ driver · Enter saves · Esc cancels");
         // Spawn the keyring lookup and ship the result through the
         // meta channel. The handler in `handle_meta_update` injects
@@ -410,14 +416,14 @@ impl AppCore {
             // produces a visible status line instead of staying on
             // the "testing…" placeholder forever.
             let Some(session) = self.session.active.as_ref() else {
-                self.status.message = "test: no active connection (§ :test <name|url>)".into();
+                self.ui.status.message = "test: no active connection (§ :test <name|url>)".into();
                 return;
             };
             let label = session.config.name.clone();
             let driver_name = session.driver.name().to_owned();
             let pool = session.pool.clone();
             let meta_tx = self.process.meta_tx.clone();
-            self.status.message = format!("testing active session: {label}…");
+            self.ui.status.message = format!("testing active session: {label}…");
             tokio::spawn(async move {
                 let result = match pool.acquire().await {
                     Ok(_) => Ok(driver_name),
@@ -436,7 +442,7 @@ impl AppCore {
             match narwhal_config::parse_url(target) {
                 Ok(p) => (p.config, p.password),
                 Err(error) => {
-                    self.status.message = format!("test: invalid url: {error}");
+                    self.ui.status.message = format!("test: invalid url: {error}");
                     return;
                 }
             }
@@ -449,7 +455,7 @@ impl AppCore {
                 .find(|c| c.name == target)
                 .cloned()
             else {
-                self.status.message = format!("test: connection not found: {target}");
+                self.ui.status.message = format!("test: connection not found: {target}");
                 return;
             };
             // Sprint 9 (H7): credential lookup also goes through the
@@ -460,7 +466,7 @@ impl AppCore {
         };
 
         let Ok(driver) = self.registry.get(&config.driver) else {
-            self.status.message = format!("test: driver not registered: {}", config.driver);
+            self.ui.status.message = format!("test: driver not registered: {}", config.driver);
             return;
         };
         let driver = driver.clone();
@@ -469,7 +475,7 @@ impl AppCore {
         } else {
             config.name.clone()
         };
-        self.status.message = format!("testing {label}…");
+        self.ui.status.message = format!("testing {label}…");
         // L36 #C4: same read-only gate as `open_named` — we never want
         // a `:test` to fire arbitrary shell commands when the auditor
         // explicitly asked for a sandbox.
@@ -497,7 +503,7 @@ impl AppCore {
             .iter()
             .position(|c| c.name == name)
         else {
-            self.status.message = format!("remove: no connection named '{name}'");
+            self.ui.status.message = format!("remove: no connection named '{name}'");
             return;
         };
         let removed = self.session.connections.connections.remove(pos);
@@ -505,7 +511,7 @@ impl AppCore {
             if let Err(error) = self.session.connections.save(path) {
                 // Restore in-memory state so we don't drift from disk.
                 self.session.connections.connections.insert(pos, removed);
-                self.status.message = format!("remove failed: {error}");
+                self.ui.status.message = format!("remove failed: {error}");
                 return;
             }
         }
@@ -544,7 +550,7 @@ impl AppCore {
             }
         }
         self.rebuild_sidebar();
-        self.status.message = format!("removed connection '{name}'");
+        self.ui.status.message = format!("removed connection '{name}'");
     }
 
     pub(super) fn forget_password(&mut self, name: &str) {
@@ -555,7 +561,7 @@ impl AppCore {
             .iter()
             .find(|c| c.name == name)
         else {
-            self.status.message = format!("forget: no connection named '{name}'");
+            self.ui.status.message = format!("forget: no connection named '{name}'");
             return;
         };
         // The keyring delete runs on a tokio task and reports the
@@ -568,7 +574,7 @@ impl AppCore {
         let config_id = config.id;
         let name_owned = name.to_owned();
         let meta_tx = self.process.meta_tx.clone();
-        self.status.message = format!("forgetting password for '{name}'…");
+        self.ui.status.message = format!("forgetting password for '{name}'…");
         tokio::spawn(async move {
             let result = credentials
                 .delete(config_id)

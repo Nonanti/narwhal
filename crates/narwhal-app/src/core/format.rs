@@ -18,11 +18,11 @@ impl AppCore {
     pub(super) fn format_current_statement(&mut self) {
         let dialect = self.active_dialect();
         let driver_name = self.active_driver_name();
-        let text = self.tabs[self.active_tab].editor.entire_text();
-        let cursor_offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
+        let text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
+        let cursor_offset = self.ui.tabs[self.ui.active_tab].editor.cursor_byte_offset();
         let stmts = split_with(&text, dialect);
         if stmts.is_empty() {
-            self.status.message = "format: nothing to format".into();
+            self.ui.status.message = "format: nothing to format".into();
             return;
         }
         let target_idx = stmts
@@ -39,16 +39,16 @@ impl AppCore {
         let new_text = join_statements(&rewritten);
         let cursor_target = cursor_target_for(&rewritten, target_idx);
         replace_editor_contents(self, &new_text, cursor_target);
-        self.status.message = format!("formatted statement {}/{}", target_idx + 1, stmts.len());
+        self.ui.status.message = format!("formatted statement {}/{}", target_idx + 1, stmts.len());
     }
 
     pub(super) fn format_all_statements(&mut self) {
         let dialect = self.active_dialect();
         let driver_name = self.active_driver_name();
-        let text = self.tabs[self.active_tab].editor.entire_text();
+        let text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let stmts = split_with(&text, dialect);
         if stmts.is_empty() {
-            self.status.message = "format-all: nothing to format".into();
+            self.ui.status.message = "format-all: nothing to format".into();
             return;
         }
         let formatted: Vec<String> = stmts
@@ -60,7 +60,7 @@ impl AppCore {
             .collect();
         let new_text = join_statements(&formatted);
         replace_editor_contents(self, &new_text, 0);
-        self.status.message = format!("formatted {} statement(s)", stmts.len());
+        self.ui.status.message = format!("formatted {} statement(s)", stmts.len());
     }
 
     fn active_dialect(&self) -> Dialect {
@@ -108,7 +108,7 @@ fn cursor_target_for(stmts: &[String], target_idx: usize) -> usize {
 }
 
 fn replace_editor_contents(core: &mut AppCore, text: &str, cursor_byte_offset: usize) {
-    let editor = &mut core.tabs[core.active_tab].editor;
+    let editor = &mut core.ui.tabs[core.ui.active_tab].editor;
     editor.clear();
     editor.insert_str(text);
     // Walk the buffer to translate byte offset into (row, col).

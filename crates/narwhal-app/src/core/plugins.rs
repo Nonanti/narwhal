@@ -101,7 +101,8 @@ impl AppCore {
             ));
         }
         if loaded > 0 {
-            self.status.message = format!("auto-loaded {loaded} plugin(s) from {}", dir.display());
+            self.ui.status.message =
+                format!("auto-loaded {loaded} plugin(s) from {}", dir.display());
         }
         loaded
     }
@@ -110,7 +111,7 @@ impl AppCore {
         let plugin = match LuaPlugin::from_path(path) {
             Ok(p) => p,
             Err(e) => {
-                self.status.message = format!("plug-load failed: {e}");
+                self.ui.status.message = format!("plug-load failed: {e}");
                 return;
             }
         };
@@ -118,10 +119,10 @@ impl AppCore {
         let cmd_count = plugin.commands().len();
         match self.register_lua_plugin(plugin) {
             Ok(_) => {
-                self.status.message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
+                self.ui.status.message = format!("plugin '{name}' loaded ({cmd_count} command(s))");
             }
             Err(e) => {
-                self.status.message = format!("plug-load failed: {e}");
+                self.ui.status.message = format!("plug-load failed: {e}");
             }
         }
     }
@@ -129,7 +130,7 @@ impl AppCore {
     pub(super) fn list_plugins(&mut self) {
         let catalogue = self.plugins.catalogue();
         if catalogue.is_empty() {
-            self.status.message = "no plugins loaded; use :plug-load <file.lua>".into();
+            self.ui.status.message = "no plugins loaded; use :plug-load <file.lua>".into();
             return;
         }
         let summary = catalogue
@@ -137,11 +138,11 @@ impl AppCore {
             .map(|(plugin, cmd)| format!("{}:{} — {}", plugin, cmd.name, cmd.description))
             .collect::<Vec<_>>()
             .join(" · ");
-        self.status.message = summary;
+        self.ui.status.message = summary;
     }
 
     pub(super) fn dispatch_plugin(&mut self, command: &str, argument: &str) {
-        let editor_text = self.tabs[self.active_tab].editor.entire_text();
+        let editor_text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let ctx = PluginCommandContext::new(argument).with_editor_text(&editor_text);
         // Resolve the owning plugin name *before* dispatch so the timeout
         // handler reports the correct plugin even if two plugins share
@@ -170,27 +171,27 @@ impl AppCore {
         });
         match outcome {
             Ok(PluginCommandOutcome::Status { message }) => {
-                self.status.message = message;
+                self.ui.status.message = message;
             }
             Ok(PluginCommandOutcome::InsertSql { sql, append }) => {
                 if !append {
-                    self.tabs[self.active_tab].editor.clear();
+                    self.ui.tabs[self.ui.active_tab].editor.clear();
                 }
-                self.tabs[self.active_tab].editor.insert_str(&sql);
-                self.status.message = format!("plugin inserted {} char(s) of SQL", sql.len());
+                self.ui.tabs[self.ui.active_tab].editor.insert_str(&sql);
+                self.ui.status.message = format!("plugin inserted {} char(s) of SQL", sql.len());
             }
             Ok(PluginCommandOutcome::Silent) => {}
             Err(PluginError::Unknown(name)) => {
-                self.status.message = format!("unknown command: {name}");
+                self.ui.status.message = format!("unknown command: {name}");
             }
             Err(PluginError::Timeout { elapsed_secs }) => {
-                self.status.message = format!(
+                self.ui.status.message = format!(
                     "plugin `{plugin_name}` exceeded execution timeout ({elapsed_secs:.1}s); \
                      adjust with `narwhal.set_timeout(secs)` in the plugin script"
                 );
             }
             Err(error) => {
-                self.status.message = format!("plugin error: {error}");
+                self.ui.status.message = format!("plugin error: {error}");
             }
             // Future PluginCommandOutcome variants: silent fallback.
             Ok(_) => {}

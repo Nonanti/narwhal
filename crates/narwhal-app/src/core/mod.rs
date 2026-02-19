@@ -27,8 +27,6 @@ use plugin_executor::PluginConnectionState;
 use std::sync::Arc;
 
 use narwhal_config::CredentialStore;
-use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
-use narwhal_vim::Vim;
 use tokio::sync::mpsc;
 
 use crate::clipboard::Clipboard;
@@ -44,7 +42,7 @@ pub mod state;
 pub use state::{
     CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ModalState,
     ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SessionState,
-    SidebarItem, SnippetsModal, StatusBar, Tab,
+    SidebarItem, SnippetsModal, StatusBar, Tab, UiState,
 };
 
 /// Pure, IO-free application state and behaviour.
@@ -68,17 +66,11 @@ pub struct AppCore {
     /// Bundled so a session swap touches one struct instead of
     /// nine fields.
     pub(super) session: SessionState,
-    pub(super) tabs: Vec<Tab>,
-    pub(super) active_tab: usize,
-    pub(super) next_tab_id: usize,
-    pub(super) vim: Vim,
-    pub(super) theme: Theme,
-    pub(super) focus: Pane,
-    pub(super) sidebar_items: Vec<SidebarItem>,
-    pub(super) sidebar_index: usize,
-    /// Sidebar viewport scroll (L24). First visible row.
-    pub(super) sidebar_scroll: usize,
-    pub(super) status: StatusBar,
+    /// Visible-on-screen state (tabs, focus, sidebar, theme,
+    /// status, last layout, pending leader / result entries).
+    /// Bundled so the dispatcher and render helpers carry a
+    /// single mutable borrow instead of a dozen.
+    pub(super) ui: UiState,
     /// Lifecycle + async-bridge state (`should_quit`, `running`,
     /// `run_tab`, `cancel_slot`, `plugin_warning`, `refresh_task`,
     /// `refresh_pending`, `run_tx`, `meta_tx`). Bundled so the
@@ -86,15 +78,6 @@ pub struct AppCore {
     /// receivers
     /// stay below because draining them needs mutable `AppCore`.
     pub(super) process: ProcessState,
-    /// Pending leader key for result-tab cycling. `]` followed by
-    /// `r` cycles forward; `[` followed by `r` cycles backward.
-    pub(super) pending_result_leader: Option<char>,
-    /// Collects per-statement results during a multi-statement batch.
-    /// Populated by `finalize_statement`; consumed and turned into a
-    /// `ResultBundle` by the `AllDone` handler.
-    pub(super) pending_result_entries_states: Vec<ResultState>,
-    pub(super) pending_result_entries_views: Vec<ResultView>,
-    pub(super) last_layout: LayoutRegions,
     /// Receiver halves of the channels owned by `process`.
     /// Kept outside `ProcessState` because draining them needs
     /// mutable access to `AppCore` (handlers mutate UI / session /

@@ -26,13 +26,13 @@ impl AppCore {
     /// load via the meta channel (H11) so the UI stays responsive.
     pub fn open_history(&mut self) {
         let Some(_journal) = &self.session.history_journal else {
-            self.status.message = "history disabled".into();
+            self.ui.status.message = "history disabled".into();
             return;
         };
         self.dispatch_meta(MetaRequest::LoadHistory {
             limit: narwhal_tui::constants::HISTORY_LOAD_LIMIT,
         });
-        self.status.message = "loading history…".into();
+        self.ui.status.message = "loading history…".into();
     }
 
     pub(super) fn close_history(&mut self) {
@@ -47,7 +47,7 @@ impl AppCore {
         match key.code {
             CtKey::Esc => {
                 self.close_history();
-                self.status.message = "history closed".into();
+                self.ui.status.message = "history closed".into();
             }
             CtKey::Up | CtKey::Char('k')
                 if key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -73,11 +73,11 @@ impl AppCore {
                 if let Some(sql) = sql {
                     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                     self.close_history();
-                    self.tabs[self.active_tab].editor.insert_str(&sql);
+                    self.ui.tabs[self.ui.active_tab].editor.insert_str(&sql);
                     if shift {
                         self.dispatch_current_statement(RunMode::Execute);
                     } else {
-                        self.status.message =
+                        self.ui.status.message =
                             format!("inserted {} char(s) from history", sql.len());
                     }
                 } else {
@@ -101,17 +101,17 @@ impl AppCore {
         match self.session.snippet_store.list() {
             Ok(entries) => {
                 if entries.is_empty() {
-                    self.status.message = "no saved snippets; use :save <name> first".into();
+                    self.ui.status.message = "no saved snippets; use :save <name> first".into();
                     return;
                 }
                 self.modals.snippets = Some(SnippetsModal {
                     entries,
                     selected: 0,
                 });
-                self.status.message = "snippets: ↑↓/jk navigate · Enter load · Esc close".into();
+                self.ui.status.message = "snippets: ↑↓/jk navigate · Enter load · Esc close".into();
             }
             Err(error) => {
-                self.status.message = format!("snippets: could not list: {error}");
+                self.ui.status.message = format!("snippets: could not list: {error}");
             }
         }
     }
@@ -128,7 +128,7 @@ impl AppCore {
         match key.code {
             CtKey::Esc => {
                 self.close_snippets_modal();
-                self.status.message = "snippets closed".into();
+                self.ui.status.message = "snippets closed".into();
             }
             CtKey::Up | CtKey::Char('k')
                 if (key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL))
@@ -152,7 +152,7 @@ impl AppCore {
                 if let Some(name) = name {
                     self.load_snippet_by_name(&name);
                 } else {
-                    self.status.message = "snippets closed".into();
+                    self.ui.status.message = "snippets closed".into();
                 }
             }
             _ => {}
@@ -164,29 +164,29 @@ impl AppCore {
         match self.session.snippet_store.load(name) {
             Ok(sql) => {
                 self.new_tab();
-                self.tabs[self.active_tab].editor.insert_str(&sql);
-                self.tabs[self.active_tab].name = name.to_owned();
-                self.status.message = format!("loaded snippet '{name}' ({} char(s))", sql.len());
+                self.ui.tabs[self.ui.active_tab].editor.insert_str(&sql);
+                self.ui.tabs[self.ui.active_tab].name = name.to_owned();
+                self.ui.status.message = format!("loaded snippet '{name}' ({} char(s))", sql.len());
             }
             Err(error) => {
-                self.status.message = format!("load failed: {error}");
+                self.ui.status.message = format!("load failed: {error}");
             }
         }
     }
 
     /// Save the current editor buffer as a named snippet.
     pub(super) fn save_snippet(&mut self, name: &str) {
-        let sql = self.tabs[self.active_tab].editor.entire_text();
+        let sql = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         if sql.trim().is_empty() {
-            self.status.message = "editor is empty; nothing to save".into();
+            self.ui.status.message = "editor is empty; nothing to save".into();
             return;
         }
         match self.session.snippet_store.save(name, &sql) {
             Ok(()) => {
-                self.status.message = format!("saved snippet '{name}'");
+                self.ui.status.message = format!("saved snippet '{name}'");
             }
             Err(error) => {
-                self.status.message = format!("save failed: {error}");
+                self.ui.status.message = format!("save failed: {error}");
             }
         }
     }
@@ -195,10 +195,10 @@ impl AppCore {
     pub(super) fn remove_snippet(&mut self, name: &str) {
         match self.session.snippet_store.remove(name) {
             Ok(()) => {
-                self.status.message = format!("removed snippet '{name}'");
+                self.ui.status.message = format!("removed snippet '{name}'");
             }
             Err(error) => {
-                self.status.message = format!("rm-snippet failed: {error}");
+                self.ui.status.message = format!("rm-snippet failed: {error}");
             }
         }
     }
@@ -206,7 +206,7 @@ impl AppCore {
     pub(super) fn cancel_wizard(&mut self) {
         if self.modals.wizard.take().is_some() {
             self.modals.wizard_error = None;
-            self.status.message = "add cancelled".into();
+            self.ui.status.message = "add cancelled".into();
         }
     }
 
@@ -313,17 +313,17 @@ impl AppCore {
                 self.modals.wizard_error = None;
                 self.rebuild_sidebar();
                 let name = built.config.name;
-                self.status.message = if existing_id.is_some() {
+                self.ui.status.message = if existing_id.is_some() {
                     format!("connection '{name}' updated")
                 } else {
                     format!("connection '{name}' saved")
                 };
                 // Pre-select the new connection in the sidebar.
-                if let Some(idx) = self.sidebar_items.iter().position(|i| match i {
+                if let Some(idx) = self.ui.sidebar_items.iter().position(|i| match i {
                     SidebarItem::Connection { name: n, .. } => n == &name,
                     _ => false,
                 }) {
-                    self.sidebar_index = idx;
+                    self.ui.sidebar_index = idx;
                 }
             }
         }
@@ -338,7 +338,7 @@ impl AppCore {
         // trapped once they have what they wanted.
         if matches!(key.code, CtKey::Tab) && wizard.focused_is_path() {
             let outcome = wizard.complete_focused_path();
-            self.status.message = match outcome {
+            self.ui.status.message = match outcome {
                 crate::wizard::PathCompletion::NoMatch => "no match".into(),
                 crate::wizard::PathCompletion::Single => "completed".into(),
                 crate::wizard::PathCompletion::Multiple { count, samples } => {
