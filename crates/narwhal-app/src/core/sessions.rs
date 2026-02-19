@@ -184,14 +184,14 @@ impl AppCore {
     pub(super) fn schedule_schema_refresh(&mut self, session_id: Uuid) {
         // Release so the spawned task's Acquire swap sees this store
         // even on weakly-ordered architectures (ARM64, POWER).  (Y4-B fix.)
-        self.refresh_pending.store(true, Ordering::Release);
+        self.process.refresh_pending.store(true, Ordering::Release);
         // Drop the previous task if any — aborting cancels its sleep.
-        if let Some(handle) = self.refresh_task.take() {
+        if let Some(handle) = self.process.refresh_task.take() {
             handle.abort();
         }
-        let tx = self.run_tx.clone();
-        let pending = self.refresh_pending.clone();
-        self.refresh_task = Some(
+        let tx = self.process.run_tx.clone();
+        let pending = self.process.refresh_pending.clone();
+        self.process.refresh_task = Some(
             tokio::spawn(async move {
                 tokio::time::sleep(narwhal_tui::constants::SCHEMA_REFRESH_DEBOUNCE).await;
                 if pending.swap(false, Ordering::Acquire) {
@@ -234,7 +234,7 @@ impl AppCore {
     }
 
     pub(super) fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
-        if self.running {
+        if self.process.running {
             self.status.message = "a query is already running".into();
             return;
         }
@@ -253,8 +253,8 @@ impl AppCore {
             driver: session.driver.name().to_owned(),
         };
         let request = RunRequest { statements, mode };
-        self.running = true;
-        self.run_tab = Some(self.active_tab);
+        self.process.running = true;
+        self.process.run_tab = Some(self.active_tab);
         self.pending_result_entries_states.clear();
         self.pending_result_entries_views.clear();
         self.tabs[self.active_tab].row_detail = None;
@@ -277,7 +277,12 @@ impl AppCore {
             RunMode::Execute => "executing…".into(),
             RunMode::Stream => "streaming…".into(),
         };
-        spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
+        spawn_run(
+            ctx,
+            request,
+            self.process.cancel_slot.clone(),
+            self.process.run_tx.clone(),
+        );
     }
 
     pub(super) fn start_wizard(&mut self) {
@@ -352,7 +357,7 @@ impl AppCore {
         let credentials = Arc::clone(&self.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
-        let meta_tx = self.meta_tx.clone();
+        let meta_tx = self.process.meta_tx.clone();
         tokio::spawn(async move {
             match credentials.get(config_id).await {
                 Ok(password) => {
@@ -409,7 +414,7 @@ impl AppCore {
             let label = session.config.name.clone();
             let driver_name = session.driver.name().to_owned();
             let pool = session.pool.clone();
-            let meta_tx = self.meta_tx.clone();
+            let meta_tx = self.process.meta_tx.clone();
             self.status.message = format!("testing active session: {label}…");
             tokio::spawn(async move {
                 let result = match pool.acquire().await {
@@ -552,7 +557,7 @@ impl AppCore {
         let credentials = Arc::clone(&self.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
-        let meta_tx = self.meta_tx.clone();
+        let meta_tx = self.process.meta_tx.clone();
         self.status.message = format!("forgetting password for '{name}'…");
         tokio::spawn(async move {
             let result = credentials

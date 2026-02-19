@@ -18,7 +18,7 @@ use crate::run::RunUpdate;
 
 impl AppCore {
     pub(super) fn spawn_cancel(&mut self) {
-        let slot = self.cancel_slot.clone();
+        let slot = self.process.cancel_slot.clone();
         tokio::spawn(async move {
             // H6: Take the handle out of the slot under a short-lived
             // guard so the mutex is NOT held across `.await` on
@@ -172,8 +172,8 @@ impl AppCore {
                 failures,
                 ddl,
             } => {
-                self.running = false;
-                self.run_tab = None;
+                self.process.running = false;
+                self.process.run_tab = None;
 
                 // Build the final ResultBundle from collected entries.
                 // Push the current (last) active entry into the pending
@@ -207,7 +207,7 @@ impl AppCore {
                 } else {
                     format!("done · {successes} ok · {failures} failed")
                 };
-                self.status.message = match self.plugin_warning.take() {
+                self.status.message = match self.process.plugin_warning.take() {
                     Some(warning) => format!("{base} · {warning}"),
                     None => base,
                 };
@@ -450,7 +450,7 @@ impl AppCore {
             pool,
             self.history_journal.clone(),
             Some(self.credentials.clone()),
-            self.meta_tx.clone(),
+            self.process.meta_tx.clone(),
         );
         true
     }
@@ -466,7 +466,7 @@ impl AppCore {
         if !self.pending_session_opens.is_empty() {
             self.await_pending_session_opens().await;
         }
-        while self.running {
+        while self.process.running {
             match self.recv_run_update().await {
                 Some(update) => self.handle_run_update(update).await,
                 None => break,
@@ -530,7 +530,7 @@ impl AppCore {
     pub async fn drain_run_updates_and_refresh(&mut self) {
         self.drain_run_updates().await;
         // Wait for the debounce timer to fire (200ms + small slack).
-        if self.refresh_task.is_some() {
+        if self.process.refresh_task.is_some() {
             tokio::time::sleep(Duration::from_millis(350)).await;
             // The debounce task sends SchemaRefresh through run_rx;
             // consume it.
@@ -601,7 +601,7 @@ impl AppCore {
             // so `qr` reflects whatever each transform managed in place.
             // Surface every failure at once — the AllDone status message
             // would otherwise clobber it.
-            self.plugin_warning = Some(format!("plugin transform failed: {errors}"));
+            self.process.plugin_warning = Some(format!("plugin transform failed: {errors}"));
         }
         (qr.columns, qr.rows)
     }

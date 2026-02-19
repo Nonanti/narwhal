@@ -107,7 +107,7 @@ impl AppCore {
     /// Tab index that owns the in-flight run.  Falls back to
     /// `active_tab` when no run is in progress (defensive default).
     pub(super) fn run_tab_index(&self) -> usize {
-        self.run_tab.unwrap_or(self.active_tab)
+        self.process.run_tab.unwrap_or(self.active_tab)
     }
 
     /// Read-only accessor for the most recent layout regions computed
@@ -152,11 +152,11 @@ impl AppCore {
     }
 
     pub const fn is_running(&self) -> bool {
-        self.running
+        self.process.running
     }
 
     pub const fn should_quit(&self) -> bool {
-        self.should_quit
+        self.process.should_quit
     }
 
     /// Whether a debounced schema-refresh timer is currently pending.
@@ -164,7 +164,7 @@ impl AppCore {
     /// a refresh.
     #[doc(hidden)]
     pub const fn refresh_task(&self) -> Option<&tokio::task::AbortHandle> {
-        self.refresh_task.as_ref()
+        self.process.refresh_task.as_ref()
     }
 
     pub const fn help_open(&self) -> bool {

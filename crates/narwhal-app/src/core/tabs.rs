@@ -33,7 +33,7 @@ impl AppCore {
     }
 
     pub(super) fn new_tab(&mut self) {
-        if self.running {
+        if self.process.running {
             self.status.message = "cannot open a new tab while a query is running".into();
             return;
         }
@@ -47,7 +47,7 @@ impl AppCore {
     }
 
     pub(super) fn close_tab(&mut self) {
-        if self.running {
+        if self.process.running {
             self.status.message = "cannot close a tab while a query is running".into();
             return;
         }
@@ -63,7 +63,7 @@ impl AppCore {
     }
 
     pub(super) fn cycle_tab(&mut self, delta: i32) {
-        if self.running {
+        if self.process.running {
             self.status.message = "cannot switch tabs while a query is running".into();
             return;
         }

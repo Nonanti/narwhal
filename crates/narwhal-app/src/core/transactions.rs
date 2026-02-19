@@ -39,7 +39,7 @@ pub(super) const fn isolation_label(level: IsolationLevel) -> &'static str {
 
 impl AppCore {
     pub(super) fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
-        if self.running {
+        if self.process.running {
             self.status.message = "a query is already running".into();
             return;
         }
@@ -117,7 +117,7 @@ impl AppCore {
     /// otherwise `rollback()`. Either way the pinned connection is
     /// returned to the pool.
     pub(super) fn end_transaction(&mut self, commit: bool) {
-        if self.running {
+        if self.process.running {
             self.status.message = "a query is already running".into();
             return;
         }
@@ -262,7 +262,7 @@ impl AppCore {
         OkF: FnOnce(&str) -> String,
         ErrF: FnOnce(&str, &narwhal_core::Error) -> String,
     {
-        if self.running {
+        if self.process.running {
             self.status.message = "a query is already running".into();
             return;
         }

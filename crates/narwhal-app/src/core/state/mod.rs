@@ -3,6 +3,7 @@
 
 pub mod history;
 pub mod modals;
+pub mod process;
 pub mod result;
 pub mod sidebar;
 pub mod snippets_modal;
@@ -11,6 +12,7 @@ pub mod tab;
 
 pub use history::HistoryState;
 pub use modals::ModalState;
+pub use process::ProcessState;
 pub use result::{
     CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
     ResultState, RowDetailState, RowSource,

@@ -681,7 +681,7 @@ impl AppCore {
 
     pub(super) fn toggle_sort(&mut self) {
         // Streaming guard.
-        if self.running {
+        if self.process.running {
             self.status.message = "sort/filter unavailable while streaming".into();
             return;
         }
@@ -712,7 +712,7 @@ impl AppCore {
 
     fn open_filter_prompt(&mut self) {
         // Streaming guard.
-        if self.running {
+        if self.process.running {
             self.status.message = "sort/filter unavailable while streaming".into();
             return;
         }

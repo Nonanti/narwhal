@@ -60,7 +60,7 @@ impl AppCore {
                 // certainly wants to know; running without plugins is
                 // also a valid choice, so we just warn rather than
                 // abort startup.
-                self.plugin_warning = Some(format!(
+                self.process.plugin_warning = Some(format!(
                     "plugin auto-load: cannot read {}: {err}",
                     dir.display()
                 ));
@@ -94,7 +94,7 @@ impl AppCore {
         if !failures.is_empty() {
             // Surface failures via the plugin_warning slot so they survive
             // the next status message rewrite.
-            self.plugin_warning = Some(format!(
+            self.process.plugin_warning = Some(format!(
                 "{} plugin(s) failed to load: {}",
                 failures.len(),
                 failures.join("; ")

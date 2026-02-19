@@ -108,7 +108,7 @@ impl AppCore {
                 pending: Some(pending_count),
                 read_only: self.read_only,
             },
-            running: self.running,
+            running: self.process.running,
             theme: &self.theme,
             sidebar: sidebar_view,
             editor: &mut tab.editor,
@@ -506,7 +506,7 @@ impl AppCore {
             self.await_pending_session_opens_sync();
         }
         match parsed {
-            Command::Quit => self.should_quit = true,
+            Command::Quit => self.process.should_quit = true,
             Command::Open(name) => self.open_named(&name),
             Command::Close => self.close_session(),
             Command::Refresh => self.refresh_schema(),

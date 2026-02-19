@@ -115,7 +115,7 @@ impl AppCore {
         let schema_owned = schema.to_owned();
         let name_owned = name.to_owned();
         let tab_id = self.tabs[self.active_tab].id();
-        let meta_tx = self.meta_tx.clone();
+        let meta_tx = self.process.meta_tx.clone();
         self.status.message = format!("fetching DDL for {schema}.{name}…");
         tokio::spawn(async move {
             let result = async {

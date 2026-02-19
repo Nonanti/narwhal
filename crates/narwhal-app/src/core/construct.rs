@@ -1,6 +1,5 @@
 //! `AppCore` constructors and settings application.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
@@ -132,21 +131,15 @@ impl AppCore {
                 message: "ready".into(),
                 ..Default::default()
             },
-            plugin_warning: None,
-            running: false,
-            run_tab: None,
-            cancel_slot: Arc::new(Mutex::new(None)),
-            should_quit: false,
+            // ProcessState bundles every lifecycle / async-bridge
+            // field. Receivers stay outside it (see mod.rs comment).
+            process: super::ProcessState::new(run_tx, meta_tx, Arc::new(Mutex::new(None))),
+            run_rx,
+            meta_rx,
             pending_result_leader: None,
             pending_result_entries_states: Vec::new(),
             pending_result_entries_views: Vec::new(),
             last_layout: LayoutRegions::default(),
-            run_tx,
-            run_rx,
-            meta_tx,
-            meta_rx,
-            refresh_task: None,
-            refresh_pending: Arc::new(AtomicBool::new(false)),
             keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
             read_only: false,

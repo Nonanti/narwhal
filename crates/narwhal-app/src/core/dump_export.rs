@@ -94,7 +94,7 @@ impl AppCore {
         // current tab id so a tab switch during the dump still routes
         // the DDL to the originating tab (C5 invariant).
         let tab_id = self.tabs[self.active_tab].id();
-        let meta_tx = self.meta_tx.clone();
+        let meta_tx = self.process.meta_tx.clone();
         self.status.message = format!("dumping {} table(s)…", names.len());
         let dialect_copy = dialect;
         tokio::spawn(async move {

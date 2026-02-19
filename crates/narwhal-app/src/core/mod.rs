@@ -24,7 +24,6 @@ pub(super) mod text_utils;
 mod transactions;
 use plugin_executor::PluginConnectionState;
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use uuid::Uuid;
@@ -40,7 +39,7 @@ use crate::keymap::Keymap;
 
 use crate::meta::MetaUpdate;
 use crate::registry::DriverRegistry;
-use crate::run::{ActiveCancel, RunUpdate};
+use crate::run::RunUpdate;
 use crate::session::Session;
 use crate::snippets::SnippetStore;
 use narwhal_plugin::PluginRegistry;
@@ -48,8 +47,8 @@ use narwhal_plugin::PluginRegistry;
 pub mod state;
 pub use state::{
     CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ModalState,
-    ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem, SnippetsModal,
-    StatusBar, Tab,
+    ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem,
+    SnippetsModal, StatusBar, Tab,
 };
 
 /// Pure, IO-free application state and behaviour.
@@ -92,19 +91,13 @@ pub struct AppCore {
     /// Sidebar viewport scroll (L24). First visible row.
     pub(super) sidebar_scroll: usize,
     pub(super) status: StatusBar,
-    /// One-shot warning carried over from a plugin (transform or command
-    /// hook) so that the final 'done · N statement(s)' `AllDone` message
-    /// doesn't overwrite it silently. Cleared after it bubbles up.
-    pub(super) plugin_warning: Option<String>,
-    pub(super) running: bool,
-    /// Tab index that owns the in-flight run. Set to `Some(active_tab)`
-    /// when `dispatch_batch` fires; cleared to `None` on `AllDone`.
-    /// All `handle_run_update` / `finalize_statement` mutations target
-    /// this tab, not `active_tab`, so a mid-run tab switch cannot
-    /// corrupt a different tab's results.  (Bug K1-A fix.)
-    pub(super) run_tab: Option<usize>,
-    pub(super) cancel_slot: ActiveCancel,
-    pub(super) should_quit: bool,
+    /// Lifecycle + async-bridge state (`should_quit`, `running`,
+    /// `run_tab`, `cancel_slot`, `plugin_warning`, `refresh_task`,
+    /// `refresh_pending`, `run_tx`, `meta_tx`). Bundled so the
+    /// event-loop invariants live in one place; the matching channel
+    /// receivers
+    /// stay below because draining them needs mutable `AppCore`.
+    pub(super) process: ProcessState,
     /// Pending leader key for result-tab cycling. `]` followed by
     /// `r` cycles forward; `[` followed by `r` cycles backward.
     pub(super) pending_result_leader: Option<char>,
@@ -114,21 +107,12 @@ pub struct AppCore {
     pub(super) pending_result_entries_states: Vec<ResultState>,
     pub(super) pending_result_entries_views: Vec<ResultView>,
     pub(super) last_layout: LayoutRegions,
-    pub(super) run_tx: mpsc::Sender<RunUpdate>,
+    /// Receiver halves of the channels owned by `process`.
+    /// Kept outside `ProcessState` because draining them needs
+    /// mutable access to `AppCore` (handlers mutate UI / session /
+    /// modal state, not just process state).
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
-    /// Channel for background metadata operations (`dump_schema`, refresh,
-    /// history). Separated from the run channel so meta ops don't
-    /// interfere with query execution state.
-    pub(super) meta_tx: mpsc::Sender<MetaUpdate>,
     pub(crate) meta_rx: mpsc::Receiver<MetaUpdate>,
-    /// Handle to the in-flight debounced schema refresh task.
-    /// Aborting it cancels the pending timer; a new task replaces it
-    /// on every `schedule_schema_refresh` call.
-    pub(super) refresh_task: Option<tokio::task::AbortHandle>,
-    /// Shared flag set by `schedule_schema_refresh` and consumed by
-    /// the debounce timer task to know whether a refresh is still
-    /// pending.
-    pub(super) refresh_pending: Arc<AtomicBool>,
     /// Active key map. Starts as the built-in defaults; mutated in place
     /// by [`Self::apply_settings`] whenever the user's `config.toml`
     /// supplies a `[keymap.<group>]` override. Cloned reads are not

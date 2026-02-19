@@ -38,7 +38,7 @@ impl AppCore {
                 self.dispatch_current_statement(RunMode::Stream);
                 return true;
             }
-            CtKey::F(4) if self.running => {
+            CtKey::F(4) if self.process.running => {
                 self.spawn_cancel();
                 return true;
             }
@@ -60,7 +60,7 @@ impl AppCore {
                     self.status.message = format!("focus → {}", self.focus.label());
                     return true;
                 }
-                CtKey::Char('c') if self.running => {
+                CtKey::Char('c') if self.process.running => {
                     self.spawn_cancel();
                     return true;
                 }
