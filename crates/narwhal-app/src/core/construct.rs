@@ -81,7 +81,7 @@ impl AppCore {
     /// Read-only accessor for the active clipboard. Mostly useful for
     /// tests that want to assert what was just yanked.
     pub fn clipboard(&self) -> Arc<dyn Clipboard> {
-        Arc::clone(&self.clipboard)
+        Arc::clone(&self.deps.clipboard)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -97,15 +97,22 @@ impl AppCore {
         meta_rx: mpsc::Receiver<MetaUpdate>,
     ) -> Self {
         Self {
-            registry,
-            credentials,
-            clipboard,
-            plugins: {
-                let mut reg = PluginRegistry::new();
-                reg.reserve_builtins(crate::commands::BUILTIN_COMMAND_NAMES.iter().copied());
-                Arc::new(reg)
+            // AppDeps bundles every immutable service: driver
+            // registry, credential store, clipboard, plugin
+            // registry + state, keymap. Tests build one of these
+            // to mock the entire I/O boundary.
+            deps: super::AppDeps {
+                registry,
+                credentials,
+                clipboard,
+                plugins: {
+                    let mut reg = PluginRegistry::new();
+                    reg.reserve_builtins(crate::commands::BUILTIN_COMMAND_NAMES.iter().copied());
+                    Arc::new(reg)
+                },
+                plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
+                keymap: crate::keymap::Keymap::builtin(),
             },
-            plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
             // ModalState::default() = every modal closed, every
             // option None, help_open=false. Bundled so callers
             // don't have to know which fields exist.
@@ -122,7 +129,6 @@ impl AppCore {
             process: super::ProcessState::new(run_tx, meta_tx, Arc::new(Mutex::new(None))),
             run_rx,
             meta_rx,
-            keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
         }
     }
@@ -205,7 +211,7 @@ impl AppCore {
                         .push(format!("unknown keymap group: '{raw_group}'"));
                 }
             }
-            let diags = self.keymap.apply_overrides(&typed);
+            let diags = self.deps.keymap.apply_overrides(&typed);
             for d in diags {
                 self.keymap_warnings.push(d.to_string());
             }

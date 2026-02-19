@@ -113,7 +113,7 @@ impl AppCore {
         // match did the same, and falling through would risk shadowing
         // legitimate future bindings.
         let chord = KeyChord::from_event(key);
-        if let Some(action) = self.keymap.resolve(KeyGroup::Results, chord) {
+        if let Some(action) = self.deps.keymap.resolve(KeyGroup::Results, chord) {
             self.apply_results_action(action);
         }
     }
@@ -436,7 +436,7 @@ impl AppCore {
             CtKey::Char('y') => {
                 let text = state.pretty.clone();
                 let len = text.len();
-                match self.clipboard.set_text(&text) {
+                match self.deps.clipboard.set_text(&text) {
                     Ok(()) => {
                         self.ui.status.message = format!("yanked {len} char(s) (pretty)");
                     }
@@ -446,7 +446,7 @@ impl AppCore {
             CtKey::Char('Y') => {
                 let text = state.raw.clone();
                 let len = text.len();
-                match self.clipboard.set_text(&text) {
+                match self.deps.clipboard.set_text(&text) {
                     Ok(()) => {
                         self.ui.status.message = format!("yanked {len} char(s) (raw)");
                     }
@@ -508,7 +508,7 @@ impl AppCore {
             narwhal_core::Value::Null => String::new(),
             other => other.render(),
         };
-        match self.clipboard.set_text(&text) {
+        match self.deps.clipboard.set_text(&text) {
             Ok(()) => {
                 self.ui.status.message = format!("yanked {} char(s) to clipboard", text.len());
             }
@@ -541,7 +541,7 @@ impl AppCore {
             })
             .collect::<Vec<_>>()
             .join("\t");
-        match self.clipboard.set_text(&text) {
+        match self.deps.clipboard.set_text(&text) {
             Ok(()) => {
                 self.ui.status.message =
                     format!("yanked row ({} cell(s)) to clipboard", row.0.len());
@@ -899,7 +899,7 @@ impl AppCore {
         // pre-empt the modal's reflexes (today only `Z` to launch the
         // JSON viewer over the focused column).
         let chord = KeyChord::from_event(key);
-        if self.keymap.resolve(KeyGroup::RowDetail, chord) == Some(Action::OpenJsonViewerRow) {
+        if self.deps.keymap.resolve(KeyGroup::RowDetail, chord) == Some(Action::OpenJsonViewerRow) {
             self.open_json_viewer_from_row_detail();
             return;
         }

@@ -22,40 +22,26 @@ mod sessions;
 mod tabs;
 pub(super) mod text_utils;
 mod transactions;
-use plugin_executor::PluginConnectionState;
-
-use std::sync::Arc;
-
-use narwhal_config::CredentialStore;
 use tokio::sync::mpsc;
 
-use crate::clipboard::Clipboard;
-use crate::keymap::Keymap;
-
 use crate::meta::MetaUpdate;
-use crate::registry::DriverRegistry;
 use crate::run::RunUpdate;
-
-use narwhal_plugin::PluginRegistry;
 
 pub mod state;
 pub use state::{
-    CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ModalState,
-    ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SessionState,
-    SidebarItem, SnippetsModal, StatusBar, Tab, UiState,
+    AppDeps, CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState,
+    ModalState, ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource,
+    SessionState, SidebarItem, SnippetsModal, StatusBar, Tab, UiState,
 };
 
 /// Pure, IO-free application state and behaviour.
 pub struct AppCore {
-    pub(super) registry: DriverRegistry,
-    pub(super) credentials: Arc<dyn CredentialStore>,
-    pub(super) clipboard: Arc<dyn Clipboard>,
-    pub(super) plugins: Arc<PluginRegistry>,
-    /// Shared handle the plugin SQL executor reads on every
-    /// `narwhal.sql_run` call. Updated whenever a session opens or
-    /// closes so scripts always target the currently-active
-    /// connection.
-    pub(super) plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
+    /// Wiring established at startup: driver registry, credential
+    /// store, clipboard, plugin registry + state, keymap. Cheap to
+    /// clone (everything is an `Arc` or owned-value handle); the
+    /// test fixture only has to build an `AppDeps` to mock the
+    /// entire I/O boundary.
+    pub(super) deps: AppDeps,
     /// Every modal-overlay field (wizard, help, history search,
     /// snippets picker). Bundled so the modal precedence check in
     /// `handle_key` has a single source of truth and so modal
@@ -84,11 +70,6 @@ pub struct AppCore {
     /// modal state, not just process state).
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
     pub(crate) meta_rx: mpsc::Receiver<MetaUpdate>,
-    /// Active key map. Starts as the built-in defaults; mutated in place
-    /// by [`Self::apply_settings`] whenever the user's `config.toml`
-    /// supplies a `[keymap.<group>]` override. Cloned reads are not
-    /// taken on the hot path — the dispatcher borrows immutably.
-    pub(super) keymap: Keymap,
     /// One-shot warnings collected from the most recent keymap override
     /// pass. Surfaced to the status bar once on the first render so the
     /// user notices malformed bindings without us having to plumb a

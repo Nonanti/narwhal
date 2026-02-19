@@ -63,7 +63,7 @@ impl AppCore {
         config: ConnectionConfig,
         password: Option<String>,
     ) {
-        let Ok(driver) = self.registry.get(&config.driver) else {
+        let Ok(driver) = self.deps.registry.get(&config.driver) else {
             self.ui.status.message = format!("driver not registered: {}", config.driver);
             return;
         };
@@ -123,6 +123,7 @@ impl AppCore {
         );
         {
             let mut state = self
+                .deps
                 .plugin_state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -139,6 +140,7 @@ impl AppCore {
     pub(super) fn close_session(&mut self) {
         if self.session.active.take().is_some() {
             let mut state = self
+                .deps
                 .plugin_state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -362,7 +364,7 @@ impl AppCore {
         // the secret only if the wizard is *still* open against the
         // same connection id, so a fast typist who hits Esc before
         // the keyring replies does not get a surprise field update.
-        let credentials = Arc::clone(&self.credentials);
+        let credentials = Arc::clone(&self.deps.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
         let meta_tx = self.process.meta_tx.clone();
@@ -465,7 +467,7 @@ impl AppCore {
             (config, None)
         };
 
-        let Ok(driver) = self.registry.get(&config.driver) else {
+        let Ok(driver) = self.deps.registry.get(&config.driver) else {
             self.ui.status.message = format!("test: driver not registered: {}", config.driver);
             return;
         };
@@ -527,7 +529,7 @@ impl AppCore {
         // does not block on the result — success is the common case,
         // failure surfaces in tracing for operators tailing the log.
         // Eliminates one `block_in_place` from the event-loop path.
-        let credentials = Arc::clone(&self.credentials);
+        let credentials = Arc::clone(&self.deps.credentials);
         let removed_id = removed.id;
         tokio::spawn(async move {
             if let Err(error) = credentials.delete(removed_id).await {
@@ -542,6 +544,7 @@ impl AppCore {
             if session.config.id == removed.id {
                 self.session.active = None;
                 let mut state = self
+                    .deps
                     .plugin_state
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -570,7 +573,7 @@ impl AppCore {
         // real verdict ("forgot password" / "forget failed: …")
         // instead of the previous "(best-effort)" placeholder that
         // left the user guessing.
-        let credentials = Arc::clone(&self.credentials);
+        let credentials = Arc::clone(&self.deps.credentials);
         let config_id = config.id;
         let name_owned = name.to_owned();
         let meta_tx = self.process.meta_tx.clone();

@@ -1,6 +1,7 @@
 //! Pure state types previously inlined in `core/mod.rs`. Each
 //! sub-module owns one concept; nothing here mutates `AppCore`.
 
+pub mod deps;
 pub mod history;
 pub mod modals;
 pub mod process;
@@ -12,6 +13,7 @@ pub mod status;
 pub mod tab;
 pub mod ui;
 
+pub use deps::AppDeps;
 pub use history::HistoryState;
 pub use modals::ModalState;
 pub use process::ProcessState;

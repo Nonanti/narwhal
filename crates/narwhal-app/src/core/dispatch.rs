@@ -578,7 +578,7 @@ impl AppCore {
                     .find(|(key, _)| *key == resolved)
                 {
                     self.ui.status.message = format!(":{name} — {desc}");
-                } else if let Some(plugin) = self.plugins.plugin_for(&name) {
+                } else if let Some(plugin) = self.deps.plugins.plugin_for(&name) {
                     // Plugin command: pull the descriptor straight off
                     // the owning plugin instead of walking the full
                     // catalogue. plugin_for already located it.
@@ -623,7 +623,7 @@ impl AppCore {
                 // token is the command name; everything after is passed to
                 // the handler verbatim.
                 let (head, arg) = split_head_arg(&text);
-                if self.plugins.plugin_for(head).is_some() {
+                if self.deps.plugins.plugin_for(head).is_some() {
                     self.dispatch_plugin(head, arg);
                 } else {
                     self.ui.status.message = format!("unknown command: {text}");

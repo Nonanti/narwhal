@@ -19,7 +19,7 @@ impl AppCore {
     /// The `Arc` derefs transparently so callers can use `&PluginRegistry`
     /// methods without caring about the indirection.
     pub fn plugins(&self) -> &PluginRegistry {
-        &self.plugins
+        &self.deps.plugins
     }
 
     /// Mutable handle so callers (binary or tests) can register plugins
@@ -28,7 +28,7 @@ impl AppCore {
     /// the caller actually mutates — dispatch paths that merely read pay
     /// a single ref-count bump.
     pub fn plugins_mut(&mut self) -> &mut PluginRegistry {
-        Arc::make_mut(&mut self.plugins)
+        Arc::make_mut(&mut self.deps.plugins)
     }
 
     /// Register a freshly-built [`LuaPlugin`], wiring it into the SQL
@@ -38,10 +38,10 @@ impl AppCore {
     /// the executor injection is impossible to forget.
     pub fn register_lua_plugin(&mut self, plugin: LuaPlugin) -> PluginResult<usize> {
         let executor: Arc<dyn SqlExecutor> = Arc::new(AppPluginExecutor {
-            state: self.plugin_state.clone(),
+            state: self.deps.plugin_state.clone(),
         });
         plugin.install_executor(executor)?;
-        Arc::make_mut(&mut self.plugins).register(plugin)
+        Arc::make_mut(&mut self.deps.plugins).register(plugin)
     }
 
     /// Scan `dir` for top-level `*.lua` files and register each as a
@@ -128,7 +128,7 @@ impl AppCore {
     }
 
     pub(super) fn list_plugins(&mut self) {
-        let catalogue = self.plugins.catalogue();
+        let catalogue = self.deps.plugins.catalogue();
         if catalogue.is_empty() {
             self.ui.status.message = "no plugins loaded; use :plug-load <file.lua>".into();
             return;
@@ -148,10 +148,11 @@ impl AppCore {
         // handler reports the correct plugin even if two plugins share
         // the same command head (H20).
         let plugin_name = self
+            .deps
             .plugins
             .plugin_for(command)
             .map_or_else(|| command.to_owned(), |p| p.name().to_owned());
-        let plugins = Arc::clone(&self.plugins);
+        let plugins = Arc::clone(&self.deps.plugins);
         let command_owned = command.to_owned();
         // Sprint 9 (H7) deferred: an earlier attempt routed plugin
         // dispatch through the meta channel, but 11 integration tests

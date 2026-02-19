@@ -89,7 +89,8 @@ impl AppCore {
                 // to run while a transaction is open — a fresh pool
                 // connection wouldn't see the uncommitted state and the
                 // user would silently get wrong answers.
-                self.plugin_state
+                self.deps
+                    .plugin_state
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .in_transaction = true;
@@ -169,7 +170,8 @@ impl AppCore {
         // against the pool again. The connection itself is now back in
         // the pool (PooledConnection::drop returned it), regardless of
         // whether the commit/rollback round-trip succeeded.
-        self.plugin_state
+        self.deps
+            .plugin_state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .in_transaction = false;

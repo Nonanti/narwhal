@@ -300,7 +300,7 @@ impl AppCore {
                     // commit step.
                     if let Err(error) = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current()
-                            .block_on(self.credentials.set(connection_id, secret))
+                            .block_on(self.deps.credentials.set(connection_id, secret))
                     }) {
                         // The connection is still saved; just warn the user
                         // that the secret didn't make it to the keyring.

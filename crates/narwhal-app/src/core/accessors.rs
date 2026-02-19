@@ -54,7 +54,7 @@ impl AppCore {
     /// and any future help/config tooling that wants to introspect
     /// the currently-active bindings.
     pub const fn keymap(&self) -> &narwhal_commands::keymap::Keymap {
-        &self.keymap
+        &self.deps.keymap
     }
 
     /// L36 #4 v1: diagnostics collected the last time

@@ -451,7 +451,7 @@ impl AppCore {
             request,
             pool,
             self.session.history_journal.clone(),
-            Some(self.credentials.clone()),
+            Some(self.deps.credentials.clone()),
             self.process.meta_tx.clone(),
         );
         true
@@ -586,10 +586,10 @@ impl AppCore {
         rows: Vec<Row>,
         elapsed_ms: u64,
     ) -> (Vec<ColumnHeader>, Vec<Row>) {
-        if self.plugins.plugins().is_empty() {
+        if self.deps.plugins.plugins().is_empty() {
             return (columns, rows);
         }
-        let plugins = Arc::clone(&self.plugins);
+        let plugins = Arc::clone(&self.deps.plugins);
         let mut qr = narwhal_core::QueryResult {
             columns,
             rows,

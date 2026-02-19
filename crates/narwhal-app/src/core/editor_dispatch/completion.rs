@@ -115,7 +115,8 @@ impl AppCore {
                     .map(|s| (*s).to_string())
                     .collect();
                 v.extend(
-                    self.plugins
+                    self.deps
+                        .plugins
                         .catalogue()
                         .into_iter()
                         .map(|(_, cmd)| cmd.name),
