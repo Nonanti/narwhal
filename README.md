@@ -5,16 +5,32 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
 
-> A TUI database client that doesn't feel like the 90s.
+> A TUI database client with a built-in MCP server. Five databases, vim editing, Lua plugins.
 
-![narwhal](./docs/img/hero.png)
+![narwhal demo](./docs/img/demo.gif)
 
 ## Why narwhal
 
-- **One TUI, five databases** — Postgres, MySQL, SQLite, DuckDB, ClickHouse. No driver-juggling, no context-switching between `psql`, `mysql`, and DataGrip.
-- **Vim editing + auto-pair + completion** — modal input (Normal / Insert / Visual), schema-aware tab-completion, alias-resolved column hints, and a proper `:` command palette.
-- **Lua plugin runtime** — the bits that should be yours, stay yours. Write a `.lua` file, drop it in `~/.config/narwhal/plugins/`, and it's live.
-- **SSH tunnels, `~/.pgpass`, OS keyring** — the auth ergonomics you already configured for `psql` work here too. Set `ssh_host=jump.example.com` and the connect path forwards a loopback port for you.
+- **Built-in MCP server.** Run `narwhal mcp` and any
+  [Model Context Protocol](https://modelcontextprotocol.io/) client (Claude
+  Desktop, Cursor, your own agent) gets `list_connections`,
+  `describe_schema`, `describe_table`, `run_query`, `explain_query` over
+  stdio. Read-only by default, with a three-layer SQL guard and a
+  workspace ACL (`.narwhal/workspace.toml`) so an agent can only see
+  the connections you explicitly listed.
+- **One TUI, five databases.** Postgres, MySQL, SQLite, DuckDB,
+  ClickHouse. No driver-juggling, no context-switching between `psql`,
+  `mysql`, and DataGrip.
+- **Vim editing + auto-pair + completion.** Modal input (Normal,
+  Insert, Visual), schema-aware tab-completion, alias-resolved column
+  hints, a proper `:` command palette.
+- **Lua plugin runtime.** The bits that should be yours, stay yours.
+  Write a `.lua` file, drop it in `~/.config/narwhal/plugins/`, and it
+  is live.
+- **SSH tunnels, `~/.pgpass`, OS keyring.** The auth ergonomics you
+  already configured for `psql` work here too. Set
+  `ssh_host=jump.example.com` and the connect path forwards a loopback
+  port for you.
 
 ## Install
 
@@ -58,16 +74,16 @@ mv narwhal-*/narwhal ~/.local/bin/
 
 A PKGBUILD lives at [`packaging/aur/PKGBUILD`](./packaging/aur/PKGBUILD)
 and a Homebrew formula at [`packaging/homebrew/narwhal.rb`](./packaging/homebrew/narwhal.rb).
-Publishing to the AUR and a Homebrew tap is on the post-2.0 roadmap —
-see [packaging issues](https://github.com/nonantiy/narwhal/labels/packaging)
+Publishing to the AUR and a Homebrew tap is on the post-2.0 roadmap.
+See [packaging issues](https://github.com/nonantiy/narwhal/labels/packaging)
 for status.
 
 ## Quick start
 
-1. **Run `narwhal`** — the TUI opens with an empty editor and a sidebar.
-2. **Hit `:add`** — the connection wizard appears. Pick a driver, fill in host + database (or use `:url postgres://user:pass@host/db` to skip the form).
-3. **`:open <name>`** — the saved entry connects; the sidebar fills with schemas and tables.
-4. **F6 to run** — the whole buffer executes; results appear in the lower pane. Press **F1** any time for the full keymap reference.
+1. **Run `narwhal`.** The TUI opens with an empty editor and a sidebar.
+2. **Hit `:add`.** The connection wizard appears. Pick a driver, fill in host + database (or use `:url postgres://user:pass@host/db` to skip the form).
+3. **`:open <name>`.** The saved entry connects; the sidebar fills with schemas and tables.
+4. **F6 to run.** The whole buffer executes; results appear in the lower pane. Press **F1** any time for the full keymap reference.
 
 ### `connections.toml` schema
 
@@ -118,12 +134,12 @@ defaults so a one-line file is enough.
 theme = "dark"           # "dark" (default) | "light" | "high-contrast"
 
 [editor]
-tab_width    = 4         # reserved — v1.1 will honour this
-use_spaces   = true      # reserved — v1.1 will honour this
-line_numbers = true      # reserved — v1.1 will honour this
+tab_width    = 4         # reserved, v1.1 will honour this
+use_spaces   = true      # reserved, v1.1 will honour this
+line_numbers = true      # reserved, v1.1 will honour this
 
 [keybindings]
-vim_mode = true          # reserved — v1.1 will allow opt-out
+vim_mode = true          # reserved, v1.1 will allow opt-out
 ```
 
 v1.0 wires only the `theme` field; the rest are persisted and
@@ -177,6 +193,68 @@ If you were relying on the previous insecure behaviour:
 Query-string TLS params (`?sslmode=...`, `?sslrootcert=...`, etc.)
 are now parsed into dedicated struct fields instead of being left in
 the generic `options` map.
+
+## MCP server: talk to your databases through an AI agent
+
+narwhal ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
+server so any MCP-capable AI assistant (Claude Desktop, Cursor, Continue,
+Aider, ...) can browse the connections you already configured and inspect
+their schema.
+
+```sh
+narwhal mcp   # runs the JSON-RPC stdio server
+```
+
+Wire it into Claude Desktop:
+
+```jsonc
+// ~/.config/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "narwhal": {
+      "command": "narwhal",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The v0 tool surface:
+
+| Tool | What it does |
+|------|--------------|
+| `list_connections` | List configured connections — driver, target, SSH flag. No IO, no credentials loaded. Honours the workspace ACL. |
+| `describe_schema`  | Schema / table / view tree for one connection. |
+| `describe_table`   | Full structure of one table — columns, indexes, foreign keys, unique constraints, engine-native DDL. |
+| `run_query`        | Execute a single statement. **Read-only by default** — syntactic guard + `BEGIN/ROLLBACK` sandwich + row limit (default 1 000). `read_only=false` opts out, subject to the workspace ACL. |
+| `explain_query`    | Driver-native EXPLAIN with the right dialect prefix. Optional `analyze=true` runs the statement for real cardinalities (PG / MySQL / DuckDB). |
+
+Every database-touching call is audit-logged to
+`~/.local/share/narwhal/history.jsonl` with `source: "mcp"` so you can
+`jq 'select(.source == "mcp")'` to isolate agent traffic.
+
+### Workspace scoping: `.narwhal/workspace.toml`
+
+A repo-local file (discovered by walking up from `pwd`, same idiom as
+`.git`) declares what the MCP server may expose when narwhal runs from
+inside that directory tree. Commit it next to your code so an agent
+launched against your project can only reach the databases you list.
+
+```toml
+# .narwhal/workspace.toml
+
+# Connection names from connections.toml that the agent may target.
+# Empty / omitted = all of them.
+allowed_connections = ["staging", "test"]
+
+# When false, run_query rejects read_only=false. Default true.
+allow_writes = false
+```
+
+Disallowed connections appear to the agent exactly as a misspelled
+name would: the `list_connections` result hides them, `describe_*` /
+`run_query` calls answer with the same "unknown connection" tool-level
+error, and the agent retries against the visible set automatically.
 
 ## Keymap
 
@@ -296,7 +374,7 @@ Built-in command names (`run`, `open`, `begin`, `quit`, …) are reserved;
 a plugin that tries to shadow one is rejected at load time. During a
 `:begin` transaction, `narwhal.sql_run` is refused entirely.
 
-## Headless `exec` mode — one-shot SQL from the shell
+## Headless `exec` mode: one-shot SQL from the shell
 
 The same binary doubles as a `psql -c` / `mysql -e` muadili. Use it in
 CI smoke checks, `cron` jobs, or shell pipelines:
@@ -321,68 +399,6 @@ Formats: `table` (default, ASCII grid), `csv` (RFC 4180), `json`
 resolution is the same as the TUI — keyring first, `~/.pgpass`/env
 fallback. Every call is audit-logged to `history.jsonl` with
 `source: "exec"` so it can be grepped alongside MCP traffic.
-
-## MCP server — talk to your databases through an AI agent
-
-narwhal ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
-server so any MCP-capable AI assistant (Claude Desktop, Cursor, Continue,
-Aider, …) can browse the connections you already configured and inspect
-their schema.
-
-```sh
-narwhal mcp   # runs the JSON-RPC stdio server
-```
-
-Wire it into Claude Desktop:
-
-```jsonc
-// ~/.config/Claude/claude_desktop_config.json
-{
-  "mcpServers": {
-    "narwhal": {
-      "command": "narwhal",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-The v0 tool surface:
-
-| Tool | What it does |
-|------|--------------|
-| `list_connections` | List configured connections — driver, target, SSH flag. No IO, no credentials loaded. Honours the workspace ACL. |
-| `describe_schema`  | Schema / table / view tree for one connection. |
-| `describe_table`   | Full structure of one table — columns, indexes, foreign keys, unique constraints, engine-native DDL. |
-| `run_query`        | Execute a single statement. **Read-only by default** — syntactic guard + `BEGIN/ROLLBACK` sandwich + row limit (default 1 000). `read_only=false` opts out, subject to the workspace ACL. |
-| `explain_query`    | Driver-native EXPLAIN with the right dialect prefix. Optional `analyze=true` runs the statement for real cardinalities (PG / MySQL / DuckDB). |
-
-Every database-touching call is audit-logged to
-`~/.local/share/narwhal/history.jsonl` with `source: "mcp"` so you can
-`jq 'select(.source == "mcp")'` to isolate agent traffic.
-
-### Workspace scoping — `.narwhal/workspace.toml`
-
-A repo-local file (discovered by walking up from `pwd`, same idiom as
-`.git`) declares what the MCP server may expose when narwhal runs from
-inside that directory tree. Commit it next to your code so an agent
-launched against your project can only reach the databases you list.
-
-```toml
-# .narwhal/workspace.toml
-
-# Connection names from connections.toml that the agent may target.
-# Empty / omitted = all of them.
-allowed_connections = ["staging", "test"]
-
-# When false, run_query rejects read_only=false. Default true.
-allow_writes = false
-```
-
-Disallowed connections appear to the agent exactly as a misspelled
-name would (the `list_connections` result hides them, `describe_*` /
-`run_query` calls answer with the same "unknown connection" tool-level
-error) — the agent retries against the visible set automatically.
 
 ## Transactions
 

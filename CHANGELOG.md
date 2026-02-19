@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template.
 - `dependabot.yml` for weekly cargo + GitHub Actions updates with
   sensible grouping.
+- `docs/img/demo.gif` recorded with VHS and reproducible from
+  `docs/img/demo.tape` + `docs/img/seed-demo-db.sh`. Hero asset for
+  the README.
+
+### Changed
+
+- README tagline now leads with the built-in MCP server: "A TUI
+  database client with a built-in MCP server. Five databases, vim
+  editing, Lua plugins."
+- The MCP section moved up next to Quick Start so it lands above the
+  fold for first-time readers.
+- Replaced the static `hero.png` at the top of the README with the new
+  animated demo.
+- Halved the em-dash count in the README's upper section for cleaner
+  scanning.
 
 ### Fixed
 
