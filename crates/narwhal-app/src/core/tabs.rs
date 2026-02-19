@@ -37,7 +37,7 @@ impl AppCore {
         format!("{base} · {}", labels.join("  "))
     }
 
-    pub(super) fn new_tab(&mut self) {
+    pub(super) async fn new_tab(&mut self) {
         if self.process.running {
             self.ui.status.message = "cannot open a new tab while a query is running".into();
             return;
@@ -51,7 +51,7 @@ impl AppCore {
         self.ui.focus = Pane::Editor;
     }
 
-    pub(super) fn close_tab(&mut self) {
+    pub(super) async fn close_tab(&mut self) {
         if self.process.running {
             self.ui.status.message = "cannot close a tab while a query is running".into();
             return;
@@ -67,7 +67,7 @@ impl AppCore {
         self.ui.status.message = format!("tab closed; now on {}", self.ui.active_tab + 1);
     }
 
-    pub(super) fn cycle_tab(&mut self, delta: i32) {
+    pub(super) async fn cycle_tab(&mut self, delta: i32) {
         if self.process.running {
             self.ui.status.message = "cannot switch tabs while a query is running".into();
             return;
@@ -89,7 +89,7 @@ impl AppCore {
     /// Cycle through the per-statement results inside the active tab's
     /// [`super::ResultBundle`]. `delta` +1 goes forward, −1 goes backward.
     /// Does nothing when the bundle has only one result.
-    pub(super) fn cycle_result_tab(&mut self, delta: i32) {
+    pub(super) async fn cycle_result_tab(&mut self, delta: i32) {
         let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
         if !bundle.is_multi() {
             return;

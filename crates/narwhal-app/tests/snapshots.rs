@@ -105,9 +105,10 @@ async fn snapshot_after_query_returns_rows() {
     let connections = configured_state(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open demo");
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open demo").await;
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     // Mask the elapsed-ms part of the status bar and result title so the
@@ -123,10 +124,10 @@ fn mask_elapsed(s: String) -> String {
     re.replace_all(&s, "? ms").into_owned()
 }
 
-#[test]
-fn snapshot_help_modal() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_help_modal() {
     let mut core = empty_state();
-    core.open_help();
+    core.open_help().await;
     assert!(core.help_open());
     assert_snapshot!("help_modal", snapshot_core_sized(&mut core, 130, 66));
 }

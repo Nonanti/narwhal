@@ -52,12 +52,12 @@ async fn streaming_title_includes_rows_and_elapsed() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
     assert!(core.session().is_some());
 
     // Dispatch a streaming query.
-    core.insert_into_editor("SELECT * FROM bulk");
-    core.execute_command("stream");
+    core.insert_into_editor("SELECT * FROM bulk").await;
+    core.execute_command("stream").await;
     core.drain_run_updates().await;
 
     // After drain, we should have a completed Rows result with streamed=true.
@@ -102,11 +102,11 @@ async fn throttle_prevents_redraw_storm() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
 
     // Dispatch a streaming query.
-    core.insert_into_editor("SELECT * FROM throttle");
-    core.execute_command("stream");
+    core.insert_into_editor("SELECT * FROM throttle").await;
+    core.execute_command("stream").await;
 
     // Manually consume updates one by one so we can inspect
     // the Running state mid-stream.
@@ -164,11 +164,11 @@ async fn complete_flips_to_rows_count() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
 
     // Dispatch a streaming query.
-    core.insert_into_editor("SELECT * FROM complete");
-    core.execute_command("stream");
+    core.insert_into_editor("SELECT * FROM complete").await;
+    core.execute_command("stream").await;
     core.drain_run_updates().await;
 
     // After completion the result should be Rows (not Running),
@@ -191,9 +191,9 @@ async fn complete_flips_to_rows_count() {
     }
 
     // Verify that a non-streamed (execute) query does NOT have streamed=true.
-    core.execute_command("clear");
-    core.insert_into_editor("SELECT * FROM complete");
-    core.execute_command("run");
+    core.execute_command("clear").await;
+    core.insert_into_editor("SELECT * FROM complete").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     match core.result() {

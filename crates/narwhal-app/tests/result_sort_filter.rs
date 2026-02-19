@@ -50,10 +50,10 @@ const fn ctrl(code: KeyCode) -> KeyEvent {
 }
 
 /// Focus the result pane via Ctrl-W cycling.
-fn focus_results(core: &mut AppCore) {
+async fn focus_results(core: &mut AppCore) {
     let ctrl_w = ctrl(KeyCode::Char('w'));
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
 }
 
@@ -71,11 +71,12 @@ async fn seed_result(core: &mut AppCore, db_path: PathBuf) {
         )
         .unwrap();
     }
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY label");
-    core.execute_command("run");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY label")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(core);
+    focus_results(core).await;
 }
 
 /// Compute visible row indices directly from result state + `ResultView`,
@@ -131,7 +132,7 @@ async fn sort_asc_then_desc_then_off() {
     // Natural (no-sort) id order: [1, 2, 3, 4, 5]
 
     // First `s`: None → Asc (by id, column 0)
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('s'))).await;
     assert_eq!(result_view(&core).sort, Some((0, SortDir::Asc)));
     let vis = compute_visible(&columns, &rows, result_view(&core));
     assert_eq!(
@@ -141,7 +142,7 @@ async fn sort_asc_then_desc_then_off() {
     );
 
     // Second `s`: Asc → Desc
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('s'))).await;
     assert_eq!(result_view(&core).sort, Some((0, SortDir::Desc)));
     let vis = compute_visible(&columns, &rows, result_view(&core));
     assert_eq!(
@@ -151,7 +152,7 @@ async fn sort_asc_then_desc_then_off() {
     );
 
     // Third `s`: Desc → None (back to SQL order)
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('s'))).await;
     assert_eq!(result_view(&core).sort, None);
     let vis = compute_visible(&columns, &rows, result_view(&core));
     assert_eq!(
@@ -180,15 +181,16 @@ async fn sort_stable_across_ties() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT id, category, name FROM fruits ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT id, category, name FROM fruits ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Move to column 1 (category) and sort ascending.
-    core.handle_key(key(KeyCode::Char('l')));
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('l'))).await;
+    core.handle_key(key(KeyCode::Char('s'))).await;
 
     let (columns, rows) = get_rows(&core);
     let vis = compute_visible(&columns, &rows, result_view(&core));
@@ -228,15 +230,16 @@ async fn sort_handles_nulls() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT id, val FROM nullable ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT id, val FROM nullable ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Move to column 1 (val) and sort ascending.
-    core.handle_key(key(KeyCode::Char('l')));
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('l'))).await;
+    core.handle_key(key(KeyCode::Char('s'))).await;
 
     let (columns, rows) = get_rows(&core);
     let vis = compute_visible(&columns, &rows, result_view(&core));
@@ -250,7 +253,7 @@ async fn sort_handles_nulls() {
     );
 
     // Toggle to Descending: NULL, NULL, 30, 20, 10 (nulls first)
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('s'))).await;
     let vis = compute_visible(&columns, &rows, result_view(&core));
     let vals = extract_rendered(&vis, &rows, 1);
     assert_eq!(
@@ -279,19 +282,20 @@ async fn filter_substring_case_insensitive() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT id, word FROM words ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT id, word FROM words ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Open filter prompt and type "PEN"
-    core.handle_key(key(KeyCode::Char('/')));
+    core.handle_key(key(KeyCode::Char('/'))).await;
     for ch in "PEN".chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
     // Accept with Enter
-    core.handle_key(key(KeyCode::Enter));
+    core.handle_key(key(KeyCode::Enter)).await;
 
     let (columns, rows) = get_rows(&core);
     let vis = compute_visible(&columns, &rows, result_view(&core));
@@ -324,24 +328,25 @@ async fn filter_then_sort() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT id, name, price FROM products ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT id, name, price FROM products ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Filter to rows containing "pen"
-    core.handle_key(key(KeyCode::Char('/')));
+    core.handle_key(key(KeyCode::Char('/'))).await;
     for ch in "pen".chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
-    core.handle_key(key(KeyCode::Enter));
+    core.handle_key(key(KeyCode::Enter)).await;
 
     // Now sort by column 2 (price) ascending.
     // Move right twice to column index 2.
-    core.handle_key(key(KeyCode::Char('l')));
-    core.handle_key(key(KeyCode::Char('l')));
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('l'))).await;
+    core.handle_key(key(KeyCode::Char('l'))).await;
+    core.handle_key(key(KeyCode::Char('s'))).await;
 
     let (columns, rows) = get_rows(&core);
     let vis = compute_visible(&columns, &rows, result_view(&core));
@@ -368,7 +373,7 @@ async fn escape_clears_filter_and_closes_prompt() {
     seed_result(&mut core, db_path).await;
 
     // Open filter prompt and type something
-    core.handle_key(key(KeyCode::Char('/')));
+    core.handle_key(key(KeyCode::Char('/'))).await;
     assert!(
         core.tabs()[core.active_tab()]
             .results()
@@ -376,7 +381,7 @@ async fn escape_clears_filter_and_closes_prompt() {
             .filter_prompt_open
     );
     for ch in "abc".chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
     assert_eq!(
         core.tabs()[core.active_tab()].results().active().filter,
@@ -384,7 +389,7 @@ async fn escape_clears_filter_and_closes_prompt() {
     );
 
     // Press Esc — should clear filter and close prompt
-    core.handle_key(key(KeyCode::Esc));
+    core.handle_key(key(KeyCode::Esc)).await;
     assert!(core.tabs()[core.active_tab()]
         .results()
         .active()
@@ -417,16 +422,16 @@ async fn streaming_results_reject_sort() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open sort-filter-test");
-    core.insert_into_editor("SELECT * FROM big");
-    core.execute_command("stream");
+    core.execute_command("open sort-filter-test").await;
+    core.insert_into_editor("SELECT * FROM big").await;
+    core.execute_command("stream").await;
     // Don't drain — we want the core in running state.
     assert!(core.is_running(), "core should be running during stream");
 
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Try to sort — should be rejected.
-    core.handle_key(key(KeyCode::Char('s')));
+    core.handle_key(key(KeyCode::Char('s'))).await;
     assert!(
         core.status_message()
             .contains("sort/filter unavailable while streaming"),
@@ -435,7 +440,7 @@ async fn streaming_results_reject_sort() {
     );
 
     // Try to filter — should also be rejected.
-    core.handle_key(key(KeyCode::Char('/')));
+    core.handle_key(key(KeyCode::Char('/'))).await;
     assert!(
         core.status_message()
             .contains("sort/filter unavailable while streaming"),

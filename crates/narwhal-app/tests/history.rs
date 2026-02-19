@@ -61,7 +61,7 @@ async fn history_opens_with_journal_entries() {
     let mut core = AppCore::new(registry, connections, Some(journal));
 
     assert!(!core.history_is_open());
-    core.open_history();
+    core.open_history().await;
     core.drain_meta_updates().await;
 
     let state = core.history_state().expect("modal should be open");
@@ -96,11 +96,12 @@ async fn history_filter_narrows_visible() {
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
 
-    core.open_history();
+    core.open_history().await;
     core.drain_meta_updates().await;
     // Type "alpha" into the filter.
     for c in "alpha".chars() {
-        core.handle_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        core.handle_key(key(KeyCode::Char(c), KeyModifiers::NONE))
+            .await;
     }
 
     let state = core.history_state().expect("modal should be open");
@@ -135,10 +136,11 @@ async fn history_enter_inserts_sql_into_editor() {
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
 
-    core.open_history();
+    core.open_history().await;
     core.drain_meta_updates().await;
     // Most recent is "SELECT hello_world" (newest first).
-    core.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+    core.handle_key(key(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(!core.history_is_open(), "modal should close on Enter");
     let text = core.editor().entire_text();
@@ -169,11 +171,11 @@ async fn history_esc_closes_without_change() {
     let mut core = AppCore::new(registry, connections, Some(journal));
 
     let text_before = core.editor().entire_text().clone();
-    core.open_history();
+    core.open_history().await;
     core.drain_meta_updates().await;
     assert!(core.history_is_open());
 
-    core.handle_key(key(KeyCode::Esc, KeyModifiers::NONE));
+    core.handle_key(key(KeyCode::Esc, KeyModifiers::NONE)).await;
     assert!(!core.history_is_open(), "modal should close on Esc");
     assert_eq!(
         core.editor().entire_text(),
@@ -200,7 +202,7 @@ async fn history_no_journal_shows_message() {
     };
     let mut core = AppCore::new(registry, connections, None);
 
-    core.open_history();
+    core.open_history().await;
     assert!(
         !core.history_is_open(),
         "modal should NOT open without a journal"

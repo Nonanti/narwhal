@@ -7,7 +7,7 @@ use crate::core::text_utils::longest_common_prefix;
 use crate::core::{AppCore, CompletionState};
 
 impl AppCore {
-    pub(crate) fn trigger_completion(&mut self) {
+    pub(crate) async fn trigger_completion(&mut self) {
         let prefix = self.ui.tabs[self.ui.active_tab]
             .editor
             .current_word_prefix();
@@ -25,7 +25,7 @@ impl AppCore {
         let buffer_text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let offset = self.ui.tabs[self.ui.active_tab].editor.cursor_byte_offset();
         let context = detect_context_with_schemas(&buffer_text, offset, &known_schemas);
-        let columns = self.column_cache();
+        let columns = self.column_cache().await;
         let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
             self.ui.status.message = format!("no completions for '{prefix}'");
@@ -58,7 +58,7 @@ impl AppCore {
     ///   arrow access in vim-aware terminal multiplexers)
     /// - Esc: dismiss the popup; the editor stays in insert mode and
     ///   the originally typed prefix is preserved
-    pub(crate) fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) async fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
         let Some(state) = self.ui.tabs[self.ui.active_tab].completion.as_mut() else {
             return false;
         };
@@ -95,7 +95,7 @@ impl AppCore {
         }
     }
 
-    pub(crate) fn complete_prompt(&mut self) {
+    pub(crate) async fn complete_prompt(&mut self) {
         let buf = self.ui.vim.command_buffer().to_owned();
         let parts: Vec<&str> = buf.split_whitespace().collect();
         let head = parts.first().copied().unwrap_or("");

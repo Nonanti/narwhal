@@ -40,9 +40,9 @@ async fn seed_and_query(core: &mut AppCore, db_path: PathBuf, sql: &str) {
         )
         .unwrap();
     }
-    core.execute_command("open export-test");
-    core.insert_into_editor(sql);
-    core.execute_command("run");
+    core.execute_command("open export-test").await;
+    core.insert_into_editor(sql).await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 }
 
@@ -72,7 +72,8 @@ async fn csv_round_trip_with_special_chars() {
     assert_eq!(rows.len(), 3);
 
     let out_path = dir.path().join("out.csv");
-    core.execute_command(&format!("export csv {}", out_path.display()));
+    core.execute_command(&format!("export csv {}", out_path.display()))
+        .await;
 
     let body = std::fs::read_to_string(&out_path).unwrap();
 
@@ -104,7 +105,8 @@ async fn csv_null_becomes_empty_field() {
     .await;
 
     let out_path = dir.path().join("out.csv");
-    core.execute_command(&format!("export csv {}", out_path.display()));
+    core.execute_command(&format!("export csv {}", out_path.display()))
+        .await;
 
     let body = std::fs::read_to_string(&out_path).unwrap();
     // First data row should have empty third field for NULL.
@@ -138,7 +140,8 @@ async fn json_array_of_objects() {
     .await;
 
     let out_path = dir.path().join("out.json");
-    core.execute_command(&format!("export json {}", out_path.display()));
+    core.execute_command(&format!("export json {}", out_path.display()))
+        .await;
 
     let body = std::fs::read_to_string(&out_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -205,7 +208,8 @@ async fn insert_single_table_round_trip() {
     }
 
     let out_path = dir.path().join("out.sql");
-    core.execute_command(&format!("export insert {}", out_path.display()));
+    core.execute_command(&format!("export insert {}", out_path.display()))
+        .await;
 
     let body = std::fs::read_to_string(&out_path).unwrap();
 
@@ -258,7 +262,8 @@ async fn insert_without_source_table_errors() {
 
     let out_path = dir.path().join("out.sql");
     assert!(!out_path.exists(), "file must not exist before export");
-    core.execute_command(&format!("export insert {}", out_path.display()));
+    core.execute_command(&format!("export insert {}", out_path.display()))
+        .await;
 
     // File must NOT have been created.
     assert!(

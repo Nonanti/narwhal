@@ -51,14 +51,14 @@ impl AppCore {
     /// that need to drain whatever has been queued without awaiting
     /// new traffic.
     #[doc(hidden)]
-    pub fn try_recv_run_update(&mut self) -> Option<RunUpdate> {
+    pub async fn try_recv_run_update(&mut self) -> Option<RunUpdate> {
         self.run_rx.try_recv().ok()
     }
 
     pub async fn handle_run_update(&mut self, update: RunUpdate) {
         // All mutations target the tab that *started* the run, not the
         // tab the user may have switched to in the meantime (K1-A fix).
-        let rt = self.run_tab_index();
+        let rt = self.run_tab_index().await;
         match update {
             RunUpdate::StatementStarted { index, total, sql } => {
                 let streaming = matches!(
@@ -228,7 +228,7 @@ impl AppCore {
             RunUpdate::SchemaRefresh { session_id } => {
                 let current = self.session.active.as_ref().map(|s| s.config.id);
                 if current == Some(session_id) {
-                    self.refresh_schema();
+                    self.refresh_schema().await;
                 } else {
                     tracing::debug!(
                         target = ?session_id,
@@ -445,7 +445,7 @@ impl AppCore {
     /// Callers that need pre-dispatch validation should check
     /// `self.session.active.is_some()` themselves before constructing the
     /// request.
-    pub(super) fn dispatch_meta(&mut self, request: MetaRequest) -> bool {
+    pub(super) async fn dispatch_meta(&mut self, request: MetaRequest) -> bool {
         let pool = self.session.active.as_ref().map(|s| s.pool.clone());
         spawn_meta_request(
             request,
@@ -479,7 +479,7 @@ impl AppCore {
     /// Non-blocking sibling of [`Self::await_pending_session_opens`].
     /// Drains any meta updates that are *already* sitting in the
     /// channel; does **not** wait if none are queued.
-    pub fn drain_ready_meta_updates(&mut self) {
+    pub async fn drain_ready_meta_updates(&mut self) {
         while let Ok(update) = self.meta_rx.try_recv() {
             self.handle_meta_update(update);
         }
@@ -499,12 +499,13 @@ impl AppCore {
     /// sub-millisecond because the `OpenSession` worker has
     /// already completed by the time the user's next keypress
     /// arrives.
-    pub fn await_pending_session_opens_sync(&mut self) {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.await_pending_session_opens());
-            });
-        }
+    /// Epic B: H7 closure — now a thin wrapper around the real
+    /// async helper. Kept under the historical `_sync` name so the
+    /// `handle_key` hot path's call site doesn't need to be renamed.
+    /// The bridge that used to live here (`block_in_place` +
+    /// `Handle::block_on`) is gone: every caller is async-aware.
+    pub async fn await_pending_session_opens_sync(&mut self) {
+        self.await_pending_session_opens().await;
     }
 
     /// Block until every pending `OpenSession` has been resolved
@@ -615,7 +616,7 @@ impl AppCore {
         rows_affected: Option<u64>,
         streamed: bool,
     ) {
-        let rt = self.run_tab_index();
+        let rt = self.run_tab_index().await;
         let (columns, rows, index, total, sql) =
             match std::mem::take(self.ui.tabs[rt].results.active_state_mut()) {
                 ResultState::Running {

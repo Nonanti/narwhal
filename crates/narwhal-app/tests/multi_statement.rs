@@ -50,10 +50,10 @@ const fn ctrl(code: KeyCode) -> KeyEvent {
 }
 
 /// Focus the result pane via Ctrl-W cycling.
-fn focus_results(core: &mut AppCore) {
+async fn focus_results(core: &mut AppCore) {
     let ctrl_w = ctrl(KeyCode::Char('w'));
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
 }
 
@@ -70,10 +70,10 @@ async fn single_result_no_strip() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open multi-stmt-test");
+    core.execute_command("open multi-stmt-test").await;
 
-    core.insert_into_editor("SELECT * FROM t");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT * FROM t").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     let bundle = core.tabs()[core.active_tab()].results();
@@ -98,10 +98,11 @@ async fn three_statements_three_results() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open multi-stmt-test");
+    core.execute_command("open multi-stmt-test").await;
 
-    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;");
-    core.execute_command("run-all");
+    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;")
+        .await;
+    core.execute_command("run-all").await;
     core.drain_run_updates().await;
 
     let bundle = core.tabs()[core.active_tab()].results();
@@ -125,16 +126,17 @@ async fn bracket_r_advances_active() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open multi-stmt-test");
+    core.execute_command("open multi-stmt-test").await;
 
-    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;");
-    core.execute_command("run-all");
+    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;")
+        .await;
+    core.execute_command("run-all").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // ] then r — active starts at 2 (last), wraps to 0
-    core.handle_key(key(KeyCode::Char(']')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char(']'))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         0,
@@ -142,8 +144,8 @@ async fn bracket_r_advances_active() {
     );
 
     // ]r again → 1
-    core.handle_key(key(KeyCode::Char(']')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char(']'))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         1,
@@ -151,8 +153,8 @@ async fn bracket_r_advances_active() {
     );
 
     // ]r again → 2
-    core.handle_key(key(KeyCode::Char(']')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char(']'))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         2,
@@ -171,16 +173,17 @@ async fn bracket_l_bracket_r_wraps_backward() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open multi-stmt-test");
+    core.execute_command("open multi-stmt-test").await;
 
-    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;");
-    core.execute_command("run-all");
+    core.insert_into_editor("SELECT 1; SELECT 2; SELECT 3;")
+        .await;
+    core.execute_command("run-all").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // [ then r — from active 2 should go to 1
-    core.handle_key(key(KeyCode::Char('[')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char('['))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         1,
@@ -188,8 +191,8 @@ async fn bracket_l_bracket_r_wraps_backward() {
     );
 
     // [r again → 0
-    core.handle_key(key(KeyCode::Char('[')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char('['))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         0,
@@ -197,8 +200,8 @@ async fn bracket_l_bracket_r_wraps_backward() {
     );
 
     // [r wraps → 2
-    core.handle_key(key(KeyCode::Char('[')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char('['))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         2,
@@ -224,16 +227,17 @@ async fn state_preserved_across_tab_switch() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open multi-stmt-test");
+    core.execute_command("open multi-stmt-test").await;
 
-    core.insert_into_editor("SELECT * FROM items; SELECT 42;");
-    core.execute_command("run-all");
+    core.insert_into_editor("SELECT * FROM items; SELECT 42;")
+        .await;
+    core.execute_command("run-all").await;
     core.drain_run_updates().await;
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Active starts at result 1 (last). Switch to result 0 first.
-    core.handle_key(key(KeyCode::Char('[')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char('['))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         0,
@@ -241,9 +245,9 @@ async fn state_preserved_across_tab_switch() {
     );
 
     // Move down three times: None -> 0 -> 1 -> 2
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
     let first_result_selected = core.tabs()[core.active_tab()].results().active().selected();
     assert_eq!(
         first_result_selected,
@@ -252,8 +256,8 @@ async fn state_preserved_across_tab_switch() {
     );
 
     // Switch to result 1
-    core.handle_key(key(KeyCode::Char(']')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char(']'))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         1,
@@ -261,8 +265,8 @@ async fn state_preserved_across_tab_switch() {
     );
 
     // Switch back to result 0
-    core.handle_key(key(KeyCode::Char('[')));
-    core.handle_key(key(KeyCode::Char('r')));
+    core.handle_key(key(KeyCode::Char('['))).await;
+    core.handle_key(key(KeyCode::Char('r'))).await;
     assert_eq!(
         core.tabs()[core.active_tab()].results().active,
         0,

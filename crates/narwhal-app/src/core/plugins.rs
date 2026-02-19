@@ -107,7 +107,7 @@ impl AppCore {
         loaded
     }
 
-    pub(super) fn load_plugin(&mut self, path: &str) {
+    pub(super) async fn load_plugin(&mut self, path: &str) {
         let plugin = match LuaPlugin::from_path(path) {
             Ok(p) => p,
             Err(e) => {
@@ -127,7 +127,7 @@ impl AppCore {
         }
     }
 
-    pub(super) fn list_plugins(&mut self) {
+    pub(super) async fn list_plugins(&mut self) {
         let catalogue = self.deps.plugins.catalogue();
         if catalogue.is_empty() {
             self.ui.status.message = "no plugins loaded; use :plug-load <file.lua>".into();
@@ -141,7 +141,7 @@ impl AppCore {
         self.ui.status.message = summary;
     }
 
-    pub(super) fn dispatch_plugin(&mut self, command: &str, argument: &str) {
+    pub(super) async fn dispatch_plugin(&mut self, command: &str, argument: &str) {
         let editor_text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let ctx = PluginCommandContext::new(argument).with_editor_text(&editor_text);
         // Resolve the owning plugin name *before* dispatch so the timeout
@@ -166,10 +166,7 @@ impl AppCore {
         // bridges (handler bodies are user-controlled Lua and almost
         // always complete in < 50 ms outside of intentional
         // `narwhal.sql_run` round-trips). Tracked as a follow-up.
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async move { plugins.dispatch(&command_owned, ctx).await })
-        });
+        let outcome = async move { plugins.dispatch(&command_owned, ctx).await }.await;
         match outcome {
             Ok(PluginCommandOutcome::Status { message }) => {
                 self.ui.status.message = message;

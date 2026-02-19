@@ -67,26 +67,26 @@ async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
     let clip = Arc::new(InMemoryClipboard::new());
     let clip_dyn: Arc<dyn Clipboard> = clip.clone();
     let mut core = AppCore::with_services(registry, connections, None, creds, clip_dyn);
-    core.execute_command("open p");
+    core.execute_command("open p").await;
     (core, clip, dir)
 }
 
 async fn preview_items(core: &mut AppCore) {
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
     // Connection (0) -> main schema (1) -> items (2).
     for _ in 0..2 {
-        core.handle_key(key(KeyCode::Char('j')));
+        core.handle_key(key(KeyCode::Char('j'))).await;
     }
-    core.handle_key(key(KeyCode::Char('o')));
+    core.handle_key(key(KeyCode::Char('o'))).await;
     core.drain_run_updates().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn next_and_prev_walk_through_pages() {
     let (mut core, _clip, _dir) = seeded(25).await;
-    core.execute_command("page-size 10");
+    core.execute_command("page-size 10").await;
     assert!(core.status_message().contains("page size set to 10"));
 
     preview_items(&mut core).await;
@@ -95,7 +95,7 @@ async fn next_and_prev_walk_through_pages() {
         other => panic!("expected Rows, got {other:?}"),
     }
 
-    core.execute_command("next");
+    core.execute_command("next").await;
     core.drain_run_updates().await;
     match core.result() {
         ResultState::Rows { rows, .. } => {
@@ -109,7 +109,7 @@ async fn next_and_prev_walk_through_pages() {
         other => panic!("expected Rows, got {other:?}"),
     }
 
-    core.execute_command("next");
+    core.execute_command("next").await;
     core.drain_run_updates().await;
     match core.result() {
         ResultState::Rows { rows, .. } => {
@@ -123,7 +123,7 @@ async fn next_and_prev_walk_through_pages() {
         other => panic!("expected Rows, got {other:?}"),
     }
 
-    core.execute_command("prev");
+    core.execute_command("prev").await;
     core.drain_run_updates().await;
     match core.result() {
         ResultState::Rows { rows, .. } => {
@@ -136,16 +136,16 @@ async fn next_and_prev_walk_through_pages() {
         other => panic!("expected Rows, got {other:?}"),
     }
 
-    core.execute_command("prev");
+    core.execute_command("prev").await;
     core.drain_run_updates().await;
-    core.execute_command("prev");
+    core.execute_command("prev").await;
     assert!(core.status_message().contains("first page"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn next_without_preview_emits_status_only() {
     let (mut core, _clip, _dir) = seeded(5).await;
-    core.execute_command("next");
+    core.execute_command("next").await;
     assert!(core.status_message().contains("no preview"));
 }
 
@@ -155,11 +155,11 @@ async fn yank_cell_writes_value_to_clipboard() {
     preview_items(&mut core).await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j'))); // row 0
-    core.handle_key(key(KeyCode::Char('l'))); // column 1 = label
-    core.handle_key(key(KeyCode::Char('y')));
+    core.handle_key(key(KeyCode::Char('j'))).await; // row 0
+    core.handle_key(key(KeyCode::Char('l'))).await; // column 1 = label
+    core.handle_key(key(KeyCode::Char('y'))).await;
 
     assert!(core.status_message().starts_with("yanked"));
     assert_eq!(clip.read().as_deref(), Some("row-1"));
@@ -171,16 +171,17 @@ async fn yank_row_writes_tsv_to_clipboard() {
     preview_items(&mut core).await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
     // Capital Y.
     core.handle_key(KeyEvent {
         code: KeyCode::Char('Y'),
         modifiers: KeyModifiers::SHIFT,
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
-    });
+    })
+    .await;
 
     assert!(core.status_message().starts_with("yanked row"));
     let pasted = clip.read().unwrap();
@@ -194,8 +195,8 @@ async fn yank_row_writes_tsv_to_clipboard() {
 async fn yank_without_result_emits_status_only() {
     let (mut core, _clip, _dir) = seeded(3).await;
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('y')));
+    core.handle_key(key(KeyCode::Char('y'))).await;
     assert!(core.status_message().contains("no cell"));
 }

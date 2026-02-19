@@ -82,7 +82,7 @@ async fn open_promotes_connection_to_top() {
     let last_used = dir.path().join("last_used.toml");
     core.set_last_used_path(last_used.clone());
 
-    core.execute_command("open bravo");
+    core.execute_command("open bravo").await;
     assert!(core.session().is_some());
     assert_eq!(first_connection_name(&core), "bravo");
 
@@ -105,15 +105,15 @@ async fn most_recently_opened_wins() {
     let (registry, connections, _) = two_sqlite_fixtures(dir.path());
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open alpha");
+    core.execute_command("open alpha").await;
     // touch_last_used uses millisecond timestamps; sleep a tick to
     // make sure the two opens land in distinct buckets.
     sleep(Duration::from_millis(5));
-    core.execute_command("close");
-    core.execute_command("open bravo");
+    core.execute_command("close").await;
+    core.execute_command("open bravo").await;
     sleep(Duration::from_millis(5));
-    core.execute_command("close");
-    core.execute_command("open alpha");
+    core.execute_command("close").await;
+    core.execute_command("open alpha").await;
 
     assert_eq!(first_connection_name(&core), "alpha");
 }
@@ -129,7 +129,7 @@ async fn remove_clears_last_used_entry() {
     let last_used = dir.path().join("last_used.toml");
     core.set_last_used_path(last_used.clone());
 
-    core.execute_command("open bravo");
+    core.execute_command("open bravo").await;
     let bravo_id = core
         .connections()
         .iter()
@@ -141,8 +141,8 @@ async fn remove_clears_last_used_entry() {
         .get(bravo_id)
         .is_some());
 
-    core.execute_command("close");
-    core.execute_command("rm bravo");
+    core.execute_command("close").await;
+    core.execute_command("rm bravo").await;
     assert!(LastUsedStore::load(&last_used)
         .unwrap()
         .get(bravo_id)
@@ -158,7 +158,7 @@ async fn in_memory_ordering_works_without_disk() {
     let (registry, connections, _) = two_sqlite_fixtures(dir.path());
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open bravo");
+    core.execute_command("open bravo").await;
     assert_eq!(first_connection_name(&core), "bravo");
 }
 

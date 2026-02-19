@@ -256,7 +256,7 @@ impl AppCore {
         }
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent) {
+    pub async fn handle_key(&mut self, key: KeyEvent) {
         // H7 compat: when an `:open` is in flight we wait briefly for
         // the background `SessionOpened` reply so a follow-up key sees
         // the new session. In production this is a no-op once the
@@ -267,17 +267,17 @@ impl AppCore {
         // `block_in_place` so the multi-thread runtime keeps draining
         // other workers in the meantime.
         if !self.session.pending_session_opens.is_empty() {
-            self.await_pending_session_opens_sync();
+            self.await_pending_session_opens_sync().await;
         }
         if self.modals.wizard.is_some() {
-            self.handle_wizard_key(key);
+            self.handle_wizard_key(key).await;
             return;
         }
         // L36: JSON viewer sits at the very top of the modal stack and
         // gets first refusal on every key. Once open, no other handler
         // (help, history, wizard, ...) sees the keypress.
         if self.ui.tabs[self.ui.active_tab].json_viewer.is_some() {
-            self.handle_json_viewer_key(key);
+            self.handle_json_viewer_key(key).await;
             return;
         }
         // L36: pending preview modal is the next layer down. Owns its
@@ -285,7 +285,7 @@ impl AppCore {
         // the regular Results pane handlers so users can keep their
         // muscle memory.
         if self.ui.tabs[self.ui.active_tab].pending_preview.is_some() {
-            self.handle_pending_preview_key(key);
+            self.handle_pending_preview_key(key).await;
             return;
         }
         // When the help modal is open, it intercepts Esc / ? / F1 to
@@ -307,15 +307,15 @@ impl AppCore {
         }
         // When the history modal is open, it intercepts all keys.
         if self.modals.history.is_some() {
-            self.handle_history_key(key);
+            self.handle_history_key(key).await;
             return;
         }
         // When the snippets modal is open, it intercepts all keys.
         if self.modals.snippets.is_some() {
-            self.handle_snippets_key(key);
+            self.handle_snippets_key(key).await;
             return;
         }
-        if self.handle_global_key(key) {
+        if self.handle_global_key(key).await {
             return;
         }
         // Pending result-tab leader: `]` or `[` was pressed, waiting
@@ -323,19 +323,19 @@ impl AppCore {
         if let Some(leader) = self.ui.pending_result_leader.take() {
             if key.code == CtKey::Char('r') && key.modifiers.is_empty() {
                 match leader {
-                    ']' => self.cycle_result_tab(1),
-                    '[' => self.cycle_result_tab(-1),
+                    ']' => self.cycle_result_tab(1).await,
+                    '[' => self.cycle_result_tab(-1).await,
                     _ => {}
                 }
             }
             return;
         }
         match self.ui.focus {
-            Pane::Editor => self.handle_editor_key(key),
-            Pane::Sidebar => self.handle_sidebar_key(key),
-            Pane::Results => self.handle_results_key(key),
+            Pane::Editor => self.handle_editor_key(key).await,
+            Pane::Sidebar => self.handle_sidebar_key(key).await,
+            Pane::Results => self.handle_results_key(key).await,
             // Future panes fall through to the editor handler until wired.
-            _ => self.handle_editor_key(key),
+            _ => self.handle_editor_key(key).await,
         }
     }
 
@@ -344,7 +344,7 @@ impl AppCore {
     /// instead of being interpreted as `Enter` keypresses one-by-one
     /// (which would trip motion handlers and the modal command
     /// prompt). Other panes do not currently accept paste.
-    pub fn editor_paste(&mut self, text: &str) {
+    pub async fn editor_paste(&mut self, text: &str) {
         if matches!(self.ui.focus, Pane::Editor) {
             self.ui.tabs[self.ui.active_tab].editor.insert_str(text);
             self.ui.status.message = format!("pasted {} char(s)", text.chars().count());
@@ -354,47 +354,47 @@ impl AppCore {
     /// Route a crossterm `MouseEvent` through the same handlers the
     /// keyboard path uses. `LayoutRegions` from the most recent render
     /// provides the hit-test rects.
-    pub fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
+    pub async fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseButton, MouseEventKind};
 
         let pos = (event.column, event.row);
 
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                self.handle_left_click(pos);
+                self.handle_left_click(pos).await;
             }
             MouseEventKind::ScrollUp => {
-                self.handle_scroll(pos, -1);
+                self.handle_scroll(pos, -1).await;
             }
             MouseEventKind::ScrollDown => {
-                self.handle_scroll(pos, 1);
+                self.handle_scroll(pos, 1).await;
             }
             // Up, Moved, Drag are no-ops for now.
             _ => {}
         }
     }
 
-    fn handle_left_click(&mut self, pos: (u16, u16)) {
+    async fn handle_left_click(&mut self, pos: (u16, u16)) {
         let layout = self.ui.last_layout.clone();
 
         // Priority: completion popup > sidebar tables > result headers/rows > pane focus.
         for (rect, item_index) in &layout.completion_items {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
-                self.accept_completion_at(*item_index);
+                self.accept_completion_at(*item_index).await;
                 return;
             }
         }
 
         for (rect, sidebar_idx) in &layout.sidebar_tables {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
-                self.click_sidebar_table(*sidebar_idx);
+                self.click_sidebar_table(*sidebar_idx).await;
                 return;
             }
         }
 
         for (rect, result_idx) in &layout.result_tabs {
             if rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
-                self.click_result_tab(*result_idx);
+                self.click_result_tab(*result_idx).await;
                 return;
             }
         }
@@ -406,7 +406,7 @@ impl AppCore {
                     .results
                     .active_mut()
                     .column_index = *col_idx;
-                self.toggle_sort();
+                self.toggle_sort().await;
                 return;
             }
         }
@@ -445,7 +445,7 @@ impl AppCore {
         }
     }
 
-    fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
+    async fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
         let layout = &self.ui.last_layout;
 
         if layout
@@ -492,7 +492,7 @@ impl AppCore {
             // L24: mouse wheel over the sidebar pans the viewport by
             // 3 rows per tick. The selection stays put so the user can
             // peek at off-screen rows without losing context.
-            self.scroll_sidebar(if delta > 0 { 3 } else { -3 });
+            self.scroll_sidebar(if delta > 0 { 3 } else { -3 }).await;
         }
     }
 
@@ -505,7 +505,7 @@ impl AppCore {
 
     /// Execute a command exactly as if the user submitted it from command-line
     /// mode. Useful from tests.
-    pub fn execute_command(&mut self, raw: &str) {
+    pub async fn execute_command(&mut self, raw: &str) {
         // H7 compat: any command other than `:open` that follows an
         // in-flight open should see the freshly-opened session. Mirror
         // the same brief wait that `handle_key` does so callers can
@@ -515,17 +515,17 @@ impl AppCore {
         if !matches!(parsed, Command::Open(_) | Command::Quit | Command::Cancel)
             && !self.session.pending_session_opens.is_empty()
         {
-            self.await_pending_session_opens_sync();
+            self.await_pending_session_opens_sync().await;
         }
         match parsed {
             Command::Quit => self.process.should_quit = true,
-            Command::Open(name) => self.open_named(&name),
-            Command::Close => self.close_session(),
-            Command::Refresh => self.refresh_schema(),
-            Command::Run => self.dispatch_current_statement(RunMode::Execute),
-            Command::RunAll => self.dispatch_all_statements(RunMode::Execute),
-            Command::Stream => self.dispatch_current_statement(RunMode::Stream),
-            Command::StreamAll => self.dispatch_all_statements(RunMode::Stream),
+            Command::Open(name) => self.open_named(&name).await,
+            Command::Close => self.close_session().await,
+            Command::Refresh => self.refresh_schema().await,
+            Command::Run => self.dispatch_current_statement(RunMode::Execute).await,
+            Command::RunAll => self.dispatch_all_statements(RunMode::Execute).await,
+            Command::Stream => self.dispatch_current_statement(RunMode::Stream).await,
+            Command::StreamAll => self.dispatch_all_statements(RunMode::Stream).await,
             Command::Cancel => self.spawn_cancel(),
             Command::Clear => {
                 self.ui.tabs[self.ui.active_tab].editor.clear();
@@ -536,34 +536,34 @@ impl AppCore {
                     .reset();
                 self.ui.status.message = "buffer cleared".into();
             }
-            Command::Explain => self.dispatch_explain(),
-            Command::Export { format, path } => self.export_results(&format, &path),
-            Command::DumpSchema { target } => self.dump_schema(target),
-            Command::Add => self.start_wizard(),
-            Command::Format => self.format_current_statement(),
-            Command::FormatAll => self.format_all_statements(),
-            Command::Url(dsn) => self.start_wizard_from_url(&dsn),
-            Command::Test(target) => self.test_connection(target.as_deref()),
-            Command::Edit(name) => self.start_wizard_edit(&name),
-            Command::NextPage => self.next_page(),
-            Command::PrevPage => self.prev_page(),
-            Command::PageSize(n) => self.set_page_size(n),
-            Command::Begin(iso) => self.begin_transaction(iso),
-            Command::Commit => self.commit_transaction(),
-            Command::Rollback => self.rollback_transaction(),
-            Command::Savepoint(name) => self.savepoint(&name),
-            Command::Release(name) => self.release_savepoint(&name),
-            Command::RollbackTo(name) => self.rollback_to_savepoint(&name),
-            Command::Remove(name) => self.remove_connection(&name),
-            Command::Forget(name) => self.forget_password(&name),
-            Command::PluginLoad(path) => self.load_plugin(&path),
-            Command::PluginList => self.list_plugins(),
-            Command::History => self.open_history(),
-            Command::Pending => self.toggle_pending_preview(),
-            Command::NewTab => self.new_tab(),
-            Command::CloseTab => self.close_tab(),
-            Command::NextTab => self.cycle_tab(1),
-            Command::PrevTab => self.cycle_tab(-1),
+            Command::Explain => self.dispatch_explain().await,
+            Command::Export { format, path } => self.export_results(&format, &path).await,
+            Command::DumpSchema { target } => self.dump_schema(target).await,
+            Command::Add => self.start_wizard().await,
+            Command::Format => self.format_current_statement().await,
+            Command::FormatAll => self.format_all_statements().await,
+            Command::Url(dsn) => self.start_wizard_from_url(&dsn).await,
+            Command::Test(target) => self.test_connection(target.as_deref()).await,
+            Command::Edit(name) => self.start_wizard_edit(&name).await,
+            Command::NextPage => self.next_page().await,
+            Command::PrevPage => self.prev_page().await,
+            Command::PageSize(n) => self.set_page_size(n).await,
+            Command::Begin(iso) => self.begin_transaction(iso).await,
+            Command::Commit => self.commit_transaction().await,
+            Command::Rollback => self.rollback_transaction().await,
+            Command::Savepoint(name) => self.savepoint(&name).await,
+            Command::Release(name) => self.release_savepoint(&name).await,
+            Command::RollbackTo(name) => self.rollback_to_savepoint(&name).await,
+            Command::Remove(name) => self.remove_connection(&name).await,
+            Command::Forget(name) => self.forget_password(&name).await,
+            Command::PluginLoad(path) => self.load_plugin(&path).await,
+            Command::PluginList => self.list_plugins().await,
+            Command::History => self.open_history().await,
+            Command::Pending => self.toggle_pending_preview().await,
+            Command::NewTab => self.new_tab().await,
+            Command::CloseTab => self.close_tab().await,
+            Command::NextTab => self.cycle_tab(1).await,
+            Command::PrevTab => self.cycle_tab(-1).await,
             Command::Help(None) => {
                 self.ui.status.message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json|insert> <path> · cancel · quit"
@@ -598,7 +598,10 @@ impl AppCore {
                 replacement,
                 global,
                 confirm,
-            } => self.execute_substitute(range, &pattern, &replacement, global, confirm),
+            } => {
+                self.execute_substitute(range, &pattern, &replacement, global, confirm)
+                    .await
+            }
             Command::NoHlSearch => {
                 self.ui.tabs[self.ui.active_tab].editor_search.highlight = false;
                 self.ui.tabs[self.ui.active_tab]
@@ -612,10 +615,10 @@ impl AppCore {
                 self.ui.tabs[self.ui.active_tab].editor_search.current = None;
                 self.ui.status.message = "search highlight cleared".into();
             }
-            Command::SaveSnippet { name } => self.save_snippet(&name),
-            Command::LoadSnippet { name } => self.load_snippet_by_name(&name),
-            Command::RemoveSnippet { name } => self.remove_snippet(&name),
-            Command::ListSnippets => self.open_snippets_modal(),
+            Command::SaveSnippet { name } => self.save_snippet(&name).await,
+            Command::LoadSnippet { name } => self.load_snippet_by_name(&name).await,
+            Command::RemoveSnippet { name } => self.remove_snippet(&name).await,
+            Command::ListSnippets => self.open_snippets_modal().await,
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the
@@ -624,7 +627,7 @@ impl AppCore {
                 // the handler verbatim.
                 let (head, arg) = split_head_arg(&text);
                 if self.deps.plugins.plugin_for(head).is_some() {
-                    self.dispatch_plugin(head, arg);
+                    self.dispatch_plugin(head, arg).await;
                 } else {
                     self.ui.status.message = format!("unknown command: {text}");
                 }
@@ -636,7 +639,7 @@ impl AppCore {
 
     /// Insert raw text into the editor buffer. Used by tests to seed
     /// statements without simulating individual key presses.
-    pub fn insert_into_editor(&mut self, text: &str) {
+    pub async fn insert_into_editor(&mut self, text: &str) {
         self.ui.tabs[self.ui.active_tab].editor.insert_str(text);
     }
 

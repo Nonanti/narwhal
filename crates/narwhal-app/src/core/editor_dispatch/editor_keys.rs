@@ -33,7 +33,7 @@ const fn domain_motion(m: VimMotion) -> DomainMotion {
 }
 
 impl AppCore {
-    pub(crate) fn accept_completion_at(&mut self, index: usize) {
+    pub(crate) async fn accept_completion_at(&mut self, index: usize) {
         let Some(state) = self.ui.tabs[self.ui.active_tab].completion.as_mut() else {
             return;
         };
@@ -53,7 +53,7 @@ impl AppCore {
     /// and run a preview query. Uses `run_preview` (same as the
     /// keyboard-driven `o` path) so that `pending_source` is set and
     /// cell editing (`e`) works on mouse-previewed tables (M15).
-    pub(crate) fn click_result_tab(&mut self, result_idx: usize) {
+    pub(crate) async fn click_result_tab(&mut self, result_idx: usize) {
         let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
         if result_idx < bundle.len() && bundle.is_multi() {
             bundle.active = result_idx;
@@ -62,18 +62,19 @@ impl AppCore {
         }
     }
 
-    pub(crate) fn handle_editor_key(&mut self, key: KeyEvent) {
+    pub(crate) async fn handle_editor_key(&mut self, key: KeyEvent) {
         // The editor search prompt is modal: characters build the needle,
         // Enter accepts, Esc cancels and restores the cursor.
         if self.ui.tabs[self.ui.active_tab].editor_search.prompt_open {
-            self.handle_editor_search_key(key);
+            self.handle_editor_search_key(key).await;
             return;
         }
         // The completion popup is modal while it's open: Tab cycles,
         // Enter accepts, Esc closes. Plain character keys fall through
         // so the user can keep typing and the popup refreshes against
         // the new prefix on the way out.
-        if self.ui.tabs[self.ui.active_tab].completion.is_some() && self.handle_completion_key(key)
+        if self.ui.tabs[self.ui.active_tab].completion.is_some()
+            && self.handle_completion_key(key).await
         {
             return;
         }
@@ -81,14 +82,14 @@ impl AppCore {
         // instead of being forwarded to the vim layer.
         if self.ui.vim.mode() == Mode::Insert && key.code == CtKey::Tab && key.modifiers.is_empty()
         {
-            self.trigger_completion();
+            self.trigger_completion().await;
             return;
         }
         let Some(logical) = translate_key_event(key) else {
             return;
         };
         let action = self.ui.vim.handle(logical);
-        self.apply_action(action);
+        self.apply_action(action).await;
 
         // After every insert-mode keystroke, refresh the completion
         // popup against the new word prefix. Two thresholds:
@@ -98,7 +99,7 @@ impl AppCore {
         // Silent: no status spam, no '4-space' fallback — manual Tab
         // / Ctrl-Space still handle those cases.
         if self.ui.vim.mode() == Mode::Insert {
-            self.maybe_auto_complete();
+            self.maybe_auto_complete().await;
         }
     }
 
@@ -107,7 +108,7 @@ impl AppCore {
     /// Keys are lowercased table names; values are `(schema_name, columns)`
     /// tuples so each column completion can carry the schema as its detail
     /// string. Returns an empty map when no session is active.
-    pub(crate) fn column_cache(
+    pub(crate) async fn column_cache(
         &self,
     ) -> std::collections::HashMap<String, (String, Vec<ColumnHeader>)> {
         let Some(session) = self.session.active.as_ref() else {
@@ -134,7 +135,7 @@ impl AppCore {
     /// [`Self::trigger_completion`] for the manual (Tab / Ctrl-Space)
     /// variant that handles the empty-prefix and no-matches cases
     /// explicitly.
-    pub(crate) fn maybe_auto_complete(&mut self) {
+    pub(crate) async fn maybe_auto_complete(&mut self) {
         let prefix = self.ui.tabs[self.ui.active_tab]
             .editor
             .current_word_prefix();
@@ -151,7 +152,7 @@ impl AppCore {
         let buffer_text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let offset = self.ui.tabs[self.ui.active_tab].editor.cursor_byte_offset();
         let context = detect_context_with_schemas(&buffer_text, offset, &known_schemas);
-        let columns = self.column_cache();
+        let columns = self.column_cache().await;
         let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
             self.ui.tabs[self.ui.active_tab].completion = None;
@@ -171,7 +172,7 @@ impl AppCore {
     }
 
     /// Open the editor search prompt (`/` for forward, `?` for backward).
-    pub(crate) fn apply_action(&mut self, action: Action) {
+    pub(crate) async fn apply_action(&mut self, action: Action) {
         match action {
             Action::Move { motion, count } => {
                 self.ui.tabs[self.ui.active_tab]
@@ -205,15 +206,15 @@ impl AppCore {
                     _ => "ready".into(),
                 };
             }
-            Action::SubmitCommand(cmd) => self.execute_command(&cmd),
+            Action::SubmitCommand(cmd) => self.execute_command(&cmd).await,
             Action::Pending if self.ui.vim.mode() == Mode::Command => {
                 self.ui.status.message = format!(":{}", self.ui.vim.command_buffer());
             }
             Action::Pending => {}
-            Action::PromptComplete => self.complete_prompt(),
-            Action::OpenSearch(dir) => self.open_editor_search(dir),
-            Action::RepeatSearch => self.repeat_editor_search(false),
-            Action::RepeatSearchReverse => self.repeat_editor_search(true),
+            Action::PromptComplete => self.complete_prompt().await,
+            Action::OpenSearch(dir) => self.open_editor_search(dir).await,
+            Action::RepeatSearch => self.repeat_editor_search(false).await,
+            Action::RepeatSearchReverse => self.repeat_editor_search(true).await,
             Action::Operate { .. } => {}
             // Future Action variants are silently ignored until wired.
             _ => {}

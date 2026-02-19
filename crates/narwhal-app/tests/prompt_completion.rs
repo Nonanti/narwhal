@@ -51,25 +51,25 @@ fn empty_core() -> AppCore {
 
 /// Type a string into the command prompt. Assumes the core is already in
 /// command mode (caller should press `:` first).
-fn type_prompt(core: &mut AppCore, text: &str) {
+async fn type_prompt(core: &mut AppCore, text: &str) {
     for ch in text.chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
 }
 
 // Test 1: `:open <prefix>` with a unique match → completes inline
 
-#[test]
-fn open_unique_completes_inline() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_unique_completes_inline() {
     let mut core = core_with_connections(&["smoke"]);
 
     // Enter command mode and type "open sm"
-    core.handle_key(key(KeyCode::Char(':')));
+    core.handle_key(key(KeyCode::Char(':'))).await;
     assert_eq!(core.mode(), Mode::Command);
-    type_prompt(&mut core, "open sm");
+    type_prompt(&mut core, "open sm").await;
 
     // Press Tab
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     // The buffer should now contain "open smoke"
     assert_eq!(core.command_buffer(), "open smoke");
@@ -77,14 +77,14 @@ fn open_unique_completes_inline() {
 
 // Test 2: `:open <prefix>` with multiple matches → inserts LCP, lists
 
-#[test]
-fn open_multiple_inserts_lcp() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_multiple_inserts_lcp() {
     let mut core = core_with_connections(&["smoke", "smolder"]);
 
-    core.handle_key(key(KeyCode::Char(':')));
-    type_prompt(&mut core, "open sm");
+    core.handle_key(key(KeyCode::Char(':'))).await;
+    type_prompt(&mut core, "open sm").await;
 
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     // The longest common prefix of "smoke" and "smolder" is "smo"
     assert_eq!(core.command_buffer(), "open smo");
@@ -98,22 +98,22 @@ fn open_multiple_inserts_lcp() {
 
 // Test 3: `:help <prefix>` completes a built-in command name
 
-#[test]
-fn help_completes_builtin() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn help_completes_builtin() {
     let mut core = empty_core();
 
-    core.handle_key(key(KeyCode::Char(':')));
-    type_prompt(&mut core, "help op");
+    core.handle_key(key(KeyCode::Char(':'))).await;
+    type_prompt(&mut core, "help op").await;
 
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     assert_eq!(core.command_buffer(), "help open");
 }
 
 // Test 4: `:help <prefix>` completes a plugin command name
 
-#[test]
-fn help_completes_plugin() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn help_completes_plugin() {
     let dir = TempDir::new().unwrap();
     let script = dir.path().join("rc.lua");
     std::fs::write(
@@ -127,12 +127,13 @@ end)
     .unwrap();
 
     let mut core = empty_core();
-    core.execute_command(&format!("plug-load {}", script.display()));
+    core.execute_command(&format!("plug-load {}", script.display()))
+        .await;
 
-    core.handle_key(key(KeyCode::Char(':')));
-    type_prompt(&mut core, "help r");
+    core.handle_key(key(KeyCode::Char(':'))).await;
+    type_prompt(&mut core, "help r").await;
 
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     // The buffer should contain "help r" plus the longest common prefix
     // of all names starting with "r". At minimum "rc" should be among
@@ -146,44 +147,44 @@ end)
 
 // Test 5: `:export <prefix>` completes the format
 
-#[test]
-fn export_completes_format() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn export_completes_format() {
     let mut core = empty_core();
 
-    core.handle_key(key(KeyCode::Char(':')));
-    type_prompt(&mut core, "export c");
+    core.handle_key(key(KeyCode::Char(':'))).await;
+    type_prompt(&mut core, "export c").await;
 
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     assert_eq!(core.command_buffer(), "export csv");
 }
 
 // Test 6: Unknown command head → Tab is a no-op
 
-#[test]
-fn unknown_head_is_noop() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_head_is_noop() {
     let mut core = empty_core();
 
-    core.handle_key(key(KeyCode::Char(':')));
-    type_prompt(&mut core, "zz a");
+    core.handle_key(key(KeyCode::Char(':'))).await;
+    type_prompt(&mut core, "zz a").await;
 
     let before = core.command_buffer().to_owned();
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     assert_eq!(core.command_buffer(), before);
 }
 
 // Test 7: Bare `:` (empty buffer) → no completion
 
-#[test]
-fn bare_colon_no_completion() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bare_colon_no_completion() {
     let mut core = core_with_connections(&["smoke"]);
 
-    core.handle_key(key(KeyCode::Char(':')));
+    core.handle_key(key(KeyCode::Char(':'))).await;
     // Don't type anything — buffer is empty.
 
     let before = core.command_buffer().to_owned();
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     assert_eq!(core.command_buffer(), before);
 }

@@ -20,9 +20,9 @@ const fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn type_str(core: &mut AppCore, text: &str) {
+async fn type_str(core: &mut AppCore, text: &str) {
     for ch in text.chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
 }
 
@@ -40,26 +40,26 @@ async fn wizard_persists_password_to_credentials() {
     core.set_connections_path(connections_path.clone());
 
     // :add → modal wizard appears.
-    core.execute_command("add");
+    core.execute_command("add").await;
     // Switch driver to postgres (sqlite → postgres).
-    core.handle_key(key(KeyCode::Right));
+    core.handle_key(key(KeyCode::Right)).await;
 
     // Tab past the driver row onto `name`, fill the postgres form.
     let tab = key(KeyCode::Tab);
-    core.handle_key(tab); // -> name
-    type_str(&mut core, "prod");
-    core.handle_key(tab); // -> host
-    type_str(&mut core, "db.example.com");
-    core.handle_key(tab); // -> port (pre-filled 5432)
-    core.handle_key(tab); // -> database
-    type_str(&mut core, "inventory");
-    core.handle_key(tab); // -> username
-    type_str(&mut core, "admin");
-    core.handle_key(tab); // -> password
-    type_str(&mut core, "s3cret");
+    core.handle_key(tab).await; // -> name
+    type_str(&mut core, "prod").await;
+    core.handle_key(tab).await; // -> host
+    type_str(&mut core, "db.example.com").await;
+    core.handle_key(tab).await; // -> port (pre-filled 5432)
+    core.handle_key(tab).await; // -> database
+    type_str(&mut core, "inventory").await;
+    core.handle_key(tab).await; // -> username
+    type_str(&mut core, "admin").await;
+    core.handle_key(tab).await; // -> password
+    type_str(&mut core, "s3cret").await;
 
     // Enter commits the wizard.
-    core.handle_key(key(KeyCode::Enter));
+    core.handle_key(key(KeyCode::Enter)).await;
 
     // The connection landed in the file and the secret in the store.
     let saved = ConnectionsFile::load(&connections_path).unwrap();
@@ -103,7 +103,7 @@ async fn forget_clears_keyring_but_keeps_connection() {
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
     core.set_connections_path(connections_path.clone());
 
-    core.execute_command("forget stage");
+    core.execute_command("forget stage").await;
     // The delete now reports back through the meta channel so the
     // status line shows a real verdict (instead of the previous
     // "(best-effort)" placeholder). Drain pending updates before
@@ -142,7 +142,7 @@ async fn remove_drops_connection_and_secret() {
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
     core.set_connections_path(connections_path.clone());
 
-    core.execute_command("remove dev");
+    core.execute_command("remove dev").await;
     assert!(core.status_message().contains("removed"));
     // Sprint 9 (H7): keyring delete is now fire-and-forget.
     tokio::task::yield_now().await;
@@ -182,7 +182,7 @@ async fn open_pulls_password_from_credentials() {
 
     let registry = DriverRegistry::with_defaults();
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
-    core.execute_command("open local");
+    core.execute_command("open local").await;
     assert!(core.session().is_some(), "session must open");
     // Secret remains in the store after open.
     assert_eq!(
@@ -228,7 +228,7 @@ async fn edit_prefills_password_from_keyring() {
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
     core.set_connections_path(connections_path);
 
-    core.execute_command("edit prod");
+    core.execute_command("edit prod").await;
     assert!(core.wizard().is_some(), "wizard must open");
     // Background keyring lookup completes via meta channel.
     core.drain_meta_updates().await;
@@ -272,10 +272,10 @@ async fn test_active_session_reports_real_verdict() {
     let registry = DriverRegistry::with_defaults();
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open local");
+    core.execute_command("open local").await;
     assert!(core.session().is_some());
 
-    core.execute_command("test");
+    core.execute_command("test").await;
     // The ping is dispatched on the meta channel; wait for the
     // verdict to arrive.
     core.drain_meta_updates().await;
@@ -314,7 +314,7 @@ async fn forget_status_reflects_real_outcome_not_best_effort() {
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
     core.set_connections_path(connections_path);
 
-    core.execute_command("forget stage");
+    core.execute_command("forget stage").await;
     // Pre-drain: status should be the in-flight placeholder, *not*
     // the misleading "(best-effort)" jargon.
     assert!(

@@ -50,10 +50,10 @@ const fn ctrl(code: KeyCode) -> KeyEvent {
 }
 
 /// Focus the result pane via Ctrl-W cycling.
-fn focus_results(core: &mut AppCore) {
+async fn focus_results(core: &mut AppCore) {
     let ctrl_w = ctrl(KeyCode::Char('w'));
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
 }
 
@@ -69,13 +69,14 @@ async fn seed_result(core: &mut AppCore, db_path: PathBuf) {
         )
         .unwrap();
     }
-    core.execute_command("open row-detail-test");
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.execute_command("open row-detail-test").await;
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
-    focus_results(core);
+    focus_results(core).await;
     // Select the first row (j selects row 0 if nothing is selected).
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
 }
 
 // Test 1: open_with_no_row_shows_status_message
@@ -87,15 +88,15 @@ async fn open_with_no_row_shows_status_message() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open row-detail-test");
+    core.execute_command("open row-detail-test").await;
     // No query run — no results, no selection.
-    focus_results(&mut core);
+    focus_results(&mut core).await;
 
     // Press R to try opening row detail with no selection.
-    core.handle_key(key(KeyCode::Char('R')));
+    core.handle_key(key(KeyCode::Char('R'))).await;
 
     assert!(
-        !core.row_detail_is_open(),
+        !core.row_detail_is_open().await,
         "row detail should not open without a selected row"
     );
     assert!(
@@ -116,9 +117,9 @@ async fn open_populates_columns_and_values() {
     seed_result(&mut core, db_path).await;
 
     // Press R to open row detail.
-    core.handle_key(key(KeyCode::Char('R')));
+    core.handle_key(key(KeyCode::Char('R'))).await;
 
-    assert!(core.row_detail_is_open(), "row detail should be open");
+    assert!(core.row_detail_is_open().await, "row detail should be open");
 
     let state = core
         .row_detail_state()
@@ -146,12 +147,12 @@ async fn navigate_selects_columns() {
     seed_result(&mut core, db_path).await;
 
     // Open row detail.
-    core.handle_key(key(KeyCode::Char('R')));
-    assert!(core.row_detail_is_open());
+    core.handle_key(key(KeyCode::Char('R'))).await;
+    assert!(core.row_detail_is_open().await);
 
     // Press j twice to navigate down.
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
 
     let state = core
         .row_detail_state()
@@ -162,7 +163,7 @@ async fn navigate_selects_columns() {
     );
 
     // Press k to go back up.
-    core.handle_key(key(KeyCode::Char('k')));
+    core.handle_key(key(KeyCode::Char('k'))).await;
     let state = core
         .row_detail_state()
         .expect("row detail state should exist");
@@ -183,14 +184,14 @@ async fn esc_closes() {
     seed_result(&mut core, db_path).await;
 
     // Open row detail.
-    core.handle_key(key(KeyCode::Char('R')));
-    assert!(core.row_detail_is_open(), "row detail should be open");
+    core.handle_key(key(KeyCode::Char('R'))).await;
+    assert!(core.row_detail_is_open().await, "row detail should be open");
 
     // Press Esc to dismiss.
-    core.handle_key(key(KeyCode::Esc));
+    core.handle_key(key(KeyCode::Esc)).await;
 
     assert!(
-        !core.row_detail_is_open(),
+        !core.row_detail_is_open().await,
         "row detail should be closed after Esc"
     );
     assert!(

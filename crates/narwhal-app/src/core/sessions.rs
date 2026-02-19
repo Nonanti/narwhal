@@ -22,11 +22,12 @@ use crate::statements::{all_statements, statement_at_cursor};
 use crate::wizard::ConnectionWizard;
 
 impl AppCore {
-    pub(super) fn open_named(&mut self, target: &str) {
+    pub(super) async fn open_named(&mut self, target: &str) {
         if target.contains("://") || target.starts_with("sqlite:") {
             match narwhal_config::parse_url(target) {
                 Ok(parsed) => {
-                    self.open_connection_with_password(parsed.config, parsed.password);
+                    self.open_connection_with_password(parsed.config, parsed.password)
+                        .await;
                 }
                 Err(error) => {
                     self.ui.status.message = format!("invalid url: {error}");
@@ -45,20 +46,20 @@ impl AppCore {
             self.ui.status.message = format!("connection not found: {target}");
             return;
         };
-        self.open_connection(config);
+        self.open_connection(config).await;
     }
 
-    fn open_connection(&mut self, config: ConnectionConfig) {
+    async fn open_connection(&mut self, config: ConnectionConfig) {
         // H7: keyring lookup + dial + initial schema refresh all run in
         // the background OpenSession meta worker so the event loop is
         // free to draw frames and service the run/meta channels while
         // the (possibly slow) connect proceeds. We do NOT pre-resolve
         // the password here — the worker handles keyring + pgpass +
         // env fallback in one place.
-        self.open_connection_with_password(config, None);
+        self.open_connection_with_password(config, None).await;
     }
 
-    fn open_connection_with_password(
+    async fn open_connection_with_password(
         &mut self,
         config: ConnectionConfig,
         password: Option<String>,
@@ -93,18 +94,20 @@ impl AppCore {
         // `meta_rx`. The tests need to be migrated to an
         // `await_pending_session_opens` step first.
         self.session.pending_session_opens.insert(config_id);
-        let dispatched = self.dispatch_meta(crate::meta::MetaRequest::OpenSession {
-            driver: driver.clone(),
-            config: Box::new(config),
-            password_hint: password,
-            opts: session_opts,
-        });
+        let dispatched = self
+            .dispatch_meta(crate::meta::MetaRequest::OpenSession {
+                driver: driver.clone(),
+                config: Box::new(config),
+                password_hint: password,
+                opts: session_opts,
+            })
+            .await;
         if !dispatched {
             self.session.pending_session_opens.remove(&config_id);
             self.ui.status.message = "connect failed: meta channel closed".into();
             return;
         }
-        self.await_pending_session_opens_sync();
+        self.await_pending_session_opens_sync().await;
     }
 
     /// Side-effects shared between the foreground sync path (legacy
@@ -137,7 +140,7 @@ impl AppCore {
         self.ui.focus = Pane::Editor;
     }
 
-    pub(super) fn close_session(&mut self) {
+    pub(super) async fn close_session(&mut self) {
         if self.session.active.take().is_some() {
             let mut state = self
                 .deps
@@ -154,7 +157,7 @@ impl AppCore {
         }
     }
 
-    pub(super) fn refresh_schema(&mut self) {
+    pub(super) async fn refresh_schema(&mut self) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -165,7 +168,8 @@ impl AppCore {
         // user switched sessions is dropped instead of clobbering the
         // new session's listing.
         let session_id = session.config.id;
-        self.dispatch_meta(MetaRequest::RefreshSchemas { session_id });
+        self.dispatch_meta(MetaRequest::RefreshSchemas { session_id })
+            .await;
         self.ui.status.message = "refreshing schema…".into();
     }
 
@@ -208,7 +212,7 @@ impl AppCore {
         );
     }
 
-    pub(super) fn dispatch_current_statement(&mut self, mode: RunMode) {
+    pub(super) async fn dispatch_current_statement(&mut self, mode: RunMode) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -224,10 +228,10 @@ impl AppCore {
             self.ui.status.message = "no statement under cursor".into();
             return;
         }
-        self.dispatch_batch(vec![trimmed], mode);
+        self.dispatch_batch(vec![trimmed], mode).await;
     }
 
-    pub(super) fn dispatch_all_statements(&mut self, mode: RunMode) {
+    pub(super) async fn dispatch_all_statements(&mut self, mode: RunMode) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -238,10 +242,10 @@ impl AppCore {
             self.ui.status.message = "buffer contains no statements".into();
             return;
         }
-        self.dispatch_batch(statements, mode);
+        self.dispatch_batch(statements, mode).await;
     }
 
-    pub(super) fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
+    pub(super) async fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
         if self.process.running {
             self.ui.status.message = "a query is already running".into();
             return;
@@ -293,7 +297,7 @@ impl AppCore {
         );
     }
 
-    pub(super) fn start_wizard(&mut self) {
+    pub(super) async fn start_wizard(&mut self) {
         self.modals.wizard = Some(ConnectionWizard::new());
         self.modals.wizard_error = None;
         self.ui.status.message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
@@ -303,7 +307,7 @@ impl AppCore {
     /// tweak the form (and *must* fill in `name`, which the URL doesn't
     /// carry) before committing. Existing IDs aren't touched — the
     /// wizard always allocates a fresh id at commit time.
-    pub(super) fn start_wizard_from_url(&mut self, dsn: &str) {
+    pub(super) async fn start_wizard_from_url(&mut self, dsn: &str) {
         let parsed = match narwhal_config::parse_url(dsn) {
             Ok(p) => p,
             Err(error) => {
@@ -340,7 +344,7 @@ impl AppCore {
     /// the open responsive on slow keyrings (GNOME / KDE / macOS
     /// can take 100+ ms on first unlock) *without* losing the
     /// prefill behaviour the user expects from `:edit <name>`.
-    pub(super) fn start_wizard_edit(&mut self, name: &str) {
+    pub(super) async fn start_wizard_edit(&mut self, name: &str) {
         let Some(config) = self
             .session
             .connections
@@ -410,7 +414,7 @@ impl AppCore {
     /// the TCP / TLS handshake does not freeze the event loop. The
     /// status bar shows `testing…` immediately; the outcome arrives
     /// later as [`MetaUpdate::TestCompleted`].
-    pub(super) fn test_connection(&mut self, target: Option<&str>) {
+    pub(super) async fn test_connection(&mut self, target: Option<&str>) {
         let Some(target) = target else {
             // No argument: ping the active session by acquiring a
             // pooled connection. The result lands on the meta
@@ -490,14 +494,15 @@ impl AppCore {
             password,
             opts,
             label,
-        });
+        })
+        .await;
     }
 
     // Transaction methods (begin/commit/rollback/savepoint/release/
     // rollback_to_savepoint, with_txn_conn) moved to
     // `core::transactions` (L21).
 
-    pub(super) fn remove_connection(&mut self, name: &str) {
+    pub(super) async fn remove_connection(&mut self, name: &str) {
         let Some(pos) = self
             .session
             .connections
@@ -556,7 +561,7 @@ impl AppCore {
         self.ui.status.message = format!("removed connection '{name}'");
     }
 
-    pub(super) fn forget_password(&mut self, name: &str) {
+    pub(super) async fn forget_password(&mut self, name: &str) {
         let Some(config) = self
             .session
             .connections

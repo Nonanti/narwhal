@@ -75,25 +75,25 @@ async fn open_with_payload(payload: &str) -> (AppCore, Arc<InMemoryClipboard>) {
         Arc::new(InMemoryStore::new()),
         clipboard.clone(),
     );
-    core.execute_command("open headless");
-    core.insert_into_editor("SELECT id, body FROM blobs");
-    core.execute_command("run");
+    core.execute_command("open headless").await;
+    core.insert_into_editor("SELECT id, body FROM blobs").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
     // Hand focus to the results pane and select the first row.
     let ctrl_w = ctrl('w');
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
-    core.handle_key(key(KeyCode::Char('j'))); // select row 0
-                                              // Move to the `body` column.
-    core.handle_key(key(KeyCode::Char('l')));
+    core.handle_key(key(KeyCode::Char('j'))).await; // select row 0
+                                                    // Move to the `body` column.
+    core.handle_key(key(KeyCode::Char('l'))).await;
     (core, clipboard)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn z_opens_json_viewer_with_pretty_text() {
     let (mut core, _cb) = open_with_payload(r#"{"a":1,"b":[2,3]}"#).await;
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
 
     let view = core.json_viewer_for_test().expect("modal must open");
     assert!(view.parse_error.is_none(), "valid JSON parses cleanly");
@@ -106,7 +106,7 @@ async fn z_opens_json_viewer_with_pretty_text() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn invalid_json_falls_back_to_raw_with_error() {
     let (mut core, _cb) = open_with_payload("not json {").await;
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
 
     let view = core.json_viewer_for_test().expect("modal must open");
     assert!(view.parse_error.is_some(), "invalid JSON surfaces error");
@@ -124,21 +124,21 @@ async fn scroll_chords_advance_and_clamp() {
             .join(",")
     );
     let (mut core, _cb) = open_with_payload(&payload).await;
-    core.handle_key(key(KeyCode::Char('z')));
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
     assert_eq!(core.json_viewer_for_test().unwrap().scroll, 2);
 
-    core.handle_key(key(KeyCode::Char('k')));
+    core.handle_key(key(KeyCode::Char('k'))).await;
     assert_eq!(core.json_viewer_for_test().unwrap().scroll, 1);
 
-    core.handle_key(ctrl('d'));
+    core.handle_key(ctrl('d')).await;
     assert_eq!(core.json_viewer_for_test().unwrap().scroll, 11);
 
-    core.handle_key(key(KeyCode::Char('g')));
+    core.handle_key(key(KeyCode::Char('g'))).await;
     assert_eq!(core.json_viewer_for_test().unwrap().scroll, 0);
 
-    core.handle_key(key(KeyCode::Char('G')));
+    core.handle_key(key(KeyCode::Char('G'))).await;
     // G clamps to the last line index.
     let total = core.json_viewer_for_test().unwrap().pretty.lines().count() as u16;
     assert_eq!(
@@ -150,9 +150,9 @@ async fn scroll_chords_advance_and_clamp() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn yank_copies_pretty_and_raw_variants() {
     let (mut core, clipboard) = open_with_payload(r#"{"x":1}"#).await;
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
 
-    core.handle_key(key(KeyCode::Char('y')));
+    core.handle_key(key(KeyCode::Char('y'))).await;
     let pretty = clipboard.read().expect("clipboard write expected");
     assert!(pretty.contains("\"x\": 1") || pretty.contains("\"x\":1"));
     assert!(
@@ -165,7 +165,8 @@ async fn yank_copies_pretty_and_raw_variants() {
         modifiers: KeyModifiers::SHIFT,
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
-    });
+    })
+    .await;
     let raw = clipboard.read().expect("clipboard write expected");
     assert_eq!(raw, r#"{"x":1}"#);
 }
@@ -173,15 +174,15 @@ async fn yank_copies_pretty_and_raw_variants() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn esc_and_q_dismiss_the_viewer() {
     let (mut core, _cb) = open_with_payload(r#"{"x":1}"#).await;
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
     assert!(core.json_viewer_for_test().is_some());
-    core.handle_key(key(KeyCode::Esc));
+    core.handle_key(key(KeyCode::Esc)).await;
     assert!(core.json_viewer_for_test().is_none());
 
     // Re-open and dismiss with `q`.
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('z'))).await;
     assert!(core.json_viewer_for_test().is_some());
-    core.handle_key(key(KeyCode::Char('q')));
+    core.handle_key(key(KeyCode::Char('q'))).await;
     assert!(core.json_viewer_for_test().is_none());
 }
 
@@ -194,16 +195,18 @@ async fn shift_z_opens_viewer_from_row_detail_modal() {
         modifiers: KeyModifiers::SHIFT,
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
-    });
+    })
+    .await;
     // Step the row-detail cursor down to the `body` column (index 1).
-    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
     // Now Shift+Z to launch the JSON viewer over `body`.
     core.handle_key(KeyEvent {
         code: KeyCode::Char('Z'),
         modifiers: KeyModifiers::SHIFT,
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
-    });
+    })
+    .await;
     let view = core
         .json_viewer_for_test()
         .expect("modal must open from row-detail");
@@ -225,17 +228,17 @@ async fn null_or_empty_cell_does_not_open_modal() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open headless");
-    core.insert_into_editor("SELECT id, body FROM blobs");
-    core.execute_command("run");
+    core.execute_command("open headless").await;
+    core.insert_into_editor("SELECT id, body FROM blobs").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
     let ctrl_w = ctrl('w');
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('l')));
-    core.handle_key(key(KeyCode::Char('z')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('l'))).await;
+    core.handle_key(key(KeyCode::Char('z'))).await;
 
     assert!(
         core.json_viewer_for_test().is_none(),

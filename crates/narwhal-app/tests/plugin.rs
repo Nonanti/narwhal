@@ -57,7 +57,7 @@ async fn core_with_items() -> (AppCore, TempDir) {
         }],
     };
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open p");
+    core.execute_command("open p").await;
     (core, dir)
 }
 
@@ -81,7 +81,8 @@ async fn plug_load_registers_lua_command_and_dispatches_it() {
     );
 
     let mut core = empty_core();
-    core.execute_command(&format!("plug-load {}", script_path.display()));
+    core.execute_command(&format!("plug-load {}", script_path.display()))
+        .await;
     assert!(
         core.status_message().contains("loaded"),
         "expected load confirmation, got: {}",
@@ -89,7 +90,7 @@ async fn plug_load_registers_lua_command_and_dispatches_it() {
     );
 
     // The new command 'shout' should now be reachable from the `:` prompt.
-    core.execute_command("shout hello berkant");
+    core.execute_command("shout hello berkant").await;
     assert_eq!(core.status_message(), "HELLO BERKANT");
 }
 
@@ -106,8 +107,9 @@ async fn plug_list_summarises_loaded_plugins() {
     );
 
     let mut core = empty_core();
-    core.execute_command(&format!("plug-load {}", script_path.display()));
-    core.execute_command("plug-list");
+    core.execute_command(&format!("plug-load {}", script_path.display()))
+        .await;
+    core.execute_command("plug-list").await;
     let msg = core.status_message();
     assert!(msg.contains("alpha"), "missing alpha: {msg}");
     assert!(msg.contains("beta"), "missing beta: {msg}");
@@ -116,7 +118,7 @@ async fn plug_list_summarises_loaded_plugins() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plug_list_with_no_plugins_hints_at_plug_load() {
     let mut core = empty_core();
-    core.execute_command("plug-list");
+    core.execute_command("plug-list").await;
     assert!(core.status_message().contains("plug-load"));
 }
 
@@ -126,7 +128,8 @@ async fn plug_load_with_bad_script_reports_error_without_panicking() {
     let script_path = write_script(&dir, "broken.lua", "this is not valid lua )");
 
     let mut core = empty_core();
-    core.execute_command(&format!("plug-load {}", script_path.display()));
+    core.execute_command(&format!("plug-load {}", script_path.display()))
+        .await;
     assert!(
         core.status_message().contains("failed"),
         "expected failure message, got: {}",
@@ -152,7 +155,7 @@ async fn lua_command_returning_table_injects_sql_into_editor() {
     let mut core = empty_core();
     core.register_lua_plugin(plugin).unwrap();
 
-    core.execute_command("count users");
+    core.execute_command("count users").await;
     assert_eq!(core.editor().entire_text(), "SELECT COUNT(*) FROM users");
     assert!(
         core.status_message().contains("inserted"),
@@ -182,9 +185,9 @@ async fn auto_load_picks_up_every_lua_file_in_a_directory() {
     assert_eq!(loaded, 2);
     assert!(core.status_message().contains("auto-loaded 2"));
 
-    core.execute_command("a");
+    core.execute_command("a").await;
     assert_eq!(core.status_message(), "A");
-    core.execute_command("b");
+    core.execute_command("b").await;
     assert_eq!(core.status_message(), "B");
 }
 
@@ -203,7 +206,7 @@ async fn auto_load_records_failing_scripts_without_aborting() {
     assert_eq!(loaded, 1);
 
     // The good plugin works.
-    core.execute_command("good");
+    core.execute_command("good").await;
     assert_eq!(core.status_message(), "good");
 
     // And the failure was recorded as a plugin warning that bubbles up
@@ -225,7 +228,7 @@ async fn auto_load_missing_dir_is_silently_skipped() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unknown_command_path_still_reports_unknown_when_no_plugin_claims_it() {
     let mut core = empty_core();
-    core.execute_command("this-name-does-not-exist arg");
+    core.execute_command("this-name-does-not-exist arg").await;
     assert!(
         core.status_message().contains("unknown command"),
         "got: {}",
@@ -252,8 +255,9 @@ async fn transform_hook_runs_after_query_and_rewrites_rows() {
     let (mut core, _dir) = core_with_items().await;
     core.register_lua_plugin(plugin).unwrap();
 
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     match core.result() {
@@ -285,8 +289,9 @@ async fn transform_hook_can_add_synthetic_columns() {
     let (mut core, _dir) = core_with_items().await;
     core.register_lua_plugin(plugin).unwrap();
 
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     match core.result() {
@@ -355,8 +360,9 @@ async fn transform_chain_continues_past_a_failing_plugin() {
     core.register_lua_plugin(broken).unwrap();
     core.register_lua_plugin(tagger).unwrap();
 
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     match core.result() {
@@ -396,14 +402,14 @@ async fn sql_run_during_open_transaction_is_refused() {
     core.register_lua_plugin(plugin).unwrap();
 
     // Before :begin — works.
-    core.execute_command("peek");
+    core.execute_command("peek").await;
     assert_eq!(core.status_message(), "items=3");
 
-    core.execute_command("begin");
+    core.execute_command("begin").await;
     assert!(core.status_message().contains("transaction started"));
 
     // During :begin — refused.
-    core.execute_command("peek");
+    core.execute_command("peek").await;
     let msg = core.status_message();
     assert!(
         msg.contains("unavailable while a :begin transaction is open"),
@@ -411,8 +417,8 @@ async fn sql_run_during_open_transaction_is_refused() {
     );
 
     // After :commit — works again.
-    core.execute_command("commit");
-    core.execute_command("peek");
+    core.execute_command("commit").await;
+    core.execute_command("peek").await;
     assert_eq!(core.status_message(), "items=3");
 }
 
@@ -454,8 +460,9 @@ async fn transform_failure_surfaces_in_status_but_keeps_rows() {
     let (mut core, _dir) = core_with_items().await;
     core.register_lua_plugin(plugin).unwrap();
 
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     let msg = core.status_message();
@@ -494,7 +501,7 @@ async fn shipped_example_plugins_load_and_work() {
     assert!(loaded >= 4, "expected ≥4 plugins, got {loaded}");
 
     // :top exercises the snippet plugin (sql injection outcome).
-    core.execute_command("top items");
+    core.execute_command("top items").await;
     assert!(
         core.editor()
             .entire_text()
@@ -504,7 +511,7 @@ async fn shipped_example_plugins_load_and_work() {
     );
 
     // :rc exercises the sql_run plugin against the active sqlite.
-    core.execute_command("rc items");
+    core.execute_command("rc items").await;
     assert_eq!(core.status_message(), "items: 3 row(s)");
 
     // :csv-export exercises the CSV export plugin against the active sqlite.
@@ -513,7 +520,7 @@ async fn shipped_example_plugins_load_and_work() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv_path = csv_dir.path().join("items.csv");
     let csv_cmd = format!("csv-export items {}", csv_path.display());
-    core.execute_command(&csv_cmd);
+    core.execute_command(&csv_cmd).await;
     let csv_status = core.status_message().to_owned();
     assert!(
         csv_status.contains("wrote 3 row(s) to"),
@@ -541,9 +548,9 @@ async fn shipped_example_plugins_load_and_work() {
 
     // :explain-cost exercises the editor-wrapping plugin.
     // Clear the editor first, then seed it with a statement.
-    core.execute_command("clear");
-    core.insert_into_editor("SELECT * FROM items");
-    core.execute_command("explain-cost");
+    core.execute_command("clear").await;
+    core.insert_into_editor("SELECT * FROM items").await;
+    core.execute_command("explain-cost").await;
     let editor_after = core.editor().entire_text();
     assert!(
         editor_after.contains("EXPLAIN ANALYZE"),
@@ -572,7 +579,7 @@ async fn sql_run_from_lua_hits_active_session() {
     let (mut core, _dir) = core_with_items().await;
     core.register_lua_plugin(plugin).unwrap();
 
-    core.execute_command("howmany");
+    core.execute_command("howmany").await;
     assert_eq!(core.status_message(), "items=3");
 }
 
@@ -594,7 +601,7 @@ async fn sql_run_without_active_session_reports_error() {
     let mut core = empty_core();
     core.register_lua_plugin(plugin).unwrap();
 
-    core.execute_command("go");
+    core.execute_command("go").await;
     let msg = core.status_message();
     assert!(
         msg.contains("plugin error") && msg.contains("no active connection"),
@@ -617,7 +624,7 @@ async fn lua_handler_runtime_error_surfaces_as_plugin_error() {
     let mut core = empty_core();
     core.register_lua_plugin(plugin).unwrap();
 
-    core.execute_command("boom");
+    core.execute_command("boom").await;
     let msg = core.status_message();
     assert!(
         msg.contains("plugin error") || msg.contains("intentional"),
@@ -630,7 +637,7 @@ async fn help_with_builtin_arg_describes_it() {
     let mut core = empty_core();
 
     // :help open should print a description containing "open".
-    core.execute_command("help open");
+    core.execute_command("help open").await;
     let msg = core.status_message();
     assert!(
         msg.contains("open"),
@@ -638,7 +645,7 @@ async fn help_with_builtin_arg_describes_it() {
     );
 
     // :help with no arg still shows the one-liner.
-    core.execute_command("help");
+    core.execute_command("help").await;
     let msg = core.status_message();
     assert!(
         msg.contains("quit"),
@@ -646,7 +653,7 @@ async fn help_with_builtin_arg_describes_it() {
     );
 
     // :help with an unknown name.
-    core.execute_command("help nonexistent-cmd");
+    core.execute_command("help nonexistent-cmd").await;
     let msg = core.status_message();
     assert!(
         msg.contains("unknown command"),
@@ -654,7 +661,7 @@ async fn help_with_builtin_arg_describes_it() {
     );
 
     // :help alias resolves correctly.
-    core.execute_command("help o");
+    core.execute_command("help o").await;
     let msg = core.status_message();
     assert!(
         msg.contains("open"),
@@ -677,11 +684,12 @@ async fn help_with_plugin_arg_describes_it() {
     );
 
     let mut core = empty_core();
-    core.execute_command(&format!("plug-load {}", script_path.display()));
+    core.execute_command(&format!("plug-load {}", script_path.display()))
+        .await;
     assert!(core.status_message().contains("loaded"));
 
     // :help rc should surface the plugin's description.
-    core.execute_command("help rc");
+    core.execute_command("help rc").await;
     let msg = core.status_message();
     assert!(
         msg.contains("row count"),
@@ -713,7 +721,7 @@ async fn explain_cost_wraps_editor_buffer() {
     core.register_lua_plugin(plugin).unwrap();
 
     // Empty buffer — should get a hint message.
-    core.execute_command("explain-cost");
+    core.execute_command("explain-cost").await;
     let msg = core.status_message();
     assert!(
         msg.contains("editor is empty"),
@@ -721,8 +729,8 @@ async fn explain_cost_wraps_editor_buffer() {
     );
 
     // Seed the editor with a statement, then wrap it.
-    core.insert_into_editor("SELECT 1");
-    core.execute_command("explain-cost");
+    core.insert_into_editor("SELECT 1").await;
+    core.execute_command("explain-cost").await;
     let editor = core.editor().entire_text();
     assert!(
         editor.contains("EXPLAIN ANALYZE"),
@@ -756,7 +764,7 @@ async fn plugin_timeout_uses_resolved_plugin_name_and_hints_at_set_timeout() {
     let mut core = empty_core();
     core.register_lua_plugin(plugin).unwrap();
 
-    core.execute_command("slow arg");
+    core.execute_command("slow arg").await;
     let msg = core.status_message().to_owned();
     // The message must reference the plugin name, not the command.
     assert!(

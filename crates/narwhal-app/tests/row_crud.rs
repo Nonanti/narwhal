@@ -62,12 +62,12 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 /// preview is dispatched. Mirrors the helper used by `cell_edit.rs`.
 async fn preview_items(core: &mut AppCore) {
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
     // connection (0) -> main schema (1) -> items (2)
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('o')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('o'))).await;
     core.drain_run_updates().await;
 }
 
@@ -83,7 +83,7 @@ async fn open_seeded_db(label_a: &str, label_b: &str) -> (AppCore, PathBuf, Temp
     drop(conn);
     let (registry, connections) = fixture(db_path.clone());
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open crud");
+    core.execute_command("open crud").await;
     preview_items(&mut core).await;
     (core, db_path, dir)
 }
@@ -92,8 +92,8 @@ async fn open_seeded_db(label_a: &str, label_b: &str) -> (AppCore, PathBuf, Temp
 async fn delete_row_queues_and_commits() {
     let (mut core, db_path, _dir) = open_seeded_db("alpha", "beta").await;
     // Focus the row 'alpha' (row 0) in the results pane.
-    core.handle_key(key(KeyCode::Char('j'))); // select row 0
-    core.handle_key(key(KeyCode::Char('d'))); // queue delete
+    core.handle_key(key(KeyCode::Char('j'))).await; // select row 0
+    core.handle_key(key(KeyCode::Char('d'))).await; // queue delete
 
     assert!(
         core.status_message().contains("queued DELETE"),
@@ -112,7 +112,7 @@ async fn delete_row_queues_and_commits() {
     }
 
     // Commit.
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
@@ -130,11 +130,11 @@ async fn delete_row_queues_and_commits() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn discard_drops_queue_without_touching_database() {
     let (mut core, db_path, _dir) = open_seeded_db("alpha", "beta").await;
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
 
-    core.handle_key(ctrl('x'));
+    core.handle_key(ctrl('x')).await;
     assert!(
         core.status_message().contains("discarded 1"),
         "got: {}",
@@ -152,11 +152,11 @@ async fn discard_drops_queue_without_touching_database() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn duplicate_row_clones_non_pk_columns_and_commits() {
     let (mut core, db_path, _dir) = open_seeded_db("alpha", "beta").await;
-    core.handle_key(key(KeyCode::Char('j'))); // select 'alpha'
-    core.handle_key(shift('o')); // duplicate
+    core.handle_key(key(KeyCode::Char('j'))).await; // select 'alpha'
+    core.handle_key(shift('o')).await; // duplicate
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
 
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
@@ -173,7 +173,7 @@ async fn duplicate_row_clones_non_pk_columns_and_commits() {
 async fn append_then_edit_columns_and_commit_inserts_row() {
     let (mut core, db_path, _dir) = open_seeded_db("alpha", "beta").await;
     // Queue an empty INSERT.
-    core.handle_key(key(KeyCode::Char('o')));
+    core.handle_key(key(KeyCode::Char('o'))).await;
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
 
     // Edit the `label` cell on the staged row \u2014 we reuse the existing
@@ -192,7 +192,7 @@ async fn append_then_edit_columns_and_commit_inserts_row() {
         }
     }
 
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
@@ -220,11 +220,11 @@ async fn read_only_mode_blocks_every_row_crud_action() {
     let (registry, connections) = fixture(db_path.clone());
     let mut core = AppCore::new(registry, connections, None);
     core.set_read_only(true);
-    core.execute_command("open crud");
+    core.execute_command("open crud").await;
     preview_items(&mut core).await;
 
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
     assert!(
         core.status_message().contains("read-only"),
         "delete must be blocked, got: {}",
@@ -232,7 +232,7 @@ async fn read_only_mode_blocks_every_row_crud_action() {
     );
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 0);
 
-    core.handle_key(key(KeyCode::Char('o')));
+    core.handle_key(key(KeyCode::Char('o'))).await;
     assert!(core.status_message().contains("read-only"));
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 0);
 
@@ -254,16 +254,16 @@ async fn delete_rejected_on_table_without_primary_key() {
     drop(conn);
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open crud");
+    core.execute_command("open crud").await;
     preview_items(&mut core).await; // 'items' \u2014 wait, it's `notes` here.
                                     // Sidebar layout: conn (0) → main (1) → notes (2). preview_items
                                     // already walked there.
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
 
     assert!(
         core.status_message().contains("no primary key"),
@@ -276,18 +276,18 @@ async fn delete_rejected_on_table_without_primary_key() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn preview_modal_opens_lists_and_closes() {
     let (mut core, _db_path, _dir) = open_seeded_db("alpha", "beta").await;
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
 
-    core.handle_key(ctrl('p'));
+    core.handle_key(ctrl('p')).await;
     assert!(
         core.tabs()[core.active_tab()].pending_preview().is_some(),
         "Ctrl-P should open the preview modal"
     );
 
     // Toggling again closes the modal but keeps the queue.
-    core.handle_key(ctrl('p'));
+    core.handle_key(ctrl('p')).await;
     assert!(core.tabs()[core.active_tab()].pending_preview().is_none());
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
 }
@@ -311,12 +311,12 @@ async fn pending_audit_entries_land_in_history_journal() {
     let journal = Arc::new(Journal::open(&journal_path).await.unwrap());
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, Some(journal));
-    core.execute_command("open crud");
+    core.execute_command("open crud").await;
     preview_items(&mut core).await;
 
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
-    core.handle_key(ctrl('s'));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     // Give the spawned audit-log task a beat to land on disk.
@@ -336,12 +336,12 @@ async fn pending_audit_entries_land_in_history_journal() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_badge_visible_in_status_bar() {
     let (mut core, _db_path, _dir) = open_seeded_db("alpha", "beta").await;
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('d'))).await;
     // The badge is rendered, not directly exposed by accessors, but the
     // tab's pending count is the source of truth.
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 1);
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 0);
 }
@@ -351,11 +351,11 @@ async fn multiple_mutations_commit_in_one_transaction() {
     let (mut core, db_path, _dir) = open_seeded_db("alpha", "beta").await;
     // Queue: delete alpha, duplicate beta, append empty insert
     // populated with 'gamma'.
-    core.handle_key(key(KeyCode::Char('j'))); // row 0 = alpha
-    core.handle_key(key(KeyCode::Char('d'))); // delete alpha
-    core.handle_key(key(KeyCode::Char('j'))); // row 1 = beta
-    core.handle_key(shift('o')); // duplicate beta
-    core.handle_key(key(KeyCode::Char('o'))); // empty insert
+    core.handle_key(key(KeyCode::Char('j'))).await; // row 0 = alpha
+    core.handle_key(key(KeyCode::Char('d'))).await; // delete alpha
+    core.handle_key(key(KeyCode::Char('j'))).await; // row 1 = beta
+    core.handle_key(shift('o')).await; // duplicate beta
+    core.handle_key(key(KeyCode::Char('o'))).await; // empty insert
 
     {
         use narwhal_app::pending::PendingMutation;
@@ -367,7 +367,7 @@ async fn multiple_mutations_commit_in_one_transaction() {
     }
     assert_eq!(core.tabs()[core.active_tab()].pending().len(), 3);
 
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();

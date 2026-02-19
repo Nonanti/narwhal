@@ -34,9 +34,10 @@ async fn format_all_uppercases_and_indents_every_statement() {
     let mut core = AppCore::new(registry, connections, None);
     core.insert_into_editor(
         "select id,name from users where active=true; select count(*) from orders",
-    );
+    )
+    .await;
 
-    core.execute_command("format-all");
+    core.execute_command("format-all").await;
     let out = core.editor().entire_text();
     assert!(out.contains("SELECT"));
     assert!(out.contains("FROM"));
@@ -54,8 +55,9 @@ async fn format_targets_only_the_current_statement() {
     // `insert_into_editor` leaves the cursor at the end of the buffer,
     // so the second statement is the one under the cursor and the
     // formatter touches it while leaving the first one verbatim.
-    core.insert_into_editor("select id from a;\n\nselect name from b");
-    core.execute_command("format");
+    core.insert_into_editor("select id from a;\n\nselect name from b")
+        .await;
+    core.execute_command("format").await;
     let out = core.editor().entire_text();
     assert!(
         out.contains("select id from a"),
@@ -71,7 +73,7 @@ async fn format_targets_only_the_current_statement() {
 async fn format_on_empty_buffer_is_a_noop_with_friendly_status() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("format");
+    core.execute_command("format").await;
     assert!(core.editor().entire_text().is_empty());
     assert!(core.status_message().contains("nothing"));
 }
@@ -80,8 +82,8 @@ async fn format_on_empty_buffer_is_a_noop_with_friendly_status() {
 async fn fmt_alias_resolves_to_format() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.insert_into_editor("select 1");
-    core.execute_command("fmt");
+    core.insert_into_editor("select 1").await;
+    core.execute_command("fmt").await;
     assert!(core
         .editor()
         .entire_text()
@@ -93,8 +95,8 @@ async fn fmt_alias_resolves_to_format() {
 async fn fmtall_alias_resolves_to_format_all() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.insert_into_editor("select 1; select 2");
-    core.execute_command("fmtall");
+    core.insert_into_editor("select 1; select 2").await;
+    core.execute_command("fmtall").await;
     let out = core.editor().entire_text();
     assert_eq!(out.matches(';').count(), 2);
 }
