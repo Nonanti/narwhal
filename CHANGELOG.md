@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   animated demo.
 - Halved the em-dash count in the README's upper section for cleaner
   scanning.
+- Install section now lists Cargo / cargo-binstall / Homebrew tap /
+  AUR / Nix as first-class options and drops the "post-2.0 roadmap"
+  language for AUR + Homebrew now that the packaging templates land
+  with v1.0.
+- `packaging/homebrew/narwhal.rb`: dropped runtime `postgresql` /
+  `mysql-client` dependencies (drivers link statically); kept only
+  `rust` + `cmake` + `llvm` as build deps. Now uses `std_cargo_args`.
+- `packaging/aur/PKGBUILD`: switched to the standard `prepare/build/
+  check/package` layout, ships both LICENSE-MIT and LICENSE-APACHE,
+  installs the README under `share/doc/`.
+
+### Added (continued)
+
+- `cargo-binstall` metadata on the `narwhal` binary crate so users
+  without a Rust toolchain can grab the prebuilt tarball produced by
+  `.github/workflows/release.yml`.
 
 ### Fixed
 

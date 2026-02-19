@@ -18,6 +18,18 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+# cargo-binstall metadata: lets users do `cargo binstall narwhal` to
+# pull the prebuilt tarball produced by .github/workflows/release.yml
+# instead of compiling from source. Matches the archive layout the
+# workflow produces (binary at the archive root).
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/narwhal-v{ version }-{ target }.{ archive-format }"
+pkg-fmt = "tgz"
+bin-dir = "narwhal-v{ version }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 narwhal-app.workspace = true
 narwhal-commands.workspace = true

@@ -34,8 +34,30 @@
 
 ## Install
 
-```
+### Cargo (any platform with Rust)
+
+```sh
 cargo install narwhal
+```
+
+For users without a Rust toolchain, `cargo-binstall` fetches the
+prebuilt binary instead of compiling:
+
+```sh
+cargo binstall narwhal
+```
+
+### Homebrew (macOS, Linuxbrew)
+
+```sh
+brew tap nonantiy/tap
+brew install narwhal
+```
+
+### Arch Linux (AUR)
+
+```sh
+yay -S narwhal      # or: paru -S narwhal
 ```
 
 ### Nix
@@ -45,15 +67,6 @@ nix run github:nonantiy/narwhal
 ```
 
 Or add the flake to your inputs and reference the default package.
-
-### Build from source
-
-```sh
-git clone https://github.com/nonantiy/narwhal.git
-cd narwhal
-cargo build --release
-# binary at target/release/narwhal
-```
 
 ### Pre-built binaries
 
@@ -65,18 +78,19 @@ Download native tarballs (with SHA-256 checksums) from the
 - `aarch64-apple-darwin`
 
 ```sh
-curl -LO https://github.com/nonantiy/narwhal/releases/latest/download/narwhal-<version>-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf narwhal-*-x86_64-unknown-linux-gnu.tar.gz
-mv narwhal-*/narwhal ~/.local/bin/
+curl -LO https://github.com/nonantiy/narwhal/releases/latest/download/narwhal-v1.0.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf narwhal-v1.0.0-*.tar.gz
+mv narwhal-v1.0.0-*/narwhal ~/.local/bin/
 ```
 
-### AUR / Homebrew
+### Build from source
 
-A PKGBUILD lives at [`packaging/aur/PKGBUILD`](./packaging/aur/PKGBUILD)
-and a Homebrew formula at [`packaging/homebrew/narwhal.rb`](./packaging/homebrew/narwhal.rb).
-Publishing to the AUR and a Homebrew tap is on the post-2.0 roadmap.
-See [packaging issues](https://github.com/nonantiy/narwhal/labels/packaging)
-for status.
+```sh
+git clone https://github.com/nonantiy/narwhal.git
+cd narwhal
+cargo build --release
+# binary at target/release/narwhal
+```
 
 ## Quick start
 
