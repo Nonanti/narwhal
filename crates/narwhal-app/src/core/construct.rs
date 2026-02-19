@@ -113,9 +113,11 @@ impl AppCore {
             },
             plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
             history_journal: history,
-            history_state: None,
             snippet_store: SnippetStore::new(SnippetStore::default_root()),
-            snippets_modal: None,
+            // ModalState::default() = every modal closed, every
+            // option None, help_open=false. Bundled so callers
+            // don't have to know which fields exist.
+            modals: super::ModalState::default(),
             session: None,
             tabs: vec![Tab::new(1, "untitled-1")],
             active_tab: 0,
@@ -135,9 +137,6 @@ impl AppCore {
             run_tab: None,
             cancel_slot: Arc::new(Mutex::new(None)),
             should_quit: false,
-            wizard: None,
-            wizard_error: None,
-            help_open: false,
             pending_result_leader: None,
             pending_result_entries_states: Vec::new(),
             pending_result_entries_views: Vec::new(),

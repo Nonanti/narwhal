@@ -43,14 +43,13 @@ use crate::registry::DriverRegistry;
 use crate::run::{ActiveCancel, RunUpdate};
 use crate::session::Session;
 use crate::snippets::SnippetStore;
-use crate::wizard::ConnectionWizard;
 use narwhal_plugin::PluginRegistry;
 
 pub mod state;
 pub use state::{
-    CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ResultBundle,
-    ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem, SnippetsModal, StatusBar,
-    Tab,
+    CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ModalState,
+    ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem, SnippetsModal,
+    StatusBar, Tab,
 };
 
 /// Pure, IO-free application state and behaviour.
@@ -72,12 +71,15 @@ pub struct AppCore {
     /// connection.
     pub(super) plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
     pub(super) history_journal: Option<Arc<Journal>>,
-    /// When `Some`, the Ctrl+R history modal is open.
-    pub(super) history_state: Option<HistoryState>,
-    /// Persistent snippet store.
+    /// Persistent snippet store. (Not modal state — this is the
+    /// on-disk catalogue. The modal that picks from it lives in
+    /// `modals.snippets`.)
     pub(super) snippet_store: SnippetStore,
-    /// When `Some`, the `:snippets` modal is open.
-    pub(super) snippets_modal: Option<SnippetsModal>,
+    /// Every modal-overlay field (wizard, help, history search,
+    /// snippets picker). Bundled so the modal precedence check in
+    /// `handle_key` has a single source of truth and so modal
+    /// state cannot accidentally bleed into non-modal handlers.
+    pub(super) modals: ModalState,
     pub(super) session: Option<Session>,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: usize,
@@ -103,9 +105,6 @@ pub struct AppCore {
     pub(super) run_tab: Option<usize>,
     pub(super) cancel_slot: ActiveCancel,
     pub(super) should_quit: bool,
-    pub(super) wizard: Option<ConnectionWizard>,
-    pub(super) wizard_error: Option<String>,
-    pub(super) help_open: bool,
     /// Pending leader key for result-tab cycling. `]` followed by
     /// `r` cycles forward; `[` followed by `r` cycles backward.
     pub(super) pending_result_leader: Option<char>,

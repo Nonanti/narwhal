@@ -281,8 +281,8 @@ impl AppCore {
     }
 
     pub(super) fn start_wizard(&mut self) {
-        self.wizard = Some(ConnectionWizard::new());
-        self.wizard_error = None;
+        self.modals.wizard = Some(ConnectionWizard::new());
+        self.modals.wizard_error = None;
         self.status.message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
     }
 
@@ -310,8 +310,8 @@ impl AppCore {
         let password = parsed
             .password
             .map(|p| secrecy::SecretString::new(p.into_boxed_str()));
-        self.wizard = Some(ConnectionWizard::from_config(&config, password, None));
-        self.wizard_error = None;
+        self.modals.wizard = Some(ConnectionWizard::from_config(&config, password, None));
+        self.modals.wizard_error = None;
         self.status.message = "url: review fields · Tab moves · Enter saves · Esc cancels".into();
     }
 
@@ -340,8 +340,8 @@ impl AppCore {
         let existing_id = Some(config.id);
         // Open the wizard with no password populated yet; the secret
         // is delivered on the meta channel below.
-        self.wizard = Some(ConnectionWizard::from_config(&config, None, existing_id));
-        self.wizard_error = None;
+        self.modals.wizard = Some(ConnectionWizard::from_config(&config, None, existing_id));
+        self.modals.wizard_error = None;
         self.status.message =
             format!("edit '{name}': Tab moves · ←/→ driver · Enter saves · Esc cancels");
         // Spawn the keyring lookup and ship the result through the

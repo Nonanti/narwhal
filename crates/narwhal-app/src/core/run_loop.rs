@@ -329,7 +329,7 @@ impl AppCore {
                     self.status.message = "no history entries".into();
                     return;
                 }
-                self.history_state = Some(HistoryState {
+                self.modals.history = Some(HistoryState {
                     entries,
                     filter: String::new(),
                     selected: 0,
@@ -350,7 +350,7 @@ impl AppCore {
                 // a different `:edit`, or fresh ":new" wizard — the
                 // reply is dropped on the floor instead of
                 // surprising the user with a stale prefill.
-                let Some(wizard) = self.wizard.as_mut() else {
+                let Some(wizard) = self.modals.wizard.as_mut() else {
                     return;
                 };
                 if wizard.existing_id != Some(connection_id) {

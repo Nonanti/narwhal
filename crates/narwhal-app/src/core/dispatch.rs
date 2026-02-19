@@ -122,7 +122,7 @@ impl AppCore {
         };
         self.last_layout = render_root(frame, area, &mut layout);
 
-        if let Some(wizard) = self.wizard.as_ref() {
+        if let Some(wizard) = self.modals.wizard.as_ref() {
             let view = WizardView {
                 drivers: DRIVERS,
                 driver_index: wizard.driver_index,
@@ -136,16 +136,16 @@ impl AppCore {
                     })
                     .collect(),
                 focused: wizard.focused,
-                error: self.wizard_error.as_deref(),
+                error: self.modals.wizard_error.as_deref(),
             };
             render_wizard(frame, area, &view, &self.theme);
         }
 
-        if self.help_open {
+        if self.modals.help_open {
             render_help_modal(frame, area, &self.theme);
         }
 
-        if let Some(state) = self.history_state.as_ref() {
+        if let Some(state) = self.modals.history.as_ref() {
             // Pre-format every per-row string into one owned tuple so
             // the borrowed view can reference stable storage.
             // Tuple layout: (timestamp, connection, sql, elapsed, rows,
@@ -195,7 +195,7 @@ impl AppCore {
         }
 
         // Snippets modal.
-        if let Some(modal) = self.snippets_modal.as_ref() {
+        if let Some(modal) = self.modals.snippets.as_ref() {
             let modal_state = SnippetsModalState {
                 entries: modal.entries.iter().map(String::as_str).collect(),
                 selected: modal.selected,
@@ -263,7 +263,7 @@ impl AppCore {
         if !self.pending_session_opens.is_empty() {
             self.await_pending_session_opens_sync();
         }
-        if self.wizard.is_some() {
+        if self.modals.wizard.is_some() {
             self.handle_wizard_key(key);
             return;
         }
@@ -285,13 +285,13 @@ impl AppCore {
         // When the help modal is open, it intercepts Esc / ? / F1 to
         // close and silently consumes every other key so the user
         // doesn't accidentally trigger an action behind the overlay.
-        if self.help_open {
+        if self.modals.help_open {
             match key.code {
                 CtKey::Esc | CtKey::F(1) => {
-                    self.help_open = false;
+                    self.modals.help_open = false;
                 }
                 CtKey::Char('?') if key.modifiers.is_empty() => {
-                    self.help_open = false;
+                    self.modals.help_open = false;
                 }
                 _ => {
                     // consumed but no-op
@@ -300,12 +300,12 @@ impl AppCore {
             return;
         }
         // When the history modal is open, it intercepts all keys.
-        if self.history_state.is_some() {
+        if self.modals.history.is_some() {
             self.handle_history_key(key);
             return;
         }
         // When the snippets modal is open, it intercepts all keys.
-        if self.snippets_modal.is_some() {
+        if self.modals.snippets.is_some() {
             self.handle_snippets_key(key);
             return;
         }

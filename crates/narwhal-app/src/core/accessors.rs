@@ -126,7 +126,7 @@ impl AppCore {
     /// it carries the expected pre-filled state.
     #[doc(hidden)]
     pub const fn wizard(&self) -> Option<&crate::wizard::ConnectionWizard> {
-        self.wizard.as_ref()
+        self.modals.wizard.as_ref()
     }
 
     /// Read-only accessor for the saved-connections list (the
@@ -168,19 +168,19 @@ impl AppCore {
     }
 
     pub const fn help_open(&self) -> bool {
-        self.help_open
+        self.modals.help_open
     }
 
     /// Whether the history modal is currently open.
     #[doc(hidden)]
     pub const fn history_is_open(&self) -> bool {
-        self.history_state.is_some()
+        self.modals.history.is_some()
     }
 
     /// Read-only accessor for the history modal state (for tests).
     #[doc(hidden)]
     pub const fn history_state(&self) -> Option<&HistoryState> {
-        self.history_state.as_ref()
+        self.modals.history.as_ref()
     }
 
     /// Whether the row detail modal is currently open on the active tab.
@@ -192,13 +192,13 @@ impl AppCore {
     /// Whether the snippets modal is currently open.
     #[doc(hidden)]
     pub const fn snippets_modal_is_open(&self) -> bool {
-        self.snippets_modal.is_some()
+        self.modals.snippets.is_some()
     }
 
     /// Read-only accessor for the snippets modal state (for tests).
     #[doc(hidden)]
     pub const fn snippets_modal(&self) -> Option<&SnippetsModal> {
-        self.snippets_modal.as_ref()
+        self.modals.snippets.as_ref()
     }
 
     /// Read-only accessor for the snippet store (for tests).

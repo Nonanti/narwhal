@@ -15,11 +15,11 @@ use crate::wizard::DRIVERS;
 
 impl AppCore {
     pub fn open_help(&mut self) {
-        self.help_open = true;
+        self.modals.help_open = true;
     }
 
     pub(super) fn toggle_help(&mut self) {
-        self.help_open = !self.help_open;
+        self.modals.help_open = !self.modals.help_open;
     }
 
     /// Open the Ctrl+R history modal. Dispatches a background
@@ -36,12 +36,12 @@ impl AppCore {
     }
 
     pub(super) fn close_history(&mut self) {
-        self.history_state = None;
+        self.modals.history = None;
     }
 
     /// Handle key events while the history modal is open.
     pub(super) fn handle_history_key(&mut self, key: KeyEvent) {
-        let Some(state) = self.history_state.as_mut() else {
+        let Some(state) = self.modals.history.as_mut() else {
             return;
         };
         match key.code {
@@ -104,7 +104,7 @@ impl AppCore {
                     self.status.message = "no saved snippets; use :save <name> first".into();
                     return;
                 }
-                self.snippets_modal = Some(SnippetsModal {
+                self.modals.snippets = Some(SnippetsModal {
                     entries,
                     selected: 0,
                 });
@@ -117,12 +117,12 @@ impl AppCore {
     }
 
     pub(super) fn close_snippets_modal(&mut self) {
-        self.snippets_modal = None;
+        self.modals.snippets = None;
     }
 
     /// Handle key events while the snippets modal is open.
     pub(super) fn handle_snippets_key(&mut self, key: KeyEvent) {
-        let Some(modal) = self.snippets_modal.as_mut() else {
+        let Some(modal) = self.modals.snippets.as_mut() else {
             return;
         };
         match key.code {
@@ -144,7 +144,8 @@ impl AppCore {
             }
             CtKey::Enter => {
                 let name = self
-                    .snippets_modal
+                    .modals
+                    .snippets
                     .as_ref()
                     .and_then(|m| m.entries.get(m.selected).cloned());
                 self.close_snippets_modal();
@@ -203,22 +204,22 @@ impl AppCore {
     }
 
     pub(super) fn cancel_wizard(&mut self) {
-        if self.wizard.take().is_some() {
-            self.wizard_error = None;
+        if self.modals.wizard.take().is_some() {
+            self.modals.wizard_error = None;
             self.status.message = "add cancelled".into();
         }
     }
 
     pub(super) fn commit_wizard(&mut self) {
-        let Some(wizard) = self.wizard.as_ref() else {
+        let Some(wizard) = self.modals.wizard.as_ref() else {
             return;
         };
         // Capture the editing-id once so the rest of the routine can rely
-        // on it without re-borrowing `self.wizard`.
+        // on it without re-borrowing `self.modals.wizard`.
         let existing_id = wizard.existing_id;
         match wizard.build() {
             Err(error) => {
-                self.wizard_error = Some(error);
+                self.modals.wizard_error = Some(error);
             }
             Ok(built) => {
                 // Name-collision check: skip when the candidate is the
@@ -230,7 +231,7 @@ impl AppCore {
                     .iter()
                     .any(|c| c.name == built.config.name && Some(c.id) != existing_id)
                 {
-                    self.wizard_error = Some(format!(
+                    self.modals.wizard_error = Some(format!(
                         "a connection named '{}' already exists",
                         built.config.name
                     ));
@@ -258,7 +259,7 @@ impl AppCore {
                 };
                 if let Some(path) = self.connections_path.as_ref() {
                     if let Err(error) = self.connections.save(path) {
-                        self.wizard_error = Some(format!("could not save: {error}"));
+                        self.modals.wizard_error = Some(format!("could not save: {error}"));
                         // Roll back the in-memory mutation so the on-disk file
                         // remains the source of truth.
                         match previous {
@@ -290,13 +291,13 @@ impl AppCore {
                     }) {
                         // The connection is still saved; just warn the user
                         // that the secret didn't make it to the keyring.
-                        self.wizard_error = Some(format!(
+                        self.modals.wizard_error = Some(format!(
                             "saved, but storing the password in the keyring failed: {error}"
                         ));
                     }
                 }
-                self.wizard = None;
-                self.wizard_error = None;
+                self.modals.wizard = None;
+                self.modals.wizard_error = None;
                 self.rebuild_sidebar();
                 let name = built.config.name;
                 self.status.message = if existing_id.is_some() {
@@ -316,7 +317,7 @@ impl AppCore {
     }
 
     pub(super) fn handle_wizard_key(&mut self, key: KeyEvent) {
-        let Some(wizard) = self.wizard.as_mut() else {
+        let Some(wizard) = self.modals.wizard.as_mut() else {
             return;
         };
         // Path-style fields hijack Tab for filesystem completion;
