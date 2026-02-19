@@ -16,6 +16,7 @@ impl AppCore {
         }
         let schemas = self
             .session
+            .active
             .as_ref()
             .map_or(&[][..], |s| s.schemas.as_slice());
         let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();
@@ -100,6 +101,7 @@ impl AppCore {
         // Identify which universe to complete from.
         let universe: Vec<String> = match head {
             "open" | "o" | "remove" | "rm" | "forget" => self
+                .session
                 .connections
                 .connections
                 .iter()
@@ -120,7 +122,7 @@ impl AppCore {
             }
             "export" => vec!["csv".into(), "json".into(), "insert".into()],
             "save" | "load" | "rm-snippet" | "rmsnippet" => {
-                self.snippet_store.list().unwrap_or_default()
+                self.session.snippet_store.list().unwrap_or_default()
             }
             _ => return,
         };

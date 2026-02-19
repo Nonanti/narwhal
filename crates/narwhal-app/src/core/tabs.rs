@@ -9,7 +9,11 @@ use super::{AppCore, Tab};
 
 impl AppCore {
     pub(super) fn editor_title_with_tabs(&self) -> String {
-        let driver = self.session.as_ref().map(|s| s.driver.display_name());
+        let driver = self
+            .session
+            .active
+            .as_ref()
+            .map(|s| s.driver.display_name());
         let base = match driver {
             Some(d) => format!("editor · {d}"),
             None => "editor".to_owned(),

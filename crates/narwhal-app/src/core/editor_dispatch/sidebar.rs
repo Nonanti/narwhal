@@ -107,7 +107,7 @@ impl AppCore {
     /// dropped with a status message instead of writing DDL into an
     /// arbitrary tab (C5 invariant).
     pub(crate) fn inject_ddl(&mut self, schema: &str, name: &str) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -145,7 +145,7 @@ impl AppCore {
     /// the table's schema as the result's row source so cell edits and
     /// pagination work.
     pub(crate) fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -174,7 +174,7 @@ impl AppCore {
             Ok(ts) => {
                 let columns = ts.columns;
                 // Cache column names for completion.
-                if let Some(session) = self.session.as_mut() {
+                if let Some(session) = self.session.active.as_mut() {
                     session.column_cache.insert(
                         table.to_ascii_lowercase(),
                         (
@@ -270,7 +270,7 @@ impl AppCore {
     /// same epic that owns the `handle_key` async refactor. The
     /// multi-thread runtime absorbs the freeze (typical < 30 ms).
     pub(crate) fn describe_table_into_result(&mut self, schema: &str, name: &str) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -295,7 +295,7 @@ impl AppCore {
                 let table_name = ts.table.name.clone();
                 let columns = ts.columns.clone();
                 // Cache column names for completion.
-                if let Some(session) = self.session.as_mut() {
+                if let Some(session) = self.session.active.as_mut() {
                     session.column_cache.insert(
                         table_name.to_ascii_lowercase(),
                         (

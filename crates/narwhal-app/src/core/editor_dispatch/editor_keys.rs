@@ -108,7 +108,7 @@ impl AppCore {
     pub(crate) fn column_cache(
         &self,
     ) -> std::collections::HashMap<String, (String, Vec<ColumnHeader>)> {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             return std::collections::HashMap::new();
         };
         let mut map = std::collections::HashMap::new();
@@ -140,6 +140,7 @@ impl AppCore {
         }
         let schemas = self
             .session
+            .active
             .as_ref()
             .map_or(&[][..], |s| s.schemas.as_slice());
         let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();

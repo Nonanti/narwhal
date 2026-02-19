@@ -18,7 +18,7 @@ use crate::run::RunMode;
 
 impl AppCore {
     pub(super) fn dump_schema(&mut self, target: DumpTarget) {
-        let Some(_) = self.session.as_ref() else {
+        let Some(_) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -43,7 +43,7 @@ impl AppCore {
 
     /// Fetch DDL for a single named or current table (synchronous path).
     fn dump_schema_single(&mut self, target: DumpTarget) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -125,7 +125,7 @@ impl AppCore {
     }
 
     pub(super) fn dispatch_explain(&mut self) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };

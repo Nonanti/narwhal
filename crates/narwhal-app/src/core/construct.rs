@@ -99,10 +99,6 @@ impl AppCore {
     ) -> Self {
         Self {
             registry,
-            connections,
-            connections_path: None,
-            last_used: narwhal_config::LastUsedStore::new(),
-            last_used_path: None,
             credentials,
             clipboard,
             plugins: {
@@ -111,13 +107,14 @@ impl AppCore {
                 Arc::new(reg)
             },
             plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
-            history_journal: history,
-            snippet_store: SnippetStore::new(SnippetStore::default_root()),
             // ModalState::default() = every modal closed, every
             // option None, help_open=false. Bundled so callers
             // don't have to know which fields exist.
             modals: super::ModalState::default(),
-            session: None,
+            // SessionState bundles the connection catalogue, active
+            // session, recency cache, history journal, snippet
+            // store, audit gate, and pending-open ledger.
+            session: super::SessionState::new(connections, history),
             tabs: vec![Tab::new(1, "untitled-1")],
             active_tab: 0,
             next_tab_id: 2,
@@ -142,15 +139,13 @@ impl AppCore {
             last_layout: LayoutRegions::default(),
             keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
-            read_only: false,
-            pending_session_opens: std::collections::HashSet::new(),
         }
     }
 
     /// Inform the core where to persist new connections produced by the
     /// `:add` wizard. Called by [`crate::app::App::new`].
     pub fn set_connections_path(&mut self, path: std::path::PathBuf) {
-        self.connections_path = Some(path);
+        self.session.connections_path = Some(path);
     }
 
     /// Wire the recency cache into the on-disk file produced by
@@ -159,9 +154,9 @@ impl AppCore {
     /// previous session's ordering.
     pub fn set_last_used_path(&mut self, path: std::path::PathBuf) {
         if let Ok(loaded) = narwhal_config::LastUsedStore::load(&path) {
-            self.last_used = loaded;
+            self.session.last_used = loaded;
         }
-        self.last_used_path = Some(path);
+        self.session.last_used_path = Some(path);
         self.rebuild_sidebar();
     }
 
@@ -169,9 +164,9 @@ impl AppCore {
     /// best-effort writes it to disk. Failures are logged at debug and
     /// not surfaced — ordering is a UX nicety, not load-bearing.
     pub(super) fn touch_last_used(&mut self, id: uuid::Uuid) {
-        self.last_used.touch(id);
-        if let Some(path) = self.last_used_path.as_ref() {
-            if let Err(error) = self.last_used.save(path) {
+        self.session.last_used.touch(id);
+        if let Some(path) = self.session.last_used_path.as_ref() {
+            if let Err(error) = self.session.last_used.save(path) {
                 tracing::debug!(target: "narwhal::app", error = %error, "last-used save failed");
             }
         }
@@ -181,14 +176,14 @@ impl AppCore {
     /// avoid polluting the user's real config.
     #[doc(hidden)]
     pub fn set_snippet_store_root(&mut self, root: std::path::PathBuf) {
-        self.snippet_store = SnippetStore::new(root);
+        self.session.snippet_store = SnippetStore::new(root);
     }
 
     /// L36 #11: enter / leave read-only mode. When `on` is true every
     /// row-CRUD entry point bails with an explanatory status message
     /// before staging any mutation.
     pub fn set_read_only(&mut self, on: bool) {
-        self.read_only = on;
+        self.session.read_only = on;
     }
 
     /// Apply a user-supplied [`narwhal_config::Settings`] payload.
@@ -234,15 +229,15 @@ impl AppCore {
 
     pub(super) fn rebuild_sidebar(&mut self) {
         let mut items = Vec::new();
-        let active_id = self.session.as_ref().map(|s| s.config.id);
+        let active_id = self.session.active.as_ref().map(|s| s.config.id);
         // Show most-recently-opened connections first; ties (or
         // never-opened entries) fall back to alphabetical order so the
         // list is stable across reboots.
         let mut ordered: Vec<&narwhal_core::ConnectionConfig> =
-            self.connections.connections.iter().collect();
+            self.session.connections.connections.iter().collect();
         ordered.sort_by(|a, b| {
-            let ta = self.last_used.get(a.id).unwrap_or(0);
-            let tb = self.last_used.get(b.id).unwrap_or(0);
+            let ta = self.session.last_used.get(a.id).unwrap_or(0);
+            let tb = self.session.last_used.get(b.id).unwrap_or(0);
             tb.cmp(&ta).then_with(|| a.name.cmp(&b.name))
         });
         for conn in ordered {
@@ -254,7 +249,7 @@ impl AppCore {
                 active,
             });
             if active {
-                if let Some(session) = self.session.as_ref() {
+                if let Some(session) = self.session.active.as_ref() {
                     for (schema, tables) in &session.schemas {
                         if !schema.name.is_empty() {
                             items.push(SidebarItem::Schema {

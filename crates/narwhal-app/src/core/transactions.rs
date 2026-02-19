@@ -43,7 +43,7 @@ impl AppCore {
             self.status.message = "a query is already running".into();
             return;
         }
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.session.active.as_mut() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -121,7 +121,7 @@ impl AppCore {
             self.status.message = "a query is already running".into();
             return;
         }
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.session.active.as_mut() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -266,7 +266,7 @@ impl AppCore {
             self.status.message = "a query is already running".into();
             return;
         }
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.session.active.as_mut() else {
             self.status.message = "no active connection".into();
             return;
         };

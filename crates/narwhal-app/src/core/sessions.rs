@@ -33,6 +33,7 @@ impl AppCore {
             return;
         }
         let Some(config) = self
+            .session
             .connections
             .connections
             .iter()
@@ -71,7 +72,7 @@ impl AppCore {
         // L36 #C4: forward the global `--read-only` flag so the
         // pre-connect shell pipeline is skipped under audit mode.
         let session_opts = narwhal_commands::session::SessionOpenOptions {
-            skip_pre_connect: self.read_only,
+            skip_pre_connect: self.session.read_only,
         };
 
         // H7 (partial fix): the open work runs on a dedicated tokio
@@ -89,7 +90,7 @@ impl AppCore {
         // event loop's `select!` arm pick up `SessionOpened` from
         // `meta_rx`. The tests need to be migrated to an
         // `await_pending_session_opens` step first.
-        self.pending_session_opens.insert(config_id);
+        self.session.pending_session_opens.insert(config_id);
         let dispatched = self.dispatch_meta(crate::meta::MetaRequest::OpenSession {
             driver: driver.clone(),
             config: Box::new(config),
@@ -97,7 +98,7 @@ impl AppCore {
             opts: session_opts,
         });
         if !dispatched {
-            self.pending_session_opens.remove(&config_id);
+            self.session.pending_session_opens.remove(&config_id);
             self.status.message = "connect failed: meta channel closed".into();
             return;
         }
@@ -127,14 +128,14 @@ impl AppCore {
             state.in_transaction = false;
         }
         let opened_id = session.config.id;
-        self.session = Some(session);
+        self.session.active = Some(session);
         self.touch_last_used(opened_id);
         self.rebuild_sidebar();
         self.focus = Pane::Editor;
     }
 
     pub(super) fn close_session(&mut self) {
-        if self.session.take().is_some() {
+        if self.session.active.take().is_some() {
             let mut state = self
                 .plugin_state
                 .lock()
@@ -150,7 +151,7 @@ impl AppCore {
     }
 
     pub(super) fn refresh_schema(&mut self) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -203,7 +204,7 @@ impl AppCore {
     }
 
     pub(super) fn dispatch_current_statement(&mut self, mode: RunMode) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -221,7 +222,7 @@ impl AppCore {
     }
 
     pub(super) fn dispatch_all_statements(&mut self, mode: RunMode) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -238,7 +239,7 @@ impl AppCore {
             self.status.message = "a query is already running".into();
             return;
         }
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             return;
         };
         let target = match session.transaction.as_ref() {
@@ -247,7 +248,7 @@ impl AppCore {
         };
         let ctx = RunContext {
             target,
-            history: self.history_journal.clone(),
+            history: self.session.history_journal.clone(),
             connection_id: session.config.id,
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
@@ -333,6 +334,7 @@ impl AppCore {
     /// prefill behaviour the user expects from `:edit <name>`.
     pub(super) fn start_wizard_edit(&mut self, name: &str) {
         let Some(config) = self
+            .session
             .connections
             .connections
             .iter()
@@ -407,7 +409,7 @@ impl AppCore {
             // channel as `TestCompleted` so a slow or failing pool
             // produces a visible status line instead of staying on
             // the "testing…" placeholder forever.
-            let Some(session) = self.session.as_ref() else {
+            let Some(session) = self.session.active.as_ref() else {
                 self.status.message = "test: no active connection (§ :test <name|url>)".into();
                 return;
             };
@@ -440,6 +442,7 @@ impl AppCore {
             }
         } else {
             let Some(config) = self
+                .session
                 .connections
                 .connections
                 .iter()
@@ -471,7 +474,7 @@ impl AppCore {
         // a `:test` to fire arbitrary shell commands when the auditor
         // explicitly asked for a sandbox.
         let opts = narwhal_commands::session::SessionOpenOptions {
-            skip_pre_connect: self.read_only,
+            skip_pre_connect: self.session.read_only,
         };
         self.dispatch_meta(MetaRequest::TestConnection {
             driver,
@@ -488,6 +491,7 @@ impl AppCore {
 
     pub(super) fn remove_connection(&mut self, name: &str) {
         let Some(pos) = self
+            .session
             .connections
             .connections
             .iter()
@@ -496,20 +500,20 @@ impl AppCore {
             self.status.message = format!("remove: no connection named '{name}'");
             return;
         };
-        let removed = self.connections.connections.remove(pos);
-        if let Some(path) = self.connections_path.as_ref() {
-            if let Err(error) = self.connections.save(path) {
+        let removed = self.session.connections.connections.remove(pos);
+        if let Some(path) = self.session.connections_path.as_ref() {
+            if let Err(error) = self.session.connections.save(path) {
                 // Restore in-memory state so we don't drift from disk.
-                self.connections.connections.insert(pos, removed);
+                self.session.connections.connections.insert(pos, removed);
                 self.status.message = format!("remove failed: {error}");
                 return;
             }
         }
         // Drop the recency entry so the cache doesn't leak tombstones
         // and the next-sort run doesn't trip over a stale id.
-        self.last_used.forget(removed.id);
-        if let Some(path) = self.last_used_path.as_ref() {
-            if let Err(error) = self.last_used.save(path) {
+        self.session.last_used.forget(removed.id);
+        if let Some(path) = self.session.last_used_path.as_ref() {
+            if let Err(error) = self.session.last_used.save(path) {
                 debug!(target: "narwhal::app", error = %error, "last-used save failed during remove");
             }
         }
@@ -528,9 +532,9 @@ impl AppCore {
                 );
             }
         });
-        if let Some(session) = self.session.as_ref() {
+        if let Some(session) = self.session.active.as_ref() {
             if session.config.id == removed.id {
-                self.session = None;
+                self.session.active = None;
                 let mut state = self
                     .plugin_state
                     .lock()
@@ -544,7 +548,13 @@ impl AppCore {
     }
 
     pub(super) fn forget_password(&mut self, name: &str) {
-        let Some(config) = self.connections.connections.iter().find(|c| c.name == name) else {
+        let Some(config) = self
+            .session
+            .connections
+            .connections
+            .iter()
+            .find(|c| c.name == name)
+        else {
             self.status.message = format!("forget: no connection named '{name}'");
             return;
         };

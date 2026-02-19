@@ -106,7 +106,7 @@ impl AppCore {
                 message: &self.status.message,
                 transaction: self.status.transaction.as_deref(),
                 pending: Some(pending_count),
-                read_only: self.read_only,
+                read_only: self.session.read_only,
             },
             running: self.process.running,
             theme: &self.theme,
@@ -260,7 +260,7 @@ impl AppCore {
         // `await_pending_session_opens` call. The wait runs through
         // `block_in_place` so the multi-thread runtime keeps draining
         // other workers in the meantime.
-        if !self.pending_session_opens.is_empty() {
+        if !self.session.pending_session_opens.is_empty() {
             self.await_pending_session_opens_sync();
         }
         if self.modals.wizard.is_some() {
@@ -501,7 +501,7 @@ impl AppCore {
         // without explicit drains.
         let parsed = parse(raw);
         if !matches!(parsed, Command::Open(_) | Command::Quit | Command::Cancel)
-            && !self.pending_session_opens.is_empty()
+            && !self.session.pending_session_opens.is_empty()
         {
             self.await_pending_session_opens_sync();
         }

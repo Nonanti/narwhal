@@ -218,13 +218,13 @@ impl AppCore {
                 // refresh is suppressed if the user switches before
                 // the debounce fires (bug C5).
                 if ddl {
-                    if let Some(id) = self.session.as_ref().map(|s| s.config.id) {
+                    if let Some(id) = self.session.active.as_ref().map(|s| s.config.id) {
                         self.schedule_schema_refresh(id);
                     }
                 }
             }
             RunUpdate::SchemaRefresh { session_id } => {
-                let current = self.session.as_ref().map(|s| s.config.id);
+                let current = self.session.active.as_ref().map(|s| s.config.id);
                 if current == Some(session_id) {
                     self.refresh_schema();
                 } else {
@@ -244,7 +244,7 @@ impl AppCore {
     pub fn handle_meta_update(&mut self, update: MetaUpdate) {
         match update {
             MetaUpdate::DumpSchemaReady { tab_id, tables } => {
-                let Some(session) = self.session.as_ref() else {
+                let Some(session) = self.session.active.as_ref() else {
                     self.status.message = "no active connection".into();
                     return;
                 };
@@ -286,7 +286,7 @@ impl AppCore {
                 // H8: drop the reply if the user switched sessions since
                 // the refresh was dispatched; otherwise we'd overwrite
                 // the new session's listing with stale data.
-                let current = self.session.as_ref().map(|s| s.config.id);
+                let current = self.session.active.as_ref().map(|s| s.config.id);
                 if current != Some(session_id) {
                     tracing::debug!(
                         target: "narwhal::app",
@@ -296,7 +296,7 @@ impl AppCore {
                     );
                     return;
                 }
-                if let Some(session) = self.session.as_mut() {
+                if let Some(session) = self.session.active.as_mut() {
                     session.schemas = schemas;
                 }
                 self.rebuild_sidebar();
@@ -306,7 +306,7 @@ impl AppCore {
             MetaUpdate::SessionOpened { config_id, result } => {
                 // H7: drop the reply if the user opened another
                 // connection in the meantime (or hit `:close`).
-                if !self.pending_session_opens.remove(&config_id) {
+                if !self.session.pending_session_opens.remove(&config_id) {
                     tracing::debug!(
                         target: "narwhal::app",
                         ?config_id,
@@ -441,14 +441,14 @@ impl AppCore {
     /// - `OpenSession` always succeeds at dispatch time.
     ///
     /// Callers that need pre-dispatch validation should check
-    /// `self.session.is_some()` themselves before constructing the
+    /// `self.session.active.is_some()` themselves before constructing the
     /// request.
     pub(super) fn dispatch_meta(&mut self, request: MetaRequest) -> bool {
-        let pool = self.session.as_ref().map(|s| s.pool.clone());
+        let pool = self.session.active.as_ref().map(|s| s.pool.clone());
         spawn_meta_request(
             request,
             pool,
-            self.history_journal.clone(),
+            self.session.history_journal.clone(),
             Some(self.credentials.clone()),
             self.process.meta_tx.clone(),
         );
@@ -463,7 +463,7 @@ impl AppCore {
     /// to be live continue to work without an extra `drain_meta`
     /// step on every call site.
     pub async fn drain_run_updates(&mut self) {
-        if !self.pending_session_opens.is_empty() {
+        if !self.session.pending_session_opens.is_empty() {
             self.await_pending_session_opens().await;
         }
         while self.process.running {
@@ -510,7 +510,7 @@ impl AppCore {
     /// exposed for direct use in tests that call `:open` outside the
     /// usual run-channel flow.
     pub async fn await_pending_session_opens(&mut self) {
-        while !self.pending_session_opens.is_empty() {
+        while !self.session.pending_session_opens.is_empty() {
             if let Ok(Some(update)) =
                 tokio::time::timeout(Duration::from_secs(5), self.meta_rx.recv()).await
             {
@@ -518,7 +518,7 @@ impl AppCore {
             } else {
                 // Channel closed or timed out — clear the ledger so
                 // we don't spin forever.
-                self.pending_session_opens.clear();
+                self.session.pending_session_opens.clear();
                 break;
             }
         }

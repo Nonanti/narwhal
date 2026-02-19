@@ -25,7 +25,7 @@ impl AppCore {
     /// Open the Ctrl+R history modal. Dispatches a background
     /// load via the meta channel (H11) so the UI stays responsive.
     pub fn open_history(&mut self) {
-        let Some(_journal) = &self.history_journal else {
+        let Some(_journal) = &self.session.history_journal else {
             self.status.message = "history disabled".into();
             return;
         };
@@ -98,7 +98,7 @@ impl AppCore {
 
     /// Open the `:snippets` modal. Reads the snippet list from the store.
     pub(super) fn open_snippets_modal(&mut self) {
-        match self.snippet_store.list() {
+        match self.session.snippet_store.list() {
             Ok(entries) => {
                 if entries.is_empty() {
                     self.status.message = "no saved snippets; use :save <name> first".into();
@@ -161,7 +161,7 @@ impl AppCore {
 
     /// Load a snippet by name into a new editor tab.
     pub(super) fn load_snippet_by_name(&mut self, name: &str) {
-        match self.snippet_store.load(name) {
+        match self.session.snippet_store.load(name) {
             Ok(sql) => {
                 self.new_tab();
                 self.tabs[self.active_tab].editor.insert_str(&sql);
@@ -181,7 +181,7 @@ impl AppCore {
             self.status.message = "editor is empty; nothing to save".into();
             return;
         }
-        match self.snippet_store.save(name, &sql) {
+        match self.session.snippet_store.save(name, &sql) {
             Ok(()) => {
                 self.status.message = format!("saved snippet '{name}'");
             }
@@ -193,7 +193,7 @@ impl AppCore {
 
     /// Remove a named snippet.
     pub(super) fn remove_snippet(&mut self, name: &str) {
-        match self.snippet_store.remove(name) {
+        match self.session.snippet_store.remove(name) {
             Ok(()) => {
                 self.status.message = format!("removed snippet '{name}'");
             }
@@ -226,6 +226,7 @@ impl AppCore {
                 // very entry being edited; reject when any *other* entry
                 // already owns the chosen name.
                 if self
+                    .session
                     .connections
                     .connections
                     .iter()
@@ -242,33 +243,45 @@ impl AppCore {
                 // Keep the previous entry around so we can restore it if
                 // the on-disk save fails mid-flight.
                 let previous = if let Some(id) = existing_id {
-                    if let Some(pos) = self.connections.connections.iter().position(|c| c.id == id)
+                    if let Some(pos) = self
+                        .session
+                        .connections
+                        .connections
+                        .iter()
+                        .position(|c| c.id == id)
                     {
-                        let prev = self.connections.connections.remove(pos);
-                        self.connections
+                        let prev = self.session.connections.connections.remove(pos);
+                        self.session
+                            .connections
                             .connections
                             .insert(pos, built.config.clone());
                         Some((pos, prev))
                     } else {
-                        self.connections.connections.push(built.config.clone());
+                        self.session
+                            .connections
+                            .connections
+                            .push(built.config.clone());
                         None
                     }
                 } else {
-                    self.connections.connections.push(built.config.clone());
+                    self.session
+                        .connections
+                        .connections
+                        .push(built.config.clone());
                     None
                 };
-                if let Some(path) = self.connections_path.as_ref() {
-                    if let Err(error) = self.connections.save(path) {
+                if let Some(path) = self.session.connections_path.as_ref() {
+                    if let Err(error) = self.session.connections.save(path) {
                         self.modals.wizard_error = Some(format!("could not save: {error}"));
                         // Roll back the in-memory mutation so the on-disk file
                         // remains the source of truth.
                         match previous {
                             Some((pos, prev)) => {
-                                self.connections.connections.remove(pos);
-                                self.connections.connections.insert(pos, prev);
+                                self.session.connections.connections.remove(pos);
+                                self.session.connections.connections.insert(pos, prev);
                             }
                             None => {
-                                self.connections.connections.pop();
+                                self.session.connections.connections.pop();
                             }
                         }
                         return;

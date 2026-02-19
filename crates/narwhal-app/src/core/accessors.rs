@@ -97,7 +97,7 @@ impl AppCore {
     }
 
     pub const fn session(&self) -> Option<&Session> {
-        self.session.as_ref()
+        self.session.active.as_ref()
     }
 
     pub const fn focus(&self) -> Pane {
@@ -133,7 +133,7 @@ impl AppCore {
     /// in-memory mirror of `connections.toml`).
     #[doc(hidden)]
     pub fn connections(&self) -> &[narwhal_core::ConnectionConfig] {
-        &self.connections.connections
+        &self.session.connections.connections
     }
 
     /// Read-only accessor for the materialised sidebar items in their
@@ -204,7 +204,7 @@ impl AppCore {
     /// Read-only accessor for the snippet store (for tests).
     #[doc(hidden)]
     pub const fn snippet_store(&self) -> &SnippetStore {
-        &self.snippet_store
+        &self.session.snippet_store
     }
 
     /// Read-only accessor for the row detail modal state (for tests).

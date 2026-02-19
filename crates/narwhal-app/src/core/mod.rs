@@ -26,10 +26,7 @@ use plugin_executor::PluginConnectionState;
 
 use std::sync::Arc;
 
-use uuid::Uuid;
-
-use narwhal_config::{ConnectionsFile, CredentialStore};
-use narwhal_history::Journal;
+use narwhal_config::CredentialStore;
 use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
 use narwhal_vim::Vim;
 use tokio::sync::mpsc;
@@ -40,27 +37,19 @@ use crate::keymap::Keymap;
 use crate::meta::MetaUpdate;
 use crate::registry::DriverRegistry;
 use crate::run::RunUpdate;
-use crate::session::Session;
-use crate::snippets::SnippetStore;
+
 use narwhal_plugin::PluginRegistry;
 
 pub mod state;
 pub use state::{
     CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState, ModalState,
-    ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SidebarItem,
-    SnippetsModal, StatusBar, Tab,
+    ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource, SessionState,
+    SidebarItem, SnippetsModal, StatusBar, Tab,
 };
 
 /// Pure, IO-free application state and behaviour.
 pub struct AppCore {
     pub(super) registry: DriverRegistry,
-    pub(super) connections: ConnectionsFile,
-    pub(super) connections_path: Option<std::path::PathBuf>,
-    /// Recency cache feeding the sidebar ordering. Populated from
-    /// `paths.last_used_file()` on start-up (via [`Self::set_last_used_path`])
-    /// and bumped on every successful `:open`.
-    pub(super) last_used: narwhal_config::LastUsedStore,
-    pub(super) last_used_path: Option<std::path::PathBuf>,
     pub(super) credentials: Arc<dyn CredentialStore>,
     pub(super) clipboard: Arc<dyn Clipboard>,
     pub(super) plugins: Arc<PluginRegistry>,
@@ -69,17 +58,16 @@ pub struct AppCore {
     /// closes so scripts always target the currently-active
     /// connection.
     pub(super) plugin_state: Arc<std::sync::Mutex<PluginConnectionState>>,
-    pub(super) history_journal: Option<Arc<Journal>>,
-    /// Persistent snippet store. (Not modal state — this is the
-    /// on-disk catalogue. The modal that picks from it lives in
-    /// `modals.snippets`.)
-    pub(super) snippet_store: SnippetStore,
     /// Every modal-overlay field (wizard, help, history search,
     /// snippets picker). Bundled so the modal precedence check in
     /// `handle_key` has a single source of truth and so modal
     /// state cannot accidentally bleed into non-modal handlers.
     pub(super) modals: ModalState,
-    pub(super) session: Option<Session>,
+    /// Connection catalogue, active session, history journal,
+    /// snippet store, recency cache, and the read-only gate.
+    /// Bundled so a session swap touches one struct instead of
+    /// nine fields.
+    pub(super) session: SessionState,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: usize,
     pub(super) next_tab_id: usize,
@@ -123,16 +111,6 @@ pub struct AppCore {
     /// user notices malformed bindings without us having to plumb a
     /// dedicated banner widget.
     pub(super) keymap_warnings: Vec<String>,
-    /// L36 #11: global read-only switch. When `true`, every row-CRUD
-    /// entry point refuses to stage mutations regardless of the
-    /// driver's `row_level_dml` capability. Driven by the `--read-only`
-    /// CLI flag.
-    pub(super) read_only: bool,
-    /// `ConnectionConfig.id`s for which an `OpenSession` meta request
-    /// is in flight. Used to drop stale `MetaUpdate::SessionOpened`
-    /// replies (user opened another connection, closed the active
-    /// one) before they clobber the current state.  (Bug H7 fix.)
-    pub(super) pending_session_opens: std::collections::HashSet<Uuid>,
 }
 
 mod accessors;

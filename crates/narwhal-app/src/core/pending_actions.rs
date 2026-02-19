@@ -50,12 +50,12 @@ impl AppCore {
     /// common case where the caller wants both the boolean and the
     /// status update.
     fn dml_block_reason(&self) -> Option<String> {
-        if self.read_only {
+        if self.session.read_only {
             return Some(
                 "read-only mode: row-level DML disabled (relaunch without --read-only)".into(),
             );
         }
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             return Some("no active connection".into());
         };
         if !session.capabilities.row_level_dml {
@@ -441,7 +441,7 @@ impl AppCore {
             }
             tab.pending.clone()
         };
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             self.status.message = "no active connection".into();
             return;
         };
@@ -521,10 +521,10 @@ impl AppCore {
         outcome: &Result<u64, String>,
         elapsed: std::time::Duration,
     ) {
-        let Some(journal) = self.history_journal.as_ref() else {
+        let Some(journal) = self.session.history_journal.as_ref() else {
             return;
         };
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.active.as_ref() else {
             return;
         };
         let conn_id = session.config.id;

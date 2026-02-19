@@ -65,12 +65,14 @@ impl AppCore {
 
     fn active_dialect(&self) -> Dialect {
         self.session
+            .active
             .as_ref()
             .map_or(Dialect::Generic, super::super::session::Session::dialect)
     }
 
     fn active_driver_name(&self) -> String {
         self.session
+            .active
             .as_ref()
             .map_or_else(|| "generic".to_owned(), |s| s.driver.name().to_owned())
     }
