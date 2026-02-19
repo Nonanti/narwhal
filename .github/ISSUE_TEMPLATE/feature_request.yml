@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose new functionality or an improvement.
+title: "feat: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the user-facing pain point first.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like narwhal to behave? Sketch a CLI/key/SQL example if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, existing commands that almost do it, other tools that get it right.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - editor / vim
+        - sidebar / schema
+        - results pane
+        - command palette (:cmd)
+        - driver-specific
+        - MCP server
+        - plugin API
+        - config / connections.toml
+        - packaging / install
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I'd be willing to help implement this.
+          required: false

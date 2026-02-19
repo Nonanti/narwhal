@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- `SECURITY.md` with private disclosure policy, scope, and hardening
+  notes for operators.
+- `CONTRIBUTING.md` covering workflow, commit conventions, code style,
+  and the per-PR checklist.
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
+- GitHub issue templates (bug report, feature request) and a PR
+  template.
+- `dependabot.yml` for weekly cargo + GitHub Actions updates with
+  sensible grouping.
+
+### Fixed
+
+- `core::dispatch`: trailing-expression in `Command::Substitute` arm
+  now ends with `;` to satisfy `clippy::semicolon_if_nothing_returned`.
 
 ## [1.0.0] — 2026-05-24
 
