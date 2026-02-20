@@ -1,6 +1,6 @@
 # narwhal
 
-[![CI](https://github.com/nonantiy/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/nonantiy/narwhal/actions/workflows/ci.yml)
+[![CI](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
@@ -50,7 +50,7 @@ cargo binstall narwhal
 ### Homebrew (macOS, Linuxbrew)
 
 ```sh
-brew tap nonantiy/tap
+brew tap Nonanti/tap
 brew install narwhal
 ```
 
@@ -63,7 +63,7 @@ yay -S narwhal      # or: paru -S narwhal
 ### Nix
 
 ```sh
-nix run github:nonantiy/narwhal
+nix run github:Nonanti/narwhal
 ```
 
 Or add the flake to your inputs and reference the default package.
@@ -71,14 +71,14 @@ Or add the flake to your inputs and reference the default package.
 ### Pre-built binaries
 
 Download native tarballs (with SHA-256 checksums) from the
-[latest GitHub Release](https://github.com/nonantiy/narwhal/releases):
+[latest GitHub Release](https://github.com/Nonanti/narwhal/releases):
 
 - `x86_64-unknown-linux-gnu`
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 
 ```sh
-curl -LO https://github.com/nonantiy/narwhal/releases/latest/download/narwhal-v1.0.0-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-v1.0.0-x86_64-unknown-linux-gnu.tar.gz
 tar -xzf narwhal-v1.0.0-*.tar.gz
 mv narwhal-v1.0.0-*/narwhal ~/.local/bin/
 ```
@@ -86,7 +86,7 @@ mv narwhal-v1.0.0-*/narwhal ~/.local/bin/
 ### Build from source
 
 ```sh
-git clone https://github.com/nonantiy/narwhal.git
+git clone https://github.com/Nonanti/narwhal.git
 cd narwhal
 cargo build --release
 # binary at target/release/narwhal
