@@ -61,7 +61,43 @@ jobs:
 
   integration:
     name: integration (docker)
+    # Spin up the database services the `#[ignore]` integration tests
+    # need. Triggered manually via workflow_dispatch (push runs would
+    # cost a couple of extra runner-minutes per commit for no signal
+    # on PR-day changes that don't touch driver code).
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: narwhal
+          POSTGRES_DB: narwhal_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: narwhal
+          MYSQL_DATABASE: narwhal_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -pnarwhal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24
+        ports: ["8123:8123", "9000:9000"]
+        options: >-
+          --health-cmd "wget -qO- localhost:8123/ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
