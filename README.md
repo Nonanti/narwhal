@@ -37,14 +37,18 @@
 ### Cargo (any platform with Rust)
 
 ```sh
-cargo install narwhal
+cargo install narwhaldb
 ```
+
+> The crates.io name is `narwhaldb` (the bare `narwhal` slot is held
+> by an unrelated 2018 docker library); the installed binary is still
+> just `narwhal`.
 
 For users without a Rust toolchain, `cargo-binstall` fetches the
 prebuilt binary instead of compiling:
 
 ```sh
-cargo binstall narwhal
+cargo binstall narwhaldb
 ```
 
 ### Homebrew (macOS, Linuxbrew)
@@ -78,9 +82,9 @@ Download native tarballs (with SHA-256 checksums) from the
 - `aarch64-apple-darwin`
 
 ```sh
-curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-v1.0.0-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf narwhal-v1.0.0-*.tar.gz
-mv narwhal-v1.0.0-*/narwhal ~/.local/bin/
+curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-1.0.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf narwhal-1.0.0-*.tar.gz
+mv narwhal-1.0.0-*/narwhal ~/.local/bin/
 ```
 
 ### Build from source

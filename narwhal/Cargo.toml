@@ -1,10 +1,14 @@
 [package]
-name = "narwhal"
+# `narwhal` is squatted by an abandoned 2018 docker library on crates.io,
+# so the binary crate ships as `narwhaldb`. The installed command name
+# is still `narwhal` (see `[[bin]] name` below) so muscle memory and
+# docs keep working.
+name = "narwhaldb"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Binary crate for narwhal, a TUI database client"
+description = "narwhal: TUI database client with a built-in MCP server (binary crate)"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -23,9 +27,9 @@ workspace = true
 # instead of compiling from source. Matches the archive layout the
 # workflow produces (binary at the archive root).
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/narwhal-v{ version }-{ target }.{ archive-format }"
+pkg-url = "{ repo }/releases/download/v{ version }/narwhal-{ version }-{ target }.{ archive-format }"
 pkg-fmt = "tgz"
-bin-dir = "narwhal-v{ version }-{ target }/{ bin }{ binary-ext }"
+bin-dir = "narwhal-{ version }-{ target }/{ bin }{ binary-ext }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"

@@ -46,9 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (continued)
 
-- `cargo-binstall` metadata on the `narwhal` binary crate so users
-  without a Rust toolchain can grab the prebuilt tarball produced by
+- `cargo-binstall` metadata on the binary crate so users without a
+  Rust toolchain can grab the prebuilt tarball produced by
   `.github/workflows/release.yml`.
+
+### Changed (continued)
+
+- The binary crate is now published as `narwhaldb` on crates.io. The
+  bare `narwhal` slot was squatted in 2018 by an abandoned docker
+  library and the name cannot be reclaimed without a multi-month
+  adoption procedure. The installed command name is unchanged (still
+  `narwhal`); only the install incantation differs:
+  `cargo install narwhaldb` instead of `cargo install narwhal`.
+- README + release tarball naming now use `narwhal-X.Y.Z-<target>`
+  (matching what release.yml has always produced); an earlier
+  `narwhal-vX.Y.Z-` example in the README was a typo and pointed at a
+  download path that doesn't exist.
 
 ### Fixed
 
