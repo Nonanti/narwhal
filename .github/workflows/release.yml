@@ -75,7 +75,10 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }} -p narwhal
+        # The binary crate ships on crates.io as `narwhaldb` (the bare
+        # `narwhal` slot is squatted). The installed binary is still
+        # `narwhal` via `[[bin]] name`.
+        run: cargo build --release --locked --target ${{ matrix.target }} -p narwhaldb
 
       - name: Package archive
         id: pkg
