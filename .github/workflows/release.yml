@@ -92,7 +92,14 @@ jobs:
           cp "target/${{ matrix.target }}/release/narwhal" "${staging}/"
           cp README.md LICENSE-MIT LICENSE-APACHE "${staging}/" 2>/dev/null || true
           tar -C dist -czf "${name}.tar.gz" "${name}"
-          sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          # macOS runners don't ship GNU coreutils, so prefer shasum which
+          # is present on both Linux and macOS and emits the same
+          # `<digest>  <file>` format that GNU sha256sum produces.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          else
+            shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          fi
           echo "archive=${name}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "sha256=${name}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
 
