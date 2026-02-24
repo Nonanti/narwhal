@@ -2,7 +2,7 @@ class Narwhal < Formula
   desc "TUI database client with a built-in MCP server"
   homepage "https://github.com/Nonanti/narwhal"
   url "https://github.com/Nonanti/narwhal/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "1dd372315ff56dbf2db2504cb7cd3fe3c08aeaa3c6acb2db052c3d8e622c7fa3"  # shasum -a 256 v1.0.0.tar.gz
+  sha256 "c0a24b5985c1626e953042c2fd95d341d0d05ebb7de15dc08c967e2678d59a42"  # shasum -a 256 v1.0.0.tar.gz
   license any_of: ["MIT", "Apache-2.0"]
   head "https://github.com/Nonanti/narwhal.git", branch: "main"
 
