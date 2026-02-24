@@ -78,8 +78,11 @@ Download native tarballs (with SHA-256 checksums) from the
 [latest GitHub Release](https://github.com/Nonanti/narwhal/releases):
 
 - `x86_64-unknown-linux-gnu`
-- `x86_64-apple-darwin`
-- `aarch64-apple-darwin`
+- `aarch64-apple-darwin` (Apple Silicon)
+
+Intel Mac users: build from source with `cargo install narwhaldb` for
+now; a prebuilt `x86_64-apple-darwin` tarball is on the roadmap once
+the macos-13 runner backlog clears.
 
 ```sh
 curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-1.0.0-x86_64-unknown-linux-gnu.tar.gz
