@@ -105,6 +105,12 @@ impl AppCore {
                     self.open_history().await;
                     return true;
                 }
+                // v1.1 #1: Ctrl-N opens the goto fuzzy navigator from
+                // any focus. Mirrors the DataGrip / IntelliJ binding.
+                CtKey::Char('n') => {
+                    self.open_goto_modal().await;
+                    return true;
+                }
                 CtKey::PageDown => {
                     self.cycle_result_tab(1).await;
                     return true;

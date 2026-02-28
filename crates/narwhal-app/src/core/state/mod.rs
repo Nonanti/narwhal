@@ -2,6 +2,7 @@
 //! sub-module owns one concept; nothing here mutates `AppCore`.
 
 pub mod deps;
+pub mod goto_modal;
 pub mod history;
 pub mod modals;
 pub mod process;
@@ -14,6 +15,7 @@ pub mod tab;
 pub mod ui;
 
 pub use deps::AppDeps;
+pub use goto_modal::{GotoEntry, GotoMatch, GotoModal};
 pub use history::HistoryState;
 pub use modals::{ConfirmModal, ModalState, PendingConfirm};
 pub use process::ProcessState;

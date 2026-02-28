@@ -73,6 +73,9 @@ mysql_common = { version = "0.32", default-features = false, features = ["chrono
 # Utilities
 parking_lot = "0.12"
 directories = "5.0"
+# v1.1 #1: nucleo-matcher powers the `:goto` fuzzy navigator.
+# Same algorithm Helix uses; no_std-friendly, very fast.
+nucleo-matcher = "0.3"
 # Platform-specific backend features are MANDATORY in keyring 3.x.
 # Without them the crate silently falls back to a mock store that
 # accepts set() and returns None from get(), which means narwhal

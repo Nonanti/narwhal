@@ -12,7 +12,7 @@
 //! convention. If a future feature needs cross-modal state, add it
 //! here rather than scattering it back into `AppCore`.
 
-use super::{HistoryState, SnippetsModal};
+use super::{GotoModal, HistoryState, SnippetsModal};
 use crate::wizard::ConnectionWizard;
 
 /// What the user is about to do once they confirm.
@@ -114,6 +114,9 @@ pub struct ModalState {
     /// write-guard before a mutating batch reaches the driver on a
     /// connection that opted in to `confirm_writes = true`.
     pub confirm: Option<ConfirmModal>,
+    /// v1.1 #1: `:goto` fuzzy schema navigator. Owns the corpus
+    /// snapshot at open time and the user's query state.
+    pub goto: Option<GotoModal>,
 }
 
 impl ModalState {
@@ -126,6 +129,7 @@ impl ModalState {
             || self.snippets.is_some()
             || self.help_open
             || self.confirm.is_some()
+            || self.goto.is_some()
     }
 
     /// Close every modal and drop their state. Used by the global
@@ -139,6 +143,7 @@ impl ModalState {
         self.snippets = None;
         self.help_open = false;
         self.confirm = None;
+        self.goto = None;
     }
 }
 

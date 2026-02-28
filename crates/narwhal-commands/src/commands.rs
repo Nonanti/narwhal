@@ -132,6 +132,11 @@ pub enum Command {
     },
     /// Open the snippets modal (`:snippets`).
     ListSnippets,
+    /// v1.1 #1: open the fuzzy schema navigator (`:goto` / `:g` / Ctrl-N).
+    /// Lists every table/view across all loaded schemas, picks one
+    /// via fuzzy match, inserts `<schema>.<table>` at the cursor on
+    /// confirm.
+    Goto,
     Unknown(String),
     Empty,
 }
@@ -549,6 +554,7 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "snippets" => Command::ListSnippets,
+        "goto" | "g" => Command::Goto,
         _ => {
             // Try substitute: s/pat/rep/[gc] or %s/pat/rep/[gc]
             if let Some(cmd) = try_parse_substitute(trimmed) {
