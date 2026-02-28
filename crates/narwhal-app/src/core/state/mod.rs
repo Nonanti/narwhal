@@ -15,7 +15,7 @@ pub mod ui;
 
 pub use deps::AppDeps;
 pub use history::HistoryState;
-pub use modals::ModalState;
+pub use modals::{ConfirmModal, ModalState, PendingConfirm};
 pub use process::ProcessState;
 pub use result::{
     CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,

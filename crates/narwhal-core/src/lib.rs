@@ -19,8 +19,8 @@ pub mod value;
 pub use cancel::CancelHandle;
 pub use capabilities::Capabilities;
 pub use connection::{
-    Connection, ConnectionConfig, ConnectionParams, IsolationLevel, PreConnectStep, SshConfig,
-    SslMode,
+    Connection, ConnectionColor, ConnectionConfig, ConnectionParams, IsolationLevel,
+    PreConnectStep, SshConfig, SslMode,
 };
 pub use driver::DatabaseDriver;
 pub use error::{Error, Result};

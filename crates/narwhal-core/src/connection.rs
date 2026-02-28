@@ -10,6 +10,24 @@ use crate::schema::{QueryResult, Schema, Table, TableSchema};
 use crate::stream::RowStream;
 use crate::value::Value;
 
+/// Visual accent colour applied to the TUI border + status bar when a
+/// connection is active. The intent is operational safety: prod = red,
+/// staging = yellow, dev = green. Six named colours so terminal
+/// compatibility is trivial — no hex / RGB to render-degrade.
+///
+/// Serialises as lowercase (`color = "red"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ConnectionColor {
+    Red,
+    Yellow,
+    Green,
+    Blue,
+    Magenta,
+    Cyan,
+}
+
 /// TLS/SSL mode for a database connection.
 ///
 /// Mirrors the standard libpq `sslmode` parameter. Serialises as
@@ -79,6 +97,32 @@ pub struct ConnectionParams {
     /// kubectl pod IP before the driver dials in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_connect: Vec<PreConnectStep>,
+    /// v1.1 #2: optional accent colour for the TUI border + status
+    /// bar while this connection is active. `None` keeps the theme
+    /// default. Production users typically set `color = "red"` so
+    /// "am I on prod?" is answered by a glance at the screen edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<ConnectionColor>,
+    /// v1.1 #2: when `true`, mutating statements (`INSERT`, `UPDATE`,
+    /// `DELETE`, DDL, …) prompt for a confirmation modal before they
+    /// reach the driver. Bare reads run without confirmation.
+    /// Recommended on every connection that touches production data.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confirm_writes: bool,
+    /// v1.1 #2: when `true`, the session is opened in driver-enforced
+    /// read-only mode (`SET default_transaction_read_only TO ON` on
+    /// PG, `PRAGMA query_only = ON` on `SQLite`, etc.) **and** the TUI
+    /// applies the same syntactic guard MCP uses
+    /// ([`narwhal_sql::guard_read_only`]) before each run. Either
+    /// layer rejecting the statement aborts it without driver round
+    /// trip.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub read_only: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// One pre-connect command.

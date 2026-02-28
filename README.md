@@ -145,6 +145,35 @@ drivers (`postgres`, `mysql`, `clickhouse`) accept any of the five
 `ssl_mode` values plus optional `ssl_root_cert`, `ssl_cert`, `ssl_key`
 paths for mutual TLS.
 
+### Connection safety: color, read-only, write confirmation (v1.1)
+
+Three optional fields on `[[connection]]` keep you out of trouble on
+production databases:
+
+```toml
+[[connection]]
+name           = "prod-pg"
+driver         = "postgres"
+color          = "red"           # red | yellow | green | blue | magenta | cyan
+confirm_writes = true            # type YES before any mutating statement
+read_only      = true            # syntactic guard rejects non-reads
+
+[connection.params]
+# …
+```
+
+- **`color`** — the active connection's name is tinted in the status
+  bar with the chosen accent. Set `color = "red"` on every production
+  connection and "am I on prod?" becomes a glance, not a guess.
+- **`confirm_writes`** — before an `INSERT`/`UPDATE`/`DELETE`/DDL
+  statement reaches the driver, narwhal opens a modal that previews
+  the first statement and demands the user type `YES` exactly. Esc
+  cancels. Bare reads run without prompting.
+- **`read_only`** — every batch is checked against the same syntactic
+  allow-list MCP's `run_query` tool uses (`SELECT`, `WITH`, `SHOW`,
+  `EXPLAIN`, `DESCRIBE`, `DESC`, `PRAGMA`, `VALUES`, `TABLE`). Writes
+  are rejected before they reach the network.
+
 ### `config.toml` (settings)
 
 A `~/.config/narwhal/config.toml` lets you override the renderer

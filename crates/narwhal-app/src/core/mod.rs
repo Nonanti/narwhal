@@ -8,6 +8,7 @@
 //! Submodules under `core/` host pure helpers extracted from this file as
 //! part of the L21 split. They never touch [`AppCore`] state directly.
 
+mod confirm;
 mod dump_export;
 mod editor_dispatch;
 mod format;
@@ -29,9 +30,10 @@ use crate::run::RunUpdate;
 
 pub mod state;
 pub use state::{
-    AppDeps, CellEdit, CompletionState, EditorSearchState, HistoryState, JsonViewerState,
-    ModalState, ProcessState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource,
-    SessionState, SidebarItem, SnippetsModal, StatusBar, Tab, UiState,
+    AppDeps, CellEdit, CompletionState, ConfirmModal, EditorSearchState, HistoryState,
+    JsonViewerState, ModalState, PendingConfirm, ProcessState, ResultBundle, ResultSearch,
+    ResultState, RowDetailState, RowSource, SessionState, SidebarItem, SnippetsModal, StatusBar,
+    Tab, UiState,
 };
 
 /// Pure, IO-free application state and behaviour.
