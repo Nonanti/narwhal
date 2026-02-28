@@ -107,6 +107,11 @@ pub(super) fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPop
     frame.render_widget(paragraph, inner);
 }
 
+/// v1.1 #3: width (in cells) reserved for the cost bar to the right
+/// of each node label. Eight cells gives 12.5 % granularity which
+/// reads well at typical terminal sizes.
+const COST_BAR_WIDTH: usize = 8;
+
 pub(super) fn draw_explain(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -124,19 +129,71 @@ pub(super) fn draw_explain(
         rendered.push(Line::from(""));
     }
     for line in lines {
-        let indent = "  ".repeat(line.depth);
-        let glyph = if line.depth == 0 { "▸" } else { "└" };
-        let style = if line.depth == 0 {
+        // Tree connector. New callers (v1.1 #3) pass a pre-formatted
+        // box-drawing prefix; legacy callers use indent + glyph.
+        let prefix = if line.connector.is_empty() {
+            let indent = "  ".repeat(line.depth);
+            let glyph = if line.depth == 0 { "▸" } else { "└" };
+            format!("  {indent}{glyph} ")
+        } else {
+            line.connector.clone()
+        };
+
+        // Label colour: hot path → accent, divergent rows → yellow
+        // warning, root → accent bold, everything else → foreground.
+        let label_style = if line.hot {
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else if line.divergent {
+            Style::default()
+                .fg(ratatui::style::Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else if line.depth == 0 {
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.foreground)
         };
-        rendered.push(Line::from(vec![
-            Span::raw(format!("  {indent}{glyph} ")),
-            Span::styled(line.text.clone(), style),
-        ]));
+
+        let mut spans: Vec<Span<'_>> = vec![
+            Span::raw(prefix),
+            Span::styled(line.text.clone(), label_style),
+        ];
+
+        // Cost bar (v1.1 #3). Drawn to the right of the label so the
+        // tree column stays visually aligned. Filled with full block
+        // characters; the unfilled portion uses light shade so the
+        // bar's full width is always visible.
+        if let Some(ratio) = line.cost_ratio {
+            let ratio = ratio.clamp(0.0, 1.0);
+            let filled = (ratio * COST_BAR_WIDTH as f64).round() as usize;
+            let filled = filled.min(COST_BAR_WIDTH);
+            let bar: String = std::iter::repeat('█')
+                .take(filled)
+                .chain(std::iter::repeat('░').take(COST_BAR_WIDTH - filled))
+                .collect();
+            let bar_color = if line.hot {
+                ratatui::style::Color::Red
+            } else if ratio > 0.5 {
+                ratatui::style::Color::Yellow
+            } else {
+                theme.muted
+            };
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(bar, Style::default().fg(bar_color)));
+        }
+        if line.divergent {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                "⚠ rows",
+                Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        rendered.push(Line::from(spans));
     }
     let paragraph = Paragraph::new(rendered);
     frame.render_widget(paragraph, area);

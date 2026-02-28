@@ -23,10 +23,102 @@ pub struct ExplainLine {
     pub text: String,
 }
 
+/// v1.1 #3: structured per-node metrics extracted from the EXPLAIN
+/// JSON. Drives the tree visualiser — cost bars, row
+/// estimate-vs-actual divergence highlighting, and the hot-path
+/// classification.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExplainNode {
+    /// `"Seq Scan"`, `"Hash Join"`, … (the JSON "Node Type" verbatim).
+    pub node_type: String,
+    /// `Some("users")` for scan nodes that target a relation.
+    pub relation: Option<String>,
+    /// `Some("users_pkey")` for index nodes.
+    pub index: Option<String>,
+    /// Optional filter expression — used by the renderer as a hint
+    /// when divergent rows show up.
+    pub filter: Option<String>,
+    /// Planner cost estimate — inclusive total. Drives the cost bar
+    /// width.
+    pub total_cost: f64,
+    /// Planner cost estimate — startup only.
+    pub startup_cost: f64,
+    /// Estimated rows.
+    pub plan_rows: f64,
+    /// Actual rows returned (only present with `ANALYZE`).
+    pub actual_rows: Option<f64>,
+    /// Actual cumulative time in ms (only with `ANALYZE`).
+    pub actual_total_ms: Option<f64>,
+    /// Number of loop iterations (only with `ANALYZE`).
+    pub actual_loops: Option<f64>,
+    /// Children, drawn beneath this node in the tree.
+    pub children: Vec<Self>,
+}
+
+impl ExplainNode {
+    /// Compact one-line summary suited to the tree row label.
+    /// Example: `"Seq Scan on users (cost=0.00..21.50 rows=200)"`.
+    #[must_use]
+    pub fn label(&self) -> String {
+        let mut s = self.node_type.clone();
+        if let Some(rel) = &self.relation {
+            s.push_str(" on ");
+            s.push_str(rel);
+        } else if let Some(idx) = &self.index {
+            s.push_str(" using ");
+            s.push_str(idx);
+        }
+        use std::fmt::Write as _;
+        let _ = write!(
+            &mut s,
+            " (cost={:.2}..{:.2} rows={:.0})",
+            self.startup_cost, self.total_cost, self.plan_rows
+        );
+        s
+    }
+
+    /// Recursive max `total_cost` across the subtree. Used by the
+    /// renderer to normalise cost bars across the whole plan.
+    #[must_use]
+    pub fn max_cost(&self) -> f64 {
+        let mut m = self.total_cost;
+        for c in &self.children {
+            let cm = c.max_cost();
+            if cm > m {
+                m = cm;
+            }
+        }
+        m
+    }
+
+    /// `true` when this node's actual rows differ from the planner's
+    /// estimate by more than 10× in either direction. Identifies the
+    /// nodes most likely to be hurting the plan (bad statistics, stale
+    /// `pg_class.reltuples`, missing index).
+    ///
+    /// Returns `false` if `ANALYZE` data is missing or the planner
+    /// rows are 0 (we cannot ratio safely).
+    #[must_use]
+    pub fn rows_divergent(&self) -> bool {
+        let Some(actual) = self.actual_rows else {
+            return false;
+        };
+        if self.plan_rows < 1.0 || actual < 0.0 {
+            return false;
+        }
+        let ratio = actual.max(1.0) / self.plan_rows.max(1.0);
+        !(0.1..=10.0).contains(&ratio)
+    }
+}
+
 /// Parsed plan ready for rendering.
 #[derive(Debug, Clone, Default)]
 pub struct ExplainPlan {
     pub lines: Vec<ExplainLine>,
+    /// v1.1 #3: structured tree mirroring `lines`. `None` when the
+    /// plan source isn't a parsable PG JSON document (we fall back
+    /// to the text-only renderer).
+    pub root: Option<ExplainNode>,
     pub planning_time_ms: Option<f64>,
     pub execution_time_ms: Option<f64>,
 }
@@ -46,11 +138,58 @@ pub fn parse(json_text: &str) -> Result<ExplainPlan, String> {
     };
     let mut lines = Vec::new();
     walk(root_plan, 0, &mut lines);
+    let root = build_node(root_plan);
     Ok(ExplainPlan {
         lines,
+        root: Some(root),
         planning_time_ms: entry.get("Planning Time").and_then(Json::as_f64),
         execution_time_ms: entry.get("Execution Time").and_then(Json::as_f64),
     })
+}
+
+/// Recursively turn a JSON plan node into an [`ExplainNode`].
+fn build_node(node: &Json) -> ExplainNode {
+    let node_type = node
+        .get("Node Type")
+        .and_then(Json::as_str)
+        .unwrap_or("Unknown")
+        .to_owned();
+    let relation = node
+        .get("Relation Name")
+        .and_then(Json::as_str)
+        .map(str::to_owned);
+    let index = node
+        .get("Index Name")
+        .and_then(Json::as_str)
+        .map(str::to_owned);
+    let filter = node
+        .get("Filter")
+        .and_then(Json::as_str)
+        .map(str::to_owned);
+    let startup_cost = node.get("Startup Cost").and_then(Json::as_f64).unwrap_or(0.0);
+    let total_cost = node.get("Total Cost").and_then(Json::as_f64).unwrap_or(0.0);
+    let plan_rows = node.get("Plan Rows").and_then(Json::as_f64).unwrap_or(0.0);
+    let actual_rows = node.get("Actual Rows").and_then(Json::as_f64);
+    let actual_total_ms = node.get("Actual Total Time").and_then(Json::as_f64);
+    let actual_loops = node.get("Actual Loops").and_then(Json::as_f64);
+    let children = node
+        .get("Plans")
+        .and_then(Json::as_array)
+        .map(|arr| arr.iter().map(build_node).collect())
+        .unwrap_or_default();
+    ExplainNode {
+        node_type,
+        relation,
+        index,
+        filter,
+        total_cost,
+        startup_cost,
+        plan_rows,
+        actual_rows,
+        actual_total_ms,
+        actual_loops,
+        children,
+    }
 }
 
 fn walk(node: &Json, depth: usize, out: &mut Vec<ExplainLine>) {
@@ -217,6 +356,37 @@ mod tests {
         assert!(seq_scan_line.depth > 0);
         assert!(seq_scan_line.text.contains("on events"));
         assert!(plan.lines.iter().any(|l| l.text.contains("Filter:")));
+    }
+
+    #[test]
+    fn structured_tree_matches_sample() {
+        let plan = parse(SAMPLE).unwrap();
+        let root = plan.root.expect("tree present");
+        assert_eq!(root.node_type, "Limit");
+        assert_eq!(root.children.len(), 1);
+        let child = &root.children[0];
+        assert_eq!(child.node_type, "Seq Scan");
+        assert_eq!(child.relation.as_deref(), Some("events"));
+        assert!(child.label().contains("Seq Scan on events"));
+        assert!((root.max_cost() - 3.40).abs() < 0.001);
+    }
+
+    #[test]
+    fn rows_divergent_detects_10x_gap() {
+        let mut node = ExplainNode {
+            plan_rows: 10.0,
+            actual_rows: Some(150.0),
+            ..Default::default()
+        };
+        assert!(node.rows_divergent(), "15x over should trigger");
+        node.plan_rows = 100.0;
+        node.actual_rows = Some(1.0);
+        assert!(node.rows_divergent(), "100x under should trigger");
+        node.plan_rows = 10.0;
+        node.actual_rows = Some(20.0);
+        assert!(!node.rows_divergent(), "2x should not trigger");
+        node.actual_rows = None;
+        assert!(!node.rows_divergent(), "missing actual is silent");
     }
 
     #[test]

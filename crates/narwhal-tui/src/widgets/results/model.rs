@@ -304,10 +304,30 @@ pub enum ResultDisplay<'a> {
 
 /// One rendered line of a query plan. Independent of the parser so the
 /// widget crate does not need a dependency on `serde_json`.
-#[derive(Debug, Clone)]
+///
+/// v1.1 #3: extended with optional cost / divergence metadata so the
+/// renderer can draw cost bars and colour the hot path. The fields
+/// default to inert values so callers that haven't migrated still
+/// produce a sensible monochrome plan.
+#[derive(Debug, Clone, Default)]
 pub struct ExplainPlanLine {
     pub depth: usize,
     pub text: String,
+    /// Total cost of this node normalised to the plan's max cost
+    /// (0.0–1.0). Drives the cost-bar fill width. `None` suppresses
+    /// the bar entirely.
+    pub cost_ratio: Option<f64>,
+    /// `true` when the node is on the plan's hot path (highest cost
+    /// branch from root to a leaf). Drawn with the accent colour.
+    pub hot: bool,
+    /// `true` when the actual rows diverge from the planner estimate
+    /// by more than 10×. Drawn with a yellow badge.
+    pub divergent: bool,
+    /// Tree connector for this line, e.g. `"  ├─ "` / `"  └─ "`. When
+    /// non-empty it is rendered verbatim *instead of* the indent +
+    /// glyph the renderer used to compute itself, so callers can
+    /// produce a proper box-drawing tree.
+    pub connector: String,
 }
 
 /// Hit-test regions computed during the last render of the results pane.

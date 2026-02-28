@@ -642,15 +642,25 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    *self.ui.tabs[rt].results.active_state_mut() = ResultState::Explain {
-                        lines: plan
-                            .lines
-                            .into_iter()
+                    // v1.1 #3: prefer the structured tree (with cost
+                    // bars, hot-path colouring, divergence badges).
+                    // Fall back to the flat line list when the
+                    // structured form isn't available (older callers,
+                    // non-PG drivers).
+                    let lines = if let Some(root) = plan.root.as_ref() {
+                        super::render_helpers::explain_tree_lines(root)
+                    } else {
+                        plan.lines
+                            .iter()
                             .map(|l| ExplainPlanLine {
                                 depth: l.depth,
-                                text: l.text,
+                                text: l.text.clone(),
+                                ..Default::default()
                             })
-                            .collect(),
+                            .collect()
+                    };
+                    *self.ui.tabs[rt].results.active_state_mut() = ResultState::Explain {
+                        lines,
                         planning_time_ms: plan.planning_time_ms,
                         execution_time_ms: plan.execution_time_ms,
                     };
