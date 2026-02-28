@@ -19,25 +19,36 @@
           extensions = [ "rust-src" "rust-analyzer" "rustfmt" "clippy" ];
         };
 
-        # DuckDB bundled C++ build requires cmake, clang, and libcxx.
-        nativeBuildDeps = with pkgs; [ cmake clang pkg-config ];
-        buildDeps = with pkgs; [ libcxx ];
+        # DuckDB's bundled C++ tree expects libstdc++ (the stdenv
+        # default), not libc++. Earlier revisions added clang +
+        # libcxx here and the build fell over with `'NAN' was not
+        # declared in this scope` because GCC was still selected by
+        # cc-rs but the -isystem libcxx headers shadowed cstdlib.
+        # Stay on the plain stdenv toolchain; cmake is for the build,
+        # libclang is for duckdb-rs's bindgen, dbus is for the keyring
+        # crate (secret-service backend) on Linux.
+        nativeBuildDeps = with pkgs; [ cmake pkg-config ];
+        buildDeps = with pkgs; [ dbus ];
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "narwhal";
           version = "1.0.0";
 
           src = ./.;
-          cargoLock = { lockFile = ./Cargo.lock; };
+          # crates.io now refuses requests with the default `curl`
+          # User-Agent (returns 403). The per-crate fetcher used when
+          # `cargoLock = { lockFile = ... }` is set still inherits that
+          # default and breaks every transitive download, so use a
+          # fixed-output `cargoHash` vendor instead: cargo runs inside
+          # the sandbox, sends the right UA, and the vendored output
+          # is content-addressed.
+          cargoHash = "sha256-+W/DO+d12yHW3MWy1CQC8ZnCXwkWw3BYGcZUBnR/g6Q=";
 
           nativeBuildInputs = nativeBuildDeps;
           buildInputs = buildDeps;
 
           # bindgen (used by duckdb-rs build.rs) needs libclang.
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-
-          # cmake needs to find the C++ standard library from libcxx.
-          CXXFLAGS = "-isystem ${pkgs.libcxx.dev}/include/c++/v1";
 
           meta = with pkgs.lib; {
             description = "A TUI database client — DataGrip in your terminal";
