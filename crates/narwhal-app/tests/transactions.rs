@@ -77,6 +77,7 @@ async fn rollback_reverts_inserts() {
     assert_eq!(rows_count(&mut core).await, 3);
 
     core.execute_command("rollback").await;
+    core.drain_run_updates().await;
     assert!(core.status_message().contains("rolled back"));
     assert_eq!(rows_count(&mut core).await, 1);
 }
@@ -95,6 +96,11 @@ async fn commit_persists_inserts() {
     core.execute_command("clear").await;
 
     core.execute_command("commit").await;
+    // commit dispatches through the run channel; drain before reading
+    // the status message so the assertion isn't a race on slow CI
+    // runners. (Was flaking on ubuntu-latest after the patch-updates
+    // bump landed; reproduces on multi_thread runtime under load.)
+    core.drain_run_updates().await;
     assert!(core.status_message().contains("committed"));
     assert_eq!(rows_count(&mut core).await, 2);
 }
