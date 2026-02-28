@@ -24,6 +24,7 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
+use narwhal_sql::guard_read_only;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::warn;
@@ -330,153 +331,6 @@ impl Tool for RunQueryTool {
 /// quoted identifiers are not parsed, but they cannot legally appear before
 /// the first keyword in any of the dialects we support, so the check is
 /// safe in practice.
-fn guard_read_only(sql: &str) -> Result<(), String> {
-    let stripped = strip_leading_comments_and_whitespace(sql);
-    let first_token = stripped
-        .split(|c: char| !c.is_ascii_alphabetic())
-        .next()
-        .unwrap_or("")
-        .to_ascii_uppercase();
-
-    if first_token.is_empty() {
-        return Err("empty statement".into());
-    }
-
-    const ALLOWED: &[&str] = &[
-        "SELECT",   // ANSI
-        "WITH",     // CTE
-        "SHOW",     // PG/MySQL/CH metadata
-        "EXPLAIN",  // every driver
-        "DESCRIBE", // MySQL
-        "DESC",     // MySQL shorthand
-        "PRAGMA",   // SQLite (read forms only — write pragmas mutate session state)
-        "VALUES",   // PG row-constructor SELECT
-        "TABLE",    // PG `TABLE foo;` shorthand
-    ];
-
-    if !ALLOWED.contains(&first_token.as_str()) {
-        return Err(format!(
-            "first token `{first_token}` is not in the read-only allow-list \
-             (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE/DESC/PRAGMA/VALUES/TABLE)"
-        ));
-    }
-
-    // Even when the first token is allowed, block known dangerous
-    // function calls that can hold a connection or mutate state.
-    //
-    // Issue D (sprint 5): the previous substring match produced both
-    // false positives (`sleeping_bags`, `asleep`, a column named
-    // `"SLEEP"`) and false negatives (`pg_sleep_for`, `WAITFOR DELAY`,
-    // `BENCHMARK(...)`). The new check
-    //
-    //   1. Strips string literals and quoted identifiers so a comment
-    //      or `'pg_sleep'` cannot trip the guard, and
-    //   2. Requires word-boundary matches so `sleeping_bags` is not
-    //      mistaken for `SLEEP`.
-    //
-    // The denylist is also widened to cover the engines we ship
-    // drivers for plus the documented dialect quirks (MSSQL
-    // `WAITFOR`, MySQL `BENCHMARK` CPU bomb, PG `pg_sleep_for` /
-    // `pg_sleep_until`).
-    let sanitised = strip_sql_literals(stripped);
-    let upper_sql = sanitised.to_ascii_uppercase();
-    const BLOCKED_FUNCS: &[&str] = &[
-        "PG_SLEEP",       // postgres: holds the connection
-        "PG_SLEEP_FOR",   // postgres alt
-        "PG_SLEEP_UNTIL", // postgres alt
-        "SLEEP",          // mysql / mariadb
-        "DBMS_LOCK",      // oracle (`DBMS_LOCK.SLEEP(…)`)
-        "BENCHMARK",      // mysql cpu bomb
-        "WAITFOR",        // mssql delay
-    ];
-    for pattern in BLOCKED_FUNCS {
-        if contains_word(&upper_sql, pattern) {
-            return Err(format!(
-                "statement contains blocked function `{pattern}` which can \
-                 hold a connection or burn CPU — pass `read_only=false` if intentional"
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Replace the contents of every SQL string literal (`'…'`) and
-/// double-quoted identifier (`"…"`) with spaces so that subsequent
-/// keyword scans see only structural tokens. Handles the SQL standard
-/// doubled-quote escapes (`''` inside a single-quoted literal, `""`
-/// inside a double-quoted identifier). Backslash escapes are *not*
-/// honoured — the goal is keyword stripping, not full lexing.
-///
-/// Sprint 11 follow-up: an earlier draft added `MySQL` backticks to
-/// the strip set on the assumption that ``SELECT `SLEEP`(10)``
-/// bypassed the scanner. The opposite is true — backticks are
-/// **not** `is_ident_byte`, so `SLEEP` between them is already
-/// flanked by word boundaries and the denylist catches it. Masking
-/// the body would *create* the bypass by hiding the function name
-/// from the scanner. The regression test
-/// `guard_rejects_backtick_identifier_bypass` pins this.
-fn strip_sql_literals(sql: &str) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let mut iter = sql.chars().peekable();
-    while let Some(c) = iter.next() {
-        match c {
-            '\'' | '"' => {
-                let quote = c;
-                out.push(c);
-                while let Some(&next) = iter.peek() {
-                    iter.next();
-                    if next == quote {
-                        if iter.peek() == Some(&quote) {
-                            // Doubled-quote escape: stay inside.
-                            iter.next();
-                            out.push(' ');
-                            out.push(' ');
-                            continue;
-                        }
-                        out.push(next);
-                        break;
-                    }
-                    // Mask the body so a keyword inside the literal
-                    // (e.g. `'pg_sleep'`) doesn't reach the scanner.
-                    out.push(if next == '\n' { '\n' } else { ' ' });
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// Word-boundary substring match. `needle` is searched in `haystack`
-/// with the requirement that the character immediately before and
-/// after the match is *not* an identifier character (ASCII alphanumeric
-/// or underscore).
-fn contains_word(haystack: &str, needle: &str) -> bool {
-    let n = needle.len();
-    if n == 0 || n > haystack.len() {
-        return false;
-    }
-    let bytes = haystack.as_bytes();
-    let needle_bytes = needle.as_bytes();
-    let mut i = 0;
-    while i + n <= bytes.len() {
-        if &bytes[i..i + n] == needle_bytes {
-            let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
-            let after_ok = i + n == bytes.len() || !is_ident_byte(bytes[i + n]);
-            if before_ok && after_ok {
-                return true;
-            }
-        }
-        i += 1;
-    }
-    false
-}
-
-const fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
 /// H2: clamp a single JSON cell to [`MAX_CELL_BYTES`] so a fat
 /// `TEXT` / `BYTEA` blob cannot blow the agent's context or the
 /// MCP host's memory.
@@ -516,33 +370,6 @@ fn cap_cell_size(value: Value, truncated_flag: &mut bool) -> Value {
     }
 }
 
-/// Skip leading whitespace and SQL comments. Returns the remainder.
-fn strip_leading_comments_and_whitespace(sql: &str) -> &str {
-    let mut s = sql.trim_start();
-    loop {
-        if let Some(rest) = s.strip_prefix("--") {
-            // line comment: skip until newline or EOF
-            s = match rest.find('\n') {
-                Some(i) => &rest[i + 1..],
-                None => "",
-            };
-            s = s.trim_start();
-            continue;
-        }
-        if let Some(rest) = s.strip_prefix("/*") {
-            // block comment: skip until `*/` (or EOF if malformed)
-            s = match rest.find("*/") {
-                Some(i) => &rest[i + 2..],
-                None => "",
-            };
-            s = s.trim_start();
-            continue;
-        }
-        break;
-    }
-    s
-}
-
 /// Execute `sql` inside a `BEGIN ... ROLLBACK` sandwich.
 ///
 /// `ROLLBACK` runs unconditionally so a statement that sneaks past the
@@ -572,75 +399,9 @@ async fn run_in_sandbox(
 mod tests {
     use super::*;
 
-    #[test]
-    fn guard_accepts_obvious_reads() {
-        for sql in [
-            "SELECT 1",
-            "select * from t",
-            "  WITH cte AS (SELECT 1) SELECT * FROM cte",
-            "EXPLAIN SELECT 1",
-            "PRAGMA table_info(users)",
-            "VALUES (1, 2), (3, 4)",
-            "-- a comment\nSELECT 1",
-            "/* block */ SELECT 1",
-            "/* one */ -- two \n SELECT 1",
-        ] {
-            assert!(guard_read_only(sql).is_ok(), "must accept: {sql:?}");
-        }
-    }
-
-    #[test]
-    fn guard_rejects_writes() {
-        for sql in [
-            "INSERT INTO t VALUES (1)",
-            "UPDATE t SET x = 1",
-            "DELETE FROM t",
-            "DROP TABLE t",
-            "CREATE TABLE t(id INT)",
-            "ALTER TABLE t ADD COLUMN x INT",
-            "TRUNCATE t",
-            "GRANT SELECT ON t TO alice",
-            "",
-            "   ",
-            "-- only comment",
-        ] {
-            assert!(guard_read_only(sql).is_err(), "must reject: {sql:?}");
-        }
-    }
-
-    /// Sprint 11 (Opus M4): the `MySQL` backtick identifier form is
-    /// not a legitimate way to call a denied function. Previously
-    /// `SELECT * FROM `SLEEP`(10)` bypassed the scanner because
-    /// backticks aren't `is_ident_byte`, so `SLEEP` looked like a
-    /// stand-alone word. After stripping backtick identifiers, the
-    /// guard catches this case along with the obvious unquoted call.
-    #[test]
-    fn guard_rejects_backtick_identifier_bypass() {
-        for sql in [
-            "SELECT * FROM `SLEEP`(10)",
-            "SELECT `pg_sleep`(1)",
-            "SELECT * FROM `dbms_lock`.`SLEEP`(1)",
-            // Doubled-backtick escape: still inside an identifier.
-            "SELECT 1 FROM `tbl``with``SLEEP`(1)",
-        ] {
-            assert!(
-                guard_read_only(sql).is_err(),
-                "backtick-wrapped denied call must be rejected: {sql:?}"
-            );
-        }
-    }
-
-    /// Sanity: stripping a backtick body should not break the
-    /// trailing keyword scan. `FROM users` after a stripped table
-    /// identifier is still a normal read.
-    #[test]
-    fn strip_preserves_structural_keywords() {
-        let sql = "SELECT * FROM `users` WHERE id = 1";
-        assert!(
-            guard_read_only(sql).is_ok(),
-            "non-malicious backtick identifier must still pass: {sql:?}"
-        );
-    }
+    // The read-only guard itself is exercised by
+    // `narwhal_sql::guard::tests`. Tests here cover the run_query
+    // integration (audit + sandbox + cell cap), see ../../tests/.
 
     // Compile-time sanity: a future refactor that drops the ceiling
     // below the default — or zeros the default — fails the build.

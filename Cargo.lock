@@ -3006,6 +3006,7 @@ dependencies = [
  "narwhal-core",
  "narwhal-driver-registry",
  "narwhal-history",
+ "narwhal-sql",
  "rusqlite",
  "secrecy",
  "serde",
