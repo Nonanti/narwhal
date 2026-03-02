@@ -128,6 +128,9 @@ pub enum Action {
     // ─── JSON viewer (L36) ─────────────────────────────────────────────
     OpenJsonViewerCell,
     OpenJsonViewerRow,
+
+    // ─── FK navigation (v1.2 #6) ──────────────────────────────────────
+    ResultsFkGotoDefinition,
 }
 
 impl Action {
@@ -164,7 +167,8 @@ impl Action {
             | Self::MetaTabConstraints
             | Self::MetaTabForeignKeys
             | Self::MetaTabIndexes
-            | Self::OpenJsonViewerCell => KeyGroup::Results,
+            | Self::OpenJsonViewerCell
+            | Self::ResultsFkGotoDefinition => KeyGroup::Results,
             Self::OpenJsonViewerRow => KeyGroup::RowDetail,
         }
     }

@@ -196,6 +196,8 @@ impl AppCore {
             Action::ResultsCommitPending => self.commit_pending().await,
             Action::ResultsDiscardPending => self.discard_pending().await,
             Action::ResultsOpenPendingPreview => self.toggle_pending_preview().await,
+            // v1.2 #6
+            Action::ResultsFkGotoDefinition => self.fk_goto_definition().await,
             // ─── Metadata tabs (L36) ────────────────────────────────
             Action::MetaTabRecords => self.switch_meta_tab(narwhal_tui::MetaTab::Records).await,
             Action::MetaTabColumns => self.switch_meta_tab(narwhal_tui::MetaTab::Columns).await,

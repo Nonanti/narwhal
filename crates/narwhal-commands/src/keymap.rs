@@ -377,6 +377,12 @@ impl Keymap {
         self.bind(Results, KeyChord::ch('['), A::ResultsPrevStatementLeader);
 
         // ─── Row CRUD + Pending changes ────────────────────────────────
+        // v1.2 #6: `f` (follow) opens the parent row when the focused
+        // cell is a foreign-key column. The IntelliJ / DataGrip
+        // binding is gd; we use `f` because the Results pane has no
+        // leader layer yet.
+        self.bind(Results, KeyChord::ch('f'), A::ResultsFkGotoDefinition);
+
         self.bind(Results, KeyChord::ch('o'), A::ResultsAppendRow);
         self.bind(Results, KeyChord::shift('o'), A::ResultsDuplicateRow);
         self.bind(Results, KeyChord::ch('d'), A::ResultsDeleteRow);

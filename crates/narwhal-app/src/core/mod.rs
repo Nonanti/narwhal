@@ -11,6 +11,7 @@
 mod confirm;
 mod dump_export;
 mod editor_dispatch;
+mod fk_nav;
 mod goto;
 mod format;
 mod modals;
