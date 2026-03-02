@@ -638,6 +638,8 @@ impl AppCore {
             Command::PluginList => self.list_plugins().await,
             Command::History => self.open_history().await,
             Command::Pending => self.toggle_pending_preview().await,
+            Command::Submit => self.commit_pending().await,
+            Command::Revert => self.discard_pending().await,
             Command::NewTab => self.new_tab().await,
             Command::CloseTab => self.close_tab().await,
             Command::NextTab => self.cycle_tab(1).await,

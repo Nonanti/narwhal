@@ -107,6 +107,12 @@ pub enum Command {
     /// counterpart to the `Ctrl-P` chord for users who live in the
     /// command line.
     Pending,
+    /// v1.2 #5: flush every pending mutation inside one transaction.
+    /// Equivalent to `Ctrl-S` while the pending preview is open.
+    Submit,
+    /// v1.2 #5: throw away every pending mutation without writing.
+    /// Equivalent to `Ctrl-X` inside the preview.
+    Revert,
     Help(Option<String>),
     /// Substitute command: `:s/old/new/[g][c]` or `:%s/old/new/[g][c]`.
     Substitute {
@@ -514,6 +520,8 @@ pub fn parse(input: &str) -> Command {
         "plug-list" | "pluglist" | "plugins" => Command::PluginList,
         "history" => Command::History,
         "pending" | "diff" => Command::Pending,
+        "submit" | "commit-pending" => Command::Submit,
+        "revert" | "discard-pending" => Command::Revert,
         "new" | "tabnew" => Command::NewTab,
         "tabclose" | "tc" => Command::CloseTab,
         "tabnext" | "tn" => Command::NextTab,
