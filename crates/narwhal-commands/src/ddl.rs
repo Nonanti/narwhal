@@ -163,6 +163,18 @@ fn format_index(schema: &str, table: &str, idx: &Index, dialect: Dialect) -> Str
     )
 }
 
+/// v1.2 #8: public re-export for `schema_diff`.
+#[must_use]
+pub fn quote_qualified_public(schema: &str, name: &str, dialect: Dialect) -> String {
+    quote_qualified(schema, name, dialect)
+}
+
+/// v1.2 #8: public re-export for `schema_diff`.
+#[must_use]
+pub fn quote_ident_public(name: &str, dialect: Dialect) -> String {
+    quote_ident(name, dialect)
+}
+
 fn quote_qualified(schema: &str, name: &str, dialect: Dialect) -> String {
     if schema.is_empty() {
         quote_ident(name, dialect)

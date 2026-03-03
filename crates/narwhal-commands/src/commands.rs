@@ -150,6 +150,11 @@ pub enum Command {
     /// v1.2 #7: toggle a sort on a 1-based column number
     /// (`:sort 3`) or clear the active sort (`:sort clear`).
     Sort(SortArg),
+    /// v1.2 #8: emit ALTER TABLE migration SQL between two tables in
+    /// the active connection. Format: `:diff-schema a.tbl1 b.tbl2`.
+    /// The result lands in a fresh editor tab so the user can review
+    /// before executing.
+    DiffSchema { left: String, right: String },
     Unknown(String),
     Empty,
 }
@@ -535,7 +540,39 @@ pub fn parse(input: &str) -> Command {
         }
         "plug-list" | "pluglist" | "plugins" => Command::PluginList,
         "history" => Command::History,
-        "pending" | "diff" => Command::Pending,
+        "pending" => Command::Pending,
+        // v1.2 #8: `:diff` *without* args still opens the pending
+        // preview (legacy alias). With args it's a schema diff.
+        "diff" => {
+            let trimmed = arg.trim();
+            if trimmed.is_empty() {
+                Command::Pending
+            } else {
+                let mut parts = trimmed.split_whitespace();
+                match (parts.next(), parts.next()) {
+                    (Some(l), Some(r)) => Command::DiffSchema {
+                        left: l.to_owned(),
+                        right: r.to_owned(),
+                    },
+                    _ => Command::Unknown(
+                        "diff: expected two qualified table names, e.g. :diff public.a public.b"
+                            .into(),
+                    ),
+                }
+            }
+        }
+        "diff-schema" => {
+            let mut parts = arg.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(l), Some(r)) => Command::DiffSchema {
+                    left: l.to_owned(),
+                    right: r.to_owned(),
+                },
+                _ => Command::Unknown(
+                    "diff-schema: expected two qualified table names".into(),
+                ),
+            }
+        }
         "submit" | "commit-pending" => Command::Submit,
         "revert" | "discard-pending" => Command::Revert,
         "new" | "tabnew" => Command::NewTab,
