@@ -700,6 +700,8 @@ impl AppCore {
             Command::RemoveSnippet { name } => self.remove_snippet(&name).await,
             Command::ListSnippets => self.open_snippets_modal().await,
             Command::Goto => self.open_goto_modal().await,
+            Command::Filter(spec) => self.apply_filter_command(spec).await,
+            Command::Sort(arg) => self.apply_sort_command(arg).await,
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the

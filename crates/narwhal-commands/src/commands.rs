@@ -143,8 +143,24 @@ pub enum Command {
     /// via fuzzy match, inserts `<schema>.<table>` at the cursor on
     /// confirm.
     Goto,
+    /// v1.2 #7: set the result-pane filter (`:filter <expr>`) or
+    /// clear it (`:filter clear`). Same expression that the inline
+    /// `f` prompt accepts; commits immediately.
+    Filter(Option<String>),
+    /// v1.2 #7: toggle a sort on a 1-based column number
+    /// (`:sort 3`) or clear the active sort (`:sort clear`).
+    Sort(SortArg),
     Unknown(String),
     Empty,
+}
+
+/// Argument to [`Command::Sort`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortArg {
+    /// 1-based column number. Toggle ascending → descending → cleared.
+    Column(usize),
+    /// `:sort clear` — drop the active sort.
+    Clear,
 }
 
 /// Scope of a substitute command.
@@ -563,6 +579,31 @@ pub fn parse(input: &str) -> Command {
         }
         "snippets" => Command::ListSnippets,
         "goto" | "g" => Command::Goto,
+        "filter" => {
+            // `:filter` (no arg)        → open inline prompt
+            // `:filter clear`           → drop the active filter
+            // `:filter <expr>`          → set the filter expression
+            if arg.trim().is_empty() {
+                Command::Filter(None)
+            } else if arg.trim().eq_ignore_ascii_case("clear") {
+                Command::Filter(Some(String::new()))
+            } else {
+                Command::Filter(Some(arg.to_owned()))
+            }
+        }
+        "sort" => {
+            let arg = arg.trim();
+            if arg.is_empty() || arg.eq_ignore_ascii_case("clear") {
+                Command::Sort(SortArg::Clear)
+            } else {
+                match arg.parse::<usize>() {
+                    Ok(n) if n >= 1 => Command::Sort(SortArg::Column(n)),
+                    _ => Command::Unknown(
+                        "sort: expected a 1-based column number or 'clear'".into(),
+                    ),
+                }
+            }
+        }
         _ => {
             // Try substitute: s/pat/rep/[gc] or %s/pat/rep/[gc]
             if let Some(cmd) = try_parse_substitute(trimmed) {
