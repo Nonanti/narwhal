@@ -14,6 +14,7 @@ mod dump_export;
 mod editor_dispatch;
 mod fk_nav;
 mod goto;
+mod lint_cmd;
 mod format;
 mod modals;
 mod pending_actions;
