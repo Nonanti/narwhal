@@ -173,13 +173,12 @@ mod tests {
     use super::*;
 
     fn params(host: &str, port: u16, db: &str, user: &str) -> ConnectionParams {
-        ConnectionParams {
-            host: Some(host.into()),
-            port: Some(port),
-            database: Some(db.into()),
-            username: Some(user.into()),
-            ..Default::default()
-        }
+        ConnectionParams::with(|p| {
+            p.host = Some(host.into());
+            p.port = Some(port);
+            p.database = Some(db.into());
+            p.username = Some(user.into());
+        })
     }
 
     #[test]

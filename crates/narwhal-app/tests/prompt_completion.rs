@@ -31,10 +31,9 @@ fn core_with_connections(names: &[&str]) -> AppCore {
                 id: Uuid::new_v4(),
                 name: (*name).to_owned(),
                 driver: "sqlite".into(),
-                params: ConnectionParams {
-                    path: Some(":memory:".into()),
-                    ..Default::default()
-                },
+                params: ConnectionParams::with(|p| {
+                    p.path = Some(":memory:".into());
+                }),
             })
             .collect(),
     };

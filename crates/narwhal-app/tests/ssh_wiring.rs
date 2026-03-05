@@ -84,14 +84,13 @@ fn wizard_round_trips_existing_ssh_block() {
         id: Uuid::new_v4(),
         name: "prod".into(),
         driver: "postgres".into(),
-        params: ConnectionParams {
-            host: Some("db.internal".into()),
-            port: Some(5432),
-            database: Some("inv".into()),
-            username: Some("alice".into()),
-            ssh: Some(ssh),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.host = Some("db.internal".into());
+            p.port = Some(5432);
+            p.database = Some("inv".into());
+            p.username = Some("alice".into());
+            p.ssh = Some(ssh);
+        }),
     };
 
     let w = ConnectionWizard::from_config(&original, None, Some(original.id));

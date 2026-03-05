@@ -52,10 +52,9 @@ async fn history_opens_with_journal_entries() {
             id: Uuid::nil(),
             name: "test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
@@ -88,10 +87,9 @@ async fn history_filter_narrows_visible() {
             id: Uuid::nil(),
             name: "test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
@@ -128,10 +126,9 @@ async fn history_enter_inserts_sql_into_editor() {
             id: Uuid::nil(),
             name: "test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
@@ -162,10 +159,9 @@ async fn history_esc_closes_without_change() {
             id: Uuid::nil(),
             name: "test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
@@ -194,10 +190,9 @@ async fn history_no_journal_shows_message() {
             id: Uuid::nil(),
             name: "test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, None);

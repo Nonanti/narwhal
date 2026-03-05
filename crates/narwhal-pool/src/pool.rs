@@ -379,10 +379,9 @@ mod tests {
             id: Uuid::nil(),
             name: "test".into(),
             driver: SqliteDriver::NAME.into(),
-            params: ConnectionParams {
-                path: Some(path.into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(path.into());
+            }),
         }
     }
 

@@ -325,17 +325,15 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn params_with_options(options: BTreeMap<String, String>) -> ConnectionParams {
-        ConnectionParams {
-            options,
-            ..Default::default()
-        }
+        ConnectionParams::with(|p| {
+            p.options = options;
+        })
     }
 
     fn params_with_ssl_mode(ssl_mode: SslMode) -> ConnectionParams {
-        ConnectionParams {
-            ssl_mode,
-            ..Default::default()
-        }
+        ConnectionParams::with(|p| {
+            p.ssl_mode = ssl_mode;
+        })
     }
 
     #[test]
@@ -408,11 +406,10 @@ mod tests {
     fn from_params_explicit_mode_overrides_legacy() {
         let mut opts = BTreeMap::new();
         opts.insert("sslmode".into(), "disable".into());
-        let params = ConnectionParams {
-            ssl_mode: SslMode::Require,
-            options: opts,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::Require;
+            p.options = opts;
+        });
         // Explicit Require takes precedence over legacy option
         assert_eq!(
             InternalSslMode::from_params(&params).unwrap(),
@@ -431,11 +428,10 @@ mod tests {
 
     #[test]
     fn client_cert_key_missing_pair_errors() {
-        let params = ConnectionParams {
-            ssl_cert: Some("/tmp/cert.pem".into()),
-            ssl_key: None,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_cert = Some("/tmp/cert.pem".into());
+            p.ssl_key = None;
+        });
         let err = load_client_cert_key(&params).unwrap_err();
         assert!(err
             .to_string()
@@ -451,10 +447,9 @@ mod tests {
     #[test]
     fn prefer_uses_chain_verifier() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let params = ConnectionParams {
-            ssl_mode: SslMode::Prefer,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::Prefer;
+        });
         let mode = InternalSslMode::from_params(&params).unwrap();
         assert_eq!(mode, InternalSslMode::Prefer);
         // make_tls_connector for Prefer should build a verified config,
@@ -478,10 +473,9 @@ mod tests {
     #[test]
     fn require_uses_chain_verifier_no_hostname() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let params = ConnectionParams {
-            ssl_mode: SslMode::Require,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::Require;
+        });
         let mode = InternalSslMode::from_params(&params).unwrap();
         assert_eq!(mode, InternalSslMode::Require);
         let result = make_tls_connector(mode, &params);
@@ -500,11 +494,10 @@ mod tests {
     #[test]
     fn verify_ca_uses_chain_verifier_no_hostname() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let params = ConnectionParams {
-            ssl_mode: SslMode::VerifyCa,
-            ssl_root_cert: None,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::VerifyCa;
+            p.ssl_root_cert = None;
+        });
         let mode = InternalSslMode::from_params(&params).unwrap();
         assert_eq!(mode, InternalSslMode::VerifyCa);
     }
@@ -512,15 +505,13 @@ mod tests {
     /// M1: `VerifyCa` is distinct from `VerifyFull` (hostname check).
     #[test]
     fn verify_ca_not_same_as_verify_full() {
-        let ca_mode = InternalSslMode::from_params(&ConnectionParams {
-            ssl_mode: SslMode::VerifyCa,
-            ..Default::default()
-        })
+        let ca_mode = InternalSslMode::from_params(&ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::VerifyCa;
+        }))
         .unwrap();
-        let full_mode = InternalSslMode::from_params(&ConnectionParams {
-            ssl_mode: SslMode::VerifyFull,
-            ..Default::default()
-        })
+        let full_mode = InternalSslMode::from_params(&ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::VerifyFull;
+        }))
         .unwrap();
         assert_ne!(ca_mode, full_mode);
     }
@@ -546,12 +537,11 @@ mod tests {
             .and_then(|mut f| f.write_all(key_pem.as_bytes()))
             .expect("write key");
 
-        let params = ConnectionParams {
-            ssl_mode: SslMode::Require,
-            ssl_cert: Some(cert_path),
-            ssl_key: Some(key_path),
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.ssl_mode = SslMode::Require;
+            p.ssl_cert = Some(cert_path);
+            p.ssl_key = Some(key_path);
+        });
 
         // This tests the verify_ca_client_config path with client certs.
         let result = make_tls_connector(InternalSslMode::Require, &params);

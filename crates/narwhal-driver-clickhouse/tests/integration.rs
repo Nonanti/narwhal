@@ -19,13 +19,12 @@ fn config() -> ConnectionConfig {
         id: Uuid::nil(),
         name: "test".into(),
         driver: ClickhouseDriver::NAME.into(),
-        params: ConnectionParams {
-            host: Some("localhost".into()),
-            port: Some(8123),
-            username: Some("default".into()),
-            database: Some("default".into()),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.host = Some("localhost".into());
+            p.port = Some(8123);
+            p.username = Some("default".into());
+            p.database = Some("default".into());
+        }),
     }
 }
 

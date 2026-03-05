@@ -173,10 +173,9 @@ async fn open_pulls_password_from_credentials() {
             id,
             name: "local".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(db_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.to_string_lossy().into_owned());
+            }),
         }],
     };
 
@@ -263,10 +262,9 @@ async fn test_active_session_reports_real_verdict() {
             id,
             name: "local".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(db_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.to_string_lossy().into_owned());
+            }),
         }],
     };
     let registry = DriverRegistry::with_defaults();

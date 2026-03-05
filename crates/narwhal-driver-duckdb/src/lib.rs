@@ -1074,10 +1074,9 @@ mod tests {
             id: Uuid::nil(),
             name: "test".into(),
             driver: DuckdbDriver::NAME.into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }
     }
 

@@ -27,11 +27,10 @@ fn seed_sqlite(path: &std::path::Path) {
 /// Two named connections — `staging` and `prod` — both pointing at the
 /// same on-disk file (the workspace ACL is independent of the driver).
 fn two_connections(path: &std::path::Path) -> Vec<ConnectionConfig> {
-    let params = ConnectionParams {
-        path: Some(path.to_string_lossy().into()),
-        ssl_mode: SslMode::Disable,
-        ..ConnectionParams::default()
-    };
+    let params = ConnectionParams::with(|p| {
+        p.path = Some(path.to_string_lossy().into());
+        p.ssl_mode = SslMode::Disable;
+    });
     vec![
         ConnectionConfig {
             id: uuid::Uuid::new_v4(),

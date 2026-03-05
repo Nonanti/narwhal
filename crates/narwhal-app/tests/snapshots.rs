@@ -66,10 +66,9 @@ fn configured_state(db_path: PathBuf) -> ConnectionsFile {
             id: Uuid::nil(),
             name: "demo".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(db_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.to_string_lossy().into_owned());
+            }),
         }],
     }
 }

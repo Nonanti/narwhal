@@ -997,14 +997,13 @@ mod tests {
         let mut options = std::collections::BTreeMap::new();
         options.insert("application_name".into(), "narwhal".into());
         options.insert("connect_timeout".into(), "30".into());
-        let params = ConnectionParams {
-            host: Some("db.local".into()),
-            port: Some(6543),
-            database: Some("analytics".into()),
-            username: Some("reader".into()),
-            options,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.host = Some("db.local".into());
+            p.port = Some(6543);
+            p.database = Some("analytics".into());
+            p.username = Some("reader".into());
+            p.options = options;
+        });
         let cfg = config(params);
         let pg_cfg = build_pg_config(&cfg, Some("pass word")).unwrap();
         // The Config builder handles special characters safely —
@@ -1028,13 +1027,12 @@ mod tests {
     fn unknown_option_rejected() {
         let mut options = std::collections::BTreeMap::new();
         options.insert("evil_inject".into(), "value".into());
-        let params = ConnectionParams {
-            host: Some("db.local".into()),
-            database: Some("analytics".into()),
-            username: Some("reader".into()),
-            options,
-            ..Default::default()
-        };
+        let params = ConnectionParams::with(|p| {
+            p.host = Some("db.local".into());
+            p.database = Some("analytics".into());
+            p.username = Some("reader".into());
+            p.options = options;
+        });
         let cfg = config(params);
         let err = build_pg_config(&cfg, None).unwrap_err();
         assert!(err

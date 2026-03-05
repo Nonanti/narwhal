@@ -61,7 +61,13 @@ pub struct ConnectionConfig {
 ///
 /// Each driver decides which fields are required; unused fields remain
 /// `None`. Engine-specific tuning is expressed through [`Self::options`].
+///
+/// Marked `#[non_exhaustive]` so adding new optional fields
+/// (`color`, `confirm_writes`, `read_only`, future TLS knobs, …)
+/// is a non-breaking change. Construct with `..Default::default()`
+/// or via the public setter pattern.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ConnectionParams {
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -123,6 +129,29 @@ pub struct ConnectionParams {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 const fn is_false(b: &bool) -> bool {
     !*b
+}
+
+impl ConnectionParams {
+    /// Construct a [`ConnectionParams`] by mutating the default via
+    /// `f`. The canonical way to build a `ConnectionParams` from
+    /// outside the `narwhal-core` crate — the struct is marked
+    /// `#[non_exhaustive]` so struct-literal construction (including
+    /// functional update syntax `..Default::default()`) is forbidden.
+    ///
+    /// ```
+    /// use narwhal_core::ConnectionParams;
+    /// let p = ConnectionParams::with(|p| {
+    ///     p.host = Some("db.local".into());
+    ///     p.port = Some(5432);
+    /// });
+    /// assert_eq!(p.port, Some(5432));
+    /// ```
+    #[must_use]
+    pub fn with(f: impl FnOnce(&mut Self)) -> Self {
+        let mut p = Self::default();
+        f(&mut p);
+        p
+    }
 }
 
 /// One pre-connect command.

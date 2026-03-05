@@ -176,19 +176,18 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
             id: Uuid::new_v4(),
             name,
             driver: driver.to_owned(),
-            params: ConnectionParams {
-                host: Some(host),
-                port,
-                database: Some(database),
-                username,
-                options,
-                ssl_mode,
-                ssl_root_cert,
-                ssl_cert,
-                ssl_key,
-                ssh,
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.host = Some(host);
+                p.port = port;
+                p.database = Some(database);
+                p.username = username;
+                p.options = options;
+                p.ssl_mode = ssl_mode;
+                p.ssl_root_cert = ssl_root_cert;
+                p.ssl_cert = ssl_cert;
+                p.ssl_key = ssl_key;
+                p.ssh = ssh;
+            }),
         },
         password,
     })
@@ -238,10 +237,9 @@ fn parse_sqlite(rest: &str) -> ParsedUrl {
             id: Uuid::new_v4(),
             name: display,
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(path),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(path);
+            }),
         },
         password: None,
     }

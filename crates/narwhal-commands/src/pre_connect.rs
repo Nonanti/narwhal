@@ -244,10 +244,9 @@ mod tests {
     }
 
     fn params_with_host(host: &str) -> narwhal_core::ConnectionParams {
-        narwhal_core::ConnectionParams {
-            host: Some(host.into()),
-            ..Default::default()
-        }
+        narwhal_core::ConnectionParams::with(|p| {
+            p.host = Some(host.into());
+        })
     }
 
     #[tokio::test]

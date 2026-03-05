@@ -19,11 +19,10 @@ use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
 /// connection. `SQLite` needs no on-disk file when the path is `:memory:`,
 /// so each test stays hermetic and gets a fresh database.
 fn ctx_with_in_memory_sqlite() -> ServerContext {
-    let params = ConnectionParams {
-        path: Some(":memory:".into()),
-        ssl_mode: SslMode::Disable,
-        ..ConnectionParams::default()
-    };
+    let params = ConnectionParams::with(|p| {
+        p.path = Some(":memory:".into());
+        p.ssl_mode = SslMode::Disable;
+    });
     let config = ConnectionConfig {
         id: uuid::Uuid::new_v4(),
         name: "mem".into(),
@@ -309,11 +308,10 @@ async fn describe_schema_reads_real_sqlite_tables() {
         .expect("seed");
     }
 
-    let params = ConnectionParams {
-        path: Some(path.to_string_lossy().into()),
-        ssl_mode: SslMode::Disable,
-        ..ConnectionParams::default()
-    };
+    let params = ConnectionParams::with(|p| {
+        p.path = Some(path.to_string_lossy().into());
+        p.ssl_mode = SslMode::Disable;
+    });
     let config = ConnectionConfig {
         id: uuid::Uuid::new_v4(),
         name: "seeded".into(),

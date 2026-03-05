@@ -19,19 +19,17 @@ fn two_sqlite_fixtures(dir: &std::path::Path) -> (DriverRegistry, ConnectionsFil
         id: Uuid::new_v4(),
         name: "alpha".into(),
         driver: "sqlite".into(),
-        params: ConnectionParams {
-            path: Some(dir.join("a.db").to_string_lossy().into_owned()),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.path = Some(dir.join("a.db").to_string_lossy().into_owned());
+        }),
     };
     let b = ConnectionConfig {
         id: Uuid::new_v4(),
         name: "bravo".into(),
         driver: "sqlite".into(),
-        params: ConnectionParams {
-            path: Some(dir.join("b.db").to_string_lossy().into_owned()),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.path = Some(dir.join("b.db").to_string_lossy().into_owned());
+        }),
     };
     let ids = [a.id, b.id];
     let connections = ConnectionsFile {

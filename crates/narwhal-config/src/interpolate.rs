@@ -301,12 +301,11 @@ mod tests {
                 id: Uuid::nil(),
                 name: "prod".into(),
                 driver: "postgres".into(),
-                params: ConnectionParams {
-                    host: Some("${env:PGHOST}".into()),
-                    username: Some("${env:PGUSER:admin}".into()),
-                    database: Some("appdb".into()),
-                    ..Default::default()
-                },
+                params: ConnectionParams::with(|p| {
+                    p.host = Some("${env:PGHOST}".into());
+                    p.username = Some("${env:PGUSER:admin}".into());
+                    p.database = Some("appdb".into());
+                }),
             }],
         };
         let mut m = HashMap::new();

@@ -18,10 +18,9 @@ async fn test_connect() -> narwhal_core::Result<Box<dyn Connection>> {
         id: uuid::Uuid::nil(),
         name: "byte_test".into(),
         driver: DuckdbDriver::NAME.into(),
-        params: ConnectionParams {
-            path: Some(path.to_owned()),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.path = Some(path.to_owned());
+        }),
     };
     DuckdbDriver::new().connect(&config, None).await
 }

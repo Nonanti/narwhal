@@ -34,11 +34,10 @@ fn seed_sqlite(path: &std::path::Path) {
 }
 
 fn ctx_for(path: &std::path::Path) -> ServerContext {
-    let params = ConnectionParams {
-        path: Some(path.to_string_lossy().into()),
-        ssl_mode: SslMode::Disable,
-        ..ConnectionParams::default()
-    };
+    let params = ConnectionParams::with(|p| {
+        p.path = Some(path.to_string_lossy().into());
+        p.ssl_mode = SslMode::Disable;
+    });
     let config = ConnectionConfig {
         id: uuid::Uuid::new_v4(),
         name: "demo".into(),

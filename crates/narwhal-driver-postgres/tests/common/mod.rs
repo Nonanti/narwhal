@@ -34,12 +34,11 @@ fn parse_url(url: &str) -> narwhal_core::Result<ConnectionConfig> {
         id: uuid::Uuid::nil(),
         name: "byte_test".into(),
         driver: PostgresDriver::NAME.into(),
-        params: ConnectionParams {
-            host: Some(host.to_owned()),
-            port,
-            database: dbname.map(str::to_owned),
-            username: user_part.map(str::to_owned),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.host = Some(host.to_owned());
+            p.port = port;
+            p.database = dbname.map(str::to_owned);
+            p.username = user_part.map(str::to_owned);
+        }),
     })
 }

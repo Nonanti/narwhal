@@ -22,10 +22,9 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
             id: Uuid::nil(),
             name: "meta-test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(database_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(database_path.to_string_lossy().into_owned());
+            }),
         }],
     };
     (registry, connections)
@@ -143,10 +142,9 @@ async fn open_history_does_not_block_ui() {
             id: Uuid::nil(),
             name: "meta-test".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(":memory:".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(":memory:".into());
+            }),
         }],
     };
     let mut core = AppCore::new(registry, connections, Some(journal));
@@ -253,19 +251,17 @@ async fn refresh_schemas_drops_reply_when_session_changed() {
                 id: Uuid::new_v4(),
                 name: "conn-a".into(),
                 driver: "sqlite".into(),
-                params: ConnectionParams {
-                    path: Some(db_a.to_string_lossy().into_owned()),
-                    ..Default::default()
-                },
+                params: ConnectionParams::with(|p| {
+                    p.path = Some(db_a.to_string_lossy().into_owned());
+                }),
             },
             ConnectionConfig {
                 id: Uuid::new_v4(),
                 name: "conn-b".into(),
                 driver: "sqlite".into(),
-                params: ConnectionParams {
-                    path: Some(db_b.to_string_lossy().into_owned()),
-                    ..Default::default()
-                },
+                params: ConnectionParams::with(|p| {
+                    p.path = Some(db_b.to_string_lossy().into_owned());
+                }),
             },
         ],
     };

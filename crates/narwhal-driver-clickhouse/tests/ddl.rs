@@ -23,13 +23,12 @@ fn ch_config() -> Option<ConnectionConfig> {
         id: Uuid::nil(),
         name: "test".into(),
         driver: ClickhouseDriver::NAME.into(),
-        params: ConnectionParams {
-            host: Some(host),
-            port: Some(port),
-            database: Some(db),
-            username: Some(user),
-            ..Default::default()
-        },
+        params: ConnectionParams::with(|p| {
+            p.host = Some(host);
+            p.port = Some(port);
+            p.database = Some(db);
+            p.username = Some(user);
+        }),
     })
 }
 

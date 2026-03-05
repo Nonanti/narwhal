@@ -39,13 +39,12 @@ impl Harness {
             id: Uuid::nil(),
             name: "it".into(),
             driver: MysqlDriver::NAME.into(),
-            params: ConnectionParams {
-                host: Some("127.0.0.1".into()),
-                port: Some(port),
-                database: Some("test".into()),
-                username: Some("root".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.host = Some("127.0.0.1".into());
+                p.port = Some(port);
+                p.database = Some("test".into());
+                p.username = Some("root".into());
+            }),
         };
 
         // Wait briefly for the server to accept TCP connections.

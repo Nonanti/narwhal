@@ -57,10 +57,9 @@ async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
             id: Uuid::nil(),
             name: "p".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(db_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.to_string_lossy().into_owned());
+            }),
         }],
     };
     let creds: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());

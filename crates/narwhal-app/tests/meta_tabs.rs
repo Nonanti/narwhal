@@ -20,10 +20,9 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
             id: Uuid::nil(),
             name: "headless".into(),
             driver: "sqlite".into(),
-            params: ConnectionParams {
-                path: Some(database_path.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.path = Some(database_path.to_string_lossy().into_owned());
+            }),
         }],
     };
     (registry, connections)

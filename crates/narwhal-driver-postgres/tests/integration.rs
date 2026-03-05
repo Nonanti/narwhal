@@ -39,13 +39,12 @@ impl Harness {
             id: Uuid::nil(),
             name: "it".into(),
             driver: PostgresDriver::NAME.into(),
-            params: ConnectionParams {
-                host: Some("127.0.0.1".into()),
-                port: Some(port),
-                database: Some("postgres".into()),
-                username: Some("postgres".into()),
-                ..Default::default()
-            },
+            params: ConnectionParams::with(|p| {
+                p.host = Some("127.0.0.1".into());
+                p.port = Some(port);
+                p.database = Some("postgres".into());
+                p.username = Some("postgres".into());
+            }),
         };
 
         Self {
