@@ -155,7 +155,10 @@ pub enum Command {
     /// the active connection. Format: `:diff-schema a.tbl1 b.tbl2`.
     /// The result lands in a fresh editor tab so the user can review
     /// before executing.
-    DiffSchema { left: String, right: String },
+    DiffSchema {
+        left: String,
+        right: String,
+    },
     /// v1.3 #9: run the lint rule set over the active buffer and
     /// dump findings to a fresh tab. `:lint` reuses the active tab's
     /// content; no argument needed.
@@ -595,9 +598,7 @@ pub fn parse(input: &str) -> Command {
                     left: l.to_owned(),
                     right: r.to_owned(),
                 },
-                _ => Command::Unknown(
-                    "diff-schema: expected two qualified table names".into(),
-                ),
+                _ => Command::Unknown("diff-schema: expected two qualified table names".into()),
             }
         }
         "submit" | "commit-pending" => Command::Submit,
@@ -662,9 +663,9 @@ pub fn parse(input: &str) -> Command {
             } else {
                 match arg.parse::<usize>() {
                     Ok(n) if n >= 1 => Command::Sort(SortArg::Column(n)),
-                    _ => Command::Unknown(
-                        "sort: expected a 1-based column number or 'clear'".into(),
-                    ),
+                    _ => {
+                        Command::Unknown("sort: expected a 1-based column number or 'clear'".into())
+                    }
                 }
             }
         }

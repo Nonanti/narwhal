@@ -162,11 +162,11 @@ fn build_node(node: &Json) -> ExplainNode {
         .get("Index Name")
         .and_then(Json::as_str)
         .map(str::to_owned);
-    let filter = node
-        .get("Filter")
-        .and_then(Json::as_str)
-        .map(str::to_owned);
-    let startup_cost = node.get("Startup Cost").and_then(Json::as_f64).unwrap_or(0.0);
+    let filter = node.get("Filter").and_then(Json::as_str).map(str::to_owned);
+    let startup_cost = node
+        .get("Startup Cost")
+        .and_then(Json::as_f64)
+        .unwrap_or(0.0);
     let total_cost = node.get("Total Cost").and_then(Json::as_f64).unwrap_or(0.0);
     let plan_rows = node.get("Plan Rows").and_then(Json::as_f64).unwrap_or(0.0);
     let actual_rows = node.get("Actual Rows").and_then(Json::as_f64);

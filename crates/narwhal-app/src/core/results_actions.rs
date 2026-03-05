@@ -758,8 +758,7 @@ impl AppCore {
         match spec {
             None => {
                 rv.filter_prompt_open = true;
-                self.ui.status.message =
-                    "filter: type to filter, Enter accepts, Esc clears".into();
+                self.ui.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
             }
             Some(expr) if expr.is_empty() => {
                 rv.filter.clear();

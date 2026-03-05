@@ -81,8 +81,7 @@ fn check_select_star(sql: &str) -> Vec<LintFinding> {
             if first_non_ws.starts_with('*') {
                 out.push(LintFinding {
                     rule: "select-star",
-                    message: "SELECT * — prefer an explicit column list in shared queries"
-                        .into(),
+                    message: "SELECT * — prefer an explicit column list in shared queries".into(),
                     line: i + 1,
                     severity: LintSeverity::Info,
                 });

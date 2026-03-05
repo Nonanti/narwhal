@@ -28,10 +28,10 @@ pub mod sidebar;
 pub mod snippets;
 pub mod wizard;
 
+pub use confirm::{render_confirm_modal, ConfirmModalView};
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
 };
-pub use confirm::{render_confirm_modal, ConfirmModalView};
 pub use goto::{render_goto_modal, GotoModalView, GotoRowView};
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow, HistoryRowOutcome};

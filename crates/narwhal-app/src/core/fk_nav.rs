@@ -93,11 +93,12 @@ impl AppCore {
         };
         drop(conn);
 
-        let Some((fk, col_pos)) = schema_info
-            .foreign_keys
-            .iter()
-            .find_map(|fk| fk.columns.iter().position(|c| c == &column_name).map(|p| (fk, p)))
-        else {
+        let Some((fk, col_pos)) = schema_info.foreign_keys.iter().find_map(|fk| {
+            fk.columns
+                .iter()
+                .position(|c| c == &column_name)
+                .map(|p| (fk, p))
+        }) else {
             self.ui.status.message =
                 format!("fk: column '{column_name}' is not part of any foreign key");
             return;

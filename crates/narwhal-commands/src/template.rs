@@ -45,7 +45,10 @@ pub const BUILTINS: &[(&str, &str)] = &[
 /// practice) to keep the lookup O(n) without a normalisation pass.
 #[must_use]
 pub fn lookup(name: &str) -> Option<&'static str> {
-    BUILTINS.iter().find(|(n, _)| *n == name).map(|(_, body)| *body)
+    BUILTINS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, body)| *body)
 }
 
 /// List every built-in by name. Used by `:tpl` with no argument to

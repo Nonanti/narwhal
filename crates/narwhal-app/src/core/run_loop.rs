@@ -334,7 +334,11 @@ impl AppCore {
                 // v1.3 #11: apply a pre-set filter if `:history <pat>`
                 // queued one. Cleared regardless of whether matches
                 // exist so a subsequent open starts fresh.
-                let filter = self.session.pending_history_filter.take().unwrap_or_default();
+                let filter = self
+                    .session
+                    .pending_history_filter
+                    .take()
+                    .unwrap_or_default();
                 self.modals.history = Some(HistoryState {
                     entries,
                     filter: filter.clone(),

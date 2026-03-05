@@ -91,11 +91,11 @@ fn build_connector(stack: &[bool], is_root: bool, is_last: bool) -> String {
 /// budget on.
 fn mark_hot_path(node: &ExplainNode, hot: &mut std::collections::HashSet<*const ExplainNode>) {
     hot.insert(node as *const _);
-    if let Some(child) = node
-        .children
-        .iter()
-        .max_by(|a, b| a.total_cost.partial_cmp(&b.total_cost).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    if let Some(child) = node.children.iter().max_by(|a, b| {
+        a.total_cost
+            .partial_cmp(&b.total_cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) {
         mark_hot_path(child, hot);
     }
 }

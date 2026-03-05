@@ -20,8 +20,8 @@
 use narwhal_core::{Column, TableSchema};
 use narwhal_sql::Dialect;
 
-use crate::ddl::quote_qualified_public as quote_qualified;
 use crate::ddl::quote_ident_public as quote_ident;
+use crate::ddl::quote_qualified_public as quote_qualified;
 
 /// One change between two [`TableSchema`]s.
 #[derive(Debug, Clone)]
@@ -84,8 +84,11 @@ pub fn render_alter_statements(
     for change in diff_columns(before, after) {
         match change {
             ColumnChange::Added { column } => {
-                let mut line =
-                    format!("ALTER TABLE {table} ADD COLUMN {} {}", quote_ident(&column.name, dialect), column.data_type);
+                let mut line = format!(
+                    "ALTER TABLE {table} ADD COLUMN {} {}",
+                    quote_ident(&column.name, dialect),
+                    column.data_type
+                );
                 if !column.nullable {
                     line.push_str(" NOT NULL");
                 }
@@ -109,10 +112,9 @@ pub fn render_alter_statements(
                     // we emit the canonical syntax and let the user
                     // adjust if needed.
                     out.push(match dialect {
-                        Dialect::MySql => format!(
-                            "ALTER TABLE {table} MODIFY COLUMN {q} {};",
-                            to.data_type
-                        ),
+                        Dialect::MySql => {
+                            format!("ALTER TABLE {table} MODIFY COLUMN {q} {};", to.data_type)
+                        }
                         _ => format!(
                             "ALTER TABLE {table} ALTER COLUMN {q} TYPE {};",
                             to.data_type
@@ -120,7 +122,11 @@ pub fn render_alter_statements(
                     });
                 }
                 if from.nullable != to.nullable {
-                    let verb = if to.nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
+                    let verb = if to.nullable {
+                        "DROP NOT NULL"
+                    } else {
+                        "SET NOT NULL"
+                    };
                     out.push(match dialect {
                         Dialect::MySql => format!(
                             "ALTER TABLE {table} MODIFY COLUMN {q} {} {};",
@@ -150,9 +156,7 @@ pub fn render_alter_statements(
 }
 
 fn columns_equivalent(a: &Column, b: &Column) -> bool {
-    a.data_type == b.data_type
-        && a.nullable == b.nullable
-        && a.default == b.default
+    a.data_type == b.data_type && a.nullable == b.nullable && a.default == b.default
 }
 
 #[cfg(test)]
@@ -192,7 +196,11 @@ mod tests {
             col("created_at", "TIMESTAMP", true),
         ]);
         let changes = diff_columns(&before, &after);
-        assert_eq!(changes.len(), 3, "id modified, created_at added, name dropped");
+        assert_eq!(
+            changes.len(),
+            3,
+            "id modified, created_at added, name dropped"
+        );
         assert!(changes
             .iter()
             .any(|c| matches!(c, ColumnChange::Modified { name, .. } if name == "id")));
@@ -237,4 +245,3 @@ mod tests {
         assert!(stmts[0].contains("DEFAULT now()"));
     }
 }
-

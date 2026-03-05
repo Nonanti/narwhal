@@ -4,8 +4,8 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
-    render_confirm_modal, render_goto_modal, render_help_modal, render_history_modal,
-    render_root, render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
+    render_confirm_modal, render_goto_modal, render_help_modal, render_history_modal, render_root,
+    render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
     CompletionPopupView, ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView,
     HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout, RowDetailView,
     SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,

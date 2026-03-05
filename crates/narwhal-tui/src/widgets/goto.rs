@@ -61,7 +61,9 @@ pub fn render_goto_modal(
         .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
             title,
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -92,7 +94,9 @@ pub fn render_goto_modal(
     let prompt = Line::from(vec![
         Span::styled(
             " > ",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(view.query, Style::default().fg(theme.foreground)),
         Span::styled("\u{2588}", Style::default().fg(theme.accent)),

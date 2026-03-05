@@ -55,11 +55,7 @@ impl ConfirmModal {
     /// Build the default "writes on `<conn>`" modal. Hard-codes
     /// `YES` as the accept token; localising is a v2 concern.
     #[must_use]
-    pub fn write_confirm(
-        connection_name: &str,
-        sample_sql: &str,
-        action: PendingConfirm,
-    ) -> Self {
+    pub fn write_confirm(connection_name: &str, sample_sql: &str, action: PendingConfirm) -> Self {
         // Show a one-line preview of the first statement so the
         // user can sanity-check what they're about to authorise.
         let preview = sample_sql.lines().next().map_or("", str::trim);
@@ -188,7 +184,10 @@ mod tests {
                 stream: false,
             },
         );
-        assert!(m.prompt.contains('\u{2026}'), "long line truncated with \u{2026}");
+        assert!(
+            m.prompt.contains('\u{2026}'),
+            "long line truncated with \u{2026}"
+        );
     }
 
     #[test]

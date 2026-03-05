@@ -31,7 +31,12 @@ pub struct ConfirmModalView<'a> {
 /// Render the confirm overlay centred on `area`. Caller is
 /// responsible for opening / closing the modal in state; this
 /// function only draws.
-pub fn render_confirm_modal(frame: &mut Frame<'_>, area: Rect, view: &ConfirmModalView<'_>, theme: &Theme) {
+pub fn render_confirm_modal(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view: &ConfirmModalView<'_>,
+    theme: &Theme,
+) {
     let width = (area.width * 7 / 10).clamp(40, 90);
     let height: u16 = 12;
     if area.width < 30 || area.height < height {

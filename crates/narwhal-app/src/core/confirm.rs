@@ -39,8 +39,7 @@ impl AppCore {
                 self.resume_confirmed(action).await;
             } else {
                 let want = modal.accept_keyword.clone();
-                self.ui.status.message =
-                    format!("type {want} exactly, or Esc to cancel");
+                self.ui.status.message = format!("type {want} exactly, or Esc to cancel");
             }
             return;
         }
@@ -65,8 +64,7 @@ impl AppCore {
         // than Shift are ignored so a stray Alt-Y or Ctrl-Y doesn't
         // count toward the accept keyword.
         if let CtKey::Char(c) = key.code {
-            let only_shift = key.modifiers.is_empty()
-                || key.modifiers == KeyModifiers::SHIFT;
+            let only_shift = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
             if only_shift {
                 if let Some(modal) = self.modals.confirm.as_mut() {
                     modal.buffer.push(c);

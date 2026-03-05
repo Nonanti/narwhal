@@ -25,8 +25,10 @@ impl AppCore {
                 self.ui.status.message = format!("tpl: inserted '{name}'");
             }
             None => {
-                self.ui.status.message =
-                    format!("tpl: unknown '{name}'. Try one of: {}", template::list().join(", "));
+                self.ui.status.message = format!(
+                    "tpl: unknown '{name}'. Try one of: {}",
+                    template::list().join(", ")
+                );
             }
         }
     }

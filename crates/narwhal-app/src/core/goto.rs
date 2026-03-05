@@ -28,17 +28,20 @@ impl AppCore {
         let mut corpus: Vec<GotoEntry> = Vec::new();
         for (schema, tables) in &session.schemas {
             for tbl in tables {
-                corpus.push(GotoEntry::new(&conn_name, &schema.name, &tbl.name, tbl.kind));
+                corpus.push(GotoEntry::new(
+                    &conn_name,
+                    &schema.name,
+                    &tbl.name,
+                    tbl.kind,
+                ));
             }
         }
         if corpus.is_empty() {
-            self.ui.status.message =
-                "goto: no schemas loaded yet (try :refresh first)".into();
+            self.ui.status.message = "goto: no schemas loaded yet (try :refresh first)".into();
             return;
         }
         self.modals.goto = Some(GotoModal::new(corpus));
-        self.ui.status.message =
-            "goto: type to filter, Enter inserts, Esc cancels".into();
+        self.ui.status.message = "goto: type to filter, Enter inserts, Esc cancels".into();
     }
 
     /// Handle a key while the goto modal owns the foreground.

@@ -278,8 +278,7 @@ impl AppCore {
         if session.config.params.read_only {
             for sql in &statements {
                 if let Err(reason) = guard_read_only(sql) {
-                    self.ui.status.message =
-                        format!("read-only connection rejected: {reason}");
+                    self.ui.status.message = format!("read-only connection rejected: {reason}");
                     return;
                 }
             }
@@ -292,7 +291,9 @@ impl AppCore {
         // so a confirm resumes exactly the same call.
         if !bypass_confirm
             && session.config.params.confirm_writes
-            && statements.iter().any(|s| classify_statement(s).is_mutating())
+            && statements
+                .iter()
+                .any(|s| classify_statement(s).is_mutating())
         {
             let first = statements
                 .iter()
