@@ -113,20 +113,24 @@ impl GotoModal {
         }
 
         let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
+        // C1: Use `Utf32Str::new` so non-ASCII identifiers (e.g.
+        // "ürünler" tables) are accepted. The previous
+        // `Utf32Str::Ascii(.as_bytes())` shortcut interpreted UTF-8
+        // bytes as ASCII code units, which scored wrong at best and
+        // crashed inside nucleo's char iterator at worst. The buffer
+        // is allocated per-iteration; `Utf32Str::new` re-uses the
+        // ASCII fast path when the haystack is in fact ASCII.
         let mut scored: Vec<GotoMatch> = self
             .corpus
             .iter()
             .enumerate()
             .filter_map(|(i, e)| {
-                pattern
-                    .score(
-                        nucleo_matcher::Utf32Str::Ascii(e.qualified.as_bytes()),
-                        matcher,
-                    )
-                    .map(|s| GotoMatch {
-                        entry_idx: i,
-                        score: s,
-                    })
+                let mut buf = Vec::new();
+                let haystack = nucleo_matcher::Utf32Str::new(&e.qualified, &mut buf);
+                pattern.score(haystack, matcher).map(|s| GotoMatch {
+                    entry_idx: i,
+                    score: s,
+                })
             })
             .collect();
         scored.sort_unstable_by_key(|m| std::cmp::Reverse(m.score));
@@ -181,6 +185,23 @@ mod tests {
         modal.rerank(&mut matcher);
         let top = modal.current_entry().expect("at least one match");
         assert!(top.table.contains("user"));
+    }
+
+    #[test]
+    fn fuzzy_handles_non_ascii_identifiers() {
+        // C1 regression: previously panicked on the Unicode codepoint
+        // when fed UTF-8 bytes via Utf32Str::Ascii.
+        let mut matcher = nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT);
+        let corpus = vec![
+            GotoEntry::new("prod", "public", "ürünler", TableKind::Table),
+            GotoEntry::new("prod", "public", "使用者", TableKind::Table),
+            GotoEntry::new("prod", "public", "orders", TableKind::Table),
+        ];
+        let mut modal = GotoModal::new(corpus);
+        modal.query = "ür".into();
+        modal.rerank(&mut matcher);
+        let top = modal.current_entry().expect("at least one match");
+        assert_eq!(top.table, "ürünler");
     }
 
     #[test]
