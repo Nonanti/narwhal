@@ -5,11 +5,32 @@
 //! editor tab when there are any. The buffer is read in full so the
 //! cross-statement rules (cartesian, etc.) see the entire context.
 
+use narwhal_commands::template;
 use narwhal_sql::{lint, LintSeverity};
 
 use super::AppCore;
 
 impl AppCore {
+    /// v1.3 #10: `:tpl <name>` insertion.
+    pub(super) async fn insert_template_command(&mut self, name: Option<String>) {
+        let Some(name) = name else {
+            self.ui.status.message =
+                format!("tpl: known templates: {}", template::list().join(", "));
+            return;
+        };
+        match template::lookup(&name) {
+            Some(body) => {
+                let tab = &mut self.ui.tabs[self.ui.active_tab];
+                tab.editor.insert_str(body);
+                self.ui.status.message = format!("tpl: inserted '{name}'");
+            }
+            None => {
+                self.ui.status.message =
+                    format!("tpl: unknown '{name}'. Try one of: {}", template::list().join(", "));
+            }
+        }
+    }
+
     pub(super) async fn lint_buffer_command(&mut self) {
         let body = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         if body.trim().is_empty() {

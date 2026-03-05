@@ -331,13 +331,20 @@ impl AppCore {
                     self.ui.status.message = "no history entries".into();
                     return;
                 }
+                // v1.3 #11: apply a pre-set filter if `:history <pat>`
+                // queued one. Cleared regardless of whether matches
+                // exist so a subsequent open starts fresh.
+                let filter = self.session.pending_history_filter.take().unwrap_or_default();
                 self.modals.history = Some(HistoryState {
                     entries,
-                    filter: String::new(),
+                    filter: filter.clone(),
                     selected: 0,
                 });
-                self.ui.status.message =
-                    "history: type to filter · Enter insert · Shift-Enter run · Esc close".into();
+                self.ui.status.message = if filter.is_empty() {
+                    "history: type to filter · Enter insert · Shift-Enter run · Esc close".into()
+                } else {
+                    format!("history: filter '{filter}' · Enter insert · Esc close")
+                };
             }
             MetaUpdate::MetaFailed { message } => {
                 self.ui.status.message = message;

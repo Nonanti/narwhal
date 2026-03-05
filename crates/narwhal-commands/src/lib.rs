@@ -26,4 +26,5 @@ pub mod schema_diff;
 pub mod session;
 pub mod snippets;
 pub mod statements;
+pub mod template;
 pub mod wizard;
