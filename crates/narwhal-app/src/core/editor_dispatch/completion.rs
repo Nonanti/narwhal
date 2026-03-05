@@ -54,6 +54,7 @@ impl AppCore {
     /// `IntelliJ` / `DataGrip` / VS Code so the muscle memory transfers:
     /// - Tab / Enter: accept the selected completion
     /// - ↑ / ↓: move the highlight
+    /// - Ctrl-N / Ctrl-P: vim-style next / previous (M1)
     /// - Shift-Tab: previous highlight (kept for keyboards without
     ///   arrow access in vim-aware terminal multiplexers)
     /// - Esc: dismiss the popup; the editor stays in insert mode and
@@ -62,6 +63,9 @@ impl AppCore {
         let Some(state) = self.ui.tabs[self.ui.active_tab].completion.as_mut() else {
             return false;
         };
+        let ctrl = key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL);
         match key.code {
             CtKey::Esc => {
                 self.ui.tabs[self.ui.active_tab].completion = None;
@@ -84,6 +88,19 @@ impl AppCore {
             }
             CtKey::Down => {
                 state.selected = (state.selected + 1) % state.items.len();
+                true
+            }
+            // M1: Ctrl-N / Ctrl-P mirror Down / Up. Vim and most
+            // IDE-style completion menus bind these, and the global
+            // Ctrl-N handler in editor_dispatch::mod.rs defers to us
+            // while the popup is open so the keystroke reaches here.
+            CtKey::Char('n') if ctrl => {
+                state.selected = (state.selected + 1) % state.items.len();
+                true
+            }
+            CtKey::Char('p') if ctrl => {
+                let len = state.items.len();
+                state.selected = (state.selected + len - 1) % len;
                 true
             }
             // Any other key dismisses the popup and falls through to the
