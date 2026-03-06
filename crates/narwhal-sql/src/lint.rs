@@ -47,7 +47,11 @@ pub fn lint(sql: &str) -> Vec<LintFinding> {
     let stripped = strip_comments(sql);
     let mut out = Vec::new();
     out.extend(check_select_star(sql));
-    out.extend(check_destructive_no_where(&stripped));
+    // M2: `check_destructive_no_where` walks the splitter on the
+    // ORIGINAL source so byte offsets line up with the user's view
+    // of the file; it does its own comment skipping by way of the
+    // splitter's state machine.
+    out.extend(check_destructive_no_where(sql));
     out.extend(check_cartesian_join(&stripped));
     out.sort_by_key(|f| f.line);
     out
@@ -93,18 +97,31 @@ fn check_select_star(sql: &str) -> Vec<LintFinding> {
 
 /// Rule `destructive-no-where`. `UPDATE` / `DELETE` / `TRUNCATE`
 /// without a `WHERE` clause runs against every row.
+///
+/// M2: uses [`crate::splitter::split`] instead of a naive `;` split
+/// so a string literal containing `;` (`UPDATE x SET name='a;b'`)
+/// doesn't get fragmented and trick the heuristic into firing on the
+/// wrong half. The splitter also understands PG dollar-quoting,
+/// `MySQL` backticks and `--` / `/* */` comments.
 fn check_destructive_no_where(sql: &str) -> Vec<LintFinding> {
     let mut out = Vec::new();
-    let upper = sql.to_ascii_uppercase();
-    let mut offset = 0;
-    for stmt in upper.split(';') {
-        let trimmed = stmt.trim_start();
+    for stmt in crate::splitter::split(sql) {
+        let upper = stmt.text.to_ascii_uppercase();
+        let trimmed = upper.trim_start();
         let starts_destructive = trimmed.starts_with("UPDATE ")
             || trimmed.starts_with("DELETE ")
             || trimmed.starts_with("DELETE FROM");
         let starts_truncate = trimmed.starts_with("TRUNCATE");
+        if !starts_destructive && !starts_truncate {
+            continue;
+        }
+        // Line number from the statement's offset in the original
+        // source. `Statement::start` is a byte offset that the
+        // splitter guarantees lands on the first non-whitespace
+        // byte of the statement, so counting newlines up to it is
+        // accurate even across `;`-separated multi-line scripts.
+        let line = sql[..stmt.start].matches('\n').count() + 1;
         if starts_destructive && !has_word(trimmed, "WHERE") {
-            let line = upper[..offset].matches('\n').count() + 1;
             out.push(LintFinding {
                 rule: "destructive-no-where",
                 message: "UPDATE/DELETE without WHERE — will affect every row".into(),
@@ -113,7 +130,6 @@ fn check_destructive_no_where(sql: &str) -> Vec<LintFinding> {
             });
         }
         if starts_truncate {
-            let line = upper[..offset].matches('\n').count() + 1;
             out.push(LintFinding {
                 rule: "truncate",
                 message: "TRUNCATE drops all rows and bypasses triggers".into(),
@@ -121,7 +137,6 @@ fn check_destructive_no_where(sql: &str) -> Vec<LintFinding> {
                 severity: LintSeverity::Warning,
             });
         }
-        offset += stmt.len() + 1;
     }
     out
 }
@@ -282,5 +297,33 @@ mod tests {
     fn comments_are_stripped() {
         let r = lint("-- DELETE FROM users -- not real\nSELECT 1");
         assert!(!rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn semicolon_inside_string_literal_does_not_split_statement() {
+        // M2 regression: a naive `;` split would have produced two
+        // chunks here. The second — " UPDATE" — starts with the
+        // word UPDATE and has no WHERE, so the linter used to fire a
+        // false-positive destructive-no-where warning. The splitter
+        // knows the `;` is inside a single-quoted literal and keeps
+        // the statement whole, so the WHERE-suffixed UPDATE no
+        // longer trips the rule.
+        let sql = "UPDATE users SET note = 'a;b; UPDATE c' WHERE id = 1";
+        let r = lint(sql);
+        assert!(
+            !rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn destructive_in_second_statement_still_caught() {
+        let sql = "SELECT 1;\nDELETE FROM users";
+        let r = lint(sql);
+        assert!(rules(&r).contains(&"destructive-no-where"));
+        // Line number should point at the DELETE, not the SELECT.
+        let finding = r.iter().find(|f| f.rule == "destructive-no-where").unwrap();
+        assert_eq!(finding.line, 2);
     }
 }
