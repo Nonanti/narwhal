@@ -12,6 +12,8 @@
 //! convention. If a future feature needs cross-modal state, add it
 //! here rather than scattering it back into `AppCore`.
 
+use narwhal_core::Value;
+
 use super::{GotoModal, HistoryState, SnippetsModal};
 use crate::wizard::ConnectionWizard;
 
@@ -29,6 +31,14 @@ pub enum PendingConfirm {
     /// run can proceed verbatim once confirmed.
     RunMutatingBatch {
         statements: Vec<String>,
+        /// CR-1: per-statement bound parameters. Empty when the batch
+        /// came from the interactive editor path (non-parametric);
+        /// non-empty when the batch was queued via
+        /// `dispatch_batch_with_params` (foreign-key navigation,
+        /// programmatic templating, …). If we dropped this on the
+        /// floor and resumed via the non-parametric path, the driver
+        /// would see placeholders (`$1`, `?`) with no bindings.
+        params_per_statement: Vec<Vec<Value>>,
         /// `true` if the user originally invoked stream-mode
         /// (F7 / `:stream`), `false` for execute-mode (F5/F6 /
         /// `:run`). Carried as a bool so this module stays free of
@@ -154,6 +164,7 @@ mod tests {
             "DELETE FROM users",
             PendingConfirm::RunMutatingBatch {
                 statements: vec!["DELETE FROM users".into()],
+                params_per_statement: Vec::new(),
                 stream: false,
             },
         );
@@ -181,6 +192,7 @@ mod tests {
             &long,
             PendingConfirm::RunMutatingBatch {
                 statements: vec![long.clone()],
+                params_per_statement: Vec::new(),
                 stream: false,
             },
         );
@@ -191,6 +203,27 @@ mod tests {
     }
 
     #[test]
+    fn pending_confirm_preserves_bound_parameters() {
+        // CR-1 regression: dropping `params_per_statement` on the way
+        // through the modal would mean a resumed FK navigation (or
+        // any other parametric batch routed through dispatch_batch_
+        // with_params) reached the driver without bindings.
+        let action = PendingConfirm::RunMutatingBatch {
+            statements: vec!["UPDATE u SET x = $1 WHERE id = $2".into()],
+            params_per_statement: vec![vec![Value::Int(7), Value::Int(42)]],
+            stream: false,
+        };
+        let PendingConfirm::RunMutatingBatch {
+            params_per_statement,
+            ..
+        } = action;
+        assert_eq!(params_per_statement.len(), 1);
+        assert_eq!(params_per_statement[0].len(), 2);
+        assert!(matches!(params_per_statement[0][0], Value::Int(7)));
+        assert!(matches!(params_per_statement[0][1], Value::Int(42)));
+    }
+
+    #[test]
     fn close_all_clears_confirm() {
         let mut modals = ModalState {
             confirm: Some(ConfirmModal::write_confirm(
@@ -198,6 +231,7 @@ mod tests {
                 "DELETE FROM t",
                 PendingConfirm::RunMutatingBatch {
                     statements: vec!["DELETE FROM t".into()],
+                    params_per_statement: Vec::new(),
                     stream: false,
                 },
             )),
