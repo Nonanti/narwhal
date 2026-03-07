@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-brightgreen)](./CHANGELOG.md)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
 
-> A TUI database client with a built-in MCP server. Five databases, vim editing, Lua plugins.
+> Multi-driver TUI database client with a built-in MCP server.
+> Postgres / MySQL / SQLite / DuckDB / ClickHouse, vim editing, Lua plugins.
 
 ![narwhal demo](./docs/img/demo.gif)
 
@@ -85,9 +86,9 @@ now; a prebuilt `x86_64-apple-darwin` tarball is on the roadmap once
 the macos-13 runner backlog clears.
 
 ```sh
-curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-1.0.0-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf narwhal-1.0.0-*.tar.gz
-mv narwhal-1.0.0-*/narwhal ~/.local/bin/
+curl -LO https://github.com/Nonanti/narwhal/releases/latest/download/narwhal-1.1.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf narwhal-1.1.0-*.tar.gz
+mv narwhal-1.1.0-*/narwhal ~/.local/bin/
 ```
 
 ### Build from source

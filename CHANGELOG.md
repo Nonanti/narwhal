@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-29
+
+### Added
+
+- **Connection safety (v1.1 #2)**: optional `color`, `confirm_writes`
+  and `read_only` fields on `[[connection]]`. The active connection's
+  name is tinted in the status bar; writes to confirm-marked
+  connections require typing `YES`; read-only connections reject
+  non-SELECT batches at the syntactic guard and via
+  `set_read_only(true)` on the driver session.
+- **`:goto` fuzzy navigator (v1.1 #1)**: Ctrl-N / `:goto` / `:g` opens
+  a Helix-style fuzzy matcher over every schema / table / view across
+  all open sessions. Now correctly handles non-ASCII identifiers
+  (Turkish, Cyrillic, CJK).
+- **Explain tree visualiser (v1.1 #3)**: cost bars and hot-path
+  colouring for `EXPLAIN` output.
+- **`:submit` / `:revert` (v1.2 #5)**: command aliases to flush or
+  discard the pending-mutation queue.
+- **Foreign-key navigation (v1.2 #6)**: `f` (or `gd`) in the results
+  pane on a foreign-key cell opens a new SELECT scoped to the
+  referenced row. Identifiers are dialect-quoted and the cell value
+  is bound as a query parameter — no string interpolation.
+- **Result palette filters (v1.2 #7)**: `:filter <expr|clear>` and
+  `:sort <N|clear>` expose the in-memory filter/sort layer through
+  the command palette.
+- **Schema diff migration generator (v1.2 #8)**: `:diff <a> <b>`
+  compares two connections and emits ALTER TABLE statements.
+- **SQL linter (v1.3 #9)**: `:lint` flags SELECT *, UPDATE/DELETE
+  without WHERE, TRUNCATE, and FROM-comma Cartesian joins. The
+  destructive-no-where rule now goes through the statement splitter,
+  so a `;` inside a string literal no longer fragments the source
+  into a false-positive UPDATE.
+- **Templates and history search (v1.3 #10–12)**: `:tpl` inserts
+  built-in templates (sel / ins / upd / del / join / with);
+  `:history [pattern]` opens a pre-filtered Ctrl-R modal.
+- `ConnectionParams::with(|p| { ... })` builder helper so callers
+  outside `narwhal-core` can construct the struct without struct
+  literal syntax (it is now `#[non_exhaustive]`).
+
+### Changed
+
+- `ConnectionParams` is marked `#[non_exhaustive]`. Future field
+  additions stay non-breaking. Migrating: replace `ConnectionParams
+  { ..Default::default() }` with `ConnectionParams::with(|p| { ... })`.
+- `RunRequest` now carries a `params_per_statement` vector and
+  exposes `RunRequest::new` / `RunRequest::with_params` so internal
+  callers (foreign-key nav, future programmatic dispatch) can route
+  bound parameters end-to-end through `spawn_run`.
+- Cargo description: "Multi-driver TUI database client with a
+  built-in MCP server." (Was a tongue-in-cheek DataGrip comparison
+  that oversold the v1.0 surface.)
+
+### Fixed
+
+- **C1**: Goto fuzzy navigator no longer panics on non-ASCII table
+  names. The previous `Utf32Str::Ascii(s.as_bytes())` shortcut
+  interpreted UTF-8 bytes as ASCII code units.
+- **C2**: Foreign-key navigation is no longer vulnerable to SQL
+  injection through the cell value or through unusual identifier
+  characters. Identifiers are dialect-quoted; the value is bound as
+  a query parameter.
+- **M1**: Ctrl-N inside an open completion popup advances the popup
+  (mirroring vim / IDE convention) instead of stealing focus to the
+  `:goto` modal. Ctrl-P added as the inverse.
+- **M2**: The lint rule for destructive-without-WHERE no longer
+  splits the source on every `;`. Statements containing literal
+  semicolons in string literals are kept whole, eliminating false
+  positives and missed cases.
+
+## [1.0.0]
+
 ### Added
 
 - `SECURITY.md` with private disclosure policy, scope, and hardening
