@@ -37,22 +37,37 @@ pub struct LintFinding {
     pub severity: LintSeverity,
 }
 
-/// Run every lint rule against `sql` and return the findings in
-/// source order. Comments are stripped before destructive checks so
-/// a `-- DELETE FROM users` doesn't trip the rule; the `select-star`
-/// rule looks at the original source so its `-- lint:allow …`
-/// pragma still works.
+/// Run every lint rule against `sql` with the conservative default
+/// dialect ([`crate::splitter::Dialect::Generic`]). Comments are
+/// stripped before destructive checks so a `-- DELETE FROM users`
+/// doesn't trip the rule; the `select-star` rule looks at the
+/// original source so its `-- lint:allow …` pragma still works.
+///
+/// Most call sites should prefer [`lint_with_dialect`] so PG
+/// dollar-quoted strings and `MySQL` backtick identifiers aren't
+/// mis-parsed. `lint` exists for back-compat callers that don't
+/// know their dialect.
 #[must_use]
 pub fn lint(sql: &str) -> Vec<LintFinding> {
-    let stripped = strip_comments(sql);
+    lint_with_dialect(sql, crate::splitter::Dialect::Generic)
+}
+
+/// Dialect-aware lint pass. The dialect is threaded into the
+/// statement splitter so `MySQL` backtick identifiers, `PostgreSQL`
+/// dollar-quoted strings and engine-specific string literal
+/// conventions don't fragment statements at false boundaries.
+///
+/// M-4 / M-5: both [`check_destructive_no_where`] and
+/// [`check_cartesian_join`] now share the splitter and operate on the
+/// original source so byte offsets line up with the user's view of
+/// the file. `check_select_star` keeps its line-by-line scan because
+/// the `-- lint:allow select-star` pragma has to remain visible.
+#[must_use]
+pub fn lint_with_dialect(sql: &str, dialect: crate::splitter::Dialect) -> Vec<LintFinding> {
     let mut out = Vec::new();
     out.extend(check_select_star(sql));
-    // M2: `check_destructive_no_where` walks the splitter on the
-    // ORIGINAL source so byte offsets line up with the user's view
-    // of the file; it does its own comment skipping by way of the
-    // splitter's state machine.
-    out.extend(check_destructive_no_where(sql));
-    out.extend(check_cartesian_join(&stripped));
+    out.extend(check_destructive_no_where(sql, dialect));
+    out.extend(check_cartesian_join(sql, dialect));
     out.sort_by_key(|f| f.line);
     out
 }
@@ -98,14 +113,17 @@ fn check_select_star(sql: &str) -> Vec<LintFinding> {
 /// Rule `destructive-no-where`. `UPDATE` / `DELETE` / `TRUNCATE`
 /// without a `WHERE` clause runs against every row.
 ///
-/// M2: uses [`crate::splitter::split`] instead of a naive `;` split
-/// so a string literal containing `;` (`UPDATE x SET name='a;b'`)
-/// doesn't get fragmented and trick the heuristic into firing on the
-/// wrong half. The splitter also understands PG dollar-quoting,
-/// `MySQL` backticks and `--` / `/* */` comments.
-fn check_destructive_no_where(sql: &str) -> Vec<LintFinding> {
+/// M-2 / M-4: uses [`crate::splitter::split_with`] instead of a
+/// naive `;` split so a string literal containing `;`
+/// (`UPDATE x SET name='a;b'`) doesn't get fragmented and trick the
+/// heuristic. The caller-supplied dialect lets the splitter
+/// recognise `PostgreSQL` dollar-quoting and `MySQL` backtick
+/// identifiers; under [`crate::splitter::Dialect::Generic`] only
+/// standard SQL single-quoted strings and `--` / `/* */` comments
+/// are tracked.
+fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> Vec<LintFinding> {
     let mut out = Vec::new();
-    for stmt in crate::splitter::split(sql) {
+    for stmt in crate::splitter::split_with(sql, dialect) {
         let upper = stmt.text.to_ascii_uppercase();
         let trimmed = upper.trim_start();
         let starts_destructive = trimmed.starts_with("UPDATE ")
@@ -141,64 +159,53 @@ fn check_destructive_no_where(sql: &str) -> Vec<LintFinding> {
     out
 }
 
-/// Rule `cartesian-join`. `FROM a, b` with no joining `WHERE` is
-/// almost always a bug.
-fn check_cartesian_join(sql: &str) -> Vec<LintFinding> {
+/// Rule `cartesian-join`. `FROM a, b` with no joining `WHERE` /
+/// JOIN clause is almost always a bug.
+///
+/// M-5: walks the dialect-aware splitter just like
+/// [`check_destructive_no_where`] and reports findings per
+/// statement. The earlier implementation operated on a
+/// comment-stripped copy of the entire script and consequently
+/// (a) missed Cartesian joins in any non-first statement and
+/// (b) reported the wrong line in multi-statement scripts.
+fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<LintFinding> {
     let mut out = Vec::new();
-    let upper = sql.to_ascii_uppercase();
-    let Some(from_pos) = upper.find("FROM ") else {
-        return out;
-    };
-    let after_from = &upper[from_pos + 5..];
-    let end = after_from
-        .find(" WHERE ")
-        .or_else(|| after_from.find(" GROUP "))
-        .or_else(|| after_from.find(" ORDER "))
-        .or_else(|| after_from.find(" LIMIT "))
-        .unwrap_or(after_from.len());
-    let clause = &after_from[..end];
-    let has_where = after_from.contains(" WHERE ");
-    let has_join = clause.contains(" JOIN ");
-    if !has_where && !has_join && clause.contains(',') {
-        let line = upper[..from_pos].matches('\n').count() + 1;
-        out.push(LintFinding {
-            rule: "cartesian-join",
-            message: "FROM a, b without a JOIN condition — likely a Cartesian product".into(),
-            line,
-            severity: LintSeverity::Warning,
-        });
-    }
-    out
-}
-
-/// Strip `--` line and `/* … */` block comments. Preserves newlines
-/// inside line comments so line numbers stay accurate.
-fn strip_comments(sql: &str) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let mut chars = sql.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '-' && chars.peek() == Some(&'-') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next == '\n' {
-                    out.push('\n');
-                    break;
-                }
-            }
-        } else if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            let mut prev = ' ';
-            for next in chars.by_ref() {
-                if prev == '*' && next == '/' {
-                    break;
-                }
-                if next == '\n' {
-                    out.push('\n');
-                }
-                prev = next;
-            }
-        } else {
-            out.push(c);
+    for stmt in crate::splitter::split_with(sql, dialect) {
+        // The cartesian check only makes sense on a SELECT. A
+        // leading TRUNCATE/UPDATE/DELETE never fires this rule, so
+        // skip early to keep the false-positive rate low.
+        let upper = stmt.text.to_ascii_uppercase();
+        let trimmed = upper.trim_start();
+        if !trimmed.starts_with("SELECT ") && !trimmed.starts_with("WITH ") {
+            continue;
+        }
+        let Some(from_pos) = upper.find("FROM ") else {
+            continue;
+        };
+        let after_from = &upper[from_pos + 5..];
+        let end = after_from
+            .find(" WHERE ")
+            .or_else(|| after_from.find(" GROUP "))
+            .or_else(|| after_from.find(" ORDER "))
+            .or_else(|| after_from.find(" LIMIT "))
+            .unwrap_or(after_from.len());
+        let clause = &after_from[..end];
+        let has_where = after_from.contains(" WHERE ");
+        let has_join = clause.contains(" JOIN ");
+        if !has_where && !has_join && clause.contains(',') {
+            // Translate the in-statement `FROM` position back to a
+            // line in the original source. `stmt.start` lands on
+            // the first non-whitespace byte of the statement, so
+            // adding `from_pos` (a byte offset inside
+            // `stmt.text.to_ascii_uppercase()`, which is the same
+            // length as `stmt.text`) is the correct anchor.
+            let line = sql[..stmt.start + from_pos].matches('\n').count() + 1;
+            out.push(LintFinding {
+                rule: "cartesian-join",
+                message: "FROM a, b without a JOIN condition — likely a Cartesian product".into(),
+                line,
+                severity: LintSeverity::Warning,
+            });
         }
     }
     out
@@ -325,5 +332,41 @@ mod tests {
         // Line number should point at the DELETE, not the SELECT.
         let finding = r.iter().find(|f| f.rule == "destructive-no-where").unwrap();
         assert_eq!(finding.line, 2);
+    }
+
+    #[test]
+    fn cartesian_join_caught_in_second_statement() {
+        // M-5 regression: prior implementation only inspected the
+        // first FROM in the script.
+        let sql = "SELECT 1;\nSELECT * FROM a, b";
+        let r = lint(sql);
+        assert!(rules(&r).contains(&"cartesian-join"));
+        let finding = r.iter().find(|f| f.rule == "cartesian-join").unwrap();
+        assert_eq!(finding.line, 2);
+    }
+
+    #[test]
+    fn cartesian_join_does_not_fire_on_update() {
+        // M-5: the rule used to scan FROM anywhere in the source
+        // and could fire on UPDATE … FROM joins.
+        let sql = "UPDATE x SET v = 1 FROM a, b WHERE x.id = a.id AND a.id = b.id";
+        let r = lint(sql);
+        assert!(!rules(&r).contains(&"cartesian-join"));
+    }
+
+    #[test]
+    fn postgres_dollar_quoted_semicolon_does_not_split() {
+        // M-4: with the Postgres dialect, $$ ... $$ delimits a
+        // dollar-quoted string and embedded `;` characters are part
+        // of the literal, not statement terminators. Under Generic
+        // dialect the splitter would treat the `;` as a separator
+        // and the rule would mis-fire on the second "chunk".
+        let sql = "CREATE FUNCTION f() RETURNS void AS $$ DELETE FROM users; $$ LANGUAGE sql";
+        let r = lint_with_dialect(sql, crate::splitter::Dialect::Postgres);
+        assert!(
+            !rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
     }
 }

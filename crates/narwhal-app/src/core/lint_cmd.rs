@@ -1,12 +1,13 @@
 //! `:lint` command handler (v1.3 #9).
 //!
-//! Runs the [`narwhal_sql::lint`] rule set against the active editor
-//! buffer and writes the findings to the status bar plus a fresh
-//! editor tab when there are any. The buffer is read in full so the
-//! cross-statement rules (cartesian, etc.) see the entire context.
+//! Runs the [`narwhal_sql::lint_with_dialect`] rule set against the
+//! active editor buffer and writes the findings to the status bar
+//! plus a fresh editor tab when there are any. The buffer is read
+//! in full so the cross-statement rules (cartesian, etc.) see the
+//! entire context.
 
 use narwhal_commands::template;
-use narwhal_sql::{lint, LintSeverity};
+use narwhal_sql::{lint_with_dialect, splitter::Dialect, LintSeverity};
 
 use super::AppCore;
 
@@ -39,7 +40,15 @@ impl AppCore {
             self.ui.status.message = "lint: buffer is empty".into();
             return;
         }
-        let findings = lint(&body);
+        // M-4: use the active session's dialect so PG dollar-quoted
+        // strings and MySQL backtick identifiers don't fragment the
+        // splitter. When no session is open, fall back to Generic.
+        let dialect = self
+            .session
+            .active
+            .as_ref()
+            .map_or(Dialect::Generic, |s| s.dialect());
+        let findings = lint_with_dialect(&body, dialect);
         if findings.is_empty() {
             self.ui.status.message = "lint: clean".into();
             return;
