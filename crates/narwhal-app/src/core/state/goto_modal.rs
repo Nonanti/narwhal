@@ -113,26 +113,28 @@ impl GotoModal {
         }
 
         let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
-        // C1: Use `Utf32Str::new` so non-ASCII identifiers (e.g.
-        // "ürünler" tables) are accepted. The previous
-        // `Utf32Str::Ascii(.as_bytes())` shortcut interpreted UTF-8
-        // bytes as ASCII code units, which scored wrong at best and
-        // crashed inside nucleo's char iterator at worst. The buffer
-        // is allocated per-iteration; `Utf32Str::new` re-uses the
-        // ASCII fast path when the haystack is in fact ASCII.
-        let mut scored: Vec<GotoMatch> = self
-            .corpus
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                let mut buf = Vec::new();
-                let haystack = nucleo_matcher::Utf32Str::new(&e.qualified, &mut buf);
-                pattern.score(haystack, matcher).map(|s| GotoMatch {
+        // C1 / M-3: `Utf32Str::new` accepts non-ASCII haystacks (the
+        // previous `Utf32Str::Ascii(.as_bytes())` shortcut decoded
+        // UTF-8 bytes as ASCII code units, scoring garbage at best).
+        // The grapheme buffer is allocated once and reused across
+        // the entire pass with `buf.clear()`; ASCII haystacks bypass
+        // it entirely via the `Utf32Str::Ascii` fast path inside
+        // `Utf32Str::new`. The previous patch allocated a fresh
+        // `Vec::new()` per entry, which on a 1000-entry corpus with
+        // mostly-non-ASCII identifiers was thousands of heap
+        // allocations per keystroke.
+        let mut buf: Vec<char> = Vec::new();
+        let mut scored: Vec<GotoMatch> = Vec::with_capacity(self.corpus.len());
+        for (i, e) in self.corpus.iter().enumerate() {
+            buf.clear();
+            let haystack = nucleo_matcher::Utf32Str::new(&e.qualified, &mut buf);
+            if let Some(score) = pattern.score(haystack, matcher) {
+                scored.push(GotoMatch {
                     entry_idx: i,
-                    score: s,
-                })
-            })
-            .collect();
+                    score,
+                });
+            }
+        }
         scored.sort_unstable_by_key(|m| std::cmp::Reverse(m.score));
         self.matches = scored;
         self.cursor = 0;
