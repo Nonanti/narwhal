@@ -132,7 +132,7 @@ impl AppCore {
         let qualified = quote_qualified(&ref_schema, &ref_table, dialect);
         let quoted_col = quote_ident(&ref_col, dialect);
         let ph = placeholder(1, dialect);
-        let sql = format!("SELECT * FROM {qualified} WHERE {quoted_col} = {ph}");
+        let sql = build_fk_select_sql(&qualified, &quoted_col, &ph, dialect, &value);
         self.ui.status.message = format!("fk: -> {ref_schema}.{ref_table}");
         self.dispatch_batch_with_params(vec![(sql, vec![value])], RunMode::Execute)
             .await;
@@ -152,10 +152,50 @@ impl AppCore {
     }
 }
 
+/// Compose the FK navigation SELECT.
+///
+/// `qualified` is the dialect-quoted `schema.table`, `quoted_col` is
+/// the dialect-quoted column identifier, `ph` is the bind
+/// placeholder, `dialect` selects the cast strategy, and `value` is
+/// the cell value about to be bound.
+///
+/// CR-2: `PostgreSQL` does not implicit-cast between text parameters
+/// and non-text columns. Without a hint, sending
+/// `WHERE uuid_col = $1` with a `Value::String("...")` cell value
+/// fails at the planner with `operator does not exist: uuid = text`
+/// even though the literal would compare equal. The conservative
+/// fix is to cast the *column* to text when the bound value is a
+/// string — it works for every column type, the typed driver bind
+/// still happens (so we keep prepared-statement safety), and the
+/// only cost is losing the index on the FK column for this lookup
+/// (acceptable for navigation — we expect a single hit).
+/// Numeric / boolean / null bindings keep the direct equality path.
+///
+/// Other dialects have looser typing (`MySQL`, `SQLite`, `DuckDB`,
+/// `ClickHouse`) and do the implicit conversion themselves.
+fn build_fk_select_sql(
+    qualified: &str,
+    quoted_col: &str,
+    ph: &str,
+    dialect: narwhal_sql::splitter::Dialect,
+    value: &Value,
+) -> String {
+    let cast_column = matches!(dialect, narwhal_sql::splitter::Dialect::Postgres)
+        && matches!(value, Value::String(_));
+    if cast_column {
+        format!("SELECT * FROM {qualified} WHERE {quoted_col}::text = {ph}")
+    } else {
+        format!("SELECT * FROM {qualified} WHERE {quoted_col} = {ph}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use narwhal_commands::cell_edit::{placeholder, quote_ident, quote_qualified};
+    use narwhal_core::Value;
     use narwhal_sql::splitter::Dialect;
+
+    use super::build_fk_select_sql;
 
     /// C2 regression: malicious identifiers and cell values used to
     /// reach the driver as raw SQL. Verify the building blocks now
@@ -175,5 +215,52 @@ mod tests {
         assert_eq!(placeholder(1, Dialect::Postgres), "$1");
         assert_eq!(placeholder(1, Dialect::MySql), "?");
         assert_eq!(placeholder(1, Dialect::Sqlite), "?");
+    }
+
+    /// CR-2 regression: PG with a String value casts the COLUMN to
+    /// text so a uuid / numeric column accepts the text-bound
+    /// parameter without the planner refusing the comparison.
+    #[test]
+    fn pg_string_value_casts_column_to_text() {
+        let sql = build_fk_select_sql(
+            r#""public"."users""#,
+            r#""id""#,
+            "$1",
+            Dialect::Postgres,
+            &Value::String("abcd-1234-uuid-like".into()),
+        );
+        assert_eq!(
+            sql,
+            r#"SELECT * FROM "public"."users" WHERE "id"::text = $1"#
+        );
+    }
+
+    /// PG numeric / boolean / null cell values stay on the direct
+    /// equality path — the driver binds them at their native type
+    /// and the planner is happy.
+    #[test]
+    fn pg_int_value_keeps_direct_equality() {
+        let sql = build_fk_select_sql(
+            r#""public"."users""#,
+            r#""id""#,
+            "$1",
+            Dialect::Postgres,
+            &Value::Int(7),
+        );
+        assert_eq!(sql, r#"SELECT * FROM "public"."users" WHERE "id" = $1"#);
+    }
+
+    /// Other dialects are loose-typed: no cast is emitted even when
+    /// the cell value is a string.
+    #[test]
+    fn other_dialects_do_not_cast_string_value() {
+        for dialect in [Dialect::Sqlite, Dialect::MySql, Dialect::Generic] {
+            let sql =
+                build_fk_select_sql("`users`", "`id`", "?", dialect, &Value::String("x".into()));
+            assert_eq!(
+                sql, "SELECT * FROM `users` WHERE `id` = ?",
+                "dialect {dialect:?} should not emit a ::text cast"
+            );
+        }
     }
 }
