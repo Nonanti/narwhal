@@ -63,11 +63,17 @@ impl AppCore {
         // Any printable character extends the buffer. Modifiers other
         // than Shift are ignored so a stray Alt-Y or Ctrl-Y doesn't
         // count toward the accept keyword.
+        //
+        // M-D: cap the buffer at 256 chars. The accept keyword is
+        // `YES` (3 chars); anything past a sane prefix is either a
+        // bracketed-paste accident or a deliberate flood. Silently
+        // dropping further input keeps the modal responsive and
+        // avoids unbounded allocations on a hot key path.
         if let CtKey::Char(c) = key.code {
             let only_shift = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
             if only_shift {
                 if let Some(modal) = self.modals.confirm.as_mut() {
-                    modal.buffer.push(c);
+                    modal.try_push(c);
                 }
             }
         }

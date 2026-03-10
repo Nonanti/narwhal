@@ -93,6 +93,21 @@ impl ConfirmModal {
             .trim()
             .eq_ignore_ascii_case(&self.accept_keyword)
     }
+
+    /// M-D: append `c` to the buffer unless the cap is reached.
+    /// Silently drops further input to keep the modal responsive on
+    /// an adversarial bracketed paste / wedged key. The cap is
+    /// generous (256 chars) so any plausible accept keyword fits
+    /// comfortably, but bounded so a paste cannot drive the buffer
+    /// (and the re-rendered prompt) into the hundreds of MB.
+    pub fn try_push(&mut self, c: char) {
+        if self.buffer.len() < Self::BUFFER_CAP {
+            self.buffer.push(c);
+        }
+    }
+
+    /// Upper bound on [`Self::buffer`] growth — see [`Self::try_push`].
+    pub const BUFFER_CAP: usize = 256;
 }
 
 /// All modal-overlay state for the app. Each field is `Option<…>`
@@ -221,6 +236,26 @@ mod tests {
         assert_eq!(params_per_statement[0].len(), 2);
         assert!(matches!(params_per_statement[0][0], Value::Int(7)));
         assert!(matches!(params_per_statement[0][1], Value::Int(42)));
+    }
+
+    #[test]
+    fn try_push_respects_buffer_cap() {
+        // M-D regression: an adversarial bracketed paste or a wedged
+        // key would otherwise grow `buffer` without bound, and the
+        // status-bar re-render formats the buffer on every redraw.
+        let mut m = ConfirmModal::write_confirm(
+            "prod",
+            "DELETE FROM t",
+            PendingConfirm::RunMutatingBatch {
+                statements: vec!["DELETE FROM t".into()],
+                params_per_statement: Vec::new(),
+                stream: false,
+            },
+        );
+        for _ in 0..(ConfirmModal::BUFFER_CAP + 32) {
+            m.try_push('x');
+        }
+        assert_eq!(m.buffer.len(), ConfirmModal::BUFFER_CAP);
     }
 
     #[test]
