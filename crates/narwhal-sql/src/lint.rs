@@ -125,7 +125,15 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
     let mut out = Vec::new();
     for stmt in crate::splitter::split_with(sql, dialect) {
         let upper = stmt.text.to_ascii_uppercase();
-        let trimmed = upper.trim_start();
+        // M-A: a leading CTE (`WITH cte AS (...) DELETE FROM ...`) is
+        // valid in PostgreSQL and SQLite and used commonly to scope a
+        // destructive statement. The previous version only inspected
+        // the first token of the statement and silently passed any
+        // CTE-prefixed DELETE/UPDATE through the linter —
+        // ironically the most dangerous-looking form. Strip the CTE
+        // prefix before classifying.
+        let main = skip_cte_prefix(&upper);
+        let trimmed = main.trim_start();
         let starts_destructive = trimmed.starts_with("UPDATE ")
             || trimmed.starts_with("DELETE ")
             || trimmed.starts_with("DELETE FROM");
@@ -138,8 +146,14 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
         // splitter guarantees lands on the first non-whitespace
         // byte of the statement, so counting newlines up to it is
         // accurate even across `;`-separated multi-line scripts.
-        let line = sql[..stmt.start].matches('\n').count() + 1;
-        if starts_destructive && !has_word(trimmed, "WHERE") {
+        // We anchor on the main-statement keyword (post-CTE) so the
+        // squiggle lands on `DELETE`, not on the leading `WITH`.
+        let main_offset = upper.len() - trimmed.len();
+        let line = sql[..stmt.start + main_offset].matches('\n').count() + 1;
+        if starts_destructive && find_top_level(trimmed.as_bytes(), b" WHERE ").is_none() {
+            // Top-level WHERE only — a WHERE inside a subquery on
+            // the right-hand side of an `IN (...)` or `EXISTS (...)`
+            // does not constrain the destructive statement.
             out.push(LintFinding {
                 rule: "destructive-no-where",
                 message: "UPDATE/DELETE without WHERE — will affect every row".into(),
@@ -174,32 +188,49 @@ fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<Lin
         // The cartesian check only makes sense on a SELECT. A
         // leading TRUNCATE/UPDATE/DELETE never fires this rule, so
         // skip early to keep the false-positive rate low.
+        //
+        // M-A: strip a leading CTE so a `WITH … SELECT * FROM a, b`
+        // is analysed the same as a bare SELECT.
         let upper = stmt.text.to_ascii_uppercase();
-        let trimmed = upper.trim_start();
-        if !trimmed.starts_with("SELECT ") && !trimmed.starts_with("WITH ") {
+        let main = skip_cte_prefix(&upper);
+        let trimmed = main.trim_start();
+        if !trimmed.starts_with("SELECT ") {
             continue;
         }
-        let Some(from_pos) = upper.find("FROM ") else {
+        let main_offset = upper.len() - trimmed.len();
+        // M-C: walk top-level (paren-depth-0) only so a subquery
+        // inside the FROM list cannot mask the outer cartesian. The
+        // earlier `upper.find("FROM ")` could match a `FROM` inside
+        // a derived-table subquery; likewise a subquery WHERE used
+        // to silence the rule on a real outer cartesian.
+        let trimmed_bytes = trimmed.as_bytes();
+        let Some(from_pos) = find_top_level(trimmed_bytes, b"FROM ") else {
             continue;
         };
-        let after_from = &upper[from_pos + 5..];
-        let end = after_from
-            .find(" WHERE ")
-            .or_else(|| after_from.find(" GROUP "))
-            .or_else(|| after_from.find(" ORDER "))
-            .or_else(|| after_from.find(" LIMIT "))
-            .unwrap_or(after_from.len());
+        let after_from = &trimmed[from_pos + 5..];
+        let after_bytes = after_from.as_bytes();
+        let end = [
+            find_top_level(after_bytes, b" WHERE "),
+            find_top_level(after_bytes, b" GROUP "),
+            find_top_level(after_bytes, b" ORDER "),
+            find_top_level(after_bytes, b" LIMIT "),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(after_bytes.len());
         let clause = &after_from[..end];
-        let has_where = after_from.contains(" WHERE ");
-        let has_join = clause.contains(" JOIN ");
-        if !has_where && !has_join && clause.contains(',') {
+        let clause_bytes = clause.as_bytes();
+        let has_top_where = find_top_level(after_bytes, b" WHERE ").is_some();
+        let has_top_join = find_top_level(clause_bytes, b" JOIN ").is_some();
+        let has_top_comma = contains_top_level_byte(clause_bytes, b',');
+        if !has_top_where && !has_top_join && has_top_comma {
             // Translate the in-statement `FROM` position back to a
-            // line in the original source. `stmt.start` lands on
-            // the first non-whitespace byte of the statement, so
-            // adding `from_pos` (a byte offset inside
-            // `stmt.text.to_ascii_uppercase()`, which is the same
-            // length as `stmt.text`) is the correct anchor.
-            let line = sql[..stmt.start + from_pos].matches('\n').count() + 1;
+            // line in the original source.
+            let line = sql[..stmt.start + main_offset + from_pos]
+                .matches('\n')
+                .count()
+                + 1;
             out.push(LintFinding {
                 rule: "cartesian-join",
                 message: "FROM a, b without a JOIN condition — likely a Cartesian product".into(),
@@ -211,31 +242,168 @@ fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<Lin
     out
 }
 
-/// Word-boundary substring match (shared with `guard::contains_word`
-/// in spirit; duplicated here to keep `lint` independent).
-fn has_word(haystack: &str, needle: &str) -> bool {
-    let n = needle.len();
-    if n == 0 || n > haystack.len() {
-        return false;
+/// Skip a leading `WITH … (…)[, … (…)]` CTE prefix on an uppercase
+/// statement. Returns a suffix that starts with the main statement's
+/// first non-whitespace character (`DELETE`, `UPDATE`, `SELECT`,
+/// …). When the input doesn't start with `WITH`, the whole
+/// (trimmed) input is returned unchanged.
+///
+/// Recognises:
+/// - `WITH [RECURSIVE] name AS (…) main_stmt`
+/// - `WITH name (cols) AS (…) main_stmt`
+/// - `WITH name AS [NOT] MATERIALIZED (…) main_stmt`
+/// - Multiple comma-separated CTEs before the main statement.
+///
+/// Heuristic: column-list / body parens are tracked with depth so a
+/// `(a, b)` column list and a body that contains `(...)` subqueries
+/// don't confuse the scanner. Returns the original (trimmed) input
+/// on any malformed prefix so the downstream linter never gets a
+/// shorter view than the user typed.
+fn skip_cte_prefix(upper: &str) -> &str {
+    let s = upper.trim_start();
+    if !begins_with_keyword(s, "WITH") {
+        return s;
     }
-    let bytes = haystack.as_bytes();
-    let needle_bytes = needle.as_bytes();
-    let mut i = 0;
-    while i + n <= bytes.len() {
-        if &bytes[i..i + n] == needle_bytes {
-            let before_ok = i == 0 || !is_ident(bytes[i - 1]);
-            let after_ok = i + n == bytes.len() || !is_ident(bytes[i + n]);
-            if before_ok && after_ok {
-                return true;
-            }
+    let bytes = s.as_bytes();
+    let mut i = "WITH".len();
+    i = skip_ws(bytes, i);
+    // Optional RECURSIVE
+    if begins_with_keyword(&s[i..], "RECURSIVE") {
+        i += "RECURSIVE".len();
+        i = skip_ws(bytes, i);
+    }
+    loop {
+        // CTE name (identifier characters until ws / `(`)
+        let name_start = i;
+        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'(' {
+            i += 1;
+        }
+        if i == name_start {
+            return &s[i..];
+        }
+        i = skip_ws(bytes, i);
+        // Optional column list: `(a, b, c)`
+        if bytes.get(i) == Some(&b'(') {
+            i = skip_balanced_parens(bytes, i);
+            i = skip_ws(bytes, i);
+        }
+        // `AS` is mandatory
+        if !begins_with_keyword(&s[i..], "AS") {
+            return &s[i..];
+        }
+        i += "AS".len();
+        i = skip_ws(bytes, i);
+        // Optional [NOT] MATERIALIZED
+        if begins_with_keyword(&s[i..], "NOT") {
+            i += "NOT".len();
+            i = skip_ws(bytes, i);
+        }
+        if begins_with_keyword(&s[i..], "MATERIALIZED") {
+            i += "MATERIALIZED".len();
+            i = skip_ws(bytes, i);
+        }
+        // Body parentheses
+        if bytes.get(i) != Some(&b'(') {
+            return &s[i..];
+        }
+        i = skip_balanced_parens(bytes, i);
+        i = skip_ws(bytes, i);
+        // More CTEs (`, name AS (…)`) or main statement
+        if bytes.get(i) == Some(&b',') {
+            i += 1;
+            i = skip_ws(bytes, i);
+            continue;
+        }
+        return &s[i..];
+    }
+}
+
+/// True if `s` begins with the uppercase keyword `kw` followed by a
+/// non-identifier byte (whitespace, `(`, or end-of-input). Assumes
+/// `s` is already uppercase ASCII for the keyword bytes.
+fn begins_with_keyword(s: &str, kw: &str) -> bool {
+    s.as_bytes().starts_with(kw.as_bytes())
+        && s.as_bytes()
+            .get(kw.len())
+            .map_or(true, |b| !b.is_ascii_alphanumeric() && *b != b'_')
+}
+
+/// Advance past ASCII whitespace.
+fn skip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+/// Caller guarantees `b[i] == b'('`. Returns the byte index one past
+/// the matching `)`. If no match is found, returns `b.len()` (the
+/// downstream linter then trips its `Some(…)` guards on the result
+/// and bails out cleanly).
+fn skip_balanced_parens(b: &[u8], mut i: usize) -> usize {
+    debug_assert_eq!(b.get(i), Some(&b'('));
+    let mut depth: i32 = 1;
+    i += 1;
+    while i < b.len() && depth > 0 {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {}
         }
         i += 1;
     }
-    false
+    i
 }
 
-const fn is_ident(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+/// Find the first occurrence of `needle` in `haystack` outside any
+/// `(` `)` group. Used to distinguish a top-level `WHERE` / `JOIN`
+/// from one buried inside a subquery in the FROM list (M-C).
+fn find_top_level(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i + needle.len() <= haystack.len() {
+        match haystack[i] {
+            b'(' => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            b')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if depth == 0 && haystack[i..i + needle.len()] == *needle {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// True if `haystack` contains `needle` at top level (paren depth 0).
+fn contains_top_level_byte(haystack: &[u8], needle: u8) -> bool {
+    let mut depth: i32 = 0;
+    for &b in haystack {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ if depth == 0 && b == needle => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -352,6 +520,114 @@ mod tests {
         let sql = "UPDATE x SET v = 1 FROM a, b WHERE x.id = a.id AND a.id = b.id";
         let r = lint(sql);
         assert!(!rules(&r).contains(&"cartesian-join"));
+    }
+
+    #[test]
+    fn cte_delete_caught() {
+        // M-A regression: previously `WITH … DELETE` was silently
+        // skipped because the destructive-no-where rule only
+        // inspected the first token of the statement.
+        let r = lint("WITH old AS (SELECT id FROM users) DELETE FROM users");
+        assert!(
+            rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn cte_update_caught() {
+        let r = lint("WITH x AS (SELECT 1) UPDATE users SET banned = true");
+        assert!(rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn cte_update_with_where_does_not_warn() {
+        let r = lint("WITH x AS (SELECT 1) UPDATE users SET banned = true WHERE id = 7");
+        assert!(
+            !rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn cte_with_column_list_handled() {
+        let r = lint("WITH x(a, b) AS (SELECT 1, 2) DELETE FROM users");
+        assert!(rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn cte_recursive_handled() {
+        let r = lint("WITH RECURSIVE t AS (SELECT 1) DELETE FROM users");
+        assert!(rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn multi_cte_handled() {
+        let r = lint("WITH a AS (SELECT 1), b AS (SELECT 2) DELETE FROM users");
+        assert!(rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn cte_materialized_keyword_handled() {
+        let r = lint("WITH x AS NOT MATERIALIZED (SELECT 1) DELETE FROM users");
+        assert!(rules(&r).contains(&"destructive-no-where"));
+    }
+
+    #[test]
+    fn cte_select_star_cartesian_still_caught() {
+        // M-A: a CTE-prefixed SELECT with a top-level Cartesian
+        // FROM clause should still trip the cartesian-join rule.
+        let r = lint("WITH x AS (SELECT 1) SELECT * FROM a, b");
+        assert!(
+            rules(&r).contains(&"cartesian-join"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn subquery_where_does_not_silence_cartesian() {
+        // M-C regression: the previous `after_from.contains(" WHERE ")`
+        // substring test was fooled by a WHERE buried inside a
+        // FROM-list subquery. With paren-aware top-level scanning,
+        // the outer `a, b` cartesian is now reported even when an
+        // inner subquery has its own WHERE.
+        let r = lint("SELECT * FROM (SELECT id FROM x WHERE x.flag = 1) a, b");
+        assert!(
+            rules(&r).contains(&"cartesian-join"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn subquery_where_in_select_list_does_not_silence_destructive() {
+        // M-C / M-A interaction: a `WHERE` inside an `EXISTS(…)`
+        // subquery on the right-hand side of `SET` (UPDATE) or on
+        // the right-hand side of an `IN (…)` (DELETE) does not
+        // constrain the outer destructive statement. The top-level
+        // scan keeps the rule honest.
+        let r = lint(
+            "DELETE FROM users WHERE id IN (SELECT user_id FROM banned WHERE banned.kind = 1)",
+        );
+        // This *does* have a top-level WHERE so no warning.
+        assert!(!rules(&r).contains(&"destructive-no-where"));
+
+        let r = lint(
+            "DELETE FROM users a USING banned b WHERE a.id IN (SELECT id FROM x WHERE x.f = 1)",
+        );
+        assert!(!rules(&r).contains(&"destructive-no-where"));
+
+        // No top-level WHERE; the only WHERE lives inside an
+        // EXISTS subquery on the SET expression.
+        let r = lint("UPDATE users SET banned = EXISTS (SELECT 1 FROM x WHERE x.id = users.id)");
+        assert!(
+            rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
     }
 
     #[test]
