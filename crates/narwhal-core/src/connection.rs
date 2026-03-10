@@ -138,6 +138,8 @@ impl ConnectionParams {
     /// `#[non_exhaustive]` so struct-literal construction (including
     /// functional update syntax `..Default::default()`) is forbidden.
     ///
+    /// Minimal network connection:
+    ///
     /// ```
     /// use narwhal_core::ConnectionParams;
     /// let p = ConnectionParams::with(|p| {
@@ -145,6 +147,22 @@ impl ConnectionParams {
     ///     p.port = Some(5432);
     /// });
     /// assert_eq!(p.port, Some(5432));
+    /// ```
+    ///
+    /// Production-tagged connection with the v1.1 safety knobs:
+    ///
+    /// ```
+    /// use narwhal_core::{ConnectionColor, ConnectionParams};
+    /// let p = ConnectionParams::with(|p| {
+    ///     p.host = Some("prod-db.example.com".into());
+    ///     p.port = Some(5432);
+    ///     p.database = Some("appdb".into());
+    ///     p.color = Some(ConnectionColor::Red);
+    ///     p.confirm_writes = true;
+    ///     p.read_only = true;
+    /// });
+    /// assert_eq!(p.color, Some(ConnectionColor::Red));
+    /// assert!(p.read_only);
     /// ```
     #[must_use]
     pub fn with(f: impl FnOnce(&mut Self)) -> Self {

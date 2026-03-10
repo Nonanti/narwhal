@@ -113,10 +113,19 @@ impl AppCore {
                 // IDE-style editors bind Ctrl-N to "next completion";
                 // intercepting it while the popup is visible would
                 // strand the user with no way to advance the list.
+                //
+                // MI-2: also defer when ANY other modal is already
+                // open (history search, snippet picker, wizard,
+                // confirm "type YES", goto itself, help overlay).
+                // Otherwise Ctrl-N would stack a goto modal on top
+                // of, say, the confirm-writes prompt.
                 CtKey::Char('n') => {
                     if self.ui.focus == Pane::Editor
                         && self.ui.tabs[self.ui.active_tab].completion.is_some()
                     {
+                        return false;
+                    }
+                    if self.modals.any_open() {
                         return false;
                     }
                     self.open_goto_modal().await;
