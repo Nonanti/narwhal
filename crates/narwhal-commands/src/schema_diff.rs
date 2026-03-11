@@ -107,46 +107,60 @@ pub fn render_alter_statements(
             }
             ColumnChange::Modified { name, from, to } => {
                 let q = quote_ident(&name, dialect);
-                if from.data_type != to.data_type {
-                    // PG and CH require `USING` for non-trivial casts;
-                    // we emit the canonical syntax and let the user
-                    // adjust if needed.
-                    out.push(match dialect {
-                        Dialect::MySql => {
-                            format!("ALTER TABLE {table} MODIFY COLUMN {q} {};", to.data_type)
-                        }
-                        _ => format!(
+                let type_changed = from.data_type != to.data_type;
+                let nullable_changed = from.nullable != to.nullable;
+                let default_changed = from.default != to.default;
+                if matches!(dialect, Dialect::MySql) {
+                    // m-3: MySQL `MODIFY COLUMN` demands the full
+                    // column spec, so emitting one statement per
+                    // sub-change (type, nullable, default) rebuilds
+                    // the table twice on large schemas and — worse —
+                    // the first statement clobbers the second's
+                    // assumptions: `MODIFY COLUMN c BIGINT` drops the
+                    // NOT NULL, the next `MODIFY COLUMN c BIGINT NOT
+                    // NULL` adds it back. Collapse everything into
+                    // one `MODIFY COLUMN` so the change is atomic.
+                    let mut spec =
+                        format!("ALTER TABLE {table} MODIFY COLUMN {q} {}", to.data_type);
+                    if !to.nullable {
+                        spec.push_str(" NOT NULL");
+                    }
+                    if let Some(d) = &to.default {
+                        spec.push_str(" DEFAULT ");
+                        spec.push_str(d);
+                    }
+                    spec.push(';');
+                    out.push(spec);
+                } else {
+                    // Postgres / SQLite / DuckDB / ClickHouse all
+                    // accept one ALTER COLUMN per sub-change.
+                    if type_changed {
+                        // PG and CH require `USING` for non-trivial
+                        // casts; we emit the canonical syntax and
+                        // let the user adjust if needed.
+                        out.push(format!(
                             "ALTER TABLE {table} ALTER COLUMN {q} TYPE {};",
                             to.data_type
-                        ),
-                    });
-                }
-                if from.nullable != to.nullable {
-                    let verb = if to.nullable {
-                        "DROP NOT NULL"
-                    } else {
-                        "SET NOT NULL"
-                    };
-                    out.push(match dialect {
-                        Dialect::MySql => format!(
-                            "ALTER TABLE {table} MODIFY COLUMN {q} {} {};",
-                            to.data_type,
-                            if to.nullable { "NULL" } else { "NOT NULL" }
-                        ),
-                        _ => format!("ALTER TABLE {table} ALTER COLUMN {q} {verb};"),
-                    });
-                }
-                if from.default != to.default {
-                    match (&to.default, dialect) {
-                        (Some(d), Dialect::MySql) => out.push(format!(
-                            "ALTER TABLE {table} ALTER COLUMN {q} SET DEFAULT {d};"
-                        )),
-                        (Some(d), _) => out.push(format!(
-                            "ALTER TABLE {table} ALTER COLUMN {q} SET DEFAULT {d};"
-                        )),
-                        (None, _) => out.push(format!(
-                            "ALTER TABLE {table} ALTER COLUMN {q} DROP DEFAULT;"
-                        )),
+                        ));
+                    }
+                    if nullable_changed {
+                        let verb = if to.nullable {
+                            "DROP NOT NULL"
+                        } else {
+                            "SET NOT NULL"
+                        };
+                        out.push(format!("ALTER TABLE {table} ALTER COLUMN {q} {verb};"));
+                    }
+                    if default_changed {
+                        if let Some(d) = &to.default {
+                            out.push(format!(
+                                "ALTER TABLE {table} ALTER COLUMN {q} SET DEFAULT {d};"
+                            ));
+                        } else {
+                            out.push(format!(
+                                "ALTER TABLE {table} ALTER COLUMN {q} DROP DEFAULT;"
+                            ));
+                        }
                     }
                 }
             }
@@ -230,6 +244,66 @@ mod tests {
         assert_eq!(stmts.len(), 1);
         assert!(stmts[0].contains("MODIFY COLUMN"));
         assert!(stmts[0].contains("BIGINT"));
+    }
+
+    #[test]
+    fn mysql_modify_column_collapses_type_and_nullable() {
+        // m-3 regression: when both type and nullable change, MySQL
+        // used to emit two separate MODIFY COLUMN statements. The
+        // first one (`MODIFY COLUMN c BIGINT`) silently drops NOT
+        // NULL because MODIFY COLUMN takes the full column spec; the
+        // second one (`MODIFY COLUMN c BIGINT NOT NULL`) adds it
+        // back. On a 100 M-row table that is two rebuilds for the
+        // price of zero, and the schema is briefly inconsistent
+        // between the two statements.
+        let before = schema(vec![col("id", "INT", false)]);
+        let after = schema(vec![col("id", "BIGINT", true)]);
+        let stmts = render_alter_statements(&before, &after, Dialect::MySql);
+        assert_eq!(
+            stmts.len(),
+            1,
+            "expected one collapsed MODIFY COLUMN; got {stmts:?}"
+        );
+        assert!(stmts[0].contains("MODIFY COLUMN"));
+        assert!(stmts[0].contains("BIGINT"));
+        // Nullable went true so the spec must NOT include NOT NULL.
+        assert!(
+            !stmts[0].contains("NOT NULL"),
+            "unexpected NOT NULL: {}",
+            stmts[0]
+        );
+    }
+
+    #[test]
+    fn mysql_modify_column_collapses_type_nullable_and_default() {
+        let before = schema(vec![col("created_at", "DATETIME", true)]);
+        let mut after_col = col("created_at", "TIMESTAMP", false);
+        after_col.default = Some("CURRENT_TIMESTAMP".into());
+        let after = schema(vec![after_col]);
+        let stmts = render_alter_statements(&before, &after, Dialect::MySql);
+        assert_eq!(
+            stmts.len(),
+            1,
+            "expected one collapsed MODIFY COLUMN; got {stmts:?}"
+        );
+        let s = &stmts[0];
+        assert!(s.contains("MODIFY COLUMN"));
+        assert!(s.contains("TIMESTAMP"));
+        assert!(s.contains("NOT NULL"));
+        assert!(s.contains("DEFAULT CURRENT_TIMESTAMP"));
+    }
+
+    #[test]
+    fn postgres_modify_still_one_statement_per_sub_change() {
+        // Sanity: the MySQL collapse must not regress the
+        // PG/SQLite/DuckDB/CH path, which is happy with one
+        // ALTER COLUMN per sub-change.
+        let before = schema(vec![col("id", "INT", true)]);
+        let after = schema(vec![col("id", "BIGINT", false)]);
+        let stmts = render_alter_statements(&before, &after, Dialect::Postgres);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts.iter().any(|s| s.contains("TYPE BIGINT")));
+        assert!(stmts.iter().any(|s| s.contains("SET NOT NULL")));
     }
 
     #[test]
