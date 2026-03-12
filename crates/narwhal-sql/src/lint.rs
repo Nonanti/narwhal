@@ -74,6 +74,14 @@ pub fn lint_with_dialect(sql: &str, dialect: crate::splitter::Dialect) -> Vec<Li
 
 /// Rule `select-star`. Suppressed by a trailing
 /// `-- lint:allow select-star` on the same line.
+///
+/// **Suppressed for `INSERT … SELECT …`** (m-4). The "shared query"
+/// argument behind the rule (other consumers' schemas drift) does
+/// not apply when the target is a column-positional `INSERT INTO t
+/// SELECT * FROM source` — the target table's column list is
+/// already explicit; column-add drift on `source` would be caught
+/// by the engine at execution time as an arity mismatch. Firing
+/// the rule here is noise that pushes users to disable the linter.
 fn check_select_star(sql: &str) -> Vec<LintFinding> {
     let mut out = Vec::new();
     for (i, line) in sql.lines().enumerate() {
@@ -81,6 +89,13 @@ fn check_select_star(sql: &str) -> Vec<LintFinding> {
             continue;
         }
         let upper = line.to_ascii_uppercase();
+        // m-4: skip lines whose first non-whitespace token is INSERT.
+        // The SELECT * later on the line (or wrapped from a previous
+        // line of the same statement) is positional, not a shared
+        // query exposure surface.
+        if upper.trim_start().starts_with("INSERT ") {
+            continue;
+        }
         if let Some(p) = upper.find("SELECT") {
             // Require the token to be flanked by non-identifier chars
             // so 'reselect' / 'SELECTED' don't trip.
@@ -182,6 +197,17 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
 /// comment-stripped copy of the entire script and consequently
 /// (a) missed Cartesian joins in any non-first statement and
 /// (b) reported the wrong line in multi-statement scripts.
+///
+/// **Deliberate scope:** this rule fires only on `SELECT` / `WITH …
+/// SELECT`. `PostgreSQL` also supports `UPDATE … FROM a, b WHERE …`
+/// and `DELETE … USING a, b WHERE …`, which look superficially
+/// similar but are joined via the destructive statement's own
+/// `WHERE`; flagging them would force users to suppress the rule on
+/// every PG cross-table update. The dedicated
+/// [`check_destructive_no_where`] rule already catches the
+/// catastrophic case (no WHERE at all). See
+/// `cartesian_join_does_not_fire_on_update` for the regression
+/// guard.
 fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<LintFinding> {
     let mut out = Vec::new();
     for stmt in crate::splitter::split_with(sql, dialect) {
@@ -520,6 +546,20 @@ mod tests {
         let sql = "UPDATE x SET v = 1 FROM a, b WHERE x.id = a.id AND a.id = b.id";
         let r = lint(sql);
         assert!(!rules(&r).contains(&"cartesian-join"));
+    }
+
+    #[test]
+    fn insert_select_star_suppressed() {
+        // m-4: INSERT INTO ... SELECT * FROM source is a
+        // positional copy; the target table's column list is
+        // already explicit. Firing the select-star rule here is
+        // noise that pushes users to disable the linter.
+        let r = lint("INSERT INTO log SELECT * FROM source");
+        assert!(
+            !rules(&r).contains(&"select-star"),
+            "unexpected findings: {:?}",
+            rules(&r)
+        );
     }
 
     #[test]
