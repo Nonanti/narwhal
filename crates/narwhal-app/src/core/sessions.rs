@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use narwhal_core::ConnectionConfig;
 use narwhal_tui::Pane;
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use narwhal_tui::ResultView;
@@ -379,6 +379,17 @@ impl AppCore {
             // wrecks the terminal).
             debug_assert_eq!(params.len(), statements.len());
             if params.len() != statements.len() {
+                // m-9: surface the invariant break in the operator's
+                // log even though the user-visible message stays
+                // short. Status-bar real estate is tight and the
+                // user can't act on "internal"; the log is what the
+                // bug report attaches.
+                error!(
+                    target: "narwhal::dispatch",
+                    statements = statements.len(),
+                    params = params.len(),
+                    "internal invariant break: params/statements length mismatch, batch aborted"
+                );
                 self.ui.status.message =
                     "internal: params/statements length mismatch, batch aborted".into();
                 return;
