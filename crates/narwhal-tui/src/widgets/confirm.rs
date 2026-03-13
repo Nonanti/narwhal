@@ -23,7 +23,7 @@ pub struct ConfirmModalView<'a> {
     pub accept_keyword: &'a str,
     /// What the user has typed so far.
     pub buffer: &'a str,
-    /// `true` when [`buffer`] matches [`accept_keyword`] exactly
+    /// `true` when `buffer` matches `accept_keyword` exactly
     /// (case-insensitive, trimmed). Drives the input border colour.
     pub satisfied: bool,
 }

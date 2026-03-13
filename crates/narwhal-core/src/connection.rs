@@ -119,7 +119,7 @@ pub struct ConnectionParams {
     /// read-only mode (`SET default_transaction_read_only TO ON` on
     /// PG, `PRAGMA query_only = ON` on `SQLite`, etc.) **and** the TUI
     /// applies the same syntactic guard MCP uses
-    /// ([`narwhal_sql::guard_read_only`]) before each run. Either
+    /// (`narwhal_sql::guard_read_only`) before each run. Either
     /// layer rejecting the statement aborts it without driver round
     /// trip.
     #[serde(default, skip_serializing_if = "is_false")]

@@ -57,8 +57,8 @@ pub fn lint(sql: &str) -> Vec<LintFinding> {
 /// dollar-quoted strings and engine-specific string literal
 /// conventions don't fragment statements at false boundaries.
 ///
-/// M-4 / M-5: both [`check_destructive_no_where`] and
-/// [`check_cartesian_join`] now share the splitter and operate on the
+/// M-4 / M-5: both `check_destructive_no_where` and
+/// `check_cartesian_join` now share the splitter and operate on the
 /// original source so byte offsets line up with the user's view of
 /// the file. `check_select_star` keeps its line-by-line scan because
 /// the `-- lint:allow select-star` pragma has to remain visible.
@@ -192,7 +192,7 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
 /// JOIN clause is almost always a bug.
 ///
 /// M-5: walks the dialect-aware splitter just like
-/// [`check_destructive_no_where`] and reports findings per
+/// `check_destructive_no_where` and reports findings per
 /// statement. The earlier implementation operated on a
 /// comment-stripped copy of the entire script and consequently
 /// (a) missed Cartesian joins in any non-first statement and
@@ -204,7 +204,7 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
 /// similar but are joined via the destructive statement's own
 /// `WHERE`; flagging them would force users to suppress the rule on
 /// every PG cross-table update. The dedicated
-/// [`check_destructive_no_where`] rule already catches the
+/// `check_destructive_no_where` rule already catches the
 /// catastrophic case (no WHERE at all). See
 /// `cartesian_join_does_not_fire_on_update` for the regression
 /// guard.
