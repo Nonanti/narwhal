@@ -165,7 +165,7 @@ fn check_destructive_no_where(sql: &str, dialect: crate::splitter::Dialect) -> V
         // squiggle lands on `DELETE`, not on the leading `WITH`.
         let main_offset = upper.len() - trimmed.len();
         let line = sql[..stmt.start + main_offset].matches('\n').count() + 1;
-        if starts_destructive && find_top_level(trimmed.as_bytes(), b" WHERE ").is_none() {
+        if starts_destructive && find_top_level_word(trimmed.as_bytes(), b"WHERE").is_none() {
             // Top-level WHERE only — a WHERE inside a subquery on
             // the right-hand side of an `IN (...)` or `EXISTS (...)`
             // does not constrain the destructive statement.
@@ -230,16 +230,29 @@ fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<Lin
         // a derived-table subquery; likewise a subquery WHERE used
         // to silence the rule on a real outer cartesian.
         let trimmed_bytes = trimmed.as_bytes();
-        let Some(from_pos) = find_top_level(trimmed_bytes, b"FROM ") else {
+        // CRITICAL fix (post-M-A/M-C): use whitespace-insensitive
+        // word matching. The earlier ` FROM ` / ` WHERE `
+        // substring needles only matched when both flanks were
+        // ASCII space, so any multi-line query
+        //     SELECT *
+        //     FROM a, b
+        //     WHERE a.id = b.a_id
+        // was misread as `WHERE`-less and tripped both this rule
+        // and `destructive-no-where`. `find_top_level_word` matches
+        // the keyword surrounded by any non-identifier byte (space,
+        // tab, newline, `(`, `,`, statement boundary).
+        let Some(from_pos) = find_top_level_word(trimmed_bytes, b"FROM") else {
             continue;
         };
-        let after_from = &trimmed[from_pos + 5..];
+        // FROM is a 4-byte keyword; the next byte is the whitespace
+        // boundary find_top_level_word matched against.
+        let after_from = &trimmed[from_pos + 4..];
         let after_bytes = after_from.as_bytes();
         let end = [
-            find_top_level(after_bytes, b" WHERE "),
-            find_top_level(after_bytes, b" GROUP "),
-            find_top_level(after_bytes, b" ORDER "),
-            find_top_level(after_bytes, b" LIMIT "),
+            find_top_level_word(after_bytes, b"WHERE"),
+            find_top_level_word(after_bytes, b"GROUP"),
+            find_top_level_word(after_bytes, b"ORDER"),
+            find_top_level_word(after_bytes, b"LIMIT"),
         ]
         .into_iter()
         .flatten()
@@ -247,8 +260,8 @@ fn check_cartesian_join(sql: &str, dialect: crate::splitter::Dialect) -> Vec<Lin
         .unwrap_or(after_bytes.len());
         let clause = &after_from[..end];
         let clause_bytes = clause.as_bytes();
-        let has_top_where = find_top_level(after_bytes, b" WHERE ").is_some();
-        let has_top_join = find_top_level(clause_bytes, b" JOIN ").is_some();
+        let has_top_where = find_top_level_word(after_bytes, b"WHERE").is_some();
+        let has_top_join = find_top_level_word(clause_bytes, b"JOIN").is_some();
         let has_top_comma = contains_top_level_byte(clause_bytes, b',');
         if !has_top_where && !has_top_join && has_top_comma {
             // Translate the in-statement `FROM` position back to a
@@ -381,16 +394,20 @@ fn skip_balanced_parens(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// Find the first occurrence of `needle` in `haystack` outside any
-/// `(` `)` group. Used to distinguish a top-level `WHERE` / `JOIN`
-/// from one buried inside a subquery in the FROM list (M-C).
-fn find_top_level(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
+/// Top-level keyword scanner, whitespace-insensitive. Matches
+/// `keyword` (ASCII uppercase, no surrounding spaces) when it
+/// appears at paren depth 0 *and* the byte immediately before and
+/// after it is a non-identifier ASCII byte (or the haystack
+/// boundary). This is what callers want for SQL keyword scanning:
+/// a `WHERE` after a `\n` or `\t` is still a `WHERE`, but the
+/// substring inside `where_clause_name` is not.
+fn find_top_level_word(haystack: &[u8], keyword: &[u8]) -> Option<usize> {
+    if keyword.is_empty() || keyword.len() > haystack.len() {
         return None;
     }
     let mut depth: i32 = 0;
     let mut i = 0;
-    while i + needle.len() <= haystack.len() {
+    while i + keyword.len() <= haystack.len() {
         match haystack[i] {
             b'(' => {
                 depth += 1;
@@ -406,12 +423,21 @@ fn find_top_level(haystack: &[u8], needle: &[u8]) -> Option<usize> {
             }
             _ => {}
         }
-        if depth == 0 && haystack[i..i + needle.len()] == *needle {
-            return Some(i);
+        if depth == 0 && haystack[i..i + keyword.len()] == *keyword {
+            let before_ok = i == 0 || !is_ident_byte(haystack[i - 1]);
+            let after_idx = i + keyword.len();
+            let after_ok = after_idx == haystack.len() || !is_ident_byte(haystack[after_idx]);
+            if before_ok && after_ok {
+                return Some(i);
+            }
         }
         i += 1;
     }
     None
+}
+
+const fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// True if `haystack` contains `needle` at top level (paren depth 0).
@@ -668,6 +694,89 @@ mod tests {
             "unexpected findings: {:?}",
             rules(&r)
         );
+    }
+
+    #[test]
+    fn multiline_update_where_does_not_warn() {
+        // CRITICAL regression: M-A/M-C used ` WHERE ` (space-flanked)
+        // as the needle, which silently broke on every multi-line
+        // statement. A typical query like
+        //     UPDATE users
+        //     SET active = false
+        //     WHERE id = 7
+        // would be flagged as `destructive-no-where` because the
+        // newline between `users` and `WHERE` did not match the
+        // expected space prefix. Fixed by find_top_level_word.
+        let sql = "UPDATE users\nSET active = false\nWHERE id = 7";
+        let r = lint(sql);
+        assert!(
+            !rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings on multi-line UPDATE WHERE: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn multiline_delete_where_does_not_warn() {
+        let sql = "DELETE FROM users\nWHERE id = 7";
+        let r = lint(sql);
+        assert!(
+            !rules(&r).contains(&"destructive-no-where"),
+            "unexpected findings on multi-line DELETE WHERE: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn multiline_select_with_join_does_not_warn_cartesian() {
+        // Same regression family: multi-line JOIN was missed
+        // because the needle was ` JOIN ` (space-flanked).
+        let sql = "SELECT *\nFROM a\nJOIN b ON a.id = b.a_id";
+        let r = lint(sql);
+        assert!(
+            !rules(&r).contains(&"cartesian-join"),
+            "unexpected findings on multi-line JOIN: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn multiline_select_with_where_does_not_warn_cartesian() {
+        let sql = "SELECT *\nFROM a, b\nWHERE a.id = b.a_id";
+        let r = lint(sql);
+        assert!(
+            !rules(&r).contains(&"cartesian-join"),
+            "unexpected findings on multi-line cartesian WHERE: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn multiline_cartesian_without_where_still_caught() {
+        // Symmetric: the rule must still fire on a real multi-line
+        // cartesian product; we don't want to over-suppress.
+        let sql = "SELECT *\nFROM a, b";
+        let r = lint(sql);
+        assert!(
+            rules(&r).contains(&"cartesian-join"),
+            "expected cartesian-join: {:?}",
+            rules(&r)
+        );
+    }
+
+    #[test]
+    fn keyword_inside_identifier_does_not_match() {
+        // `where_clause` is an identifier (not a top-level WHERE).
+        // The non-ident-byte boundary check stops the rule firing
+        // on `WHERE` *inside* a column / table name like `WHEREVER`
+        // or `WHERE_CLAUSE`. Use a clearly-named identifier that
+        // contains the substring `WHERE` but is bordered by ident
+        // bytes.
+        let sql = "UPDATE users SET wherever = 1";
+        let r = lint(sql);
+        // No top-level WHERE -> still warns; the point is the
+        // identifier `wherever` is NOT mis-detected as a WHERE.
+        assert!(rules(&r).contains(&"destructive-no-where"));
     }
 
     #[test]
