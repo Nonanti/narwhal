@@ -13,7 +13,7 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use nucleo_matcher::{Config as MatcherConfig, Matcher};
 
-use super::{AppCore, GotoEntry, GotoModal};
+use super::{AppCore, GotoCorpusCache, GotoEntry, GotoModal};
 
 impl AppCore {
     /// Build a fresh corpus from the active session's schema listing
@@ -24,18 +24,50 @@ impl AppCore {
             self.ui.status.message = "goto: no active connection".into();
             return;
         };
+        let conn_id = session.config.id;
+        let schemas_version = session.schemas_version;
         let conn_name = session.config.name.clone();
-        let mut corpus: Vec<GotoEntry> = Vec::new();
-        for (schema, tables) in &session.schemas {
-            for tbl in tables {
-                corpus.push(GotoEntry::new(
-                    &conn_name,
-                    &schema.name,
-                    &tbl.name,
-                    tbl.kind,
-                ));
+
+        // m-7: reuse a previously-built corpus when the active
+        // session and its schema version are unchanged. This
+        // matters on big production schemas (10 k+ tables) where
+        // the per-open Vec build is microseconds-to-milliseconds
+        // and dominates the modal-open feel.
+        let cache_hit =
+            self.session.goto_corpus_cache.as_ref().is_some_and(|c| {
+                c.connection_id == conn_id && c.schemas_version == schemas_version
+            });
+
+        let corpus: Vec<GotoEntry> = if cache_hit {
+            // Safe: cache_hit checks Some + matching keys.
+            self.session
+                .goto_corpus_cache
+                .as_ref()
+                .map(|c| c.corpus.clone())
+                .unwrap_or_default()
+        } else {
+            let mut new_corpus: Vec<GotoEntry> = Vec::new();
+            for (schema, tables) in &session.schemas {
+                for tbl in tables {
+                    new_corpus.push(GotoEntry::new(
+                        &conn_name,
+                        &schema.name,
+                        &tbl.name,
+                        tbl.kind,
+                    ));
+                }
             }
-        }
+            if new_corpus.is_empty() {
+                self.ui.status.message = "goto: no schemas loaded yet (try :refresh first)".into();
+                return;
+            }
+            self.session.goto_corpus_cache = Some(GotoCorpusCache {
+                connection_id: conn_id,
+                schemas_version,
+                corpus: new_corpus.clone(),
+            });
+            new_corpus
+        };
         if corpus.is_empty() {
             self.ui.status.message = "goto: no schemas loaded yet (try :refresh first)".into();
             return;

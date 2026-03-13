@@ -75,27 +75,21 @@ impl AppCore {
         };
         let (schema, table, focused_col_name, column_names, row_values) = snapshot;
 
-        // describe_table to fetch the FK list. We can't go through
-        // session.column_cache (it only caches `Vec<ColumnHeader>`).
+        // m-2: describe_table_cached memoises the full TableSchema
+        // (columns + FKs + indexes + uniques) on the session, so
+        // back-to-back `f` hops on the same table don't repeat the
+        // catalogue round-trip. The cache is dropped on :refresh.
         let Some(session) = self.session.active.as_mut() else {
             self.ui.status.message = "fk: no active session".into();
             return;
         };
-        let mut conn = match session.pool.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                self.ui.status.message = format!("fk: pool acquire failed: {e}");
-                return;
-            }
-        };
-        let schema_info = match conn.describe_table(&schema, &table).await {
+        let schema_info = match session.describe_table_cached(&schema, &table).await {
             Ok(s) => s,
             Err(e) => {
                 self.ui.status.message = format!("fk: describe_table failed: {e}");
                 return;
             }
         };
-        drop(conn);
 
         // M-B: find the foreign key that includes the focused
         // column. The whole FK — not just the focused leg — is

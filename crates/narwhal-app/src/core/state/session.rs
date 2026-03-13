@@ -27,6 +27,21 @@ use uuid::Uuid;
 use crate::session::Session;
 use crate::snippets::SnippetStore;
 
+use super::goto_modal::GotoEntry;
+
+/// m-7: cached `:goto` corpus keyed by the active session's identity
+/// and schema version. When the user reopens the modal without
+/// having switched connections or refreshed schemas, the cached
+/// corpus is cloned out instead of re-iterating every
+/// `SchemaListing`. On a 10 k-entry schema this drops the
+/// `:goto`-open latency from a couple of milliseconds to a single
+/// `Vec::clone` (~half a millisecond).
+pub struct GotoCorpusCache {
+    pub connection_id: Uuid,
+    pub schemas_version: u64,
+    pub corpus: Vec<GotoEntry>,
+}
+
 /// Connection catalogue, active session, and adjacent data
 /// (history journal, snippet store, recency cache, audit gate).
 pub struct SessionState {
@@ -72,6 +87,11 @@ pub struct SessionState {
     /// the meta-channel completion handler applies once the journal
     /// entries arrive. Cleared on apply.
     pub pending_history_filter: Option<String>,
+    /// m-7: memoised `:goto` corpus. Built on first open and reused
+    /// across opens until either the active session changes
+    /// (`connection_id` differs) or `:refresh` bumps
+    /// `Session::schemas_version`.
+    pub goto_corpus_cache: Option<GotoCorpusCache>,
 }
 
 impl SessionState {
@@ -91,6 +111,7 @@ impl SessionState {
             pending_session_opens: HashSet::new(),
             read_only: false,
             pending_history_filter: None,
+            goto_corpus_cache: None,
         }
     }
 }

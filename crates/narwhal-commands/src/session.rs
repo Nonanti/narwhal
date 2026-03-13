@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use narwhal_core::{
     Capabilities, ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result,
-    Schema, SshTunnel,
+    Schema, SshTunnel, TableSchema,
 };
 use narwhal_domain::SchemaListing;
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
@@ -42,6 +42,25 @@ pub struct Session {
     /// values are `(schema_name, columns)` tuples. Populated when
     /// `describe_table` is called (e.g. from sidebar preview).
     pub column_cache: HashMap<String, (String, Vec<ColumnHeader>)>,
+    /// m-2: full-fat [`TableSchema`] cache. Keys are `(schema,
+    /// table)`; values are the entire driver introspection result
+    /// (columns + indexes + foreign keys + unique constraints +
+    /// engine DDL). Populated lazily by [`Self::describe_table_cached`]
+    /// and invalidated by [`Self::refresh_schemas`].
+    ///
+    /// Foreign-key navigation (`f` keybind) and `:diff <a> <b>` used
+    /// to issue a full `describe_table` round-trip on every
+    /// invocation; with the cache, repeated FK hops on the same
+    /// table or back-to-back diffs against the same pair become
+    /// in-memory lookups. Memory cost is bounded by user behaviour
+    /// — the cache only grows when the user actually visits a
+    /// table — and is dropped on `:refresh` or session close.
+    pub table_schema_cache: HashMap<(String, String), TableSchema>,
+    /// m-7: monotonic version counter bumped on every successful
+    /// [`Self::refresh_schemas`]. Lets callers (notably the `:goto`
+    /// fuzzy navigator) cache derived structures keyed by this
+    /// version and skip a rebuild when the schema set is unchanged.
+    pub schemas_version: u64,
     /// Live SSH tunnel for the duration of this session. `None` when
     /// the connection talks to the database directly. Dropped together
     /// with the session so the forwarded port goes away as soon as
@@ -175,6 +194,8 @@ impl Session {
             schemas: Vec::new(),
             transaction: None,
             column_cache: HashMap::new(),
+            table_schema_cache: HashMap::new(),
+            schemas_version: 0,
             _ssh_tunnel: tunnel,
         })
     }
@@ -211,7 +232,43 @@ impl Session {
         }
         drop(conn);
         self.schemas = listing;
+        // m-2 / m-7: any cached introspection is stale once the
+        // schema listing is refreshed (DDL could have changed types,
+        // dropped FKs, renamed tables). Clear the table-schema cache
+        // and bump the version so derived caches in the app layer
+        // (goto corpus, …) invalidate themselves on the next open.
+        self.table_schema_cache.clear();
+        self.schemas_version = self.schemas_version.wrapping_add(1);
         Ok(())
+    }
+
+    /// Fetch the full [`TableSchema`] for `(schema, table)`,
+    /// memoising the result. Subsequent calls for the same pair are
+    /// served from [`Self::table_schema_cache`] without a driver
+    /// round-trip until [`Self::refresh_schemas`] runs.
+    ///
+    /// Errors propagate from the underlying
+    /// [`narwhal_core::Connection::describe_table`] call. The cache
+    /// is only populated on success so a transient failure doesn't
+    /// pin a partial result.
+    pub async fn describe_table_cached(
+        &mut self,
+        schema: &str,
+        table: &str,
+    ) -> Result<TableSchema> {
+        let key = (schema.to_owned(), table.to_owned());
+        if let Some(cached) = self.table_schema_cache.get(&key) {
+            return Ok(cached.clone());
+        }
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| Error::Connection(e.to_string()))?;
+        let ts = conn.describe_table(schema, table).await?;
+        drop(conn);
+        self.table_schema_cache.insert(key, ts.clone());
+        Ok(ts)
     }
 
     pub fn dialect(&self) -> Dialect {

@@ -23,7 +23,7 @@ pub use result::{
     CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
     ResultState, RowDetailState, RowSource,
 };
-pub use session::SessionState;
+pub use session::{GotoCorpusCache, SessionState};
 pub use sidebar::SidebarItem;
 pub use snippets_modal::SnippetsModal;
 pub use status::StatusBar;
