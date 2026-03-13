@@ -16,6 +16,34 @@
 //! The renderer quotes identifiers with the dialect's native style
 //! and emits `ALTER TABLE ... ADD/DROP/ALTER COLUMN` per change so
 //! the result can be executed statement-by-statement.
+//!
+//! # Trust boundary on `Column::default`
+//!
+//! `Column::data_type` and `Column::default` arrive from the
+//! driver's introspection layer (`pg_catalog.pg_get_expr`,
+//! `information_schema.columns`, `pragma_table_info`, …) as raw
+//! SQL fragments and are forwarded verbatim into the generated
+//! `ALTER TABLE` text. That means:
+//!
+//! - **No escaping.** A default of `'O''Brien'` lands unchanged in
+//!   the output. The downstream engine re-parses it, so the quoting
+//!   has to round-trip through the same dialect; this is correct
+//!   for a same-engine diff and *can* break across engines (a PG
+//!   `now()` default sent to `SQLite` is meaningless).
+//! - **No sandboxing.** The diff output is meant to be reviewed and
+//!   re-executed by the user, not blindly applied. A malicious
+//!   default like `'); DROP TABLE …; --` smuggled into a source DB
+//!   would replay against the target DB if the migration is
+//!   executed without inspection. The `:diff` command writes the
+//!   output to a new editor buffer specifically so this review
+//!   step is mandatory; do **not** wire the result of
+//!   [`render_alter_statements`] into an automated apply path.
+//!
+//! A future revision could tighten this by modelling
+//! `Column::default` as a structured `DefaultExpr { Literal(…),
+//! Function(…), Sequence(…), … }` enum so the renderer can
+//! emit dialect-appropriate quoting, but that is a foundation
+//! change in `narwhal-core` and out of scope here.
 
 use narwhal_core::{Column, TableSchema};
 use narwhal_sql::Dialect;
