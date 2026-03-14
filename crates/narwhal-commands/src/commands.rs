@@ -9,6 +9,41 @@ pub enum DumpTarget {
     Named(String),
 }
 
+/// Output format accepted by [`Command::DiagramExport`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagramFormat {
+    /// Mermaid `erDiagram` source (paste into mermaid.live).
+    Mermaid,
+    /// Graphviz `dot` source (`dot -Tsvg` to render).
+    Dot,
+}
+
+impl DiagramFormat {
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token.to_ascii_lowercase().as_str() {
+            "mermaid" | "mmd" | "mer" => Some(Self::Mermaid),
+            "dot" | "gv" | "graphviz" => Some(Self::Dot),
+            _ => None,
+        }
+    }
+
+    /// File extension used when the user omits one in `:diagram export`.
+    pub const fn default_extension(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mmd",
+            Self::Dot => "dot",
+        }
+    }
+
+    /// Human-readable label for status messages.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+            Self::Dot => "dot",
+        }
+    }
+}
+
 /// Isolation levels accepted by `:begin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsolationArg {
@@ -54,6 +89,19 @@ pub enum Command {
     },
     DumpSchema {
         target: DumpTarget,
+    },
+    /// Export an ER diagram of the active connection's schema as
+    /// Mermaid (`erDiagram`) or Graphviz (`dot`). When `path` is `None`
+    /// the rendered string is copied to the system clipboard; otherwise
+    /// it is written to disk.
+    ///
+    /// `table` restricts the diagram to that table and its 1-hop FK
+    /// neighbours; `schema` restricts to a single schema.
+    DiagramExport {
+        format: DiagramFormat,
+        path: Option<String>,
+        table: Option<String>,
+        schema: Option<String>,
     },
     NewTab,
     CloseTab,
@@ -217,6 +265,8 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "export",
     "dump-schema",
     "dumpschema",
+    "diagram",
+    "diag",
     "add",
     "format",
     "fmt",
@@ -313,6 +363,10 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
     (
         "dump-schema",
         "write CREATE TABLE DDL into the editor (:dump-schema [name|all])",
+    ),
+    (
+        "diagram",
+        "export an ER diagram (:diagram export mermaid|dot [path] [--table T] [--schema S])",
     ),
     ("add", "open the connection wizard to save a new connection"),
     (
@@ -413,6 +467,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "runall" => "run-all",
         "streamall" => "stream-all",
         "dumpschema" => "dump-schema",
+        "diag" => "diagram",
         "next" | "npage" => "next-page",
         "prev" | "ppage" => "prev-page",
         "pagesize" => "page-size",
@@ -459,6 +514,7 @@ pub fn parse(input: &str) -> Command {
         "explain" => Command::Explain,
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
+        "diagram" | "diag" => parse_diagram(arg),
         "add" => Command::Add,
         "format" | "fmt" => Command::Format,
         "format-all" | "fmtall" => Command::FormatAll,
@@ -713,6 +769,87 @@ fn parse_export(arg: &str) -> Command {
     }
 }
 
+/// Parse the argument to `:diagram`. The only sub-command in V1 is
+/// `export`. Grammar:
+///
+/// ```text
+/// export <format> [path] [--table NAME] [--schema NAME]
+/// ```
+///
+/// `format` is one of `mermaid|mmd|mer|dot|gv|graphviz`. `path` is the
+/// first positional argument that is not a flag; if absent, the rendered
+/// diagram goes to the system clipboard. `--table` / `-t` restricts the
+/// diagram to a single table and its 1-hop FK neighbours.
+fn parse_diagram(arg: &str) -> Command {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return Command::Unknown(
+            "diagram: subcommand required (try `:diagram export mermaid`)".into(),
+        );
+    }
+    let (sub, rest) = match trimmed.split_once(char::is_whitespace) {
+        Some((s, r)) => (s, r.trim()),
+        None => (trimmed, ""),
+    };
+    if sub != "export" {
+        return Command::Unknown(format!(
+            "diagram: unknown subcommand '{sub}' (expected 'export')"
+        ));
+    }
+
+    let mut tokens = rest.split_whitespace();
+    let Some(format_tok) = tokens.next() else {
+        return Command::Unknown("diagram: format required (mermaid|dot)".into());
+    };
+    let Some(format) = DiagramFormat::from_token(format_tok) else {
+        return Command::Unknown(format!(
+            "diagram: unknown format '{format_tok}' (mermaid|dot)"
+        ));
+    };
+
+    let mut path: Option<String> = None;
+    let mut table: Option<String> = None;
+    let mut schema: Option<String> = None;
+    while let Some(tok) = tokens.next() {
+        match tok {
+            "--table" | "-t" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown(
+                        "diagram: --table requires a table name".into(),
+                    );
+                };
+                table = Some(value.to_owned());
+            }
+            "--schema" | "-s" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown(
+                        "diagram: --schema requires a schema name".into(),
+                    );
+                };
+                schema = Some(value.to_owned());
+            }
+            other if other.starts_with("--") => {
+                return Command::Unknown(format!("diagram: unknown flag '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Command::Unknown(format!(
+                        "diagram: unexpected argument '{other}'"
+                    ));
+                }
+                path = Some(other.to_owned());
+            }
+        }
+    }
+
+    Command::DiagramExport {
+        format,
+        path,
+        table,
+        schema,
+    }
+}
+
 /// Try to parse `:s/pat/rep/[gc]` or `:%s/pat/rep/[gc]`.
 /// Returns `None` if the input doesn't match the substitute pattern.
 fn try_parse_substitute(input: &str) -> Option<Command> {
@@ -786,6 +923,58 @@ mod tests {
                 target: DumpTarget::Named("orders".into())
             }
         );
+        assert_eq!(
+            parse("diagram export mermaid"),
+            Command::DiagramExport {
+                format: DiagramFormat::Mermaid,
+                path: None,
+                table: None,
+                schema: None,
+            }
+        );
+        assert_eq!(
+            parse("diag export dot ./schema.dot"),
+            Command::DiagramExport {
+                format: DiagramFormat::Dot,
+                path: Some("./schema.dot".into()),
+                table: None,
+                schema: None,
+            }
+        );
+        assert_eq!(
+            parse("diagram export mmd --table users"),
+            Command::DiagramExport {
+                format: DiagramFormat::Mermaid,
+                path: None,
+                table: Some("users".into()),
+                schema: None,
+            }
+        );
+        assert_eq!(
+            parse("diagram export mermaid /tmp/x.mmd -t orders -s public"),
+            Command::DiagramExport {
+                format: DiagramFormat::Mermaid,
+                path: Some("/tmp/x.mmd".into()),
+                table: Some("orders".into()),
+                schema: Some("public".into()),
+            }
+        );
+        match parse("diagram export") {
+            Command::Unknown(msg) => assert!(msg.contains("format")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram export svg") {
+            Command::Unknown(msg) => assert!(msg.contains("unknown format")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram bork") {
+            Command::Unknown(msg) => assert!(msg.contains("subcommand")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram export mermaid --table") {
+            Command::Unknown(msg) => assert!(msg.contains("--table requires")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
         assert_eq!(parse("new"), Command::NewTab);
         assert_eq!(parse("tabnew"), Command::NewTab);
         assert_eq!(parse("tabclose"), Command::CloseTab);
