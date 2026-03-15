@@ -21,6 +21,7 @@ narwhal-vim.workspace = true
 narwhal-tui.workspace = true
 narwhal-domain.workspace = true
 narwhal-commands.workspace = true
+narwhal-diagram.workspace = true
 narwhal-driver-registry = { workspace = true }
 narwhal-plugin.workspace = true
 narwhal-plugin-lua.workspace = true

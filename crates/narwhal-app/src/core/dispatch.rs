@@ -617,6 +617,14 @@ impl AppCore {
             Command::Explain => self.dispatch_explain().await,
             Command::Export { format, path } => self.export_results(&format, &path).await,
             Command::DumpSchema { target } => self.dump_schema(target).await,
+            Command::DiagramExport {
+                format,
+                path,
+                table,
+                schema,
+            } => {
+                self.export_diagram(format, path, table, schema).await;
+            }
             Command::Add => self.start_wizard().await,
             Command::Format => self.format_current_statement().await,
             Command::FormatAll => self.format_all_statements().await,
