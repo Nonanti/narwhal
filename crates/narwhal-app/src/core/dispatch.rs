@@ -307,6 +307,25 @@ impl AppCore {
             narwhal_tui::render_pending_preview(frame, area, &view, &self.ui.theme);
         }
 
+        // Diagram modal (Focused / Impact) — sits below the JSON
+        // viewer in the modal stack but above pending preview.
+        if let Some(state) = self.ui.tabs[self.ui.active_tab].diagram.as_ref() {
+            let mode = match state.mode {
+                crate::core::DiagramMode::Focused => narwhal_tui::DiagramViewMode::Focused,
+                crate::core::DiagramMode::Impact => narwhal_tui::DiagramViewMode::Impact,
+            };
+            let view = narwhal_tui::DiagramView {
+                mode,
+                model: &state.model,
+                center: &state.center,
+                impact: &state.impact,
+                selected: state.selected,
+                scroll: state.scroll,
+                icons: state.icons,
+            };
+            narwhal_tui::render_diagram(frame, area, &view, &self.ui.theme);
+        }
+
         // JSON viewer (L36) — stacks above every other overlay so it
         // can be opened from the cell popup *or* from inside the row
         // detail modal.
@@ -351,6 +370,14 @@ impl AppCore {
         // (help, history, wizard, ...) sees the keypress.
         if self.ui.tabs[self.ui.active_tab].json_viewer.is_some() {
             self.handle_json_viewer_key(key).await;
+            return;
+        }
+        // Diagram modal sits just below the JSON viewer so a user can
+        // pop a JSON cell open *from inside* the diagram modal without
+        // losing the diagram. Owns its own keymap; no chord falls
+        // through to underlying panes.
+        if self.ui.tabs[self.ui.active_tab].diagram.is_some() {
+            self.handle_diagram_key(key).await;
             return;
         }
         // L36: pending preview modal is the next layer down. Owns its
@@ -625,6 +652,8 @@ impl AppCore {
             } => {
                 self.export_diagram(format, path, table, schema).await;
             }
+            Command::DiagramFocus(table) => self.open_diagram_focus(table).await,
+            Command::DiagramImpact(table) => self.open_diagram_impact(table).await,
             Command::Add => self.start_wizard().await,
             Command::Format => self.format_current_statement().await,
             Command::FormatAll => self.format_all_statements().await,

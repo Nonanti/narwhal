@@ -3,8 +3,8 @@
 use narwhal_tui::EditorBuffer;
 
 use super::result::{
-    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
-    RowDetailState, RowSource,
+    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState,
+    ResultBundle, ResultSearch, RowDetailState, RowSource,
 };
 use crate::pending::PendingChanges;
 
@@ -37,6 +37,11 @@ pub struct Tab {
     /// every other result-pane overlay; receives every key until
     /// dismissed with `q`/`Esc`.
     pub(crate) json_viewer: Option<JsonViewerState>,
+    /// When `Some`, the diagram modal (Focused or Impact) is open.
+    /// Sits below the JSON viewer in the modal stack but above the
+    /// pending preview, so a diagram opened while a cell-popup is up
+    /// becomes the active overlay.
+    pub(crate) diagram: Option<DiagramModalState>,
     /// L36: staged row-level mutations awaiting commit. Persists for
     /// the lifetime of the tab; the user dismisses it with Ctrl-X or
     /// commits it with Ctrl-S. Cross-table batches are explicitly
@@ -73,6 +78,7 @@ impl Tab {
             pending_source: None,
             row_detail: None,
             json_viewer: None,
+            diagram: None,
             pending: PendingChanges::new(),
             pending_preview: None,
         }

@@ -27,6 +27,23 @@ impl AppCore {
         // predictable regardless of layout. Wheel events use a smaller
         // step (3) to feel closer to the OS scroll cadence.
         const PAGE_STEP: usize = 10;
+
+        // Vim-style chord: `gd` ("goto diagram") opens the Focused
+        // diagram modal on the selected table. Any other key clears
+        // the pending leader so we never trap the user mid-chord.
+        if self.ui.pending_sidebar_leader == Some('g') {
+            self.ui.pending_sidebar_leader = None;
+            if key.code == CtKey::Char('d') {
+                self.open_diagram_from_sidebar().await;
+                return;
+            }
+            // fall through — the original key gets re-dispatched below.
+        }
+        if key.code == CtKey::Char('g') && key.modifiers.is_empty() {
+            self.ui.pending_sidebar_leader = Some('g');
+            return;
+        }
+
         match key.code {
             CtKey::Char('j') | CtKey::Down if !self.ui.sidebar_items.is_empty() => {
                 self.ui.sidebar_index = (self.ui.sidebar_index + 1) % self.ui.sidebar_items.len();
@@ -57,6 +74,7 @@ impl AppCore {
             CtKey::Enter => self.activate_sidebar_selection().await,
             CtKey::Char('o') => self.preview_sidebar_selection().await,
             CtKey::Char('d') => self.ddl_sidebar_selection().await,
+            CtKey::Char('D') => self.open_diagram_from_sidebar().await,
             _ => {}
         }
     }
@@ -242,6 +260,22 @@ impl AppCore {
             } => Some((s.schema.clone(), s.table.clone(), s.offset)),
             _ => None,
         }
+    }
+
+    /// Open the Focused diagram modal for the table currently selected
+    /// in the sidebar. Bound to the `gd` chord and to plain `D`.
+    pub(crate) async fn open_diagram_from_sidebar(&mut self) {
+        let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
+            return;
+        };
+        let SidebarItem::Table { schema, name, .. } = item else {
+            self.ui.status.message = "diagram: select a table first".into();
+            return;
+        };
+        // Use the qualified form so cross-schema sidebars resolve to
+        // exactly the right table even when names collide.
+        let qualified = format!("{schema}.{name}");
+        self.open_diagram_focus(qualified).await;
     }
 
     pub(crate) async fn activate_sidebar_selection(&mut self) {

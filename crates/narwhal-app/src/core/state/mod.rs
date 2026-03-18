@@ -20,8 +20,8 @@ pub use history::HistoryState;
 pub use modals::{ConfirmModal, ModalState, PendingConfirm};
 pub use process::ProcessState;
 pub use result::{
-    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
-    ResultState, RowDetailState, RowSource,
+    CellEdit, CompletionState, DiagramModalState, DiagramMode, EditorSearchState,
+    JsonViewerState, ResultBundle, ResultSearch, ResultState, RowDetailState, RowSource,
 };
 pub use session::{GotoCorpusCache, SessionState};
 pub use sidebar::SidebarItem;

@@ -42,6 +42,12 @@ impl AppCore {
         self.ui.tabs[self.ui.active_tab].json_viewer.as_ref()
     }
 
+    /// Test helper: borrow the diagram modal state on the active tab.
+    #[doc(hidden)]
+    pub fn diagram_for_test(&self) -> Option<&super::state::DiagramModalState> {
+        self.ui.tabs[self.ui.active_tab].diagram.as_ref()
+    }
+
     pub fn editor(&self) -> &EditorBuffer {
         &self.tab().editor
     }
@@ -142,6 +148,27 @@ impl AppCore {
     #[doc(hidden)]
     pub fn sidebar_items_for_test(&self) -> &[SidebarItem] {
         &self.ui.sidebar_items
+    }
+
+    /// Test helper: borrow the UI state. Lets tests pick up the live
+    /// sidebar items / focus / pending leaders without depending on
+    /// the dispatcher's internal access pattern.
+    #[doc(hidden)]
+    pub const fn ui_for_test(&self) -> &super::state::UiState {
+        &self.ui
+    }
+
+    /// Test helper: position the sidebar selection cursor.
+    #[doc(hidden)]
+    pub fn set_sidebar_index_for_test(&mut self, idx: usize) {
+        self.ui.sidebar_index = idx;
+    }
+
+    /// Test helper: move keyboard focus to the sidebar pane (skips the
+    /// usual `Ctrl-W` cycle that drives this in interactive use).
+    #[doc(hidden)]
+    pub fn set_focus_sidebar_for_test(&mut self) {
+        self.ui.focus = narwhal_tui::Pane::Sidebar;
     }
 
     /// Read-only accessor for the vim command buffer. Used by tests to

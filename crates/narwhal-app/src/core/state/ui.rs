@@ -11,6 +11,7 @@
 //! session, connections, history, and modal overlays live in
 //! their own sub-states.
 
+use narwhal_config::DiagramIcons;
 use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
 
 use super::{ResultState, SidebarItem, StatusBar, Tab};
@@ -57,6 +58,11 @@ pub struct UiState {
     /// cycles forward; `[` then `r` cycles backward. Any other
     /// key clears the pending leader.
     pub pending_result_leader: Option<char>,
+    /// Pending leader key on the sidebar pane. Currently used for
+    /// the `gd` chord ("goto diagram") that opens the Focused diagram
+    /// modal for the selected table. Cleared by any non-matching key
+    /// so it never traps the user.
+    pub pending_sidebar_leader: Option<char>,
     /// Collects per-statement results during a multi-statement
     /// batch. Populated by `finalize_statement`; consumed and
     /// turned into a `ResultBundle` by the `AllDone` handler.
@@ -68,6 +74,10 @@ pub struct UiState {
     /// (mouse hit-testing, viewport jump-to-cursor) can find pane
     /// rectangles without rerunning the layout algorithm.
     pub last_layout: LayoutRegions,
+    /// Glyph set used when the diagram modal opens. Resolved from
+    /// `[diagram].icons` in `apply_settings`; defaults to `Ascii`
+    /// so terminals without a Nerd Font never see broken glyphs.
+    pub diagram_icons: DiagramIcons,
 }
 
 impl UiState {
@@ -89,9 +99,11 @@ impl UiState {
                 ..Default::default()
             },
             pending_result_leader: None,
+            pending_sidebar_leader: None,
             pending_result_entries_states: Vec::new(),
             pending_result_entries_views: Vec::new(),
             last_layout: LayoutRegions::default(),
+            diagram_icons: DiagramIcons::default(),
         }
     }
 }

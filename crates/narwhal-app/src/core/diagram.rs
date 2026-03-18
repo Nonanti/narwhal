@@ -13,16 +13,283 @@
 
 use std::path::PathBuf;
 
+use narwhal_config::DiagramIcons;
 use narwhal_diagram::{
-    build, focused as diagram_focused, DiagramModel, DotRenderer, MermaidRenderer, QualifiedName,
-    Renderer,
+    build, focused as diagram_focused, impact as diagram_impact, DiagramModel, DotRenderer,
+    IconSet, MermaidRenderer, QualifiedName, Renderer,
 };
 use narwhal_pool::Pool;
 
+use super::state::result::{DiagramModalState, DiagramMode};
 use super::AppCore;
 use crate::commands::DiagramFormat;
 
 impl AppCore {
+    /// Open the diagram modal in Focused mode, centred on `table`.
+    ///
+    /// `table` may be `name` or `schema.name`. The full schema is
+    /// described once and cached on the modal state so re-centering
+    /// (Enter on a neighbour) is instant.
+    pub(super) async fn open_diagram_focus(&mut self, table: String) {
+        self.open_diagram_modal(&table, DiagramMode::Focused).await;
+    }
+
+    /// Open the diagram modal in Impact mode (reverse-FK closure).
+    pub(super) async fn open_diagram_impact(&mut self, table: String) {
+        self.open_diagram_modal(&table, DiagramMode::Impact).await;
+    }
+
+    async fn open_diagram_modal(&mut self, table: &str, mode: DiagramMode) {
+        let Some(session) = self.session.active.as_ref() else {
+            self.ui.status.message = "diagram: no active connection".into();
+            return;
+        };
+
+        // Restrict to the target's schema so the cached model only
+        // describes tables that can actually appear in the modal
+        // (cross-schema FKs are dropped by `build()` in V1).
+        let pairs_all: Vec<(String, String)> = session
+            .schemas
+            .iter()
+            .flat_map(|(s, tables)| {
+                tables
+                    .iter()
+                    .map(move |t| (s.name.clone(), t.name.clone()))
+            })
+            .collect();
+
+        let Some((target_schema, target_name)) = resolve_table(&pairs_all, table, None) else {
+            self.ui.status.message = format!("diagram: table not found: {table}");
+            return;
+        };
+        let pairs: Vec<(String, String)> = pairs_all
+            .into_iter()
+            .filter(|(s, _)| s == &target_schema)
+            .collect();
+
+        self.ui.status.message = format!("diagram: describing {} table(s)…", pairs.len());
+
+        let pool = session.pool.clone();
+        let described = describe_all(pool, pairs).await;
+        let tables = match described {
+            Ok(ts) => ts,
+            Err(error) => {
+                self.ui.status.message = format!("diagram: describe failed: {error}");
+                return;
+            }
+        };
+
+        let model = build(&tables);
+        let center = QualifiedName::new(target_schema, target_name);
+        if model.node(&center).is_none() {
+            self.ui.status.message = format!(
+                "diagram: table not found in cached model: {}",
+                center.display()
+            );
+            return;
+        }
+        let impact_tree = diagram_impact(&model, &center);
+        let icons = icon_set_from(self.ui.diagram_icons);
+
+        let label = match mode {
+            DiagramMode::Focused => "focused",
+            DiagramMode::Impact => "impact",
+        };
+        self.ui.status.message = format!(
+            "diagram ({label}): {} — {} tables, {} edges",
+            center.display(),
+            model.nodes.len(),
+            model.edges.len()
+        );
+
+        let active = self.ui.active_tab;
+        self.ui.tabs[active].diagram = Some(DiagramModalState {
+            mode,
+            model,
+            center,
+            impact: impact_tree,
+            selected: 0,
+            scroll: 0,
+            icons,
+        });
+    }
+
+    /// Move the centre of the Focused modal to the currently-selected
+    /// neighbour. No-op when the user is not in Focused mode or has no
+    /// neighbours to centre on.
+    pub(super) fn diagram_recenter_selected(&mut self) {
+        let active = self.ui.active_tab;
+        let Some(state) = self.ui.tabs[active].diagram.as_mut() else {
+            return;
+        };
+        if state.mode != DiagramMode::Focused {
+            return;
+        }
+        let outbound: Vec<&narwhal_diagram::Edge> = state
+            .model
+            .edges
+            .iter()
+            .filter(|e| e.from == state.center)
+            .collect();
+        let inbound: Vec<&narwhal_diagram::Edge> = state
+            .model
+            .edges
+            .iter()
+            .filter(|e| e.to == state.center)
+            .collect();
+        let total = outbound.len() + inbound.len();
+        if total == 0 {
+            return;
+        }
+        let selected = state.selected.min(total - 1);
+        let new_center = if selected < outbound.len() {
+            outbound[selected].to.clone()
+        } else {
+            inbound[selected - outbound.len()].from.clone()
+        };
+        if new_center == state.center {
+            return;
+        }
+        state.center = new_center;
+        state.impact = diagram_impact(&state.model, &state.center);
+        state.selected = 0;
+        state.scroll = 0;
+        self.ui.status.message = format!("diagram: re-centred on {}", state.center.display());
+    }
+
+    /// Toggle between Focused and Impact mode for the open modal.
+    pub(super) fn diagram_toggle_mode(&mut self) {
+        let active = self.ui.active_tab;
+        let Some(state) = self.ui.tabs[active].diagram.as_mut() else {
+            return;
+        };
+        state.mode = match state.mode {
+            DiagramMode::Focused => DiagramMode::Impact,
+            DiagramMode::Impact => DiagramMode::Focused,
+        };
+        state.scroll = 0;
+    }
+
+    /// Yank a Mermaid rendering of the *current* modal view to the
+    /// clipboard. In Focused mode this is the 1-hop subset; in Impact
+    /// mode it is the full cached model with a comment header listing
+    /// the impact tree (the tree itself is text not Mermaid — so we
+    /// just dump the model and prepend a hint).
+    pub(super) fn diagram_yank_mermaid(&mut self) {
+        let active = self.ui.active_tab;
+        let Some(state) = self.ui.tabs[active].diagram.as_ref() else {
+            return;
+        };
+        let subset = match state.mode {
+            DiagramMode::Focused => diagram_focused(&state.model, &state.center, 1),
+            DiagramMode::Impact => state.model.clone(),
+        };
+        let mermaid = MermaidRenderer::new()
+            .with_title(format!("narwhal: {}", state.center.display()))
+            .render(&subset);
+        match self.deps.clipboard.set_text(&mermaid) {
+            Ok(()) => {
+                self.ui.status.message = format!(
+                    "diagram: yanked mermaid ({} tables, {} edges)",
+                    subset.nodes.len(),
+                    subset.edges.len()
+                );
+            }
+            Err(error) => {
+                self.ui.status.message = format!("diagram: clipboard write failed: {error}");
+            }
+        }
+    }
+
+    /// Cycle selection forward (or backward with `delta = -1`) inside
+    /// the Focused-mode neighbour list. No-op in Impact mode.
+    pub(super) fn diagram_cycle_selection(&mut self, forward: bool) {
+        let active = self.ui.active_tab;
+        let Some(state) = self.ui.tabs[active].diagram.as_mut() else {
+            return;
+        };
+        if state.mode != DiagramMode::Focused {
+            return;
+        }
+        let total = state
+            .model
+            .edges
+            .iter()
+            .filter(|e| e.from == state.center || e.to == state.center)
+            .count();
+        if total == 0 {
+            return;
+        }
+        let new_sel = if forward {
+            (state.selected + 1) % total
+        } else {
+            (state.selected + total - 1) % total
+        };
+        state.selected = new_sel;
+    }
+
+    /// Close the diagram modal (Esc / q).
+    pub(super) fn diagram_close(&mut self) {
+        let active = self.ui.active_tab;
+        if self.ui.tabs[active].diagram.take().is_some() {
+            self.ui.status.message = "diagram closed".into();
+        }
+    }
+
+    /// Modal handler for the diagram overlay. Owns its own key
+    /// vocabulary; the configured keymap is *not* consulted here —
+    /// the modal's reflexes (`Esc`/`q` closes, etc.) are fixed for
+    /// the same reason JSON viewer's are: removing them would
+    /// trap the user inside the modal.
+    pub(super) async fn handle_diagram_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let active = self.ui.active_tab;
+        // Re-check on every key so the borrow stays scoped.
+        if self.ui.tabs[active].diagram.is_none() {
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.diagram_close(),
+            KeyCode::Tab => self.diagram_cycle_selection(true),
+            KeyCode::BackTab => self.diagram_cycle_selection(false),
+            KeyCode::Char('j') | KeyCode::Down => self.diagram_cycle_selection(true),
+            KeyCode::Char('k') | KeyCode::Up => self.diagram_cycle_selection(false),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(state) = self.ui.tabs[active].diagram.as_mut() {
+                    state.scroll = state.scroll.saturating_add(10);
+                }
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(state) = self.ui.tabs[active].diagram.as_mut() {
+                    state.scroll = state.scroll.saturating_sub(10);
+                }
+            }
+            KeyCode::Char('g') => {
+                if let Some(state) = self.ui.tabs[active].diagram.as_mut() {
+                    state.scroll = 0;
+                }
+            }
+            KeyCode::Char('G') => {
+                // Render-time clamp handles the upper bound; pick a
+                // large sentinel here rather than recomputing the line
+                // count off the model.
+                if let Some(state) = self.ui.tabs[active].diagram.as_mut() {
+                    state.scroll = u16::MAX;
+                }
+            }
+            KeyCode::Enter => self.diagram_recenter_selected(),
+            KeyCode::Char('i') => self.diagram_toggle_mode(),
+            KeyCode::Char('y') => self.diagram_yank_mermaid(),
+            KeyCode::Char('e') => {
+                self.ui.status.message =
+                    "diagram: use `:diagram export mermaid|dot [path]` for file output".into();
+            }
+            _ => {}
+        }
+    }
+
     pub(super) async fn export_diagram(
         &mut self,
         format: DiagramFormat,
@@ -183,6 +450,16 @@ impl AppCore {
                 self.ui.status.message = format!("diagram: clipboard write failed: {error}");
             }
         }
+    }
+}
+
+const fn icon_set_from(icons: DiagramIcons) -> IconSet {
+    // `DiagramIcons` is `#[non_exhaustive]`; fall back to Ascii for any
+    // future variant we have not seen so terminals without a Nerd Font
+    // never see broken glyphs.
+    match icons {
+        DiagramIcons::Nerdfont => IconSet::Nerdfont,
+        DiagramIcons::Ascii | _ => IconSet::Ascii,
     }
 }
 

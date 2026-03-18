@@ -103,6 +103,12 @@ pub enum Command {
         table: Option<String>,
         schema: Option<String>,
     },
+    /// Open the in-TUI diagram modal in *Focused* mode, centred on the
+    /// given table. The table token may be `name` or `schema.name`.
+    DiagramFocus(String),
+    /// Open the in-TUI diagram modal in *Impact* mode (reverse-FK
+    /// closure) for the given table.
+    DiagramImpact(String),
     NewTab,
     CloseTab,
     NextTab,
@@ -769,34 +775,58 @@ fn parse_export(arg: &str) -> Command {
     }
 }
 
-/// Parse the argument to `:diagram`. The only sub-command in V1 is
-/// `export`. Grammar:
+/// Parse the argument to `:diagram`. Grammar:
 ///
 /// ```text
 /// export <format> [path] [--table NAME] [--schema NAME]
+/// impact <table>
+/// <table>                       # bare form, opens Focused modal
 /// ```
 ///
 /// `format` is one of `mermaid|mmd|mer|dot|gv|graphviz`. `path` is the
 /// first positional argument that is not a flag; if absent, the rendered
 /// diagram goes to the system clipboard. `--table` / `-t` restricts the
-/// diagram to a single table and its 1-hop FK neighbours.
+/// diagram to a single table and its 1-hop FK neighbours. The bare
+/// `<table>` form is intentionally positional so muscle-memory like
+/// `:diagram users` works without remembering a subcommand.
 fn parse_diagram(arg: &str) -> Command {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
         return Command::Unknown(
-            "diagram: subcommand required (try `:diagram export mermaid`)".into(),
+            "diagram: subcommand or table name required (try `:diagram users`)".into(),
         );
     }
     let (sub, rest) = match trimmed.split_once(char::is_whitespace) {
         Some((s, r)) => (s, r.trim()),
         None => (trimmed, ""),
     };
-    if sub != "export" {
-        return Command::Unknown(format!(
-            "diagram: unknown subcommand '{sub}' (expected 'export')"
-        ));
+    match sub {
+        "export" => parse_diagram_export(rest),
+        "impact" => {
+            if rest.is_empty() {
+                Command::Unknown("diagram impact: table name required".into())
+            } else if rest.split_whitespace().count() > 1 {
+                Command::Unknown(format!(
+                    "diagram impact: unexpected extra arguments after '{}'",
+                    rest.split_whitespace().next().unwrap_or("")
+                ))
+            } else {
+                Command::DiagramImpact(rest.to_owned())
+            }
+        }
+        // Bare positional: sub *is* the table name.
+        table => {
+            if !rest.is_empty() {
+                return Command::Unknown(format!(
+                    "diagram: unexpected argument '{rest}' after table name"
+                ));
+            }
+            Command::DiagramFocus(table.to_owned())
+        }
     }
+}
 
+fn parse_diagram_export(rest: &str) -> Command {
     let mut tokens = rest.split_whitespace();
     let Some(format_tok) = tokens.next() else {
         return Command::Unknown("diagram: format required (mermaid|dot)".into());
@@ -967,8 +997,34 @@ mod tests {
             Command::Unknown(msg) => assert!(msg.contains("unknown format")),
             other => panic!("expected Unknown, got {other:?}"),
         }
-        match parse("diagram bork") {
-            Command::Unknown(msg) => assert!(msg.contains("subcommand")),
+        // Bare positional `:diagram <table>` opens Focused modal.
+        assert_eq!(
+            parse("diagram users"),
+            Command::DiagramFocus("users".into())
+        );
+        assert_eq!(
+            parse("diagram public.orders"),
+            Command::DiagramFocus("public.orders".into())
+        );
+        assert_eq!(
+            parse("diag orders"),
+            Command::DiagramFocus("orders".into())
+        );
+        // `:diagram impact <table>` opens Impact modal.
+        assert_eq!(
+            parse("diagram impact users"),
+            Command::DiagramImpact("users".into())
+        );
+        match parse("diagram impact") {
+            Command::Unknown(msg) => assert!(msg.contains("table name required")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram impact users extra") {
+            Command::Unknown(msg) => assert!(msg.contains("unexpected extra")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram users extra") {
+            Command::Unknown(msg) => assert!(msg.contains("unexpected argument")),
             other => panic!("expected Unknown, got {other:?}"),
         }
         match parse("diagram export mermaid --table") {

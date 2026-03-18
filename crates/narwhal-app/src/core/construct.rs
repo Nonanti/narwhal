@@ -186,6 +186,7 @@ impl AppCore {
     /// catches malformed `config.toml` files at start-up so we never
     /// fall back to defaults blindly.
     pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
+        self.ui.diagram_icons = settings.diagram.icons;
         self.ui.theme = match settings.theme {
             narwhal_config::Theme::Dark => Theme::DARK,
             narwhal_config::Theme::Light => Theme::LIGHT,
