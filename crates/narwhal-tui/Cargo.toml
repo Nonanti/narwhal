@@ -18,6 +18,7 @@ workspace = true
 narwhal-domain.workspace = true
 narwhal-core.workspace = true
 narwhal-vim.workspace = true
+narwhal-diagram.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-segmentation.workspace = true
