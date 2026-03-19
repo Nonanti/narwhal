@@ -4,19 +4,89 @@
 use std::collections::{HashSet, VecDeque};
 
 use narwhal_core::schema::{ForeignKey, TableSchema};
+use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Cardinality, DiagramModel, Edge, EdgeKind, ImpactNode, ImpactTree, Node, NodeColumn,
     QualifiedName,
 };
 
+/// User-declared logical relation between two tables (FK-less join).
+///
+/// Hosts (`narwhal-config`, `.narwhal/workspace.toml` parser) build
+/// these from TOML and pass them to [`build_with_logical`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogicalRelation {
+    /// Child / referencing side. The diagram draws the edge
+    /// `to → from` with `from` on the many side (matching FK semantics).
+    pub from: QualifiedName,
+    /// Parent / referenced side.
+    pub to: QualifiedName,
+    /// `(from_column, to_column)` pairs. V1 ships single-column
+    /// relations; the field is plural so V1.1 can add composite support
+    /// without changing the model wire format.
+    pub columns: Vec<(String, String)>,
+    /// Cardinality picked by the user (logical relations cannot
+    /// derive it from FK metadata that does not exist).
+    pub cardinality: Cardinality,
+    /// Optional human note ("sharded across regions", "events stream").
+    pub note: Option<String>,
+}
+
+/// Diagnostic emitted by [`build_with_logical`] when a logical
+/// relation cannot be wired (unknown table or column on either side).
+/// Hosts surface these in the status bar at start-up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildDiagnostic {
+    UnknownTable {
+        side: &'static str,
+        table: QualifiedName,
+    },
+    UnknownColumn {
+        table: QualifiedName,
+        column: String,
+    },
+}
+
+impl std::fmt::Display for BuildDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownTable { side, table } => {
+                write!(f, "logical relation: unknown {side} table `{}`", table.display())
+            }
+            Self::UnknownColumn { table, column } => {
+                write!(
+                    f,
+                    "logical relation: column `{column}` not found in `{}`",
+                    table.display()
+                )
+            }
+        }
+    }
+}
+
 /// Build the full diagram for `tables`.
 ///
-/// FKs whose referenced table is not in `tables` are dropped — this keeps
-/// renderers from emitting dangling edges. The referenced schema falls
-/// back to the referencing table's schema when `ForeignKey::referenced_schema`
-/// is `None` (the common case for same-schema FKs).
+/// Equivalent to [`build_with_logical`] with no logical relations.
+/// Kept as the simple-case entry point so existing callers do not
+/// have to plumb an empty slice.
 pub fn build(tables: &[TableSchema]) -> DiagramModel {
+    let (model, _diags) = build_with_logical(tables, &[]);
+    model
+}
+
+/// Build the diagram including user-declared logical relations.
+///
+/// FKs whose referenced table is not in `tables` are dropped to keep
+/// renderers from emitting dangling edges (same V1 rule as before).
+/// Logical relations whose endpoints don't resolve get the same
+/// treatment, but with a [`BuildDiagnostic`] returned in the second
+/// tuple slot so the host can warn the user instead of silently
+/// hiding them.
+pub fn build_with_logical(
+    tables: &[TableSchema],
+    logical: &[LogicalRelation],
+) -> (DiagramModel, Vec<BuildDiagnostic>) {
     let nodes: Vec<Node> = tables.iter().map(build_node).collect();
 
     let known: HashSet<QualifiedName> = nodes.iter().map(|n| n.qualified.clone()).collect();
@@ -50,7 +120,97 @@ pub fn build(tables: &[TableSchema]) -> DiagramModel {
         }
     }
 
-    DiagramModel { nodes, edges }
+    // Mark logical edges. Wire them after FKs so the diagnostic order
+    // matches the user's declaration order and so a logical relation
+    // that duplicates an existing FK is still appended (the user may
+    // want to attach a note to it).
+    let mut diagnostics = Vec::new();
+    for (idx, rel) in logical.iter().enumerate() {
+        // Unqualified relations (config without a schema prefix) are
+        // resolved against the set of known tables by name when there
+        // is exactly one match — mirrors how the `:diagram <table>`
+        // command resolves bare names against the sidebar.
+        let Some(from) = resolve_qualified(&nodes, &rel.from) else {
+            diagnostics.push(BuildDiagnostic::UnknownTable {
+                side: "from",
+                table: rel.from.clone(),
+            });
+            continue;
+        };
+        let Some(to) = resolve_qualified(&nodes, &rel.to) else {
+            diagnostics.push(BuildDiagnostic::UnknownTable {
+                side: "to",
+                table: rel.to.clone(),
+            });
+            continue;
+        };
+        // Validate column existence: surfaces typos at config load
+        // time instead of at the first render.
+        let from_node = node_by_name(&nodes, &from);
+        let to_node = node_by_name(&nodes, &to);
+        let mut column_ok = true;
+        for (fc, tc) in &rel.columns {
+            if let Some(node) = from_node {
+                if !node.columns.iter().any(|c| &c.name == fc) {
+                    diagnostics.push(BuildDiagnostic::UnknownColumn {
+                        table: from.clone(),
+                        column: fc.clone(),
+                    });
+                    column_ok = false;
+                }
+            }
+            if let Some(node) = to_node {
+                if !node.columns.iter().any(|c| &c.name == tc) {
+                    diagnostics.push(BuildDiagnostic::UnknownColumn {
+                        table: to.clone(),
+                        column: tc.clone(),
+                    });
+                    column_ok = false;
+                }
+            }
+        }
+        if !column_ok {
+            continue;
+        }
+        edges.push(Edge {
+            kind: EdgeKind::Logical {
+                note: rel.note.clone(),
+            },
+            from,
+            to,
+            columns: rel.columns.clone(),
+            cardinality: rel.cardinality,
+            on_delete: None,
+            on_update: None,
+            name: format!("logical_{idx}"),
+        });
+    }
+
+    (DiagramModel { nodes, edges }, diagnostics)
+}
+
+fn node_by_name<'a>(nodes: &'a [Node], qn: &QualifiedName) -> Option<&'a Node> {
+    nodes.iter().find(|n| &n.qualified == qn)
+}
+
+/// Resolve a possibly-unqualified `QualifiedName` against the cached
+/// node list. Exact-schema match wins; otherwise, when the schema is
+/// empty and exactly one node matches by name, return that node's
+/// qualified name. Returns `None` for ambiguous or missing matches.
+fn resolve_qualified(nodes: &[Node], qn: &QualifiedName) -> Option<QualifiedName> {
+    if nodes.iter().any(|n| &n.qualified == qn) {
+        return Some(qn.clone());
+    }
+    if !qn.schema.is_empty() {
+        return None;
+    }
+    let mut matches = nodes.iter().filter(|n| n.qualified.name == qn.name);
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        // Ambiguous — multiple schemas have a table with this name.
+        return None;
+    }
+    Some(first.qualified.clone())
 }
 
 /// Restrict `model` to `table` and every node reachable within `hops`

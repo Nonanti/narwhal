@@ -67,11 +67,18 @@ impl Renderer for MermaidRenderer {
         for edge in &model.edges {
             // Mermaid: parent (referenced) on the LEFT, child (referencing)
             // on the RIGHT. `edge.from` is the child in our model.
+            // Logical (non-identifying) relations use `..` instead of
+            // `--`; Mermaid renders them dashed and labels them as
+            // non-identifying — exactly the semantics we want.
+            let card = if edge.kind.is_logical() {
+                edge.cardinality.mermaid().replace("--", "..")
+            } else {
+                edge.cardinality.mermaid().to_owned()
+            };
             writeln!(
                 &mut out,
                 "    {parent} {card} {child} : \"{label}\"",
                 parent = node_id(&edge.to.display()),
-                card = edge.cardinality.mermaid(),
                 child = node_id(&edge.from.display()),
                 label = sanitize_label(&edge.label()),
             )

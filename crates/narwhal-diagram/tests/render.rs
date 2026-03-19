@@ -4,7 +4,10 @@
 //! the expected strings are short enough to embed inline.
 
 use narwhal_core::schema::{Column, ForeignKey, Table, TableKind, TableSchema};
-use narwhal_diagram::{build, DotRenderer, MermaidRenderer, Renderer};
+use narwhal_diagram::{
+    build, build_with_logical, Cardinality, DotRenderer, LogicalRelation, MermaidRenderer,
+    QualifiedName, Renderer,
+};
 
 fn fixture() -> Vec<TableSchema> {
     let users = TableSchema {
@@ -126,6 +129,50 @@ fn dot_with_rankdir_tb() {
     let model = build(&fixture());
     let out = DotRenderer::new().with_rankdir("TB").render(&model);
     assert!(out.contains("rankdir=TB;"));
+}
+
+#[test]
+fn mermaid_logical_edge_uses_dashed_notation() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "orders"),
+        to: QualifiedName::new("public", "users"),
+        columns: vec![("user_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: Some("shadow".into()),
+    }];
+    let (model, _) = build_with_logical(&model_in, &logical);
+    let out = MermaidRenderer::new().render(&model);
+
+    // FK edge: solid `--`.
+    assert!(
+        out.contains("public_users ||--o{ public_orders : \"user_id\""),
+        "FK line missing:\n{out}"
+    );
+    // Logical edge: dashed `..` and the [logical] label suffix.
+    assert!(
+        out.contains("public_users }o..|| public_orders : \"user_id [logical]\""),
+        "logical line missing:\n{out}"
+    );
+}
+
+#[test]
+fn dot_logical_edge_is_dashed_and_grey() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "orders"),
+        to: QualifiedName::new("public", "users"),
+        columns: vec![("user_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: None,
+    }];
+    let (model, _) = build_with_logical(&model_in, &logical);
+    let out = DotRenderer::new().render(&model);
+    assert!(
+        out.contains("style=dashed"),
+        "logical edge must be dashed in DOT:\n{out}"
+    );
+    assert!(out.contains("[logical]"));
 }
 
 #[test]

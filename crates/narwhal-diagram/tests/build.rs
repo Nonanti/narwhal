@@ -3,7 +3,10 @@
 use narwhal_core::schema::{
     Column, ForeignKey, Index, ReferentialAction, Table, TableKind, TableSchema, UniqueConstraint,
 };
-use narwhal_diagram::{build, focused, impact, Cardinality, QualifiedName};
+use narwhal_diagram::{
+    build, build_with_logical, focused, impact, BuildDiagnostic, Cardinality, EdgeKind,
+    LogicalRelation, QualifiedName,
+};
 
 fn table(name: &str, columns: Vec<Column>) -> TableSchema {
     TableSchema {
@@ -218,6 +221,110 @@ fn impact_tree_does_not_loop_on_cycles() {
     // The self-edge is found once, then visited blocks recursion.
     assert_eq!(tree.inbound.len(), 1);
     assert!(tree.inbound[0].children.is_empty());
+}
+
+#[test]
+fn logical_relation_adds_dashed_edge() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "audit"),
+        to: QualifiedName::new("public", "orders"),
+        columns: vec![("actor_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: Some("cross-shard pruning".into()),
+    }];
+    let (model, diags) = build_with_logical(&model_in, &logical);
+    assert!(diags.is_empty(), "clean inputs produce no diagnostics");
+
+    let edge = model
+        .edges
+        .iter()
+        .find(|e| matches!(e.kind, EdgeKind::Logical { .. }))
+        .expect("logical edge present");
+    assert_eq!(edge.cardinality, Cardinality::ManyToOne);
+    assert!(edge.label().contains("[logical]"));
+    if let EdgeKind::Logical { note } = &edge.kind {
+        assert_eq!(note.as_deref(), Some("cross-shard pruning"));
+    }
+}
+
+#[test]
+fn logical_relation_with_unknown_table_is_dropped_with_diagnostic() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "events"), // not in fixture
+        to: QualifiedName::new("public", "users"),
+        columns: vec![("user_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: None,
+    }];
+    let (model, diags) = build_with_logical(&model_in, &logical);
+    assert!(
+        !model.edges.iter().any(|e| e.kind.is_logical()),
+        "unknown-from edge must not be wired"
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(matches!(
+        diags[0],
+        BuildDiagnostic::UnknownTable { side: "from", .. }
+    ));
+}
+
+#[test]
+fn logical_relation_with_unknown_column_is_dropped_with_diagnostic() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "audit"),
+        to: QualifiedName::new("public", "users"),
+        columns: vec![("nope_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: None,
+    }];
+    let (model, diags) = build_with_logical(&model_in, &logical);
+    assert!(!model.edges.iter().any(|e| e.kind.is_logical()));
+    assert_eq!(diags.len(), 1);
+    assert!(matches!(diags[0], BuildDiagnostic::UnknownColumn { .. }));
+}
+
+#[test]
+fn cardinality_parse_accepts_kebab_and_aliases() {
+    assert_eq!(Cardinality::parse("one-to-many"), Some(Cardinality::OneToMany));
+    assert_eq!(Cardinality::parse("1-to-many"), Some(Cardinality::OneToMany));
+    assert_eq!(
+        Cardinality::parse("many-to-one"),
+        Some(Cardinality::ManyToOne)
+    );
+    assert_eq!(
+        Cardinality::parse(" MANY_TO_MANY "),
+        Some(Cardinality::ManyToMany)
+    );
+    assert_eq!(Cardinality::parse("bogus"), None);
+}
+
+#[test]
+fn logical_edge_participates_in_focused_and_impact() {
+    let model_in = fixture();
+    let logical = vec![LogicalRelation {
+        from: QualifiedName::new("public", "audit"),
+        to: QualifiedName::new("public", "orders"),
+        columns: vec![("actor_id".into(), "id".into())],
+        cardinality: Cardinality::ManyToOne,
+        note: None,
+    }];
+    let (model, _) = build_with_logical(&model_in, &logical);
+
+    // Focused: orders — 1-hop must include audit through the logical edge.
+    let view = focused(&model, &qn("orders"), 1);
+    let names: Vec<_> = view.nodes.iter().map(|n| n.qualified.name.clone()).collect();
+    assert!(
+        names.contains(&"audit".into()),
+        "logical edge should connect audit to orders"
+    );
+
+    // Impact: orders — audit appears as a reverse-FK inbound through logical edge.
+    let tree = impact(&model, &qn("orders"));
+    let inbound: Vec<_> = tree.inbound.iter().map(|n| n.table.name.clone()).collect();
+    assert!(inbound.contains(&"audit".into()));
 }
 
 #[test]
