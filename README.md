@@ -15,10 +15,16 @@
 - **Built-in MCP server.** Run `narwhal mcp` and any
   [Model Context Protocol](https://modelcontextprotocol.io/) client (Claude
   Desktop, Cursor, your own agent) gets `list_connections`,
-  `describe_schema`, `describe_table`, `run_query`, `explain_query` over
-  stdio. Read-only by default, with a three-layer SQL guard and a
-  workspace ACL (`.narwhal/workspace.toml`) so an agent can only see
-  the connections you explicitly listed.
+  `describe_schema`, `describe_table`, `run_query`, `explain_query`,
+  `get_diagram` over stdio. Read-only by default, with a three-layer
+  SQL guard and a workspace ACL (`.narwhal/workspace.toml`) so an
+  agent can only see the connections you explicitly listed.
+- **ER diagrams without leaving the terminal.** `:diagram users`
+  opens a Focused modal with the table, its columns, and every
+  in/out-bound foreign-key neighbour; `:diagram impact users` shows
+  the reverse-FK closure ("what breaks if I drop this?");
+  `:diagram export mermaid` ships Mermaid source straight to your
+  clipboard for mermaid.live, a PR description, or Notion.
 - **One TUI, five databases.** Postgres, MySQL, SQLite, DuckDB,
   ClickHouse. No driver-juggling, no context-switching between `psql`,
   `mysql`, and DataGrip.
@@ -191,6 +197,11 @@ line_numbers = true      # reserved, v1.1 will honour this
 
 [keybindings]
 vim_mode = true          # reserved, v1.1 will allow opt-out
+
+[diagram]
+icons = "ascii"          # "ascii" (default) | "nerdfont"
+                         # Only affects the in-TUI diagram modal;
+                         # Mermaid / DOT exports always use ASCII.
 ```
 
 v1.0 wires only the `theme` field; the rest are persisted and
@@ -245,6 +256,82 @@ Query-string TLS params (`?sslmode=...`, `?sslrootcert=...`, etc.)
 are now parsed into dedicated struct fields instead of being left in
 the generic `options` map.
 
+## Diagrams
+
+narwhal builds an entity-relationship diagram out of the same
+`describe_table` metadata it already uses for completion and DDL
+generation. Three surfaces, one model:
+
+- An in-TUI modal you can open without leaving the editor.
+- A `:diagram export` command that hands you Mermaid or Graphviz
+  source on the clipboard — paste into mermaid.live, a PR
+  description, a Notion page, or pipe through `dot -Tsvg`.
+- The `get_diagram` MCP tool so agents see the same picture.
+
+### In-TUI modal
+
+```text
+:diagram users               → Focused mode (table + 1-hop neighbours)
+:diagram impact users        → Impact mode (reverse-FK closure)
+```
+
+When the sidebar pane has focus, `gd` (vim chord) or `D` (single key)
+opens the Focused modal on the highlighted table. Inside the modal:
+
+| Keys | Action |
+|------|--------|
+| Tab / Shift-Tab | Cycle through neighbours |
+| j / k / ↑ / ↓ | Same, single-step |
+| Enter | Re-centre on the selected neighbour (instant — the model is cached) |
+| i | Toggle Focused ↔ Impact |
+| y | Yank the current subset as Mermaid to the clipboard |
+| g / G / Ctrl-d / Ctrl-u | Scroll |
+| Esc / q | Close |
+
+Focused mode shows the centre table as a labelled box (PK / FK / UK
+markers) and lists outbound + inbound foreign-key neighbours below
+with their FK column and cardinality (`——▶`, `◀——`, `(nullable)`,
+`[1‑1]`). Impact mode renders the reverse-FK tree with `ON DELETE`
+annotations, flagging `NO ACTION` references that would block a
+delete.
+
+The modal uses ASCII markers by default. Set `[diagram] icons =
+"nerdfont"` in `config.toml` for Nerd Font glyphs.
+
+### Export to Mermaid / Graphviz
+
+```text
+:diagram export mermaid                    → clipboard
+:diagram export mermaid ./schema.mmd       → file
+:diagram export dot ./schema               → file (.dot extension added)
+:diagram export mermaid --table orders     → focused subset
+:diagram export mermaid --schema public    → single-schema export
+```
+
+Exports always use ASCII markers because Mermaid (mermaid.live) and
+Graphviz HTML labels don't reliably ship Nerd Font glyphs; the TUI
+is the only surface that opts in. Cardinality is derived from FK
+nullability + uniqueness:
+
+| FK columns | Mermaid | Meaning |
+|------------|---------|---------|
+| NOT NULL, not UNIQUE | `\|\|--o{` | 1-to-many |
+| nullable, not UNIQUE | `\|o--o{` | 0..1-to-many |
+| NOT NULL, UNIQUE     | `\|\|--\|\|` | 1-to-1 |
+| nullable, UNIQUE     | `\|o--o\|` | 0..1-to-1 |
+
+Cross-schema FKs are dropped in V1 so the rendered diagram never
+shows dangling edges. Junction tables fall out naturally as two
+1-to-many edges.
+
+### Limits
+
+- TUI modal renders only the Focused + Impact views — a full
+  auto-laid-out overview lives in Mermaid (run
+  `:diagram export mermaid` and paste into mermaid.live).
+- Cross-schema FKs are not rendered.
+- User-defined logical relations (FK-less joins) are not supported.
+
 ## MCP server: talk to your databases through an AI agent
 
 narwhal ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
@@ -279,6 +366,7 @@ The v0 tool surface:
 | `describe_table`   | Full structure of one table — columns, indexes, foreign keys, unique constraints, engine-native DDL. |
 | `run_query`        | Execute a single statement. **Read-only by default** — syntactic guard + `BEGIN/ROLLBACK` sandwich + row limit (default 1 000). `read_only=false` opts out, subject to the workspace ACL. |
 | `explain_query`    | Driver-native EXPLAIN with the right dialect prefix. Optional `analyze=true` runs the statement for real cardinalities (PG / MySQL / DuckDB). |
+| `get_diagram`      | Render an ER diagram of the connection's schema as Mermaid (`erDiagram`) or Graphviz `dot`. Optional `table` focuses to a 1-hop subset; optional `schema` restricts candidates. Returns a JSON envelope with node/edge counts plus the rendered source. |
 
 Every database-touching call is audit-logged to
 `~/.local/share/narwhal/history.jsonl` with `source: "mcp"` so you can
@@ -322,6 +410,9 @@ error, and the agent retries against the visible set automatically.
 | Ctrl-N / :goto / :g | Fuzzy navigator — jump to any table/view |
 | :diff `<a>` `<b>` | Schema diff: emit ALTER TABLE migration SQL |
 | :lint | Run linter (SELECT *, UPDATE/DELETE no WHERE, cartesian …) |
+| :diagram `<table>` | Open the Focused ER diagram modal on a table |
+| :diagram impact `<table>` | Reverse-FK closure ("what breaks if I drop this?") |
+| :diagram export mermaid\|dot `[path]` | Export schema as Mermaid / Graphviz — to file when a path is given, otherwise clipboard. Add `--table T` / `--schema S` to narrow. |
 | :tpl `<name>` | Insert a built-in template: sel / ins / upd / del / join / with |
 | :history `[pattern]` | Open Ctrl-R modal (optionally pre-filtered) |
 | :submit / :revert | Flush / drop the pending-mutation queue |
@@ -354,6 +445,7 @@ error, and the agent retries against the visible set automatically.
 | Enter | Describe table |
 | o | Preview table data |
 | d | Inject DDL into editor |
+| gd / D | Open ER diagram modal on the selected table |
 
 ### Results
 
