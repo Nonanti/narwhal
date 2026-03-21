@@ -176,6 +176,88 @@ fn dot_logical_edge_is_dashed_and_grey() {
 }
 
 #[test]
+fn mermaid_escapes_newlines_and_quotes_in_labels() {
+    // Pathological column name with newline + quote. Real-world
+    // source: PostgreSQL quoted identifiers (`"weird\nname"`),
+    // copy-pasted from external systems, or sloppy migration scripts.
+    let mut tables = fixture();
+    tables[1].foreign_keys[0].columns = vec!["user\n\"id".into()];
+    let model = build(&tables);
+    let out = MermaidRenderer::new().render(&model);
+
+    // Label is the joined column name; both the newline and the quote
+    // must be neutralised so the wrapping `"..."` stays well-formed
+    // and the line stays on one line.
+    let edge_line = out
+        .lines()
+        .find(|l| l.contains("public_users") && l.contains("public_orders"))
+        .expect("edge line");
+    assert!(
+        !edge_line.contains('\n'),
+        "label must not embed a newline: {edge_line:?}"
+    );
+    // Double-quote downgraded to single-quote so the label string is
+    // closed by the wrapping `"`.
+    assert_eq!(
+        edge_line.matches('"').count(),
+        2,
+        "only the two delimiter double-quotes may remain: {edge_line:?}"
+    );
+}
+
+#[test]
+fn mermaid_title_strips_yaml_front_matter_delimiters() {
+    let model = build(&fixture());
+    // A title that *would* close the front matter early and inject a
+    // bogus second `erDiagram` opener if not sanitised. Mermaid 10
+    // refuses to render the diagram in that case.
+    let out = MermaidRenderer::new()
+        .with_title("safe\n---\nerDiagram")
+        .render(&model);
+
+    // The well-formed front matter must look like:
+    //   line 1: `---`
+    //   line 2: `title: <single-line>`
+    //   line 3: `---`
+    //   line 4: `erDiagram`
+    // — anything else means the title leaked past the closing delimiter.
+    let mut lines = out.lines();
+    assert_eq!(lines.next(), Some("---"), "front matter opener");
+    let title_line = lines.next().expect("title line");
+    assert!(
+        title_line.starts_with("title: ") && !title_line.contains('\n'),
+        "title must be one line: {title_line:?}"
+    );
+    assert!(
+        !title_line.contains("---"),
+        "the `---` token in the title must be downgraded: {title_line:?}"
+    );
+    assert_eq!(lines.next(), Some("---"), "front matter closer");
+    assert_eq!(lines.next(), Some("erDiagram"), "single erDiagram opener");
+}
+
+#[test]
+fn dot_escapes_control_chars_in_labels() {
+    // Same pathological column name, this time through the DOT path.
+    let mut tables = fixture();
+    tables[1].foreign_keys[0].columns = vec!["user\nid".into()];
+    let model = build(&tables);
+    let out = DotRenderer::new().render(&model);
+
+    // The edge declaration must remain a single line so downstream
+    // `dot -Tsvg` accepts it. Find the edge line and make sure it
+    // contains the literal `\n` escape sequence, not a real newline.
+    let edge_line = out
+        .lines()
+        .find(|l| l.contains(" -> ") && l.contains("public_users"))
+        .expect("edge line");
+    assert!(
+        edge_line.contains("user\\nid"),
+        "newline must be escaped to `\\n`: {edge_line:?}"
+    );
+}
+
+#[test]
 fn dot_unknown_rankdir_falls_back_to_lr() {
     let model = build(&fixture());
     let out = DotRenderer::new().with_rankdir("XX").render(&model);

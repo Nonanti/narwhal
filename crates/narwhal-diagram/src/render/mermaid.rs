@@ -166,10 +166,30 @@ fn sanitize_type(ty: &str) -> String {
     }
 }
 
+/// Mermaid edge labels are quoted strings; a literal newline or tab
+/// inside one breaks the parser ("unexpected token" error in
+/// mermaid.live). Collapse whitespace control chars to a single space
+/// and downgrade embedded double-quotes so the wrapping `"..."` still
+/// delimits the label. Backslashes are *kept* — Mermaid has no
+/// quoted-string escape vocabulary; a literal `\\` survives.
 fn sanitize_label(label: &str) -> String {
-    label.replace('"', "'")
+    let mut out = String::with_capacity(label.len());
+    for ch in label.chars() {
+        match ch {
+            '"' => out.push('\''),
+            '\n' | '\r' | '\t' => out.push(' '),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
+/// YAML front-matter title is delimited by `---` lines; strip newlines
+/// (would close the front matter early) and the literal token `---`
+/// (would terminate the block mid-title). The escape is conservative —
+/// we replace, not reject — because titles are derived from connection
+/// + table names, which are otherwise user-controlled.
 fn sanitize_title(title: &str) -> String {
-    title.replace(['\r', '\n'], " ")
+    title.replace(['\r', '\n'], " ").replace("---", "——")
 }
