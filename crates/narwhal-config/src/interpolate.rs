@@ -297,6 +297,7 @@ mod tests {
         use narwhal_core::{ConnectionConfig, ConnectionParams};
         use uuid::Uuid;
         let mut file = ConnectionsFile {
+            logical_relations: Vec::new(),
             connections: vec![ConnectionConfig {
                 id: Uuid::nil(),
                 name: "prod".into(),

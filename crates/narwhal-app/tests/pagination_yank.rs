@@ -53,6 +53,7 @@ async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "p".into(),

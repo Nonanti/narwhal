@@ -52,7 +52,10 @@ fn ctx_with(connections: Vec<ConnectionConfig>, workspace: Option<Workspace>) ->
     let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
     let mut ctx = ServerContext::new(
         drivers,
-        Arc::new(ConnectionsFile { connections }),
+        Arc::new(ConnectionsFile {
+            connections,
+            logical_relations: Vec::new(),
+        }),
         credentials,
     );
     if let Some(ws) = workspace {
@@ -106,6 +109,7 @@ async fn list_connections_hides_disallowed_entries() {
         file: WorkspaceFile {
             allowed_connections: vec!["staging".into()],
             allow_writes: true,
+            logical_relations: Vec::new(),
         },
     };
 
@@ -136,6 +140,7 @@ async fn empty_allow_list_means_everything_is_visible() {
         file: WorkspaceFile {
             allowed_connections: vec![],
             allow_writes: true,
+            logical_relations: Vec::new(),
         },
     };
 
@@ -164,6 +169,7 @@ async fn describe_schema_rejects_disallowed_connection() {
         file: WorkspaceFile {
             allowed_connections: vec!["staging".into()],
             allow_writes: true,
+            logical_relations: Vec::new(),
         },
     };
 
@@ -205,6 +211,7 @@ async fn run_query_refuses_writes_when_workspace_forbids() {
         file: WorkspaceFile {
             allowed_connections: vec![],
             allow_writes: false,
+            logical_relations: Vec::new(),
         },
     };
 
@@ -255,6 +262,7 @@ async fn run_query_read_only_still_works_under_strict_workspace() {
         file: WorkspaceFile {
             allowed_connections: vec!["staging".into()],
             allow_writes: false,
+            logical_relations: Vec::new(),
         },
     };
 
@@ -299,6 +307,7 @@ async fn force_read_only_flag_rejects_writes_even_with_permissive_workspace() {
             allowed_connections: vec![],
             // Permissive workspace — normally would let writes through.
             allow_writes: true,
+            logical_relations: Vec::new(),
         },
     };
 

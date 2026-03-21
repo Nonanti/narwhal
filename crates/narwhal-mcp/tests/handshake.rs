@@ -33,7 +33,8 @@ fn ctx_with_in_memory_sqlite() -> ServerContext {
 }
 
 fn ctx_with_connections(connections: Vec<ConnectionConfig>) -> ServerContext {
-    let file = ConnectionsFile { connections };
+    let file = ConnectionsFile {
+        logical_relations: Vec::new(), connections };
     let drivers = Arc::new(DriverRegistry::with_defaults());
     let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
     ServerContext::new(drivers, Arc::new(file), credentials)

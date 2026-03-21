@@ -46,6 +46,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     exports always use ASCII because their downstream viewers
     (mermaid.live, Graphviz HTML labels) don't reliably ship Nerd
     Font glyphs.
+- **User-declared logical relations (v1.2)**: micro-service splits
+  and sharded schemas often leave behind "this column points at
+  that one" relationships the engine cannot enforce. Declare them
+  in `.narwhal/workspace.toml` (preferred — git-commit for your
+  team) or `connections.toml` (personal fallback) and they render
+  alongside the real FKs in every surface:
+  - Dashed `..` notation in Mermaid (`}o..||`, etc.) and
+    `style=dashed, color="#888888"` in Graphviz so logical edges
+    read as informational at a glance.
+  - `[L]` prefix + dashed unicode arrows (`╌╌▷` / `◁╌╌`) and
+    muted styling in the TUI modal, with the user note shown as
+    `↳ note` below the row.
+  - Six cardinality tokens including the FK-less
+    `many-to-one` (default) and `many-to-many` variants.
+  - Workspace + connections-file merge with workspace winning on
+    duplicates; bad entries (unknown table/column, unknown
+    cardinality, composite-in-v1) are dropped with a logged
+    warning instead of failing the whole diagram.
+  - `narwhal_diagram::build_with_logical` returns
+    `(model, diagnostics)` so MCP and TUI hosts share the same
+    validation surface.
 
 ## [1.1.0] - 2026-05-29
 

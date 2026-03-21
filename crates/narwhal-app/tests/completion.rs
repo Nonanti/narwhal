@@ -49,6 +49,7 @@ async fn open_with_tables(tables: &[&str]) -> AppCore {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "c".into(),

@@ -17,6 +17,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "diagram-modal".into(),
@@ -262,6 +263,53 @@ async fn sidebar_shift_d_also_opens_focused_modal() {
 
     let state = core.diagram_for_test().expect("Shift+D should open the modal");
     assert_eq!(state.center.name, "users");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logical_relation_from_connections_toml_lands_on_model() {
+    use narwhal_config::LogicalRelationConfig;
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("schema.db");
+    seed(&db_path);
+
+    // Build a `ConnectionsFile` with one connection plus a logical
+    // relation declaring `audit.id → orders.id`. No workspace.toml.
+    let registry = DriverRegistry::with_defaults();
+    let connections = ConnectionsFile {
+        logical_relations: vec![LogicalRelationConfig {
+            connection: "diagram-modal".into(),
+            from: Some("audit.id".into()),
+            to: Some("orders.id".into()),
+            cardinality: "many-to-one".into(),
+            note: Some("reconciled async".into()),
+            from_columns: Vec::new(),
+            to_columns: Vec::new(),
+        }],
+        connections: vec![ConnectionConfig {
+            id: Uuid::nil(),
+            name: "diagram-modal".into(),
+            driver: "sqlite".into(),
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.to_string_lossy().into_owned());
+            }),
+        }],
+    };
+    let mut core = AppCore::new(registry, connections, None);
+    core.execute_command("open diagram-modal").await;
+    core.drain_run_updates_and_refresh().await;
+
+    core.execute_command("diagram orders").await;
+    let state = core.diagram_for_test().expect("modal open");
+    // 3 FK edges + 1 logical edge.
+    assert_eq!(state.model.edges.len(), 4, "logical edge must be wired");
+    let logical = state
+        .model
+        .edges
+        .iter()
+        .find(|e| e.kind.is_logical())
+        .expect("logical edge present");
+    assert_eq!(logical.from.name, "audit");
+    assert_eq!(logical.to.name, "orders");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

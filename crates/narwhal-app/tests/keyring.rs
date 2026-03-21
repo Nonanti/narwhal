@@ -86,6 +86,7 @@ async fn forget_clears_keyring_but_keeps_connection() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "stage".into(),
@@ -128,6 +129,7 @@ async fn remove_drops_connection_and_secret() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "dev".into(),
@@ -169,6 +171,7 @@ async fn open_pulls_password_from_credentials() {
         .unwrap();
 
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "local".into(),
@@ -210,6 +213,7 @@ async fn edit_prefills_password_from_keyring() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "prod".into(),
@@ -258,6 +262,7 @@ async fn test_active_session_reports_real_verdict() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "local".into(),
@@ -298,6 +303,7 @@ async fn forget_status_reflects_real_outcome_not_best_effort() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
             name: "stage".into(),

@@ -324,13 +324,45 @@ Cross-schema FKs are dropped in V1 so the rendered diagram never
 shows dangling edges. Junction tables fall out naturally as two
 1-to-many edges.
 
+### Logical relations (FK-less joins)
+
+Micro-service splits, partition pruning, or legacy schemas often
+leave behind "this column points at that one" relationships the
+engine doesn't enforce. Declare them in TOML and they render
+alongside the real FKs — dashed in Mermaid / DOT and tagged `[L]`
+in the TUI so you can tell which edges the database actually
+guarantees.
+
+```toml
+# .narwhal/workspace.toml   (preferred — commit it for your team)
+# or ~/.config/narwhal/connections.toml (personal fallback)
+
+[[logical_relation]]
+connection  = "prod-db"
+from        = "events.user_id"     # [schema.]table.column
+to          = "users.id"
+cardinality = "many-to-one"        # default: many-to-one
+note        = "sharded across regions"
+```
+
+Cardinality tokens: `one-to-many`, `many-to-one`, `one-to-one`,
+`zero-or-one-to-many`, `zero-or-one-to-one`, `many-to-many`
+(kebab-case; `_` and digit forms like `1-to-many` are accepted).
+
+Workspace + connections entries are merged with workspace winning
+on duplicates. Entries that reference unknown tables or columns
+are dropped with a status-bar warning so a typo in your config
+never silently hides the rest of the diagram.
+
 ### Limits
 
 - TUI modal renders only the Focused + Impact views — a full
   auto-laid-out overview lives in Mermaid (run
   `:diagram export mermaid` and paste into mermaid.live).
 - Cross-schema FKs are not rendered.
-- User-defined logical relations (FK-less joins) are not supported.
+- Composite logical relations (multi-column FK-less joins) are
+  reserved for V1.1; the `from_columns` / `to_columns` keys are
+  accepted by the parser but rejected with a friendly error.
 
 ## MCP server: talk to your databases through an AI agent
 

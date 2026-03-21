@@ -2849,6 +2849,7 @@ dependencies = [
  "directories",
  "keyring",
  "narwhal-core",
+ "narwhal-diagram",
  "secrecy",
  "serde",
  "tempfile",

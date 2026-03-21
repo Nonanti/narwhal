@@ -18,6 +18,7 @@ use uuid::Uuid;
 fn empty_core() -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: Vec::new(),
     };
     AppCore::new(registry, connections, None)
@@ -46,6 +47,7 @@ async fn core_with_items() -> (AppCore, TempDir) {
     }
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "p".into(),

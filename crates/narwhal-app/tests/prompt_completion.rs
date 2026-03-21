@@ -25,6 +25,7 @@ const fn key(code: KeyCode) -> KeyEvent {
 fn core_with_connections(names: &[&str]) -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: names
             .iter()
             .map(|name| ConnectionConfig {
@@ -43,6 +44,7 @@ fn core_with_connections(names: &[&str]) -> AppCore {
 fn empty_core() -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: Vec::new(),
     };
     AppCore::new(registry, connections, None)
