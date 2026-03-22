@@ -104,6 +104,21 @@ where
             }
         }
     }
+    // Logical relations live alongside `[[connection]]` in the same
+    // file; the user reasonably expects the same `${env:VAR}` vocabulary
+    // to apply (e.g. `from = "${env:SCHEMA_PREFIX}_events.user_id"` for
+    // a multi-tenant deployment). `connection` and `cardinality` are
+    // deliberately *not* interpolated — they are validated against
+    // closed enums where placeholders would only mask typos.
+    for rel in &mut file.logical_relations {
+        interpolate_optional(&mut rel.from, lookup)?;
+        interpolate_optional(&mut rel.to, lookup)?;
+        interpolate_optional(&mut rel.note, lookup)?;
+        for col in rel.from_columns.iter_mut().chain(rel.to_columns.iter_mut()) {
+            let replaced = interpolate_with(col, lookup)?;
+            *col = replaced;
+        }
+    }
     Ok(())
 }
 
@@ -325,5 +340,63 @@ mod tests {
             file.connections[0].params.database.as_deref(),
             Some("appdb")
         );
+    }
+
+    #[test]
+    fn logical_relation_fields_interpolated() {
+        use crate::settings::LogicalRelationConfig;
+        let mut file = ConnectionsFile {
+            connections: Vec::new(),
+            logical_relations: vec![LogicalRelationConfig {
+                connection: "prod".into(),
+                from: Some("${env:SCHEMA_PREFIX}_events.user_id".into()),
+                to: Some("users.id".into()),
+                cardinality: "many-to-one".into(),
+                note: Some("owned by ${env:OWNER:platform}".into()),
+                from_columns: vec!["${env:COL_A}".into()],
+                to_columns: vec!["plain".into()],
+            }],
+        };
+        let mut m = HashMap::new();
+        m.insert("SCHEMA_PREFIX", "tenant42");
+        m.insert("COL_A", "resolved_col");
+        let l = map_lookup(&m);
+        interpolate_connections_with(&mut file, l).unwrap();
+
+        let rel = &file.logical_relations[0];
+        assert_eq!(rel.from.as_deref(), Some("tenant42_events.user_id"));
+        assert_eq!(rel.to.as_deref(), Some("users.id"));
+        // Missing-with-default branch covers the OWNER lookup.
+        assert_eq!(rel.note.as_deref(), Some("owned by platform"));
+        assert_eq!(rel.from_columns, vec!["resolved_col".to_string()]);
+        assert_eq!(rel.to_columns, vec!["plain".to_string()]);
+        // `connection` and `cardinality` are deliberately not
+        // interpolated — they target closed enums.
+        assert_eq!(rel.connection, "prod");
+        assert_eq!(rel.cardinality, "many-to-one");
+    }
+
+    #[test]
+    fn logical_relation_missing_env_surfaces_error() {
+        use crate::settings::LogicalRelationConfig;
+        let mut file = ConnectionsFile {
+            connections: Vec::new(),
+            logical_relations: vec![LogicalRelationConfig {
+                connection: "prod".into(),
+                from: Some("${env:MISSING}.x".into()),
+                to: Some("y.id".into()),
+                cardinality: "many-to-one".into(),
+                note: None,
+                from_columns: Vec::new(),
+                to_columns: Vec::new(),
+            }],
+        };
+        let m: HashMap<&str, &str> = HashMap::new();
+        let l = map_lookup(&m);
+        let err = interpolate_connections_with(&mut file, l).unwrap_err();
+        // Bubble-up so the user sees a clean error at startup instead
+        // of a confusing "unknown table" downstream.
+        let msg = err.to_string();
+        assert!(msg.contains("MISSING"), "error must name the missing var: {msg}");
     }
 }
