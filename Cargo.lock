@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-app"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2818,7 +2818,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-commands"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "crossterm",
@@ -2843,7 +2843,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-config"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "directories",
@@ -2863,7 +2863,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2876,7 +2876,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-diagram"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "insta",
  "narwhal-core",
@@ -2886,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-domain"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "narwhal-core",
  "serde",
@@ -2894,7 +2894,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-clickhouse"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2910,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-duckdb"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2924,7 +2924,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-mysql"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-postgres"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-registry"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "narwhal-core",
  "narwhal-driver-clickhouse",
@@ -2979,7 +2979,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-driver-sqlite"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "narwhal-core",
@@ -2992,7 +2992,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-history"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-mcp"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-plugin"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "narwhal-core",
@@ -3048,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-plugin-lua"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "mlua",
@@ -3061,7 +3061,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-pool"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "narwhal-core",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-sql"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "memchr",
@@ -3085,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-tui"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "crossterm",
@@ -3102,14 +3102,14 @@ dependencies = [
 
 [[package]]
 name = "narwhal-vim"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "narwhaldb"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "clap",
