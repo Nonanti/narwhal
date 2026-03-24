@@ -4,11 +4,11 @@
 //! [`crate::theme::Theme`] supplies colours and the caller passes a frozen
 //! [`WizardView`] each frame.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

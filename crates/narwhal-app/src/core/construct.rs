@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore, VaultRegistry};
 use narwhal_history::Journal;
 use narwhal_plugin::PluginRegistry;
 use narwhal_tui::Theme;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use super::plugin_executor::PluginConnectionState;
 use super::{AppCore, SidebarItem};
@@ -104,6 +104,7 @@ impl AppCore {
             deps: super::AppDeps {
                 registry,
                 credentials,
+                vault: Arc::new(VaultRegistry::empty()),
                 clipboard,
                 plugins: {
                     let mut reg = PluginRegistry::new();
@@ -173,8 +174,21 @@ impl AppCore {
     /// L36 #11: enter / leave read-only mode. When `on` is true every
     /// row-CRUD entry point bails with an explanatory status message
     /// before staging any mutation.
-    pub fn set_read_only(&mut self, on: bool) {
+    pub const fn set_read_only(&mut self, on: bool) {
         self.session.read_only = on;
+    }
+
+    /// Swap in a configured [`VaultRegistry`] (T1-T2-B).
+    ///
+    /// Default state after [`Self::with_services`] is an empty
+    /// registry, which means `password = "vault:…"` references in
+    /// `connections.toml` will fail with
+    /// [`narwhal_config::VaultError::NotConfigured`]. The binary
+    /// constructs the populated registry from
+    /// `settings.vault.providers` and calls this method before the
+    /// first `:open`.
+    pub fn set_vault(&mut self, vault: Arc<VaultRegistry>) {
+        self.deps.vault = vault;
     }
 
     /// Apply a user-supplied [`narwhal_config::Settings`] payload.
@@ -187,6 +201,10 @@ impl AppCore {
     /// fall back to defaults blindly.
     pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
         self.ui.diagram_icons = settings.diagram.icons;
+        // T1-T4-A: streaming-result tuning. Defended in StreamTuning::new
+        // so a misconfigured `batch_size = 0` cannot livelock the worker.
+        self.session.stream_tuning =
+            crate::run::StreamTuning::new(settings.run.batch_size, settings.run.stream_flush_ms);
         self.ui.theme = match settings.theme {
             narwhal_config::Theme::Dark => Theme::DARK,
             narwhal_config::Theme::Light => Theme::LIGHT,

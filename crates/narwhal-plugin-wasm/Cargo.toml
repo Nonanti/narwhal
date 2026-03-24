@@ -1,0 +1,37 @@
+[package]
+name = "narwhal-plugin-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "WASM component-model plugin runtime for narwhal"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-plugin.workspace = true
+narwhal-core.workspace = true
+narwhal-config.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+toml.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+tracing.workspace = true
+# Engine + component model. Pinned via workspace so the plugin SDK
+# and host agree on the canonical-ABI layout.
+wasmtime.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "3.13"
+serde_json.workspace = true
+# `wat` lets the test suite assemble tiny component fixtures inline
+# so the unit tests don't need an external cargo-component toolchain.
+wat.workspace = true

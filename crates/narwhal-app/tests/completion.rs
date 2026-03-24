@@ -1,8 +1,8 @@
 //! Headless integration tests for the editor's completion popup.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use tempfile::TempDir;
@@ -49,6 +49,7 @@ async fn open_with_tables(tables: &[&str]) -> AppCore {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),

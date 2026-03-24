@@ -5,11 +5,11 @@
 //! `Paragraph` wrap since the modal has the room — no glyph projection.
 
 use narwhal_core::{ColumnHeader, Value};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::results::sanitize_for_display;

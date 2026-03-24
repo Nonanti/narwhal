@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+/// All visible schemas paired with the tables they own.
+///
+/// Return type of [`crate::Connection::list_all_tables`]. Lives at
+/// the crate root so the dyn-safe sibling signatures don't trip
+/// `clippy::type_complexity` on the nested `Vec<(Schema,
+/// Vec<Table>)>`.
+pub type SchemaCatalog = Vec<(Schema, Vec<Table>)>;
+
 use crate::value::Value;
 
 /// Logical schema or namespace inside a database.

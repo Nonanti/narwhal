@@ -11,8 +11,8 @@ use narwhal_plugin::{
 };
 use narwhal_plugin_lua::LuaPlugin;
 
-use super::plugin_executor::AppPluginExecutor;
 use super::AppCore;
+use super::plugin_executor::AppPluginExecutor;
 
 impl AppCore {
     /// Read-only handle to the plugin registry, useful for tests.

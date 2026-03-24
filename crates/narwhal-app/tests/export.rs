@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use narwhal_app::core::{AppCore, ResultState};
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::{AppCore, ResultState};
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams, Row};
 use tempfile::TempDir;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -171,7 +172,15 @@ async fn json_invalid_utf8_uses_bytes_sentinel() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.json");
 
-    narwhal_app::export::export_rows(&columns, &rows, ExportFormat::Json, &path, None).unwrap();
+    narwhal_app::export::export_rows(
+        &columns,
+        &rows,
+        ExportFormat::Json,
+        &path,
+        None,
+        &narwhal_app::export::ExportOptions::default(),
+    )
+    .unwrap();
 
     let body = std::fs::read_to_string(&path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();

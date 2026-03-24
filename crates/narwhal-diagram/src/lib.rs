@@ -16,7 +16,7 @@ pub mod icons;
 pub mod model;
 pub mod render;
 
-pub use build::{build, build_with_logical, focused, impact, BuildDiagnostic, LogicalRelation};
+pub use build::{BuildDiagnostic, LogicalRelation, build, build_with_logical, focused, impact};
 pub use icons::IconSet;
 pub use model::{
     Cardinality, DiagramModel, Edge, EdgeKind, ImpactNode, ImpactTree, Node, NodeColumn,

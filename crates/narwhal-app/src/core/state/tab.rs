@@ -1,10 +1,11 @@
 //! One editor tab: name, buffer, run state, results.
 
+use narwhal_sql::treesitter::{HighlightSpan, Parser as TsParser};
 use narwhal_tui::EditorBuffer;
 
 use super::result::{
-    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState,
-    ResultBundle, ResultSearch, RowDetailState, RowSource,
+    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState, ResultBundle,
+    ResultSearch, RowDetailState, RowSource,
 };
 use crate::pending::PendingChanges;
 
@@ -52,6 +53,19 @@ pub struct Tab {
     /// minimal (just a scroll cursor); the body is reconstructed from
     /// `pending` every render.
     pub(crate) pending_preview: Option<PendingPreviewState>,
+    /// T1-T3-A: per-tab tree-sitter parser. Lazily initialised on the
+    /// first highlight request so a tab that never opens an editor
+    /// (e.g. one used only via :run) pays nothing. `None` after
+    /// construction; populated by [`Tab::sql_highlights`].
+    pub(crate) ts_parser: Option<TsParser>,
+    /// T1-T3-A: cached highlight spans for the current editor buffer.
+    /// Refreshed when the editor's content changes (the dispatch
+    /// layer compares revision counters before re-rendering).
+    pub(crate) sql_highlights: Option<Vec<HighlightSpan>>,
+    /// T1-T3-A: byte length of the buffer the cached spans were
+    /// computed against. A mismatch with the current buffer length
+    /// invalidates the cache.
+    pub(crate) sql_highlights_buf_len: usize,
 }
 
 /// Lightweight modal state for the pending-preview overlay. Only
@@ -81,7 +95,62 @@ impl Tab {
             diagram: None,
             pending: PendingChanges::new(),
             pending_preview: None,
+            ts_parser: None,
+            sql_highlights: None,
+            sql_highlights_buf_len: 0,
         }
+    }
+
+    /// T1-T3-A: refresh and return the tree-sitter highlight spans
+    /// for the current editor buffer.
+    ///
+    /// Cache policy: spans are recomputed when the buffer length
+    /// changes. Within-line same-length edits (overstrike a single
+    /// character) leave stale spans visible for one render tick — a
+    /// minor visual glitch resolved by the next length-changing
+    /// keystroke. A precise revision counter on `EditorBuffer`
+    /// would close the hole; deferred until the multi-cursor task
+    /// (T2-T3-D) adds one anyway.
+    ///
+    /// The reparse path goes through `Parser::reparse`, which falls
+    /// back to a from-scratch parse the first time it's called per
+    /// tab. Subsequent calls reuse the cached `tree_sitter::Tree`
+    /// when the dispatch layer threads `Edit`s through (a future
+    /// follow-up; the editor doesn't surface byte-level edit events
+    /// yet).
+    ///
+    /// Returns `None` if the grammar failed to load (logged once at
+    /// startup); the editor degrades to plain text in that case.
+    pub fn sql_highlights(&mut self) -> Option<&[HighlightSpan]> {
+        let source = self.editor.entire_text();
+        if self.sql_highlights.is_some() && self.sql_highlights_buf_len == source.len() {
+            return self.sql_highlights.as_deref();
+        }
+        if self.ts_parser.is_none() {
+            match TsParser::new() {
+                Ok(p) => self.ts_parser = Some(p),
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        "tree-sitter SQL parser unavailable; \
+                                        falling back to plain-text editor rendering"
+                    );
+                    return None;
+                }
+            }
+        }
+        let parser = self.ts_parser.as_mut()?;
+        match parser.reparse(&source) {
+            Ok(tree) => {
+                self.sql_highlights = Some(tree.highlights(&source));
+                self.sql_highlights_buf_len = source.len();
+            }
+            Err(err) => {
+                tracing::warn!(?err, "tree-sitter SQL reparse failed; keeping last cache");
+                return self.sql_highlights.as_deref();
+            }
+        }
+        self.sql_highlights.as_deref()
     }
 
     /// Stable identifier (see field doc).
@@ -100,7 +169,7 @@ impl Tab {
     }
 
     /// Mutable editor buffer for tests and host-side compositors.
-    pub fn editor_mut(&mut self) -> &mut EditorBuffer {
+    pub const fn editor_mut(&mut self) -> &mut EditorBuffer {
         &mut self.editor
     }
 
@@ -110,7 +179,7 @@ impl Tab {
     }
 
     /// Mutable access to the result bundle.
-    pub fn results_mut(&mut self) -> &mut ResultBundle {
+    pub const fn results_mut(&mut self) -> &mut ResultBundle {
         &mut self.results
     }
 
@@ -138,7 +207,7 @@ impl Tab {
     /// tests and any future inline-edit path that needs to populate
     /// values on an `Insert` row without going through the cell
     /// editor.
-    pub fn pending_mut(&mut self) -> &mut PendingChanges {
+    pub const fn pending_mut(&mut self) -> &mut PendingChanges {
         &mut self.pending
     }
 

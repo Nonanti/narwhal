@@ -9,11 +9,11 @@
 //! rows-returned summary so the user can spot slow queries and
 //! failed statements without paging the underlying journal.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::help::centred;
@@ -269,7 +269,7 @@ fn pad_to_width(s: &str, target_width: usize) -> String {
     let display_w = s.width();
     let mut out = s.to_owned();
     let need = target_width.saturating_sub(display_w);
-    out.extend(std::iter::repeat(' ').take(need));
+    out.extend(std::iter::repeat_n(' ', need));
     out
 }
 

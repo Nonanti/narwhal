@@ -6,14 +6,17 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use narwhal_app::clipboard::{ArboardClipboard, Clipboard};
-use narwhal_app::export::{write_format, ExportFormat};
+use narwhal_app::export::{ExportFormat, write_format};
 use narwhal_app::{App, DriverRegistry as AppDriverRegistry};
-use narwhal_config::{ConfigPaths, ConnectionsFile, CredentialStore, KeyringStore, Settings};
-use narwhal_core::{Connection, ConnectionConfig};
+use narwhal_config::{
+    ConfigPaths, ConnectionsFile, CredentialStore, KeyringStore, MigrateOptions, MigrateOutcome,
+    Settings, ValidateOutcome, VaultRegistry, migrate_config, validate_config,
+};
+use narwhal_core::{ConnectionConfig, DynConnection};
 use narwhal_history::Journal;
 use narwhal_mcp::{DriverRegistry as McpDriverRegistry, McpServer, ServerContext, Workspace};
 use secrecy::ExposeSecret;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// narwhal: TUI database client with built-in MCP server + headless CLI.
 #[derive(Debug, Parser)]
@@ -46,6 +49,56 @@ enum Mode {
     Mcp,
     /// Execute one SQL statement and print the result. Pipes-friendly.
     Exec(ExecArgs),
+    /// Migrate v1 settings.toml + connections.toml to the v2 schema.
+    ///
+    /// Writes the v2 file in place and preserves the original at
+    /// `<file>.v1.bak`. Idempotent: running twice on a v2 file is
+    /// a no-op.
+    MigrateConfig(MigrateConfigArgs),
+    /// Validate the on-disk config without modifying it. Reports
+    /// schema version, parse errors, and whether migration is
+    /// required. Exit code is non-zero on any non-OK outcome.
+    Config(ConfigArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct MigrateConfigArgs {
+    /// Print the v2 payload that would be written, but don't touch
+    /// the filesystem.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+    /// Backup suffix appended to each v1 file. Defaults to
+    /// `.v1.bak`.
+    #[arg(long = "backup-suffix", default_value = ".v1.bak")]
+    backup_suffix: String,
+    /// Overwrite an existing backup. Refuses otherwise so an earlier
+    /// migration's backup is never lost.
+    #[arg(long = "force")]
+    force: bool,
+    /// Override the auto-discovered settings.toml path.
+    #[arg(long = "settings-path", value_name = "PATH")]
+    settings_path: Option<std::path::PathBuf>,
+    /// Override the auto-discovered connections.toml path.
+    #[arg(long = "connections-path", value_name = "PATH")]
+    connections_path: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    command: ConfigCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Read-only schema check. Reports `Ok` / `NeedsMigration` /
+    /// `Invalid` / `UnsupportedSchema` for each config file.
+    Validate {
+        #[arg(long = "settings-path", value_name = "PATH")]
+        settings_path: Option<std::path::PathBuf>,
+        #[arg(long = "connections-path", value_name = "PATH")]
+        connections_path: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -84,7 +137,196 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Mode::Mcp) => run_mcp(paths, cli.read_only).await,
         Some(Mode::Exec(args)) => run_exec(paths, args, cli.read_only).await,
+        Some(Mode::MigrateConfig(args)) => run_migrate_config(paths, args),
+        Some(Mode::Config(args)) => run_config(paths, args),
         None => run_tui(paths, cli.read_only).await,
+    }
+}
+
+/// Centralised settings loader.
+///
+/// Maps `ConfigError::NeedsMigration` to a friendly warning that
+/// names the binary's `migrate-config` subcommand, so the user is
+/// never confronted with a raw "file is v1" error.
+fn load_settings_or_warn(paths: &ConfigPaths) -> Settings {
+    match Settings::load(&paths.settings_file()) {
+        Ok(s) => s,
+        Err(narwhal_config::ConfigError::NeedsMigration { path }) => {
+            tracing::warn!(
+                path = %path.display(),
+                "settings.toml is v1 — run `narwhal migrate-config` to convert; using defaults until then"
+            );
+            Settings::default()
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %paths.settings_file().display(),
+                error = %error,
+                "falling back to default settings"
+            );
+            Settings::default()
+        }
+    }
+}
+
+fn load_connections_or_warn(paths: &ConfigPaths) -> ConnectionsFile {
+    match ConnectionsFile::load(&paths.connections_file()) {
+        Ok(c) => c,
+        Err(narwhal_config::ConfigError::NeedsMigration { path }) => {
+            tracing::warn!(
+                path = %path.display(),
+                "connections.toml is v1 — run `narwhal migrate-config` to convert; using empty list until then"
+            );
+            ConnectionsFile::default()
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %paths.connections_file().display(),
+                error = %error,
+                "falling back to empty connections file"
+            );
+            ConnectionsFile::default()
+        }
+    }
+}
+
+fn run_migrate_config(paths: ConfigPaths, args: MigrateConfigArgs) -> Result<()> {
+    let settings_path = args.settings_path.unwrap_or_else(|| paths.settings_file());
+    let connections_path = args
+        .connections_path
+        .unwrap_or_else(|| paths.connections_file());
+    let opts = MigrateOptions::with(|o| {
+        o.dry_run = args.dry_run;
+        o.backup_suffix = args.backup_suffix;
+        o.force = args.force;
+    });
+    let report =
+        migrate_config(&settings_path, &connections_path, &opts).context("migrate-config")?;
+    print_migrate_outcome("settings", &settings_path, &report.settings, args.dry_run);
+    print_migrate_outcome(
+        "connections",
+        &connections_path,
+        &report.connections,
+        args.dry_run,
+    );
+    Ok(())
+}
+
+fn print_migrate_outcome(
+    label: &str,
+    path: &std::path::Path,
+    outcome: &MigrateOutcome,
+    dry_run: bool,
+) {
+    match outcome {
+        MigrateOutcome::Absent => {
+            println!("{label}: {} — absent, skipped", path.display());
+        }
+        MigrateOutcome::AlreadyV2 => {
+            println!("{label}: {} — already v2, no action", path.display());
+        }
+        MigrateOutcome::Migrated {
+            backup_path,
+            rendered_v2,
+        } => {
+            if dry_run {
+                println!("{label}: {} — dry-run, would write:", path.display());
+                println!("---");
+                println!("{rendered_v2}");
+                println!("---");
+            } else {
+                let backup = backup_path
+                    .as_ref()
+                    .map_or_else(|| "(none)".to_owned(), |p| p.display().to_string());
+                println!(
+                    "{label}: {} — migrated to v2 (backup: {backup})",
+                    path.display()
+                );
+            }
+        }
+        // `MigrateOutcome` is `#[non_exhaustive]`. A new variant
+        // added in a future minor means the binary was built
+        // against an older `narwhal-config` than the one wired
+        // here — highly unusual but possible during partial
+        // upgrades. Surface it loudly rather than swallowing.
+        other => {
+            debug_assert!(false, "unhandled MigrateOutcome variant: {other:?}");
+            tracing::error!(?other, "unhandled MigrateOutcome variant in CLI dispatch");
+            println!(
+                "{label}: {} — unknown outcome (open an issue: {other:?})",
+                path.display()
+            );
+        }
+    }
+}
+
+fn run_config(paths: ConfigPaths, args: ConfigArgs) -> Result<()> {
+    match args.command {
+        ConfigCommand::Validate {
+            settings_path,
+            connections_path,
+        } => {
+            let settings_path = settings_path.unwrap_or_else(|| paths.settings_file());
+            let connections_path = connections_path.unwrap_or_else(|| paths.connections_file());
+            let report = validate_config(&settings_path, &connections_path);
+            let mut ok = true;
+            print_validate_outcome("settings", &settings_path, &report.settings, &mut ok);
+            print_validate_outcome(
+                "connections",
+                &connections_path,
+                &report.connections,
+                &mut ok,
+            );
+            if !ok {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn print_validate_outcome(
+    label: &str,
+    path: &std::path::Path,
+    outcome: &ValidateOutcome,
+    ok: &mut bool,
+) {
+    match outcome {
+        ValidateOutcome::Absent => {
+            println!("{label}: {} — absent", path.display());
+        }
+        ValidateOutcome::Ok { schema_version } => {
+            println!("{label}: {} — ok (v{schema_version})", path.display());
+        }
+        ValidateOutcome::NeedsMigration => {
+            *ok = false;
+            println!(
+                "{label}: {} — v1, run `narwhal migrate-config` to convert",
+                path.display()
+            );
+        }
+        ValidateOutcome::Invalid(msg) => {
+            *ok = false;
+            println!("{label}: {} — invalid: {msg}", path.display());
+        }
+        ValidateOutcome::UnsupportedSchema(n) => {
+            *ok = false;
+            println!(
+                "{label}: {} — unsupported schema_version = {n}; upgrade narwhal",
+                path.display()
+            );
+        }
+        // `ValidateOutcome` is `#[non_exhaustive]`; see the same
+        // note on `MigrateOutcome` above.
+        other => {
+            *ok = false;
+            debug_assert!(false, "unhandled ValidateOutcome variant: {other:?}");
+            tracing::error!(?other, "unhandled ValidateOutcome variant in CLI dispatch");
+            println!(
+                "{label}: {} — unknown outcome (open an issue: {other:?})",
+                path.display()
+            );
+        }
     }
 }
 
@@ -103,28 +345,8 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
 
     // L20: log instead of silently swallowing a malformed settings file
     // — a user-visible warning beats falling back to defaults blind.
-    let settings = match Settings::load(&paths.settings_file()) {
-        Ok(s) => s,
-        Err(error) => {
-            tracing::warn!(
-                path = %paths.settings_file().display(),
-                error = %error,
-                "falling back to default settings"
-            );
-            Settings::default()
-        }
-    };
-    let connections = match ConnectionsFile::load(&paths.connections_file()) {
-        Ok(c) => c,
-        Err(error) => {
-            tracing::warn!(
-                path = %paths.connections_file().display(),
-                error = %error,
-                "falling back to empty connections file"
-            );
-            ConnectionsFile::default()
-        }
-    };
+    let settings = load_settings_or_warn(&paths);
+    let connections = load_connections_or_warn(&paths);
     let history = match Journal::open(paths.history_file()).await {
         Ok(j) => Some(Arc::new(j)),
         Err(error) => {
@@ -136,10 +358,22 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     let registry = AppDriverRegistry::with_defaults();
     let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
     let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
+    // T1-T2-B: build the vault registry from settings.vault.providers.
+    // A misconfigured provider sub-section here is non-fatal — the
+    // TUI still starts so the user can edit settings.toml; only an
+    // actual `password = "vault:…"` reference will fail at connect
+    // time with a clear NotConfigured error.
+    let vault = Arc::new(build_vault_registry(&settings.vault, "TUI"));
+    // T1-T3-B: workspace-state restore. Wired before `with_settings`
+    // so the persist toggles from `[settings.workspace.persist]` are
+    // already cached when `with_workspace_state_path` consults them.
+    let workspace_state_path = paths.workspace_state_file();
     let app = App::with_services(registry, connections, history, credentials, clipboard)
+        .with_vault(vault)
         .with_connections_path(paths.connections_file())
         .with_last_used_path(paths.last_used_file())
         .with_settings(settings)
+        .with_workspace_state_path(workspace_state_path)
         .with_plugins_dir(&paths.plugins_dir())
         .with_read_only(read_only);
 
@@ -180,22 +414,12 @@ async fn run_mcp(paths: ConfigPaths, force_read_only: bool) -> Result<()> {
         "starting narwhal MCP server"
     );
 
-    let connections = ConnectionsFile::load(&paths.connections_file())
-        .with_context(|| {
-            format!(
-                "loading connections file: {}",
-                paths.connections_file().display()
-            )
-        })
-        .unwrap_or_else(|error| {
-            // Empty connections file is a legitimate first-run state; we
-            // log and keep going so `list_connections` simply returns [].
-            tracing::warn!(error = %error, "falling back to empty connections file");
-            ConnectionsFile::default()
-        });
+    let connections = load_connections_or_warn(&paths);
+    let settings = load_settings_or_warn(&paths);
 
     let drivers = Arc::new(McpDriverRegistry::with_defaults());
     let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let vault = Arc::new(build_vault_registry(&settings.vault, "MCP"));
     let journal = match Journal::open(paths.history_file()).await {
         Ok(j) => Some(Arc::new(j)),
         Err(error) => {
@@ -207,6 +431,7 @@ async fn run_mcp(paths: ConfigPaths, force_read_only: bool) -> Result<()> {
         }
     };
     let mut ctx = ServerContext::new(drivers, Arc::new(connections), credentials)
+        .with_vault(vault)
         .with_force_read_only(force_read_only);
     if force_read_only {
         tracing::info!("MCP server forced to read-only by --read-only flag");
@@ -266,7 +491,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
 
     let format = ExportFormat::from_token(&args.format).with_context(|| {
         format!(
-            "unknown format `{}` — choose one of: csv, json, tsv, table",
+            "unknown format `{}` — choose one of: csv, json, tsv, table, markdown",
             args.format
         )
     })?;
@@ -276,13 +501,33 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
         // instead of a deep ExportError::NoSourceTable later.
         anyhow::bail!("`insert` is not supported in exec mode — use the TUI's `:export` command");
     }
+    // T1-T4-B: Parquet needs to own the sink for atomic write +
+    // footer flush, which the streaming `write_format` path cannot
+    // provide. Direct the user at the TUI command (which goes through
+    // `export_rows` with a real path).
+    if matches!(format, ExportFormat::Parquet) {
+        anyhow::bail!(
+            "`parquet` is not supported in exec mode (binary footer needs file ownership) — use the TUI's `:export parquet <path>` command"
+        );
+    }
 
-    let connections_file = ConnectionsFile::load(&paths.connections_file()).with_context(|| {
-        format!(
-            "loading connections file: {}",
-            paths.connections_file().display()
-        )
-    })?;
+    let connections_file = match ConnectionsFile::load(&paths.connections_file()) {
+        Ok(c) => c,
+        Err(narwhal_config::ConfigError::NeedsMigration { path }) => {
+            anyhow::bail!(
+                "connections file at {} is v1 — run `narwhal migrate-config` first",
+                path.display()
+            )
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "loading connections file: {}",
+                    paths.connections_file().display()
+                )
+            });
+        }
+    };
     let config = connections_file
         .connections
         .iter()
@@ -298,8 +543,13 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
 
     let registry = McpDriverRegistry::with_defaults();
     let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    // T1-T2-B: load settings just for the vault block. The exec
+    // path doesn't care about the rest of the settings struct —
+    // it has its own CLI flags for everything else.
+    let settings = load_settings_or_warn(&paths);
+    let vault = build_vault_registry(&settings.vault, "exec");
 
-    let password = resolve_password(&*credentials, &config).await;
+    let password = resolve_password(&*credentials, &vault, &config).await;
     let driver = registry
         .get(&config.driver)
         .map_err(|e| anyhow::anyhow!("driver: {e}"))?;
@@ -330,7 +580,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
         }
     }
 
-    let mut conn: Box<dyn Connection> = driver
+    let mut conn: Box<dyn DynConnection> = driver
         .connect(&config, password.as_deref())
         .await
         .context("opening connection")?;
@@ -386,15 +636,62 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
     Ok(())
 }
 
-/// Credential resolution chain shared with the MCP path: keyring first,
-/// then `~/.pgpass` / env-var fallback. Failures are not fatal — drivers
-/// that accept passwordless auth simply receive `None`.
+/// Credential resolution chain shared with the MCP path: T1-T2-B
+/// vault reference → keyring → `~/.pgpass` / env-var fallback.
+/// Failures are not fatal — drivers that accept passwordless auth
+/// simply receive `None`. Vault failures are logged at warn level so
+/// the operator notices a misconfigured `vault:` reference without
+/// the connect path silently degrading to no-password.
 async fn resolve_password(
     credentials: &dyn CredentialStore,
+    vault: &VaultRegistry,
     config: &ConnectionConfig,
 ) -> Option<String> {
-    if let Ok(Some(secret)) = credentials.get(config.id).await {
-        return Some(secret.expose_secret().to_string());
+    match narwhal_config::resolve_connection_password(config, Some(vault), Some(credentials)).await
+    {
+        Ok(Some(secret)) => Some(secret.expose_secret().to_string()),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::warn!(
+                connection = %config.name,
+                %error,
+                "password resolution failed; connect will proceed without a password",
+            );
+            None
+        }
     }
-    narwhal_config::pgpass::resolve_password(&config.driver, &config.params)
+}
+
+/// Build a [`VaultRegistry`] from `settings.vault.providers`,
+/// logging (but not failing) on a misconfigured provider section.
+///
+/// `entry_point` tags log lines so the operator can tell whether the
+/// TUI, MCP server, or exec path produced the warning.
+fn build_vault_registry(
+    settings: &narwhal_config::settings::VaultSettings,
+    entry_point: &'static str,
+) -> VaultRegistry {
+    match VaultRegistry::from_settings(settings) {
+        Ok(registry) => {
+            let providers: Vec<&str> = registry.provider_names();
+            if providers.is_empty() {
+                tracing::debug!(entry = entry_point, "no vault providers configured");
+            } else {
+                tracing::info!(
+                    entry = entry_point,
+                    providers = ?providers,
+                    "vault providers ready"
+                );
+            }
+            registry
+        }
+        Err(error) => {
+            tracing::warn!(
+                entry = entry_point,
+                %error,
+                "vault providers misconfigured; references will fail at connect time"
+            );
+            VaultRegistry::empty()
+        }
+    }
 }

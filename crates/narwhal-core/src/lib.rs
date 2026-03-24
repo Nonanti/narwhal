@@ -11,23 +11,28 @@ pub mod capabilities;
 pub mod connection;
 pub mod driver;
 pub mod error;
+pub mod future;
+pub mod query_stream;
 pub mod schema;
 pub mod ssh;
 pub mod stream;
 pub mod value;
 
-pub use cancel::CancelHandle;
+pub use future::BoxFuture;
+
+pub use cancel::{CancelHandle, DynCancelHandle};
 pub use capabilities::Capabilities;
 pub use connection::{
-    Connection, ConnectionColor, ConnectionConfig, ConnectionParams, IsolationLevel,
+    Connection, ConnectionColor, ConnectionConfig, ConnectionParams, DynConnection, IsolationLevel,
     PreConnectStep, SshConfig, SslMode,
 };
-pub use driver::DatabaseDriver;
+pub use driver::{DatabaseDriver, DynDatabaseDriver};
 pub use error::{Error, Result};
+pub use query_stream::QueryStream;
 pub use schema::{
-    Column, ColumnHeader, ForeignKey, Index, QueryResult, ReferentialAction, Row, Schema, Table,
-    TableKind, TableSchema, UniqueConstraint,
+    Column, ColumnHeader, ForeignKey, Index, QueryResult, ReferentialAction, Row, Schema,
+    SchemaCatalog, Table, TableKind, TableSchema, UniqueConstraint,
 };
-pub use ssh::{SshTunnel, READY_TIMEOUT as SSH_READY_TIMEOUT};
-pub use stream::RowStream;
+pub use ssh::{READY_TIMEOUT as SSH_READY_TIMEOUT, SshTunnel};
+pub use stream::{DynRowStream, RowStream};
 pub use value::Value;

@@ -6,8 +6,6 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
     #[error("serialisation error: {0}")]
     Serialise(String),
-    #[error(
-        "INSERT export requires a known source table; the query did not target a single table"
-    )]
+    #[error("INSERT export requires a known source table; the query did not target a single table")]
     NoSourceTable,
 }

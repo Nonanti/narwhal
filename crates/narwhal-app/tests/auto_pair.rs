@@ -51,7 +51,7 @@ fn no_pair_inside_string_literal() {
     // single-quoted string. Insert opening quote (auto-paired to ''),
     // then move left back inside and type content.
     buf.insert_char('\''); // '' cursor at 1 (inside)
-                           // Type content inside the string
+    // Type content inside the string
     for c in "where x =".chars() {
         buf.insert_char(c);
     }
@@ -68,7 +68,7 @@ fn no_pair_when_next_char_is_opener() {
     // Start with () via auto-pair, then move cursor to before (
     buf.insert_char('('); // () with cursor at 1
     buf.insert_char(')'); // skip over, cursor at 2 (after ))
-                          // Now go to start and type ( before the existing pair
+    // Now go to start and type ( before the existing pair
     buf.apply_motion(narwhal_domain::Motion::LineStart, 1);
     buf.insert_char('(');
     // Should NOT over-pair: buffer should be ((), not (())(
@@ -86,7 +86,7 @@ fn non_pair_characters_unaffected() {
 fn nested_pairs() {
     let mut buf = EditorBuffer::new();
     buf.insert_char('('); // () cursor at 1
-                          // Next char is ), which is not an opener, so ( should auto-pair
+    // Next char is ), which is not an opener, so ( should auto-pair
     buf.insert_char('('); // (()) cursor at 2
     buf.insert_char(')'); // skip inner ), cursor at 3
     buf.insert_char(')'); // skip outer ), cursor at 4

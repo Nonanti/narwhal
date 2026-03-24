@@ -26,9 +26,9 @@
 //! not text". JSON has no native byte type; the sentinel is the standard
 //! workaround across MCP server implementations.
 
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use narwhal_core::Value;
-use serde_json::{json, Value as Json};
+use serde_json::{Value as Json, json};
 use thiserror::Error;
 
 /// Errors returned by [`json_to_value`].

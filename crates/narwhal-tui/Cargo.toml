@@ -17,6 +17,10 @@ workspace = true
 [dependencies]
 narwhal-domain.workspace = true
 narwhal-core.workspace = true
+# T1-T3-A: tree-sitter SQL highlight kinds are mapped to ratatui
+# styles inside this crate so call sites can pass
+# `&[treesitter::HighlightSpan]` straight to `render_editor`.
+narwhal-sql.workspace = true
 narwhal-vim.workspace = true
 narwhal-diagram.workspace = true
 ratatui.workspace = true

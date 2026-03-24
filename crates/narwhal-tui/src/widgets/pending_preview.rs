@@ -5,11 +5,11 @@
 //! reconstructs the view from the live [`crate::widgets::pending_preview::PendingPreviewView`]
 //! every frame; the modal owns no data of its own.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

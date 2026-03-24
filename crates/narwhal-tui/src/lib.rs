@@ -9,7 +9,7 @@ pub mod theme;
 pub mod widgets;
 
 pub use input::translate_key_event;
-pub use layout::{render_root, LayoutRegions, Pane, RootLayout, StatusBarView};
+pub use layout::{LayoutRegions, Pane, RootLayout, StatusBarView, render_root};
 pub use theme::Theme;
 // `widgets` already re-exports each public type from its child modules;
 // glob-import here so there's a single source of truth instead of the

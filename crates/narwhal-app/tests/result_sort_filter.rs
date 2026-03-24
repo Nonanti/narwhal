@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::{AppCore, ResultState};
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::{AppCore, ResultState};
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ColumnHeader, ConnectionConfig, ConnectionParams, Row};
 use narwhal_tui::{Pane, ResultView, SortDir};
@@ -18,6 +18,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -390,11 +391,13 @@ async fn escape_clears_filter_and_closes_prompt() {
 
     // Press Esc — should clear filter and close prompt
     core.handle_key(key(KeyCode::Esc)).await;
-    assert!(core.tabs()[core.active_tab()]
-        .results()
-        .active()
-        .filter
-        .is_empty());
+    assert!(
+        core.tabs()[core.active_tab()]
+            .results()
+            .active()
+            .filter
+            .is_empty()
+    );
     assert!(
         !core.tabs()[core.active_tab()]
             .results()

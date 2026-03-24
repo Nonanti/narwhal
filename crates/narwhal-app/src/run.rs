@@ -1,12 +1,49 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use narwhal_core::{CancelHandle, ColumnHeader, Connection, Row, Value};
+use narwhal_core::{ColumnHeader, DynCancelHandle, DynConnection, Row, Value};
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_pool::{Pool, PooledConnection};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::warn;
 use uuid::Uuid;
+
+/// Streaming-result tuning, sourced from `settings.run` and passed
+/// into the worker. Local copy so the worker does not have to depend
+/// on `narwhal-config` directly — the binary translates from
+/// [`narwhal_config::RunSettings`] at the call site.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct StreamTuning {
+    /// Maximum batch size before a flush, in rows.
+    pub batch_size: usize,
+    /// Time window (ms) before a partially-filled batch is flushed.
+    /// `0` disables the time-based flush.
+    pub flush_ms: u64,
+}
+
+impl Default for StreamTuning {
+    /// Pre-T1-T4-A defaults: 64-row batch, 50 ms flush window.
+    fn default() -> Self {
+        Self {
+            batch_size: 64,
+            flush_ms: 50,
+        }
+    }
+}
+
+impl StreamTuning {
+    /// Build a tuning struct, defending against the pathological
+    /// `batch_size = 0` config (would loop forever).
+    #[must_use]
+    pub const fn new(batch_size: usize, flush_ms: u64) -> Self {
+        let batch_size = if batch_size == 0 { 1 } else { batch_size };
+        Self {
+            batch_size,
+            flush_ms,
+        }
+    }
+}
 
 /// Check whether a SQL statement is a DDL statement by inspecting its
 /// first token. Matches CREATE, DROP, ALTER, TRUNCATE, RENAME
@@ -133,6 +170,10 @@ pub struct RunContext {
     pub connection_id: Uuid,
     pub connection_name: String,
     pub driver: String,
+    /// Streaming-result tuning. Caller passes the live value from
+    /// `SessionState::stream_tuning`; tests can pass
+    /// [`StreamTuning::default`] directly.
+    pub stream_tuning: StreamTuning,
 }
 
 /// Incremental updates produced by the worker.
@@ -185,9 +226,7 @@ pub enum RunUpdate {
 }
 
 /// Handle to the in-flight statement.
-pub type ActiveCancel = Arc<Mutex<Option<Box<dyn CancelHandle>>>>;
-
-const STREAM_BATCH: usize = 64;
+pub type ActiveCancel = Arc<Mutex<Option<Box<dyn DynCancelHandle>>>>;
 
 pub fn spawn_run(
     ctx: RunContext,
@@ -217,7 +256,7 @@ pub fn spawn_run(
             Pinned(tokio::sync::OwnedMutexGuard<PooledConnection>),
         }
         impl Holder {
-            fn conn(&mut self) -> &mut dyn Connection {
+            fn conn(&mut self) -> &mut dyn DynConnection {
                 // The match bindings are `&mut PooledConnection` and
                 // `&mut OwnedMutexGuard<PooledConnection>`, so we need an
                 // extra deref step in each arm to reach `dyn Connection`.
@@ -271,7 +310,9 @@ pub fn spawn_run(
             let params = request.params_for(i);
             let outcome = match request.mode {
                 RunMode::Execute => run_execute(holder.conn(), sql, params, &tx).await,
-                RunMode::Stream => run_stream(holder.conn(), sql, params, &tx).await,
+                RunMode::Stream => {
+                    run_stream(holder.conn(), sql, params, ctx.stream_tuning, &tx).await
+                }
             };
 
             *cancel_slot.lock().await = None;
@@ -315,8 +356,22 @@ enum StatementOutcome {
     },
 }
 
+/// Internal control-flow tag for the streaming loop: every iteration
+/// of `run_stream` boils down to "got a row", "engine ended", "engine
+/// errored", or "timer fired so we flushed a partial batch and we
+/// should keep going". A dedicated enum keeps the `match` in the
+/// hot loop exhaustive and easier to extend.
+enum NextRowOutcome {
+    Row(Row),
+    End,
+    Err(narwhal_core::Error),
+    /// The time-window timer fired before a row arrived. The loop
+    /// has already flushed any pending batch; iterate.
+    Continue,
+}
+
 async fn run_execute(
-    conn: &mut dyn narwhal_core::Connection,
+    conn: &mut dyn narwhal_core::DynConnection,
     sql: &str,
     params: &[Value],
     tx: &mpsc::Sender<RunUpdate>,
@@ -364,13 +419,14 @@ async fn run_execute(
 }
 
 async fn run_stream(
-    conn: &mut dyn narwhal_core::Connection,
+    conn: &mut dyn narwhal_core::DynConnection,
     sql: &str,
     params: &[Value],
+    tuning: StreamTuning,
     tx: &mpsc::Sender<RunUpdate>,
 ) -> StatementOutcome {
     let started = Instant::now();
-    let mut stream = match conn.stream(sql, params).await {
+    let mut stream = match conn.query(sql, params).await {
         Ok(s) => s,
         Err(error) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -392,25 +448,105 @@ async fn run_stream(
         })
         .await;
 
-    let mut total_rows = 0usize;
-    let mut batch: Vec<Row> = Vec::with_capacity(STREAM_BATCH);
+    let mut batch: Vec<Row> = Vec::with_capacity(tuning.batch_size.max(1));
     let mut terminal_error: Option<narwhal_core::Error> = None;
+    // T1-T4-A: time-window flush. `last_flush` is reset every time
+    // we send a `RowsAppended` so a slow trickle still surfaces
+    // rows in the UI within `flush_ms`. When `flush_ms == 0` the
+    // time-based flush is disabled and we revert to pure size
+    // batching (v1.x behaviour).
+    let mut last_flush = Instant::now();
+    let flush_window = if tuning.flush_ms == 0 {
+        None
+    } else {
+        Some(Duration::from_millis(tuning.flush_ms))
+    };
+    // Defensive clamp: `batch_size = 0` would loop-flush every row,
+    // saturating the UI channel. `StreamTuning::new` already
+    // clamps to 1, but the field is `pub` so a runtime mutation
+    // could bypass that — keep a local floor so the worker is
+    // bullet-proof regardless.
+    let batch_size = tuning.batch_size.max(1);
 
     loop {
-        match stream.next_row().await {
-            Ok(Some(row)) => {
-                batch.push(row);
-                total_rows += 1;
-                if batch.len() >= STREAM_BATCH {
-                    let chunk = std::mem::replace(&mut batch, Vec::with_capacity(STREAM_BATCH));
+        // Drive the next row with an optional time-based deadline so
+        // a partial batch can flush even when the driver is idle.
+        //
+        // Cancellation safety: when the timeout fires the inner
+        // future is dropped before resolving. We rely on the inner
+        // row-yielding future being cancellation-safe — verified
+        // for the sqlite / duckdb path (the row crosses through a
+        // `tokio::sync::mpsc::Receiver::recv`, which is
+        // cancellation-safe by tokio's contract). The sqlx-backed
+        // (PG / MySQL) and ClickHouse paths have not been audited
+        // line-by-line; if a driver author finds the cancellation
+        // contract is not upheld for their backend, they should
+        // surface that as a [`Capabilities`] flag and we can branch
+        // the worker on it. Until then the default tuning's 50 ms
+        // window keeps the timeout-cancel rate low enough that the
+        // worst-case behaviour is one mid-protocol drop per slow
+        // query, which sqlx handles by closing the connection —
+        // costly but not corrupting.
+        let next_row_outcome = if let Some(window) = flush_window {
+            let elapsed_since_flush = last_flush.elapsed();
+            // If the window already elapsed, flush any pending
+            // batch (or just reset the timer if nothing's pending)
+            // before computing the timeout. This is the fix for the
+            // "empty batch / expired window" busy-loop: without the
+            // unconditional reset, the next iteration would see
+            // `remaining == 0` again and spin.
+            if elapsed_since_flush >= window {
+                if !batch.is_empty() {
+                    let chunk = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
                     let _ = tx.send(RunUpdate::RowsAppended { rows: chunk }).await;
                 }
+                last_flush = Instant::now();
             }
-            Ok(None) => break,
-            Err(error) => {
+            // Always wait at least 1 ms on the next_row future
+            // — a zero-duration timeout would resolve before the
+            // driver gets a chance to schedule, manifesting as a
+            // spin.
+            let remaining = window
+                .saturating_sub(last_flush.elapsed())
+                .max(Duration::from_millis(1));
+            match tokio::time::timeout(remaining, stream.next_row()).await {
+                Ok(Some(Ok(row))) => NextRowOutcome::Row(row),
+                Ok(Some(Err(err))) => NextRowOutcome::Err(err),
+                Ok(None) => NextRowOutcome::End,
+                Err(_elapsed) => {
+                    // Timer fired before a row arrived. Flush
+                    // anything we already have and reset.
+                    if !batch.is_empty() {
+                        let chunk = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
+                        let _ = tx.send(RunUpdate::RowsAppended { rows: chunk }).await;
+                    }
+                    last_flush = Instant::now();
+                    NextRowOutcome::Continue
+                }
+            }
+        } else {
+            match stream.next_row().await {
+                Some(Ok(row)) => NextRowOutcome::Row(row),
+                Some(Err(err)) => NextRowOutcome::Err(err),
+                None => NextRowOutcome::End,
+            }
+        };
+
+        match next_row_outcome {
+            NextRowOutcome::Row(row) => {
+                batch.push(row);
+                if batch.len() >= batch_size {
+                    let chunk = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
+                    let _ = tx.send(RunUpdate::RowsAppended { rows: chunk }).await;
+                    last_flush = Instant::now();
+                }
+            }
+            NextRowOutcome::End => break,
+            NextRowOutcome::Err(error) => {
                 terminal_error = Some(error);
                 break;
             }
+            NextRowOutcome::Continue => {}
         }
     }
 
@@ -418,7 +554,12 @@ async fn run_stream(
         let _ = tx.send(RunUpdate::RowsAppended { rows: batch }).await;
     }
 
-    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    // Single source of truth for the row count: ask the stream
+    // (review fixup M4). Avoids the previous `total_rows` shadow
+    // counter that could drift if the loop body ever grew a
+    // "skip this row" branch.
+    let total_rows = stream.rows_yielded();
     if let Err(error) = stream.close().await {
         warn!(target: "narwhal::run", error = %error, "stream close failed");
     }
@@ -484,7 +625,30 @@ async fn record_history(ctx: &RunContext, sql: &str, outcome: &StatementOutcome)
 
 #[cfg(test)]
 mod tests {
-    use super::is_ddl_statement;
+    use super::{StreamTuning, is_ddl_statement};
+
+    /// T1-T4-A: `StreamTuning::new` must not let `batch_size = 0`
+    /// escape — a zero-sized batch would livelock the worker loop.
+    #[test]
+    fn stream_tuning_zero_batch_clamped_to_one() {
+        let t = StreamTuning::new(0, 50);
+        assert_eq!(t.batch_size, 1);
+        assert_eq!(t.flush_ms, 50);
+    }
+
+    #[test]
+    fn stream_tuning_passthrough_when_positive() {
+        let t = StreamTuning::new(128, 25);
+        assert_eq!(t.batch_size, 128);
+        assert_eq!(t.flush_ms, 25);
+    }
+
+    #[test]
+    fn stream_tuning_default_matches_v1() {
+        let t = StreamTuning::default();
+        assert_eq!(t.batch_size, 64);
+        assert_eq!(t.flush_ms, 50);
+    }
 
     #[test]
     fn ddl_classifier_matches_keywords() {

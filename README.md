@@ -3,10 +3,10 @@
 [![CI](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
 [![Version](https://img.shields.io/badge/version-1.1.0-brightgreen)](./CHANGELOG.md)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](./rust-toolchain.toml)
 
 > Multi-driver TUI database client with a built-in MCP server.
-> Postgres / MySQL / SQLite / DuckDB / ClickHouse, vim editing, Lua plugins.
+> Postgres / MySQL / SQLite / DuckDB / ClickHouse / SQL Server, vim editing, Lua plugins.
 
 ![narwhal demo](./docs/img/demo.gif)
 
@@ -25,8 +25,8 @@
   the reverse-FK closure ("what breaks if I drop this?");
   `:diagram export mermaid` ships Mermaid source straight to your
   clipboard for mermaid.live, a PR description, or Notion.
-- **One TUI, five databases.** Postgres, MySQL, SQLite, DuckDB,
-  ClickHouse. No driver-juggling, no context-switching between `psql`,
+- **One TUI, six databases.** Postgres, MySQL, SQLite, DuckDB,
+  ClickHouse, Microsoft SQL Server. No driver-juggling, no context-switching between `psql`,
   `mysql`, and DataGrip.
 - **Vim editing + auto-pair + completion.** Modal input (Normal,
   Insert, Visual), schema-aware tab-completion, alias-resolved column
@@ -107,6 +107,14 @@ cargo build --release
 ```
 
 ## Quick start
+
+> **Upgrading from v1.x?** narwhal 2.0 ships `settings.toml` and
+> `connections.toml` schema **v2**. On first launch against a v1
+> config you'll see a warning telling you to run
+> `narwhal migrate-config`. The migrator writes v2 in place and
+> preserves the original at `<file>.v1.bak`. Pass `--dry-run` to
+> preview the rewrite, `narwhal config validate` to check the
+> current state without touching the disk.
 
 1. **Run `narwhal`.** The TUI opens with an empty editor and a sidebar.
 2. **Hit `:add`.** The connection wizard appears. Pick a driver, fill in host + database (or use `:url postgres://user:pass@host/db` to skip the form).
@@ -578,7 +586,10 @@ narwhal exec -c prod --write "UPDATE users SET banned = true WHERE id = 42"
 ```
 
 Formats: `table` (default, ASCII grid), `csv` (RFC 4180), `json`
-(array-of-objects), `tsv` (pipe-friendly, no quoting). Connection
+(array-of-objects), `tsv` (pipe-friendly, no quoting), `markdown`
+(GFM table, truncated at 1000 rows). `parquet` is supported via the
+TUI `:export parquet <path>` command — the streaming `exec` sink
+cannot own the file footer. Connection
 resolution is the same as the TUI — keyring first, `~/.pgpass`/env
 fallback. Every call is audit-logged to `history.jsonl` with
 `source: "exec"` so it can be grepped alongside MCP traffic.

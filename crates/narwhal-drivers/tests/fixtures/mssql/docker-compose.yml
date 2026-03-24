@@ -1,0 +1,50 @@
+# Local SQL Server fixture for the MSSQL driver smoke tests.
+#
+# The `testcontainers` test path manages a fresh container per test and
+# does not need this compose file. This is the *manual* path: bring the
+# container up once, point `NARWHAL_MSSQL_HOST=127.0.0.1` and
+# `NARWHAL_MSSQL_PASSWORD=yourStrong(!)Password` at it, and iterate on
+# the driver without paying the image pull on every run.
+#
+# Usage:
+#
+#   docker compose -f crates/narwhal-drivers/tests/fixtures/mssql/docker-compose.yml up -d
+#   NARWHAL_MSSQL_HOST=127.0.0.1 NARWHAL_MSSQL_USER=sa \
+#     NARWHAL_MSSQL_PASSWORD='yourStrong(!)Password' \
+#     cargo test -p narwhal-drivers --features mssql \
+#       --test mssql_smoke external_select_one -- --ignored
+#
+# Tear-down:
+#
+#   docker compose -f crates/narwhal-drivers/tests/fixtures/mssql/docker-compose.yml down -v
+
+services:
+  mssql:
+    # SQL Server 2022 Developer edition. Free for dev/test workloads,
+    # matches the testcontainers default so behavioural drift between
+    # the two modes is unlikely.
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: narwhal-mssql-fixture
+    environment:
+      ACCEPT_EULA: "Y"
+      # Same password the testcontainers MssqlServer image uses by
+      # default. Override via `MSSQL_SA_PASSWORD` env var when invoking
+      # docker compose if you need a different one — the tests read the
+      # password from NARWHAL_MSSQL_PASSWORD, not from this file.
+      MSSQL_SA_PASSWORD: "yourStrong(!)Password"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      # /opt/mssql-tools18 in 2022+, with -C to trust the self-signed
+      # cert. Older images expose /opt/mssql-tools/bin/sqlcmd.
+      test:
+        - "CMD-SHELL"
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P
+          "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -C -No || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped

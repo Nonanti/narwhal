@@ -10,8 +10,8 @@ use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_history::{Journal, JournalReader};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
-use serde_json::{json, Value};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
 /// Seed a sqlite database at `path` with two tables and a few rows so
 /// every test starts from a known fixture.
@@ -39,6 +39,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
         params,
     };
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![config],
     };

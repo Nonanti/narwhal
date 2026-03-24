@@ -13,8 +13,8 @@
 //!    rest of the file.
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_commands::action::{Action, KeyGroup};
 use narwhal_commands::keymap::KeyChord;
 use narwhal_config::{ConnectionsFile, Settings};

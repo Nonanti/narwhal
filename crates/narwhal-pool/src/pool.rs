@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use narwhal_core::{Connection, ConnectionConfig, DatabaseDriver};
+use narwhal_core::{ConnectionConfig, DynConnection, DynDatabaseDriver};
 use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -70,7 +70,7 @@ impl Default for PoolConfig {
     }
 }
 
-/// Pool of [`Connection`] instances backed by a single driver and
+/// Pool of [`narwhal_core::Connection`] instances backed by a single driver and
 /// configuration. Cloning a [`Pool`] shares the same underlying state.
 #[derive(Clone)]
 pub struct Pool {
@@ -79,9 +79,9 @@ pub struct Pool {
 
 /// One pooled connection plus the timestamps used to enforce
 /// `idle_timeout` and `max_lifetime`. Kept private; callers see only
-/// the wrapped `Box<dyn Connection>` through [`PooledConnection`].
+/// the wrapped `Box<dyn DynConnection>` through [`PooledConnection`].
 struct Entry {
-    connection: Box<dyn Connection>,
+    connection: Box<dyn DynConnection>,
     /// When the connection was returned to the pool (or initially
     /// created, in which case it equals `created_at`).
     idle_since: Instant,
@@ -90,7 +90,7 @@ struct Entry {
 }
 
 struct Inner {
-    driver: Arc<dyn DatabaseDriver>,
+    driver: Arc<dyn DynDatabaseDriver>,
     config: ConnectionConfig,
     password: Option<String>,
     settings: PoolConfig,
@@ -105,7 +105,7 @@ struct Inner {
 impl Pool {
     /// Construct a new [`Pool`].
     pub fn new(
-        driver: Arc<dyn DatabaseDriver>,
+        driver: Arc<dyn DynDatabaseDriver>,
         config: ConnectionConfig,
         password: Option<String>,
         settings: PoolConfig,
@@ -215,7 +215,7 @@ impl Pool {
         None
     }
 
-    async fn connect_with_timeout(&self) -> Result<Box<dyn Connection>, PoolError> {
+    async fn connect_with_timeout(&self) -> Result<Box<dyn DynConnection>, PoolError> {
         let fut = self
             .inner
             .driver
@@ -253,7 +253,7 @@ impl Pool {
 /// when a stale/unhealthy connection is discarded. If no Tokio runtime
 /// is available (e.g. during shutdown) the connection is dropped, which
 /// matches the legacy behaviour.
-fn spawn_close(connection: Box<dyn Connection>) {
+fn spawn_close(connection: Box<dyn DynConnection>) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
             if let Err(error) = connection.close().await {
@@ -294,7 +294,7 @@ impl Drop for Inner {
     }
 }
 
-/// RAII guard that returns its [`Connection`] to the pool on drop.
+/// RAII guard that returns its [`narwhal_core::Connection`] to the pool on drop.
 ///
 /// # Invariant
 ///
@@ -302,7 +302,7 @@ impl Drop for Inner {
 /// `Deref` / `DerefMut` rely on this invariant and will panic if it is
 /// violated (which should be impossible through the public API).
 pub struct PooledConnection {
-    connection: Option<Box<dyn Connection>>,
+    connection: Option<Box<dyn DynConnection>>,
     created_at: Instant,
     inner: Arc<Inner>,
     invalidated: bool,
@@ -316,7 +316,7 @@ impl PooledConnection {
     /// Use this after observing a hard error (broken protocol state,
     /// dropped TCP, deadlock victim) to prevent the next caller from
     /// re-acquiring a corrupted session.
-    pub fn invalidate(&mut self) {
+    pub const fn invalidate(&mut self) {
         self.invalidated = true;
     }
 
@@ -327,7 +327,7 @@ impl PooledConnection {
 }
 
 impl Deref for PooledConnection {
-    type Target = dyn Connection;
+    type Target = dyn DynConnection;
 
     fn deref(&self) -> &Self::Target {
         let conn = self
@@ -340,6 +340,11 @@ impl Deref for PooledConnection {
 
 impl DerefMut for PooledConnection {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        // `Box::as_mut()` already produces `&mut dyn DynConnection`
+        // from `Box<dyn DynConnection>` — no coercion gymnastics
+        // needed. Target type changed from `dyn Connection` to
+        // `dyn DynConnection` in T0-02 (RPITIT migration); the body
+        // here is unchanged from v1.x.
         let conn = self
             .connection
             .as_mut()
@@ -371,7 +376,7 @@ impl Drop for PooledConnection {
 mod tests {
     use super::*;
     use narwhal_core::{ConnectionParams, Value};
-    use narwhal_driver_sqlite::SqliteDriver;
+    use narwhal_drivers::sqlite::SqliteDriver;
     use uuid::Uuid;
 
     fn config(path: &str) -> ConnectionConfig {
@@ -386,7 +391,7 @@ mod tests {
     }
 
     fn pool() -> Pool {
-        let driver: Arc<dyn DatabaseDriver> = Arc::new(SqliteDriver::new());
+        let driver: Arc<dyn DynDatabaseDriver> = Arc::new(SqliteDriver::new());
         Pool::new(
             driver,
             config(":memory:"),
@@ -509,7 +514,7 @@ mod tests {
     /// H14: `idle_timeout` discards connections that sat in the pool too long.
     #[tokio::test]
     async fn idle_timeout_discards_stale_connection() {
-        let driver: Arc<dyn DatabaseDriver> = Arc::new(SqliteDriver::new());
+        let driver: Arc<dyn DynDatabaseDriver> = Arc::new(SqliteDriver::new());
         let pool = Pool::new(
             driver,
             config(":memory:"),
@@ -540,7 +545,7 @@ mod tests {
     /// H14: `max_lifetime` discards connections older than the cap.
     #[tokio::test]
     async fn max_lifetime_caps_connection_age() {
-        let driver: Arc<dyn DatabaseDriver> = Arc::new(SqliteDriver::new());
+        let driver: Arc<dyn DynDatabaseDriver> = Arc::new(SqliteDriver::new());
         let pool = Pool::new(
             driver,
             config(":memory:"),

@@ -16,13 +16,12 @@ workspace = true
 
 [dependencies]
 narwhal-core.workspace = true
-async-trait.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]
-narwhal-driver-sqlite.workspace = true
+narwhal-drivers = { workspace = true, features = ["sqlite"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 uuid = { workspace = true }

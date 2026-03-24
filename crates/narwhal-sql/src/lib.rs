@@ -12,8 +12,13 @@ pub mod formatter;
 pub mod guard;
 pub mod lint;
 pub mod splitter;
+// T1-T3-A: tree-sitter SQL parser. Provides a CST per buffer plus
+// incremental reparse, [highlight] spans, and [scope] detection used
+// by the editor for syntax colouring and (in v2.1) the LSP completion
+// engine.
+pub mod treesitter;
 
 pub use formatter::{format, format_for_driver};
-pub use guard::{classify_statement, guard_read_only, StatementKind};
-pub use lint::{lint, lint_with_dialect, LintFinding, LintSeverity};
-pub use splitter::{split, split_with, Dialect, Statement};
+pub use guard::{StatementKind, classify_statement, guard_read_only};
+pub use lint::{LintFinding, LintSeverity, lint, lint_with_dialect};
+pub use splitter::{Dialect, Statement, split, split_with};

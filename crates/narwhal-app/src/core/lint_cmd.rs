@@ -7,7 +7,7 @@
 //! entire context.
 
 use narwhal_commands::template;
-use narwhal_sql::{lint_with_dialect, splitter::Dialect, LintSeverity};
+use narwhal_sql::{LintSeverity, lint_with_dialect, splitter::Dialect};
 
 use super::AppCore;
 

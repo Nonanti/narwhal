@@ -10,9 +10,9 @@
 use narwhal_core::Row;
 
 use super::{AppCore, ResultState};
-use crate::commands::DumpTarget;
+use crate::commands::{DumpTarget, ExportArgs};
 use crate::explain::wrap_explain;
-use crate::export::{export_rows, ExportFormat};
+use crate::export::{ExportFormat, ExportOptions, MarkdownOptions, export_rows};
 use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::RunMode;
 
@@ -151,11 +151,31 @@ impl AppCore {
         self.ui.status.message = "explaining…".into();
     }
 
-    pub(super) async fn export_results(&mut self, format: &str, path: &str) {
+    pub(super) async fn export_results(&mut self, format: &str, path: &str, args: ExportArgs) {
         let Some(format) = ExportFormat::from_token(format) else {
-            self.ui.status.message = format!("unknown export format: {format} (csv|json|insert)");
+            self.ui.status.message = format!(
+                "unknown export format: {format} (csv|json|tsv|table|insert|parquet|markdown)"
+            );
             return;
         };
+        // T1-T4-B: reject flag/format mismatches up-front — the
+        // dispatch layer surfaces these as a status message so the
+        // user fixes the typo before a partial file is created.
+        if args.compression.is_some() && format != ExportFormat::Parquet {
+            self.ui.status.message = "--compression only applies to :export parquet".into();
+            return;
+        }
+        if args.no_truncate && format != ExportFormat::Markdown {
+            self.ui.status.message = "--no-truncate only applies to :export markdown".into();
+            return;
+        }
+        let mut options = ExportOptions::default();
+        if let Some(codec) = args.compression {
+            options.parquet_compression = codec;
+        }
+        if args.no_truncate {
+            options.markdown = MarkdownOptions { row_limit: None };
+        }
         let (columns, rows, source_table) =
             match self.ui.tabs[self.ui.active_tab].results.active_state() {
                 ResultState::Rows {
@@ -187,6 +207,7 @@ impl AppCore {
             format,
             &path_buf,
             source_table.as_ref(),
+            &options,
         ) {
             Ok(()) => {
                 self.ui.status.message = format!(

@@ -56,7 +56,7 @@ fn walk_tree(
         depth: stack.len(),
         text: node.label(),
         cost_ratio,
-        hot: hot.contains(&(node as *const _)),
+        hot: hot.contains(&std::ptr::from_ref(node)),
         divergent: node.rows_divergent(),
         connector,
     });
@@ -90,7 +90,7 @@ fn build_connector(stack: &[bool], is_root: bool, is_last: bool) -> String {
 /// node on it as hot. Identifies the path the planner spent the most
 /// budget on.
 fn mark_hot_path(node: &ExplainNode, hot: &mut std::collections::HashSet<*const ExplainNode>) {
-    hot.insert(node as *const _);
+    hot.insert(std::ptr::from_ref(node));
     if let Some(child) = node.children.iter().max_by(|a, b| {
         a.total_cost
             .partial_cmp(&b.total_cost)
@@ -123,7 +123,7 @@ pub(super) const fn connection_color_to_ratatui(c: ConnectionColor) -> ratatui::
 }
 
 use super::{ResultState, SidebarItem};
-use crate::explain::{parse as parse_plan, ExplainPlan};
+use crate::explain::{ExplainPlan, parse as parse_plan};
 
 /// Postgres `EXPLAIN (FORMAT JSON)` returns a single `"QUERY PLAN"`
 /// column of `Value::Json`. Detect that shape so the run loop can

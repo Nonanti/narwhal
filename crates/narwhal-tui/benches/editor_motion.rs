@@ -5,7 +5,7 @@
 //! into a fresh `String` on every invocation — a regression magnet
 //! once buffers grow.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use narwhal_domain::Motion;
 use narwhal_tui::EditorBuffer;
 

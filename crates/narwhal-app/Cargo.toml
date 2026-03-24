@@ -22,7 +22,7 @@ narwhal-tui.workspace = true
 narwhal-domain.workspace = true
 narwhal-commands.workspace = true
 narwhal-diagram.workspace = true
-narwhal-driver-registry = { workspace = true }
+narwhal-drivers = { workspace = true }
 narwhal-plugin.workspace = true
 narwhal-plugin-lua.workspace = true
 async-trait.workspace = true
@@ -38,7 +38,10 @@ anyhow.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
+serde = { workspace = true }
 serde_json.workspace = true
+# T1-T3-B: workspace-state snapshot serialisation.
+toml.workspace = true
 arboard.workspace = true
 base64.workspace = true
 directories.workspace = true
@@ -49,17 +52,19 @@ nucleo-matcher.workspace = true
 
 [features]
 default = ["driver-postgres", "driver-sqlite"]
-driver-postgres = ["narwhal-driver-registry/driver-postgres"]
-driver-sqlite = ["narwhal-driver-registry/driver-sqlite"]
-driver-mysql = ["narwhal-driver-registry/driver-mysql"]
-driver-duckdb = ["narwhal-driver-registry/driver-duckdb"]
-driver-clickhouse = ["narwhal-driver-registry/driver-clickhouse"]
+driver-postgres = ["narwhal-drivers/postgres"]
+driver-sqlite = ["narwhal-drivers/sqlite"]
+driver-mysql = ["narwhal-drivers/mysql"]
+driver-duckdb = ["narwhal-drivers/duckdb"]
+driver-clickhouse = ["narwhal-drivers/clickhouse"]
+driver-mssql = ["narwhal-drivers/mssql"]
 all-drivers = [
     "driver-postgres",
     "driver-sqlite",
     "driver-mysql",
     "driver-duckdb",
     "driver-clickhouse",
+    "driver-mssql",
 ]
 
 [dev-dependencies]
@@ -68,4 +73,4 @@ rusqlite = "0.32"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 insta = "1.40"
 regex-lite = "0.1"
-narwhal-driver-registry = { workspace = true, features = ["all-drivers"] }
+narwhal-drivers = { workspace = true, features = ["all-drivers"] }

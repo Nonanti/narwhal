@@ -90,7 +90,7 @@ impl DrawScheduler {
     }
 
     /// Called when the deadline timer fires. Flushes any pending defer.
-    pub fn on_tick(&mut self, now: Instant) -> DrawDecision {
+    pub const fn on_tick(&mut self, now: Instant) -> DrawDecision {
         if self.pending {
             self.flush(now)
         } else {
@@ -107,7 +107,7 @@ impl DrawScheduler {
         }
     }
 
-    fn flush(&mut self, now: Instant) -> DrawDecision {
+    const fn flush(&mut self, now: Instant) -> DrawDecision {
         self.last_draw = Some(now);
         self.pending = false;
         DrawDecision::DrawNow

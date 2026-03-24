@@ -14,17 +14,17 @@ pub use model::{
     CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions, ResultView,
     SearchHighlight,
 };
-pub use sort::{compare_values, SortDir};
+pub use sort::{SortDir, compare_values};
 
 use popups::draw_explain;
 use schema_detail::draw_table_detail;
 use table_paint::draw_table;
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

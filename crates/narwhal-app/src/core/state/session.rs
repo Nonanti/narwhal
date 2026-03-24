@@ -24,6 +24,7 @@ use narwhal_config::{ConnectionsFile, LastUsedStore};
 use narwhal_history::Journal;
 use uuid::Uuid;
 
+use crate::run::StreamTuning;
 use crate::session::Session;
 use crate::snippets::SnippetStore;
 
@@ -100,6 +101,12 @@ pub struct SessionState {
     /// when the binary was launched outside any workspace, or when
     /// `current_dir()` itself failed (rare; usually a deleted CWD).
     pub workspace_root: Option<PathBuf>,
+    /// Streaming-result tuning sourced from `settings.run`.
+    /// Captured at startup and re-read on `:reload-config`. Drives
+    /// `RunContext::stream_tuning` for every dispatch — the worker
+    /// uses this to size its row batches and pick the time-window
+    /// flush.
+    pub stream_tuning: StreamTuning,
 }
 
 impl SessionState {
@@ -129,6 +136,7 @@ impl SessionState {
             workspace_root: std::env::current_dir()
                 .ok()
                 .and_then(|cwd| narwhal_config::discover_workspace_root(&cwd)),
+            stream_tuning: StreamTuning::default(),
         }
     }
 }

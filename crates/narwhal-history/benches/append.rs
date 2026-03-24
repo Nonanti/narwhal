@@ -5,7 +5,7 @@
 //! `tempfile::tempdir` so the on-disk file is recreated per run and the
 //! fsync cost is realistic (no page-cache cheating across runs).
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use narwhal_history::{HistoryEntry, Journal};
 use tokio::runtime::Runtime;
 

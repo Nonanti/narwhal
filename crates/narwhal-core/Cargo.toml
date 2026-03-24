@@ -15,7 +15,6 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-async-trait.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,3 +24,7 @@ uuid.workspace = true
 # `spawn` in `spawn_blocking` so the async runtime stays responsive
 # during the up-to-8s readiness wait.
 tokio = { workspace = true, features = ["rt"] }
+# query_stream emits debug-level breadcrumbs on close-after-error so a
+# cursor-leak is observable in logs without surfacing as a user-facing
+# error (the engine error already won the race).
+tracing.workspace = true

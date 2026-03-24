@@ -28,6 +28,17 @@ thiserror.workspace = true
 directories.workspace = true
 tracing.workspace = true
 base64.workspace = true
+chrono = { workspace = true }
+# T1-T4-B: Parquet (columnar) export. The `arrow` feature pulls in the
+# arrow ecosystem builders + RecordBatch so we can map narwhal `Value`s
+# onto Arrow arrays before encoding. snap + zstd cover the two most
+# common compression codecs without dragging brotli / lz4 / gzip
+# (less common on the analytics side; the parquet `flate2` feature
+# only enables the dep without picking a zlib backend, which forces
+# downstream consumers to wire one — easier to just leave gzip off).
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd"] }
+arrow-array = "58"
+arrow-schema = "58"
 
 [dev-dependencies]
 tempfile = "3"

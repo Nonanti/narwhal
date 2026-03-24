@@ -78,6 +78,13 @@ where
         interpolate_optional(&mut conn.params.database, lookup)?;
         interpolate_optional(&mut conn.params.username, lookup)?;
         interpolate_optional(&mut conn.params.path, lookup)?;
+        // T1-T2-B: env interpolation applies to in-file password
+        // material too. Vault references (`vault:` / `1password:`)
+        // are opaque tokens that contain neither `${env:` nor any
+        // other `${...}` shape, so the loop is a no-op for them.
+        // A `password = "${env:PG_PASS}"` user keeps the v1.x
+        // env-var indirection without touching the keyring.
+        interpolate_optional(&mut conn.params.password, lookup)?;
         for value in conn.params.options.values_mut() {
             let replaced = interpolate_with(value, lookup)?;
             *value = replaced;
@@ -312,6 +319,7 @@ mod tests {
         use narwhal_core::{ConnectionConfig, ConnectionParams};
         use uuid::Uuid;
         let mut file = ConnectionsFile {
+            schema_version: None,
             logical_relations: Vec::new(),
             connections: vec![ConnectionConfig {
                 id: Uuid::nil(),
@@ -346,6 +354,7 @@ mod tests {
     fn logical_relation_fields_interpolated() {
         use crate::settings::LogicalRelationConfig;
         let mut file = ConnectionsFile {
+            schema_version: None,
             connections: Vec::new(),
             logical_relations: vec![LogicalRelationConfig {
                 connection: "prod".into(),
@@ -380,6 +389,7 @@ mod tests {
     fn logical_relation_missing_env_surfaces_error() {
         use crate::settings::LogicalRelationConfig;
         let mut file = ConnectionsFile {
+            schema_version: None,
             connections: Vec::new(),
             logical_relations: vec![LogicalRelationConfig {
                 connection: "prod".into(),
@@ -397,6 +407,9 @@ mod tests {
         // Bubble-up so the user sees a clean error at startup instead
         // of a confusing "unknown table" downstream.
         let msg = err.to_string();
-        assert!(msg.contains("MISSING"), "error must name the missing var: {msg}");
+        assert!(
+            msg.contains("MISSING"),
+            "error must name the missing var: {msg}"
+        );
     }
 }

@@ -7,7 +7,7 @@ use narwhal_core::{ColumnHeader, Row, TableSchema};
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 
-use super::sort::{compare_values, SortDir};
+use super::sort::{SortDir, compare_values};
 
 /// Which metadata sub-view of [`ResultDisplay::TableDetail`] is on
 /// screen. Mapped 1:1 from the numeric chord (`1`..=`5`) on the
@@ -182,11 +182,11 @@ impl ResultView {
         }
     }
 
-    pub fn move_left(&mut self) {
+    pub const fn move_left(&mut self) {
         self.column_index = self.column_index.saturating_sub(1);
     }
 
-    pub fn move_right(&mut self, total_cols: usize) {
+    pub const fn move_right(&mut self, total_cols: usize) {
         if total_cols == 0 {
             return;
         }

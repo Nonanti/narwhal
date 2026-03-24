@@ -251,9 +251,11 @@ mod tests {
 
     #[tokio::test]
     async fn captures_stdout_into_named_var() {
-        let steps = vec![PreConnectStep::new("echo hello")
-            .with_save_output_to("GREETING")
-            .with_timeout_secs(5)];
+        let steps = vec![
+            PreConnectStep::new("echo hello")
+                .with_save_output_to("GREETING")
+                .with_timeout_secs(5),
+        ];
         let vars = run_pre_connect(&steps).await.unwrap();
         assert_eq!(vars.get("GREETING").map(String::as_str), Some("hello"));
     }

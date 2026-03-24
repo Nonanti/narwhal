@@ -26,13 +26,13 @@ use std::time::Instant;
 use async_trait::async_trait;
 use narwhal_sql::guard_read_only;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::{json_array_to_values, value_to_json};
-use crate::tools::{cap_response, Tool, ToolOutput};
+use crate::tools::{Tool, ToolOutput, cap_response};
 
 /// Default ceiling on returned rows. A handful of agents (Claude Desktop,
 /// Cursor) cap tool-call responses at ~100 KB; 1 000 rows is well under
@@ -377,7 +377,7 @@ fn cap_cell_size(value: Value, truncated_flag: &mut bool) -> Value {
 /// `begin` / `rollback` so the agent always sees the actual statement
 /// error rather than a wrapping transaction failure.
 async fn run_in_sandbox(
-    conn: &mut dyn narwhal_core::Connection,
+    conn: &mut dyn narwhal_core::DynConnection,
     sql: &str,
     params: &[narwhal_core::Value],
 ) -> Result<narwhal_core::QueryResult, narwhal_core::Error> {

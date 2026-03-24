@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
-use narwhal_app::core::{AppCore, SidebarItem};
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::{AppCore, SidebarItem};
 use narwhal_config::{ConnectionsFile, LastUsedStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use tempfile::TempDir;
@@ -33,6 +33,7 @@ fn two_sqlite_fixtures(dir: &std::path::Path) -> (DriverRegistry, ConnectionsFil
     };
     let ids = [a.id, b.id];
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![a, b],
     };
@@ -135,17 +136,21 @@ async fn remove_clears_last_used_entry() {
         .find(|c| c.name == "bravo")
         .unwrap()
         .id;
-    assert!(LastUsedStore::load(&last_used)
-        .unwrap()
-        .get(bravo_id)
-        .is_some());
+    assert!(
+        LastUsedStore::load(&last_used)
+            .unwrap()
+            .get(bravo_id)
+            .is_some()
+    );
 
     core.execute_command("close").await;
     core.execute_command("rm bravo").await;
-    assert!(LastUsedStore::load(&last_used)
-        .unwrap()
-        .get(bravo_id)
-        .is_none());
+    assert!(
+        LastUsedStore::load(&last_used)
+            .unwrap()
+            .get(bravo_id)
+            .is_none()
+    );
 }
 
 /// Smoke for the path-based opener with no on-disk wiring: even when

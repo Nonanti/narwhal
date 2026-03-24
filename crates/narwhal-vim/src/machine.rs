@@ -256,7 +256,7 @@ impl Vim {
         }
     }
 
-    fn handle_visual(&mut self, key: Key) -> Action {
+    const fn handle_visual(&mut self, key: Key) -> Action {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;

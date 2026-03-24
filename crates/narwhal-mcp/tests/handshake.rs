@@ -12,8 +12,8 @@ use std::sync::Arc;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
-use serde_json::{json, Value};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
 /// Build a `ServerContext` populated with a single in-memory sqlite
 /// connection. `SQLite` needs no on-disk file when the path is `:memory:`,
@@ -34,7 +34,10 @@ fn ctx_with_in_memory_sqlite() -> ServerContext {
 
 fn ctx_with_connections(connections: Vec<ConnectionConfig>) -> ServerContext {
     let file = ConnectionsFile {
-        logical_relations: Vec::new(), connections };
+        schema_version: None,
+        logical_relations: Vec::new(),
+        connections,
+    };
     let drivers = Arc::new(DriverRegistry::with_defaults());
     let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
     ServerContext::new(drivers, Arc::new(file), credentials)

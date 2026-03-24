@@ -1,0 +1,40 @@
+# Example WASM plugin for narwhal. Builds to a component-model
+# `.wasm` via `cargo component` (https://github.com/bytecodealliance/cargo-component).
+#
+# Build:
+#   cd crates/narwhal-plugin-wasm/examples/hello-world
+#   cargo component build --release
+#
+# Output:
+#   target/wasm32-wasip1/release/hello_world.wasm
+#
+# Run the host integration test against it:
+#   NARWHAL_WASM_EXAMPLE="$(pwd)/target/wasm32-wasip1/release/hello_world.wasm" \
+#     cargo test -p narwhal-plugin-wasm --test runtime -- --ignored \
+#     end_to_end_event_delivery_with_real_component
+#
+# This crate is intentionally NOT part of the workspace — the host's
+# stable Rust toolchain and the cargo-component bindings would
+# otherwise fight over `wit-bindgen` versions. Stand-alone keeps the
+# guest pinning local.
+
+[package]
+name = "hello-world"
+version = "0.1.0"
+edition = "2021"
+publish = false
+authors = ["narwhal contributors"]
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.34"
+
+[package.metadata.component]
+package = "narwhal:hello-world"
+
+[package.metadata.component.target]
+path = "../../wit"
+world = "narwhal-plugin"

@@ -7,7 +7,7 @@
 use narwhal_core::schema::{
     Column, ForeignKey, Index, ReferentialAction, Table, TableKind, TableSchema, UniqueConstraint,
 };
-use narwhal_diagram::{build, DotRenderer, MermaidRenderer, Renderer};
+use narwhal_diagram::{DotRenderer, MermaidRenderer, Renderer, build};
 
 fn main() {
     let tables = fixture();

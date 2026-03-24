@@ -6,16 +6,15 @@ members = [
     "crates/narwhal-sql",
     "crates/narwhal-pool",
     "crates/narwhal-history",
-    "crates/narwhal-driver-postgres",
-    "crates/narwhal-driver-sqlite",
-    "crates/narwhal-driver-mysql",
-    "crates/narwhal-driver-duckdb",
-    "crates/narwhal-driver-clickhouse",
-    "crates/narwhal-driver-registry",
+    # T0-03: 5 driver crates + narwhal-driver-registry consolidated
+    # into narwhal-drivers with one cargo feature per backend.
+    "crates/narwhal-drivers",
     "crates/narwhal-domain",
     "crates/narwhal-commands",
     "crates/narwhal-plugin",
     "crates/narwhal-plugin-lua",
+    # T1-T5-A: WASM plugin runtime (wasmtime + component model).
+    "crates/narwhal-plugin-wasm",
     "crates/narwhal-vim",
     "crates/narwhal-diagram",
     "crates/narwhal-tui",
@@ -26,8 +25,8 @@ members = [
 
 [workspace.package]
 version = "1.2.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
 authors = ["Nonantiy <nonantiy1@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Nonanti/narwhal"
@@ -70,6 +69,12 @@ rusqlite = { version = "0.32", features = ["bundled", "chrono", "column_decltype
 duckdb = { version = "1.1", features = ["bundled", "chrono"] }
 mysql_async = { version = "0.34", default-features = false, features = ["minimal-rust", "rustls-tls"] }
 mysql_common = { version = "0.32", default-features = false, features = ["chrono", "bigdecimal"] }
+# T1-T2-A: MSSQL via tiberius. `default-features = false` ile yalnız
+# rustls TLS hattını çekiyoruz — workspace genelinde openssl-sys'a
+# bağımlılık geri gelmesin diye native-tls/vendored-openssl kapalı.
+# `chrono` özellik bayrağı `Value::Date`/`DateTime` köprüsü için.
+tiberius = { version = "0.12", default-features = false, features = ["chrono", "rustls", "tds73"] }
+tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 
 # Utilities
 parking_lot = "0.12"
@@ -100,6 +105,18 @@ base64 = "0.22"
 zeroize = { version = "1", features = ["derive"] }
 secrecy = "0.10"
 
+# Vault HTTP client (T1-T2-B). default-features = false hattı zorunlu:
+# native-tls openssl-sys çekiyor; workspace genelinde rustls hattını
+# saf tutmak için narwhal-drivers'taki reqwest ile aynı feature
+# setini kullanıyoruz.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "charset",
+    "http2",
+    "system-proxy",
+    "json",
+] }
+
 # Benchmarking (dev-only). HTML reports are disabled to keep the
 # default-features footprint small and avoid pulling in `plotters`.
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
@@ -113,25 +130,43 @@ narwhal-config = { path = "crates/narwhal-config", version = "1.0.0" }
 narwhal-sql = { path = "crates/narwhal-sql", version = "1.0.0" }
 narwhal-pool = { path = "crates/narwhal-pool", version = "1.0.0" }
 narwhal-history = { path = "crates/narwhal-history", version = "1.0.0" }
-narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres", version = "1.0.0" }
-narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite", version = "1.0.0" }
-narwhal-driver-mysql = { path = "crates/narwhal-driver-mysql", version = "1.0.0" }
-narwhal-driver-duckdb = { path = "crates/narwhal-driver-duckdb", version = "1.0.0" }
-narwhal-driver-clickhouse = { path = "crates/narwhal-driver-clickhouse", version = "1.0.0" }
-narwhal-driver-registry = { path = "crates/narwhal-driver-registry", version = "1.0.0", default-features = false }
+narwhal-drivers = { path = "crates/narwhal-drivers", version = "1.0.0", default-features = false }
 narwhal-domain = { path = "crates/narwhal-domain", version = "1.0.0" }
 narwhal-commands = { path = "crates/narwhal-commands", version = "1.0.0" }
 narwhal-plugin = { path = "crates/narwhal-plugin", version = "1.0.0" }
 narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "1.0.0" }
+narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "1.0.0" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }
+# T1-T5-A: WASM runtime — pinned so plugin SDK and host agree on the
+# component-model ABI. wasmtime 45 ships the stable component model
+# wired below; `wat` is dev-only for in-tree fixture components.
+wasmtime = { version = "45", default-features = false, features = ["runtime", "component-model", "cranelift", "parallel-compilation", "async"] }
+wat = "1.0"
 narwhal-vim = { path = "crates/narwhal-vim", version = "1.0.0" }
 narwhal-diagram = { path = "crates/narwhal-diagram", version = "1.0.0" }
 narwhal-tui = { path = "crates/narwhal-tui", version = "1.0.0" }
 narwhal-app = { path = "crates/narwhal-app", version = "1.0.0" }
 narwhal-mcp = { path = "crates/narwhal-mcp", version = "1.0.0" }
 
+# Tree-sitter SQL parser (T1-T3-A). Pinned to 0.26 / 0.3 — the SQL
+# grammar tracks the parser ABI in lockstep, so bumping either side
+# requires re-running the highlight / scope queries against the new
+# node-name set. The grammar ships as a C parser; the `cc` dep is
+# hauled in automatically by `tree-sitter`'s build script.
+tree-sitter = "0.26"
+tree-sitter-sequel = "0.3"
+
+# Property tests for incremental-parse correctness (T1-T3-A).
+proptest = "1"
+
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny` rather than `forbid` so individual *integration tests* can
+# locally `#![allow(unsafe_code)]` when they must mutate the process
+# environment. Rust 2024 reclassified `std::env::set_var`/`remove_var`
+# as `unsafe` (race with libc `getenv`), and pgpass env-resolution
+# tests have to set `PGPASSWORD`. Library code keeps a stricter
+# `#![forbid(unsafe_code)]` at the lib root in every crate.
+unsafe_code = "deny"
 unreachable_pub = "warn"
 unused_must_use = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }

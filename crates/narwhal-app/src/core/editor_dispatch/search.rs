@@ -3,8 +3,8 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_vim::SearchDirection;
 
-use crate::core::text_utils::{find_all, replace_all, replace_first, row_col_to_offset};
 use crate::core::AppCore;
+use crate::core::text_utils::{find_all, replace_all, replace_first, row_col_to_offset};
 
 impl AppCore {
     pub(crate) async fn open_editor_search(&mut self, direction: SearchDirection) {

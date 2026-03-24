@@ -1,4 +1,4 @@
-//! Data model exposed by [`crate::build`] and consumed by renderers and
+//! Data model exposed by [`crate::build()`] and consumed by renderers and
 //! the TUI widget.
 
 use serde::{Deserialize, Serialize};
@@ -120,10 +120,7 @@ impl Cardinality {
     /// Graphviz arrowhead style (`crow` = many, `none` = one).
     pub const fn dot_arrowhead(self) -> &'static str {
         match self {
-            Self::OneToMany
-            | Self::ZeroOrOneToMany
-            | Self::ManyToOne
-            | Self::ManyToMany => "crow",
+            Self::OneToMany | Self::ZeroOrOneToMany | Self::ManyToOne | Self::ManyToMany => "crow",
             Self::OneToOne | Self::ZeroOrOneToOne => "none",
         }
     }
@@ -188,7 +185,7 @@ impl Edge {
 /// resolves inside `nodes`.
 ///
 /// FKs pointing at tables outside the slice (e.g. cross-schema in V1) are
-/// dropped silently by [`crate::build`]; this is intentional so renderers
+/// dropped silently by [`crate::build()`]; this is intentional so renderers
 /// never emit dangling edges.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiagramModel {

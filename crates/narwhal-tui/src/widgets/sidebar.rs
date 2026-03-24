@@ -5,11 +5,11 @@
 //! are rendered. This keeps key handling simple — a single `selected_index`
 //! into a homogeneous slice — and makes it easy to add new row kinds.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::results::sanitize_for_display;

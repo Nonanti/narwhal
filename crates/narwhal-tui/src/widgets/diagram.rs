@@ -8,11 +8,11 @@
 //! The widget owns no state — scroll, selection and the active mode
 //! live in the host's `DiagramModalState`.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 use narwhal_diagram::{
     Cardinality, DiagramModel, EdgeKind, IconSet, ImpactNode, ImpactTree, Node, NodeColumn,
@@ -155,7 +155,10 @@ fn focused_lines<'a>(view: &DiagramView<'_>, theme: &'a Theme) -> Vec<Line<'a>> 
         push_table_box(&mut lines, node, theme, view.icons);
     } else {
         lines.push(Line::from(Span::styled(
-            format!("(table not found in cached model: {})", view.center.display()),
+            format!(
+                "(table not found in cached model: {})",
+                view.center.display()
+            ),
             Style::default().fg(theme.error),
         )));
         return lines;

@@ -15,7 +15,7 @@ use narwhal_tui::ResultView;
 
 use super::{AppCore, HistoryState, ResultBundle, ResultState};
 use crate::ddl::{build_dump, build_table_ddl};
-use crate::meta::{spawn_meta_request, MetaRequest, MetaUpdate};
+use crate::meta::{MetaRequest, MetaUpdate, spawn_meta_request};
 use crate::run::RunUpdate;
 
 impl AppCore {
@@ -463,6 +463,7 @@ impl AppCore {
             pool,
             self.session.history_journal.clone(),
             Some(self.deps.credentials.clone()),
+            Some(self.deps.vault.clone()),
             self.process.meta_tx.clone(),
         );
         true

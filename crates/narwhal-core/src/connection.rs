@@ -1,13 +1,22 @@
+// Trait definitions intentionally keep explicit `'a` lifetimes on the
+// dyn-safe sibling methods: every borrowed parameter shares the same
+// lifetime as the returned `BoxFuture`, which elision cannot express
+// (multi-input borrows would each get an independent anonymous
+// lifetime).
+#![allow(clippy::needless_lifetimes, clippy::elidable_lifetime_names)]
+
+use crate::future::BoxFuture;
+use std::future::Future;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::cancel::CancelHandle;
+use crate::cancel::DynCancelHandle;
 use crate::capabilities::Capabilities;
 use crate::error::Result;
-use crate::schema::{QueryResult, Schema, Table, TableSchema};
-use crate::stream::RowStream;
+use crate::query_stream::QueryStream;
+use crate::schema::{QueryResult, Schema, SchemaCatalog, Table, TableSchema};
+use crate::stream::DynRowStream;
 use crate::value::Value;
 
 /// Visual accent colour applied to the TUI border + status bar when a
@@ -74,6 +83,34 @@ pub struct ConnectionParams {
     pub database: Option<String>,
     pub username: Option<String>,
     pub path: Option<String>,
+    /// Optional password material declared *in the configuration file*.
+    ///
+    /// v1.x stored passwords exclusively in the OS keyring (or fell
+    /// back to `~/.pgpass` / env vars). v2.0 (T1-T2-B) accepts an
+    /// optional in-file value so users can express:
+    ///
+    /// * a literal password (discouraged, but supported for parity);
+    /// * an `${env:VAR}` placeholder, expanded by
+    ///   `narwhal_config::interpolate` at load time — same vocabulary
+    ///   as every other string field;
+    /// * a vault reference: `vault:hashicorp/<path>#<field>` or
+    ///   `1password:op://Vault/Item/field`, resolved at connect time
+    ///   by `narwhal_config::vault::VaultRegistry`.
+    ///
+    /// Resolution order at runtime is:
+    ///
+    /// 1. If `password` is present and parses as a vault reference →
+    ///    the configured provider returns the secret.
+    /// 2. If `password` is present and is *not* a reference → it is
+    ///    used verbatim (after env interpolation).
+    /// 3. Else, the keyring is consulted by `connection.id`.
+    /// 4. Else, the `~/.pgpass` / env-var fallback runs.
+    ///
+    /// The reference is stored as a plain `String` because that is
+    /// the on-disk shape; the resolved secret is held in
+    /// `secrecy::SecretString` from the moment the resolver runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
     #[serde(default)]
     pub options: std::collections::BTreeMap<String, String>,
     /// TLS/SSL mode. Defaults to [`SslMode::Prefer`] for network drivers
@@ -295,59 +332,114 @@ pub enum IsolationLevel {
 ///
 /// All methods that mutate session state take `&mut self` to make ownership
 /// explicit and to surface accidental concurrent use at compile time.
-#[async_trait]
+///
+/// # Trait shape
+///
+/// This trait uses **native `async fn` in trait** (RPITIT) — every
+/// `async fn` desugars to `-> impl Future + Send`. Because RPITIT is
+/// **not** dyn-compatible, callers that need a trait object should use
+/// [`DynConnection`] instead: it boxes the returned future, costing an
+/// allocation per call but enabling `Box<dyn DynConnection>` /
+/// `Arc<dyn DynConnection>` sites. A blanket
+/// `impl<T: Connection> DynConnection for T` is provided, so any type
+/// that implements `Connection` automatically implements `DynConnection`.
+///
+/// Driver authors implement [`Connection`] directly with `async fn`
+/// bodies — the compiler enforces that every returned future is `Send`.
 pub trait Connection: Send + Sync {
     /// Execute a single statement and return the materialised result set.
     ///
     /// Parameters are bound positionally. Drivers that do not implement
     /// server-side prepared statements emulate binding by escaping.
-    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult>;
+    fn execute(
+        &mut self,
+        sql: &str,
+        params: &[Value],
+    ) -> impl Future<Output = Result<QueryResult>> + Send;
 
     /// Execute a single statement and return a row stream.
     ///
     /// Streams release server-side resources only when the returned
-    /// [`RowStream::close`] is called or the stream is dropped.
-    async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>>;
+    /// [`crate::RowStream::close`] is called or the stream is dropped.
+    fn stream(
+        &mut self,
+        sql: &str,
+        params: &[Value],
+    ) -> impl Future<Output = Result<Box<dyn DynRowStream>>> + Send;
+
+    /// Execute a single statement and return a [`QueryStream`] —
+    /// columns up-front, rows arriving asynchronously.
+    ///
+    /// The default implementation builds the stream from
+    /// [`Self::stream`] and captures the column headers eagerly so
+    /// the caller can announce the schema before the first row
+    /// crosses the wire. Drivers that can produce the headers and
+    /// open the cursor in a single round trip can override this for
+    /// a latency win; the trait contract is
+    ///
+    /// 1. `columns()` returns the final column list before the first
+    ///    `next_row()` resolves.
+    /// 2. Dropping the [`QueryStream`] releases driver-side cursor /
+    ///    portal state.
+    /// 3. [`QueryStream::close`] is awaitable so drivers that must
+    ///    flush a server-side close (PG portals, `ClickHouse` HTTP
+    ///    bodies) can surface release errors.
+    ///
+    /// `QueryStream` is the canonical entry point for the TUI run
+    /// worker, the MCP query tool's bounded drain, and the v2.0
+    /// export path. Use [`Self::execute`] when you specifically need
+    /// the materialised `QueryResult` with `rows_affected` reporting
+    /// (DDL / DML).
+    fn query(
+        &mut self,
+        sql: &str,
+        params: &[Value],
+    ) -> impl Future<Output = Result<QueryStream>> + Send {
+        async move {
+            let inner = self.stream(sql, params).await?;
+            Ok(QueryStream::new(inner))
+        }
+    }
 
     /// Begin a transaction with the engine's default isolation level.
-    async fn begin(&mut self) -> Result<()>;
+    fn begin(&mut self) -> impl Future<Output = Result<()>> + Send;
 
     /// Begin a transaction with the requested isolation level.
-    async fn begin_with(&mut self, isolation: IsolationLevel) -> Result<()>;
+    fn begin_with(&mut self, isolation: IsolationLevel) -> impl Future<Output = Result<()>> + Send;
 
     /// Commit the current transaction.
-    async fn commit(&mut self) -> Result<()>;
+    fn commit(&mut self) -> impl Future<Output = Result<()>> + Send;
 
     /// Roll back the current transaction.
-    async fn rollback(&mut self) -> Result<()>;
+    fn rollback(&mut self) -> impl Future<Output = Result<()>> + Send;
 
     /// Establish a savepoint inside the current transaction.
     ///
     /// The default implementation reports the feature as unsupported;
     /// drivers whose [`Capabilities::savepoints`] is `true` override it.
-    async fn savepoint(&mut self, name: &str) -> Result<()> {
+    fn savepoint(&mut self, name: &str) -> impl Future<Output = Result<()>> + Send {
         let _ = name;
-        Err(crate::Error::unsupported("savepoints"))
+        async { Err(crate::Error::unsupported("savepoints")) }
     }
 
     /// Release a previously created savepoint.
-    async fn release_savepoint(&mut self, name: &str) -> Result<()> {
+    fn release_savepoint(&mut self, name: &str) -> impl Future<Output = Result<()>> + Send {
         let _ = name;
-        Err(crate::Error::unsupported("savepoints"))
+        async { Err(crate::Error::unsupported("savepoints")) }
     }
 
     /// Roll back to a previously created savepoint without ending the
     /// surrounding transaction.
-    async fn rollback_to_savepoint(&mut self, name: &str) -> Result<()> {
+    fn rollback_to_savepoint(&mut self, name: &str) -> impl Future<Output = Result<()>> + Send {
         let _ = name;
-        Err(crate::Error::unsupported("savepoints"))
+        async { Err(crate::Error::unsupported("savepoints")) }
     }
 
     /// List logical schemas/namespaces visible to the session.
-    async fn list_schemas(&mut self) -> Result<Vec<Schema>>;
+    fn list_schemas(&mut self) -> impl Future<Output = Result<Vec<Schema>>> + Send;
 
     /// List tables and views inside `schema`.
-    async fn list_tables(&mut self, schema: &str) -> Result<Vec<Table>>;
+    fn list_tables(&mut self, schema: &str) -> impl Future<Output = Result<Vec<Table>>> + Send;
 
     /// List every table/view across every visible schema in a single
     /// round trip when the driver can express it cheaply.
@@ -362,26 +454,32 @@ pub trait Connection: Send + Sync {
     /// Returned schemas preserve the order produced by `list_schemas`;
     /// tables inside each schema preserve the order produced by
     /// `list_tables`.
-    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
-        let schemas = self.list_schemas().await?;
-        let mut out = Vec::with_capacity(schemas.len());
-        for schema in schemas {
-            let tables = self.list_tables(&schema.name).await?;
-            out.push((schema, tables));
+    fn list_all_tables(&mut self) -> impl Future<Output = Result<SchemaCatalog>> + Send {
+        async move {
+            let schemas = self.list_schemas().await?;
+            let mut out = Vec::with_capacity(schemas.len());
+            for schema in schemas {
+                let tables = self.list_tables(&schema.name).await?;
+                out.push((schema, tables));
+            }
+            Ok(out)
         }
-        Ok(out)
     }
 
     /// Describe the columns, defaults and constraints of `schema.name`.
-    async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema>;
+    fn describe_table(
+        &mut self,
+        schema: &str,
+        name: &str,
+    ) -> impl Future<Output = Result<TableSchema>> + Send;
 
     /// Liveness probe.
-    async fn ping(&mut self) -> Result<()>;
+    fn ping(&mut self) -> impl Future<Output = Result<()>> + Send;
 
     /// Return a cancellation handle that may be used to abort the next query
     /// dispatched on this connection. `None` means the driver does not
     /// support out-of-band cancellation.
-    fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>>;
+    fn cancel_handle(&self) -> Option<Box<dyn DynCancelHandle>>;
 
     /// Static capability descriptor for this driver.
     fn capabilities(&self) -> Capabilities;
@@ -390,8 +488,12 @@ pub trait Connection: Send + Sync {
     ///
     /// The default implementation returns [`crate::Error::Unsupported`];
     /// drivers override this to return engine-native DDL.
-    async fn fetch_ddl(&mut self, _schema: &str, _table: &str) -> Result<String> {
-        Err(crate::Error::unsupported("fetch_ddl"))
+    fn fetch_ddl(
+        &mut self,
+        _schema: &str,
+        _table: &str,
+    ) -> impl Future<Output = Result<String>> + Send {
+        async { Err(crate::Error::unsupported("fetch_ddl")) }
     }
 
     /// Toggle session-level read-only enforcement.
@@ -412,11 +514,192 @@ pub trait Connection: Send + Sync {
     /// The default implementation reports the feature as unsupported so
     /// driver authors are forced to make an explicit choice (and so a
     /// security-sensitive caller can detect the absence of enforcement).
-    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+    fn set_read_only(&mut self, read_only: bool) -> impl Future<Output = Result<()>> + Send {
         let _ = read_only;
-        Err(crate::Error::unsupported("set_read_only"))
+        async { Err(crate::Error::unsupported("set_read_only")) }
     }
 
     /// Tear down the underlying connection.
-    async fn close(self: Box<Self>) -> Result<()>;
+    fn close(self: Box<Self>) -> impl Future<Output = Result<()>> + Send;
+}
+
+/// Dyn-safe sibling of [`Connection`].
+///
+/// Native `async fn` in trait isn't dyn-compatible — the returned
+/// future has an existential type that can't fit in a vtable slot.
+/// `DynConnection` is the boxing wrapper: every async method returns
+/// `Pin<Box<dyn Future + Send + '_>>`, which **is** vtable-friendly.
+///
+/// A blanket `impl<T: Connection> DynConnection for T` means any
+/// `Connection` automatically satisfies `DynConnection`. Callers that
+/// need a trait object — drivers handed out from a registry, pools
+/// holding heterogeneous connections, the CLI dispatcher — use
+/// `Box<dyn DynConnection>` / `Arc<dyn DynConnection>` and pay the
+/// classic `Box<dyn Future>` alloc per call. Callers with a concrete
+/// type call [`Connection`] directly and avoid the alloc.
+pub trait DynConnection: Send + Sync {
+    fn execute<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<QueryResult>>;
+
+    fn stream<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<Box<dyn DynRowStream>>>;
+
+    fn query<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<QueryStream>>;
+
+    fn begin<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
+
+    fn begin_with<'a>(&'a mut self, isolation: IsolationLevel) -> BoxFuture<'a, Result<()>>;
+
+    fn commit<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
+
+    fn rollback<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
+
+    fn savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>>;
+
+    fn release_savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>>;
+
+    fn rollback_to_savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>>;
+
+    fn list_schemas<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<Schema>>>;
+
+    fn list_tables<'a>(&'a mut self, schema: &'a str) -> BoxFuture<'a, Result<Vec<Table>>>;
+
+    fn list_all_tables<'a>(&'a mut self) -> BoxFuture<'a, Result<SchemaCatalog>>;
+
+    fn describe_table<'a>(
+        &'a mut self,
+        schema: &'a str,
+        name: &'a str,
+    ) -> BoxFuture<'a, Result<TableSchema>>;
+
+    fn ping<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
+
+    fn cancel_handle(&self) -> Option<Box<dyn DynCancelHandle>>;
+
+    fn capabilities(&self) -> Capabilities;
+
+    fn fetch_ddl<'a>(
+        &'a mut self,
+        schema: &'a str,
+        table: &'a str,
+    ) -> BoxFuture<'a, Result<String>>;
+
+    fn set_read_only<'a>(&'a mut self, read_only: bool) -> BoxFuture<'a, Result<()>>;
+
+    fn close(self: Box<Self>) -> BoxFuture<'static, Result<()>>;
+}
+
+impl<T> DynConnection for T
+where
+    T: Connection + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<QueryResult>> {
+        Box::pin(<Self as Connection>::execute(self, sql, params))
+    }
+
+    fn stream<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<Box<dyn DynRowStream>>> {
+        Box::pin(<Self as Connection>::stream(self, sql, params))
+    }
+
+    fn query<'a>(
+        &'a mut self,
+        sql: &'a str,
+        params: &'a [Value],
+    ) -> BoxFuture<'a, Result<QueryStream>> {
+        Box::pin(<Self as Connection>::query(self, sql, params))
+    }
+
+    fn begin<'a>(&'a mut self) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::begin(self))
+    }
+
+    fn begin_with<'a>(&'a mut self, isolation: IsolationLevel) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::begin_with(self, isolation))
+    }
+
+    fn commit<'a>(&'a mut self) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::commit(self))
+    }
+
+    fn rollback<'a>(&'a mut self) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::rollback(self))
+    }
+
+    fn savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::savepoint(self, name))
+    }
+
+    fn release_savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::release_savepoint(self, name))
+    }
+
+    fn rollback_to_savepoint<'a>(&'a mut self, name: &'a str) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::rollback_to_savepoint(self, name))
+    }
+
+    fn list_schemas<'a>(&'a mut self) -> BoxFuture<'a, Result<Vec<Schema>>> {
+        Box::pin(<Self as Connection>::list_schemas(self))
+    }
+
+    fn list_tables<'a>(&'a mut self, schema: &'a str) -> BoxFuture<'a, Result<Vec<Table>>> {
+        Box::pin(<Self as Connection>::list_tables(self, schema))
+    }
+
+    fn list_all_tables<'a>(&'a mut self) -> BoxFuture<'a, Result<SchemaCatalog>> {
+        Box::pin(<Self as Connection>::list_all_tables(self))
+    }
+
+    fn describe_table<'a>(
+        &'a mut self,
+        schema: &'a str,
+        name: &'a str,
+    ) -> BoxFuture<'a, Result<TableSchema>> {
+        Box::pin(<Self as Connection>::describe_table(self, schema, name))
+    }
+
+    fn ping<'a>(&'a mut self) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::ping(self))
+    }
+
+    fn cancel_handle(&self) -> Option<Box<dyn DynCancelHandle>> {
+        <Self as Connection>::cancel_handle(self)
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        <Self as Connection>::capabilities(self)
+    }
+
+    fn fetch_ddl<'a>(
+        &'a mut self,
+        schema: &'a str,
+        table: &'a str,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(<Self as Connection>::fetch_ddl(self, schema, table))
+    }
+
+    fn set_read_only<'a>(&'a mut self, read_only: bool) -> BoxFuture<'a, Result<()>> {
+        Box::pin(<Self as Connection>::set_read_only(self, read_only))
+    }
+
+    fn close(self: Box<Self>) -> BoxFuture<'static, Result<()>> {
+        Box::pin(<Self as Connection>::close(self))
+    }
 }

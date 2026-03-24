@@ -19,6 +19,7 @@ mod goto;
 mod lint_cmd;
 mod modals;
 mod pending_actions;
+pub(crate) mod persist_hook;
 mod plugin_executor;
 mod plugins;
 mod render_helpers;

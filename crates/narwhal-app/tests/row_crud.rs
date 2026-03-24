@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_tui::Pane;
@@ -45,6 +45,7 @@ const fn shift(c: char) -> KeyEvent {
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -256,8 +257,8 @@ async fn delete_rejected_on_table_without_primary_key() {
     let mut core = AppCore::new(registry, connections, None);
     core.execute_command("open crud").await;
     preview_items(&mut core).await; // 'items' \u2014 wait, it's `notes` here.
-                                    // Sidebar layout: conn (0) → main (1) → notes (2). preview_items
-                                    // already walked there.
+    // Sidebar layout: conn (0) → main (1) → notes (2). preview_items
+    // already walked there.
 
     while core.focus() != Pane::Results {
         core.handle_key(ctrl('w')).await;

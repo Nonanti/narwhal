@@ -103,8 +103,8 @@ fn force_event_supersedes_pending_stream_defer() {
     let mut sched = DrawScheduler::new(start);
     sched.on_event(DrawTrigger::Stream, start); // first draws
     sched.on_event(DrawTrigger::Stream, start + Duration::from_millis(10)); // defers
-                                                                            // A key event mid-window must draw immediately and clear the
-                                                                            // pending defer.
+    // A key event mid-window must draw immediately and clear the
+    // pending defer.
     let d = sched.on_event(DrawTrigger::Force, start + Duration::from_millis(20));
     assert_eq!(d, DrawDecision::DrawNow);
     assert!(

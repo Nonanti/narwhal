@@ -247,8 +247,8 @@ mod tests {
     /// stall.
     #[tokio::test(flavor = "current_thread")]
     async fn spawn_async_does_not_block_current_thread_runtime() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let counter = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicUsize::new(0));

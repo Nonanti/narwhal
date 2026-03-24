@@ -4,11 +4,11 @@
 //! Mirrors the layout of the 06-05 history modal: centred Rect, Block
 //! border with title, one name per row.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::help::centred;

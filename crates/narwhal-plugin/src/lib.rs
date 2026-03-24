@@ -90,6 +90,41 @@ pub struct CommandContext {
     pub editor_text: String,
 }
 
+/// Lifecycle events broadcast to every loaded plugin via
+/// [`Plugin::on_event`]. The host fans these out so both the Lua and
+/// WASM runtimes (and any future runtime) see the same stream.
+///
+/// The enum is `#[non_exhaustive]` so adding variants is a
+/// non-breaking change for downstream plugin runtimes; runtimes are
+/// expected to translate unknown variants to a no-op (and log a
+/// `debug` line if they want forward-compat visibility).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum PluginEvent {
+    /// A new connection just became active. Payload: connection name.
+    ConnectionOpened { name: String },
+    /// A connection just closed. Payload: connection name.
+    ConnectionClosed { name: String },
+    /// A SQL statement was dispatched. Payload: the SQL text.
+    QueryStarted { sql: String },
+    /// A SQL statement finished. `ok=false` indicates the driver
+    /// returned an error (the plugin sees an `err`/`ok` summary; the
+    /// raw rows do not flow through this channel — use
+    /// [`Plugin::transform_result`] for that).
+    QueryFinished {
+        sql: String,
+        rows: u64,
+        elapsed_ms: u64,
+        ok: bool,
+    },
+    /// The editor buffer changed in the active tab.
+    EditorBufferChanged {
+        text: String,
+        cursor_line: u32,
+        cursor_col: u32,
+    },
+}
+
 impl CommandContext {
     pub fn new(argument: impl Into<String>) -> Self {
         Self {
@@ -150,6 +185,21 @@ pub trait Plugin: Send + Sync {
     /// without allocating.
     async fn transform_result(&self, result: &mut QueryResult) -> PluginResult<()> {
         let _ = result;
+        Ok(())
+    }
+
+    /// Optional lifecycle hook. The host fans every [`PluginEvent`]
+    /// into every loaded plugin; runtimes that want event-driven
+    /// behaviour (WASM components, future native plugins) override
+    /// this, while command-only or transform-only plugins fall back
+    /// to the default no-op.
+    ///
+    /// Errors are surfaced to the host but **do not** cancel
+    /// delivery to other plugins — [`PluginRegistry::broadcast_event`]
+    /// collects them into a single [`TransformErrors`] value so the
+    /// user sees every misbehaving plugin at once.
+    async fn on_event(&self, event: &PluginEvent) -> PluginResult<()> {
+        let _ = event;
         Ok(())
     }
 }
@@ -245,6 +295,32 @@ impl PluginRegistry {
         plugin.dispatch(command, ctx).await
     }
 
+    /// Fan `event` out to every loaded plugin's [`Plugin::on_event`]
+    /// hook in registration order.
+    ///
+    /// Errors from individual plugins are collected and returned via
+    /// [`TransformErrors`] (the same shape
+    /// [`PluginRegistry::transform_result`] uses) so the caller sees
+    /// every misbehaving plugin at once. Delivery to *later* plugins
+    /// is never cancelled by an earlier failure — a buggy plugin must
+    /// not be able to suppress the event for everyone else.
+    pub async fn broadcast_event(
+        &self,
+        event: &PluginEvent,
+    ) -> std::result::Result<(), TransformErrors> {
+        let mut errors: Vec<String> = Vec::new();
+        for plugin in &self.plugins {
+            if let Err(e) = plugin.on_event(event).await {
+                errors.push(format!("{}: {e}", plugin.name()));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(TransformErrors(errors))
+        }
+    }
+
     /// Run every plugin's [`Plugin::transform_result`] hook in order.
     ///
     /// Errors from individual transforms are collected and returned in a
@@ -302,6 +378,7 @@ impl std::error::Error for TransformErrors {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// Minimal in-tree plugin used by the unit tests. It exposes a single
     /// "echo" command that returns the argument back as a status message.
@@ -463,6 +540,112 @@ mod tests {
         }
         // And nothing partial-registered: catalogue still empty.
         assert!(registry.catalogue().is_empty());
+    }
+
+    /// A plugin that records every event it receives so the test can
+    /// assert on the broadcast order. Wrapped in an `Arc` at the call
+    /// site so the test can inspect the captured events after handing
+    /// the plugin to the registry.
+    #[derive(Default)]
+    struct RecordingEventPlugin {
+        seen: Mutex<Vec<PluginEvent>>,
+    }
+
+    #[async_trait]
+    impl Plugin for RecordingEventPlugin {
+        fn name(&self) -> &'static str {
+            "recorder"
+        }
+
+        async fn on_event(&self, event: &PluginEvent) -> PluginResult<()> {
+            self.seen
+                .lock()
+                .map(|mut g| g.push(event.clone()))
+                .map_err(|e| PluginError::Runtime(format!("lock poisoned: {e}")))?;
+            Ok(())
+        }
+    }
+
+    /// Plugin that always errors out of `on_event`. Used to assert
+    /// that `broadcast_event` keeps going past failures.
+    struct FailingEventPlugin;
+
+    #[async_trait]
+    impl Plugin for FailingEventPlugin {
+        fn name(&self) -> &'static str {
+            "failing-event"
+        }
+
+        async fn on_event(&self, _: &PluginEvent) -> PluginResult<()> {
+            Err(PluginError::Handler("event boom".into()))
+        }
+    }
+
+    /// Small wrapper that forwards [`Plugin`] calls to an `Arc`-held
+    /// inner plugin so the test code keeps a handle on the recorded
+    /// state after registering. Necessary because
+    /// [`PluginRegistry::register`] consumes the plugin by value.
+    struct WrapArc(Arc<RecordingEventPlugin>);
+
+    #[async_trait]
+    impl Plugin for WrapArc {
+        fn name(&self) -> &'static str {
+            "recorder"
+        }
+        async fn on_event(&self, event: &PluginEvent) -> PluginResult<()> {
+            self.0.on_event(event).await
+        }
+    }
+
+    #[tokio::test]
+    async fn broadcast_event_reaches_every_plugin() {
+        let mut registry = PluginRegistry::new();
+        let recorder = Arc::new(RecordingEventPlugin::default());
+        registry.register(WrapArc(Arc::clone(&recorder))).unwrap();
+
+        registry
+            .broadcast_event(&PluginEvent::ConnectionOpened {
+                name: "prod".into(),
+            })
+            .await
+            .unwrap();
+        registry
+            .broadcast_event(&PluginEvent::QueryStarted {
+                sql: "SELECT 1".into(),
+            })
+            .await
+            .unwrap();
+
+        let seen = recorder.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        match &seen[0] {
+            PluginEvent::ConnectionOpened { name } => assert_eq!(name, "prod"),
+            other => panic!("unexpected first event: {other:?}"),
+        }
+        match &seen[1] {
+            PluginEvent::QueryStarted { sql } => assert_eq!(sql, "SELECT 1"),
+            other => panic!("unexpected second event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn broadcast_event_keeps_going_past_failures() {
+        let mut registry = PluginRegistry::new();
+        registry.register(FailingEventPlugin).unwrap();
+        let recorder = Arc::new(RecordingEventPlugin::default());
+        registry.register(WrapArc(Arc::clone(&recorder))).unwrap();
+
+        let event = PluginEvent::ConnectionClosed { name: "x".into() };
+        let err = registry.broadcast_event(&event).await.unwrap_err();
+        assert!(
+            err.0.iter().any(|m| m.contains("failing-event")),
+            "missing failing message in {:?}",
+            err.0
+        );
+        // recorder still saw the event:
+        let seen = recorder.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0], event);
     }
 
     #[tokio::test]

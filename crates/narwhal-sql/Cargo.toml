@@ -21,9 +21,16 @@ serde.workspace = true
 # for the four engines we ship (the postgres profile also covers
 # clickhouse/duckdb adequately).
 sqlformat = "0.3"
+# T1-T3-A: tree-sitter SQL parser. The grammar is a C parser compiled
+# by `tree-sitter-sequel`'s build script via the `cc` crate — users
+# need a working C toolchain in their PATH (most do; documented in
+# docs/dev/t1-t3-a-treesitter.md).
+tree-sitter.workspace = true
+tree-sitter-sequel.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "splitter"

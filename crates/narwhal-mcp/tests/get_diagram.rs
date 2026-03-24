@@ -5,8 +5,8 @@ use std::sync::Arc;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
-use serde_json::{json, Value};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
 fn seed_sqlite(path: &std::path::Path) {
     let conn = rusqlite::Connection::open(path).expect("open");
@@ -54,6 +54,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
     ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {
+            schema_version: None,
             logical_relations: Vec::new(),
             connections: vec![config],
         }),
@@ -148,11 +149,7 @@ async fn dot_format_returns_digraph() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"format": "dot"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"format": "dot"}))).await;
     assert_ne!(response["result"]["isError"], true);
 
     let payload = body(&response);
@@ -168,11 +165,7 @@ async fn focused_table_limits_to_one_hop() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"table": "orders"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"table": "orders"}))).await;
     assert_ne!(response["result"]["isError"], true);
 
     let payload = body(&response);
@@ -212,11 +205,7 @@ async fn schema_filter_restricts_candidates() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"schema": "main"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"schema": "main"}))).await;
     assert_ne!(response["result"]["isError"], true);
     let payload = body(&response);
     assert_eq!(payload["schema_filter"], "main");
@@ -229,11 +218,7 @@ async fn unknown_format_is_tool_error() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"format": "svg"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"format": "svg"}))).await;
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
         .as_str()
@@ -247,11 +232,7 @@ async fn unknown_table_is_tool_error() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"table": "ghost"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"table": "ghost"}))).await;
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
         .as_str()

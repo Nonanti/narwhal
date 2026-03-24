@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore, SecretString};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use secrecy::ExposeSecret;
@@ -86,6 +86,7 @@ async fn forget_clears_keyring_but_keeps_connection() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
@@ -129,6 +130,7 @@ async fn remove_drops_connection_and_secret() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
@@ -171,6 +173,7 @@ async fn open_pulls_password_from_credentials() {
         .unwrap();
 
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
@@ -213,6 +216,7 @@ async fn edit_prefills_password_from_keyring() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
@@ -262,6 +266,7 @@ async fn test_active_session_reports_real_verdict() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,
@@ -303,6 +308,7 @@ async fn forget_status_reflects_real_outcome_not_best_effort() {
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id,

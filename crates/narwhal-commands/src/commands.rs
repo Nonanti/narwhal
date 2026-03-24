@@ -1,3 +1,19 @@
+/// Parsed flag bag for [`Command::Export`] (T1-T4-B).
+///
+/// `compression` is `Some` only when the user explicitly passed
+/// `--compression <codec>`; the dispatch layer falls back to the
+/// format's default codec when it sees `None`. `no_truncate` is the
+/// boolean form of `--no-truncate`.
+///
+/// We keep this as a small typed struct (rather than `Vec<String>`)
+/// because the parser already validates the codec token, and the
+/// dispatch layer would otherwise have to reparse the strings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExportArgs {
+    pub compression: Option<crate::export::ParquetCompression>,
+    pub no_truncate: bool,
+}
+
 /// Selector for [`Command::DumpSchema`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DumpTarget {
@@ -86,6 +102,10 @@ pub enum Command {
     Export {
         format: String,
         path: String,
+        /// T1-T4-B: parsed options for the chosen format (parquet
+        /// `--compression`, markdown `--no-truncate`, etc). Empty
+        /// for csv/json/tsv/table/insert, populated for parquet/md.
+        options: ExportArgs,
     },
     DumpSchema {
         target: DumpTarget,
@@ -364,7 +384,7 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     (
         "export",
-        "export the current result to a file (:export csv|json|insert <path>)",
+        "export the current result to a file (:export csv|json|tsv|insert|parquet|markdown <path>)",
     ),
     (
         "dump-schema",
@@ -763,16 +783,86 @@ fn parse_export(arg: &str) -> Command {
         None => (trimmed, ""),
     };
     if format.is_empty() {
-        return Command::Unknown("export: format required (csv|json|insert)".into());
+        return Command::Unknown(
+            "export: format required (csv|json|tsv|table|insert|parquet|markdown)".into(),
+        );
     }
-    let path = rest.trim_end();
+    // T1-T4-B: the path may be followed by `--compression <codec>` or
+    // `--no-truncate`. Strip the trailing flags first so a path with
+    // spaces survives; what remains is the path proper. The flags are
+    // intentionally trailing-only so `:export markdown out.md` keeps
+    // the historical positional shape.
+    let (path, options) = match split_export_flags(rest) {
+        Ok(parsed) => parsed,
+        Err(msg) => return Command::Unknown(msg),
+    };
+    let path = path.trim_end();
     if path.is_empty() {
         return Command::Unknown("export: path required".into());
     }
     Command::Export {
         format: format.to_owned(),
         path: path.to_owned(),
+        options,
     }
+}
+
+/// Trailing-flag parser for `:export`. Walks tokens from the right
+/// peeling off `--no-truncate` and `--compression <codec>` until a
+/// non-flag token is hit; everything before that point is the path.
+///
+/// The trailing-only contract is what lets the path keep interior
+/// spaces (`:export markdown /tmp/my report.md --no-truncate`): once
+/// we stop seeing flags, the entire prefix — spaces and all — is the
+/// path.
+fn split_export_flags(rest: &str) -> Result<(&str, ExportArgs), String> {
+    let mut args = ExportArgs::default();
+    let mut cursor = rest.trim_end();
+    loop {
+        // Peel the last whitespace-separated token off `cursor`.
+        let (head, last) = match cursor.rfind(char::is_whitespace) {
+            Some(boundary) => {
+                let (prefix, suffix) = cursor.split_at(boundary);
+                (prefix.trim_end(), suffix.trim_start())
+            }
+            None => ("", cursor),
+        };
+        match last {
+            "--no-truncate" => {
+                args.no_truncate = true;
+                cursor = head;
+            }
+            "--compression" => {
+                // Bare `--compression` with no value is a user error.
+                return Err("export: --compression requires a codec (snappy|zstd|none)".into());
+            }
+            // Any other token might be the path or the value half of
+            // `--compression <codec>`. Peek one further left.
+            value if !value.is_empty() => {
+                let (head2, prev) = match head.rfind(char::is_whitespace) {
+                    Some(b) => {
+                        let (p, s) = head.split_at(b);
+                        (p.trim_end(), s.trim_start())
+                    }
+                    None => ("", head),
+                };
+                if prev == "--compression" {
+                    let Some(codec) = crate::export::ParquetCompression::from_token(value) else {
+                        return Err(format!(
+                            "export: unknown compression `{value}` (snappy|zstd|none)"
+                        ));
+                    };
+                    args.compression = Some(codec);
+                    cursor = head2;
+                    continue;
+                }
+                // Not a flag pair — stop; what we have is the path.
+                break;
+            }
+            _ => break,
+        }
+    }
+    Ok((cursor, args))
 }
 
 /// Parse the argument to `:diagram`. Grammar:
@@ -816,9 +906,7 @@ fn parse_diagram(arg: &str) -> Command {
         // meant something else.
         "--" => {
             if rest.is_empty() {
-                return Command::Unknown(
-                    "diagram --: table name required after the escape".into(),
-                );
+                return Command::Unknown("diagram --: table name required after the escape".into());
             }
             if rest.split_whitespace().count() > 1 {
                 return Command::Unknown(format!(
@@ -878,17 +966,13 @@ fn parse_diagram_export(rest: &str) -> Command {
         match tok {
             "--table" | "-t" => {
                 let Some(value) = tokens.next() else {
-                    return Command::Unknown(
-                        "diagram: --table requires a table name".into(),
-                    );
+                    return Command::Unknown("diagram: --table requires a table name".into());
                 };
                 table = Some(value.to_owned());
             }
             "--schema" | "-s" => {
                 let Some(value) = tokens.next() else {
-                    return Command::Unknown(
-                        "diagram: --schema requires a schema name".into(),
-                    );
+                    return Command::Unknown("diagram: --schema requires a schema name".into());
                 };
                 schema = Some(value.to_owned());
             }
@@ -897,9 +981,7 @@ fn parse_diagram_export(rest: &str) -> Command {
             }
             other => {
                 if path.is_some() {
-                    return Command::Unknown(format!(
-                        "diagram: unexpected argument '{other}'"
-                    ));
+                    return Command::Unknown(format!("diagram: unexpected argument '{other}'"));
                 }
                 path = Some(other.to_owned());
             }
@@ -967,6 +1049,7 @@ mod tests {
             Command::Export {
                 format: "csv".into(),
                 path: "/tmp/out.csv".into(),
+                options: ExportArgs::default(),
             }
         );
         assert_eq!(
@@ -1040,10 +1123,7 @@ mod tests {
             parse("diagram public.orders"),
             Command::DiagramFocus("public.orders".into())
         );
-        assert_eq!(
-            parse("diag orders"),
-            Command::DiagramFocus("orders".into())
-        );
+        assert_eq!(parse("diag orders"), Command::DiagramFocus("orders".into()));
         // `:diagram impact <table>` opens Impact modal.
         assert_eq!(
             parse("diagram impact users"),
@@ -1148,6 +1228,7 @@ mod tests {
             Command::Export {
                 format: "csv".into(),
                 path: "/tmp/my data.csv".into(),
+                options: ExportArgs::default(),
             }
         );
         // Trailing whitespace gets trimmed but interior spaces survive.
@@ -1156,8 +1237,68 @@ mod tests {
             Command::Export {
                 format: "json".into(),
                 path: "/tmp/two words.json".into(),
+                options: ExportArgs::default(),
             }
         );
+
+        // T1-T4-B: parquet + markdown with their flags.
+        use crate::export::ParquetCompression;
+        assert_eq!(
+            parse("export parquet out.parquet --compression zstd"),
+            Command::Export {
+                format: "parquet".into(),
+                path: "out.parquet".into(),
+                options: ExportArgs {
+                    compression: Some(ParquetCompression::Zstd),
+                    no_truncate: false,
+                },
+            }
+        );
+        assert_eq!(
+            parse("export markdown out.md --no-truncate"),
+            Command::Export {
+                format: "markdown".into(),
+                path: "out.md".into(),
+                options: ExportArgs {
+                    compression: None,
+                    no_truncate: true,
+                },
+            }
+        );
+        // `md` alias + path with a space still works under flags.
+        assert_eq!(
+            parse("export md /tmp/my report.md --no-truncate"),
+            Command::Export {
+                format: "md".into(),
+                path: "/tmp/my report.md".into(),
+                options: ExportArgs {
+                    compression: None,
+                    no_truncate: true,
+                },
+            }
+        );
+        // Both flags at once.
+        assert_eq!(
+            parse("export parquet out.parquet --compression none"),
+            Command::Export {
+                format: "parquet".into(),
+                path: "out.parquet".into(),
+                options: ExportArgs {
+                    compression: Some(ParquetCompression::None),
+                    no_truncate: false,
+                },
+            }
+        );
+        // Bad codec surfaces a friendly error rather than crashing.
+        match parse("export parquet out.parquet --compression brotli") {
+            Command::Unknown(msg) => assert!(msg.contains("brotli")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        // Bare `--compression` without a codec is rejected.
+        match parse("export parquet out.parquet --compression") {
+            Command::Unknown(msg) => assert!(msg.contains("requires a codec")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
     }
 
     #[test]

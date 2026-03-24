@@ -10,7 +10,7 @@
 //! works without a connection so users can clean up snippets before
 //! ever opening one.
 
-use narwhal_sql::{format_for_driver, split_with, Dialect};
+use narwhal_sql::{Dialect, format_for_driver, split_with};
 
 use super::AppCore;
 

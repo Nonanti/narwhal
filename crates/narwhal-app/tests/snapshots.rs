@@ -9,13 +9,13 @@
 use std::path::PathBuf;
 
 use insta::assert_snapshot;
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::Terminal;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -62,8 +62,9 @@ fn empty_state() -> AppCore {
 
 fn configured_state(db_path: PathBuf) -> ConnectionsFile {
     ConnectionsFile {
-            logical_relations: Vec::new(),
-            connections: vec![ConnectionConfig {
+        schema_version: None,
+        logical_relations: Vec::new(),
+        connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "demo".into(),
             driver: "sqlite".into(),

@@ -1,3 +1,4 @@
+use narwhal_sql::treesitter::HighlightKind;
 use ratatui::style::{Color, Modifier, Style};
 
 /// Colour palette used when rendering the interface.
@@ -10,6 +11,10 @@ pub struct Theme {
     pub error: Color,
     /// Used for CMD mode highlight and transaction badge.
     pub warning: Color,
+    /// Used by the SQL syntax highlighter for string literals — added
+    /// in T1-T3-A. Most themes paint strings green; the existing
+    /// palette had no "success"-y slot.
+    pub success: Color,
 }
 
 impl Theme {
@@ -22,6 +27,7 @@ impl Theme {
         muted: Color::DarkGray,
         error: Color::LightRed,
         warning: Color::Yellow,
+        success: Color::LightGreen,
     };
 
     /// Light-terminal palette. `Color::Reset` keeps the terminal's
@@ -34,6 +40,7 @@ impl Theme {
         muted: Color::Gray,
         error: Color::Red,
         warning: Color::Rgb(0xb0, 0x60, 0x00), // amber that survives on white
+        success: Color::Rgb(0x00, 0x80, 0x00), // green that survives on white
     };
 
     /// High-contrast palette — saturated primaries on a black
@@ -51,6 +58,7 @@ impl Theme {
         muted: Color::LightCyan,
         error: Color::LightRed,
         warning: Color::LightYellow,
+        success: Color::LightGreen,
     };
 
     pub fn status_bar(&self) -> Style {
@@ -99,6 +107,48 @@ impl Theme {
         Style::default()
             .fg(self.accent)
             .add_modifier(Modifier::BOLD)
+    }
+
+    /// Map a tree-sitter SQL [`HighlightKind`] to a ratatui [`Style`]
+    /// using the theme palette.
+    ///
+    /// Added in T1-T3-A. The mapping is intentionally conservative —
+    /// every kind gets a foreground colour pulled from the existing
+    /// palette so a custom theme that overrides the named slots also
+    /// re-skins the syntax highlighter for free.
+    #[must_use]
+    pub fn sql_style(&self, kind: HighlightKind) -> Style {
+        match kind {
+            HighlightKind::Keyword => Style::default()
+                .fg(self.accent)
+                .add_modifier(Modifier::BOLD),
+            HighlightKind::String => Style::default().fg(self.success),
+            HighlightKind::Number | HighlightKind::Constant | HighlightKind::Type => {
+                Style::default().fg(self.warning)
+            }
+            HighlightKind::LineComment | HighlightKind::BlockComment => Style::default()
+                .fg(self.muted)
+                .add_modifier(Modifier::ITALIC),
+            HighlightKind::Operator | HighlightKind::Punctuation => {
+                Style::default().fg(self.foreground)
+            }
+            HighlightKind::FunctionCall => Style::default().fg(self.accent),
+            HighlightKind::TableRef => Style::default()
+                .fg(self.foreground)
+                .add_modifier(Modifier::BOLD),
+            HighlightKind::ColumnRef => Style::default().fg(self.foreground),
+            HighlightKind::Alias => Style::default()
+                .fg(self.foreground)
+                .add_modifier(Modifier::ITALIC),
+            HighlightKind::Identifier => Style::default().fg(self.foreground),
+            HighlightKind::Error => Style::default()
+                .fg(self.error)
+                .add_modifier(Modifier::UNDERLINED),
+            // `HighlightKind` is `#[non_exhaustive]`; future variants
+            // fall back to plain foreground so the editor keeps
+            // working until the palette gains a new slot.
+            _ => Style::default().fg(self.foreground),
+        }
     }
 }
 
