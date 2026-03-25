@@ -16,26 +16,53 @@ use crate::event::AuditEvent;
 pub struct RedactorConfig {
     /// Mask password literals in SQL text (default true).
     pub redact_passwords: bool,
-    /// Lower-cased column / parameter names whose values should be
-    /// replaced with `***`.
+    /// Column / parameter names whose values should be replaced with
+    /// `***`. Matching is ASCII-case-insensitive (R3-M4): the rules
+    /// are folded with [`str::to_ascii_lowercase`] and compared via
+    /// [`str::eq_ignore_ascii_case`]. **Implication:** a rule with
+    /// non-ASCII letters (e.g. `İSIM`) will only match column
+    /// names that are byte-identical aside from ASCII case. Users
+    /// who need full-Unicode case folding should encode every
+    /// case variant they want masked as separate rules.
     pub redact_columns: Vec<String>,
 }
 
 /// Stateless masker — cheap to clone.
 #[derive(Debug, Clone, Default)]
 pub struct Redactor {
-    cfg: RedactorConfig,
+    redact_passwords: bool,
+    /// MR-N5 (reverted N8): pre-folded column rules in a `Vec`.
+    /// Real-world configs hold 1–10 entries; a linear scan over a
+    /// `Vec<String>` with `eq_ignore_ascii_case` per entry is
+    /// measurably faster than a `BTreeSet` lookup for that range
+    /// and avoids the allocator pressure of building / cloning the
+    /// set on hot paths. R3-M4: folding is
+    /// [`str::to_ascii_lowercase`], not full-Unicode
+    /// `to_lowercase`, so the rule list and the per-event matcher
+    /// agree on the same byte-level case relation.
+    redact_columns: Vec<String>,
 }
 
 impl Redactor {
-    /// Build a redactor from its config. Lower-cases all column rules
-    /// once so per-event work stays O(rules * fields).
+    /// Build a redactor from its config. Column rules are
+    /// ASCII-lower-cased once at construction so per-event matching
+    /// is alloc-free.
     #[must_use]
-    pub fn new(mut cfg: RedactorConfig) -> Self {
-        for c in &mut cfg.redact_columns {
-            *c = c.to_lowercase();
+    pub fn new(cfg: RedactorConfig) -> Self {
+        // R3-M4: switched from `to_lowercase()` (full Unicode) to
+        // `to_ascii_lowercase()` so the rule keys agree with the
+        // matcher (`eq_ignore_ascii_case`). The previous mix would
+        // silently miss e.g. a Turkish `İSIM` rule against an
+        // `İSIM` column.
+        let redact_columns = cfg
+            .redact_columns
+            .into_iter()
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        Self {
+            redact_passwords: cfg.redact_passwords,
+            redact_columns,
         }
-        Self { cfg }
     }
 
     /// Apply masking to `event` in place.
@@ -44,7 +71,7 @@ impl Redactor {
             AuditEvent::Query {
                 sql, params, error, ..
             } => {
-                if self.cfg.redact_passwords {
+                if self.redact_passwords {
                     let masked = narwhal_history::redact_sql_secrets(sql);
                     if let std::borrow::Cow::Owned(s) = masked {
                         *sql = s;
@@ -59,7 +86,7 @@ impl Redactor {
                 // Column-name redaction: callers encode parameters as
                 // `<column>=<value>` strings; we mask the value when
                 // the column matches a rule.
-                if !self.cfg.redact_columns.is_empty() {
+                if !self.redact_columns.is_empty() {
                     for p in params.iter_mut() {
                         if let Some((name, _)) = p.split_once('=') {
                             if self.matches_column(name) {
@@ -80,8 +107,17 @@ impl Redactor {
     }
 
     fn matches_column(&self, name: &str) -> bool {
-        let lower = name.trim().to_lowercase();
-        self.cfg.redact_columns.iter().any(|c| c == &lower)
+        // R3-N3: shortened the comment to match what the code
+        // actually does. The only fast-path is the empty rule set;
+        // `eq_ignore_ascii_case` is alloc-free regardless of the
+        // input casing.
+        if self.redact_columns.is_empty() {
+            return false;
+        }
+        let trimmed = name.trim();
+        self.redact_columns
+            .iter()
+            .any(|rule| rule.eq_ignore_ascii_case(trimmed))
     }
 }
 
@@ -162,5 +198,37 @@ mod tests {
         let before = evt.clone();
         r.apply(&mut evt);
         assert_eq!(before, evt);
+    }
+
+    /// R3-M4: rule keys and the matcher must agree on the same
+    /// case relation. Mixing `to_lowercase()` (full Unicode) with
+    /// `eq_ignore_ascii_case` previously left a hole where a rule
+    /// with non-ASCII upper-case letters wouldn't match its own
+    /// column. The test pins down that an ASCII-only rule
+    /// ("PASSWORD") still matches a mixed-case column name and
+    /// non-ASCII columns are matched byte-identically modulo
+    /// ASCII case.
+    #[test]
+    fn ascii_case_folding_is_consistent_across_rule_and_matcher() {
+        let r = Redactor::new(RedactorConfig {
+            redact_passwords: false,
+            // Mixed-case rules; rule storage folds to ASCII-lower.
+            redact_columns: vec!["PASSWORD".into(), "Card_Number".into()],
+        });
+        let mut evt = make_query(
+            "INSERT INTO t VALUES (?, ?, ?)",
+            vec![
+                "password=hunter2".into(),
+                "CARD_NUMBER=4111-1111-1111-1111".into(),
+                "name=Bob".into(),
+            ],
+        );
+        r.apply(&mut evt);
+        let AuditEvent::Query { params, .. } = evt else {
+            unreachable!()
+        };
+        assert_eq!(params[0], "password=***");
+        assert_eq!(params[1], "CARD_NUMBER=***");
+        assert_eq!(params[2], "name=Bob");
     }
 }

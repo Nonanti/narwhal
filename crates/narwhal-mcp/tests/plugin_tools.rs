@@ -203,3 +203,87 @@ fn collision_with_builtin_is_rejected_at_registration() {
     let outcome = registry.register_dynamic(bad);
     assert_eq!(outcome, RegistrationOutcome::CollisionBuiltin);
 }
+
+/// Review fix C3 / MR-C3: oversized output from a dynamic tool is
+/// truncated by the dispatch layer (not silently forwarded), the
+/// original `is_error` flag is preserved, and a UTF-8-safe snippet
+/// of the original body is kept inside the envelope so the agent
+/// can still diagnose the underlying error.
+#[tokio::test]
+async fn dynamic_tool_oversized_output_is_capped() {
+    let mut registry = ToolRegistry::with_defaults();
+    let big = DynamicTool {
+        name: "big_blob".to_owned(),
+        description: "Returns a blob bigger than the cap.".to_owned(),
+        input_schema: json!({ "type": "object" }),
+        source: "oversize-plugin".to_owned(),
+        handler: Arc::new(|_ctx, _args| {
+            Box::pin(async move {
+                let mut body = String::with_capacity(1024 * 1024);
+                body.push_str("DIAG_HEADER_42:");
+                while body.len() < 1024 * 1024 {
+                    body.push('x');
+                }
+                // Return as an error-shaped output so we can also
+                // verify is_error preservation across the cap.
+                Ok(ToolOutput {
+                    text: body,
+                    is_error: true,
+                })
+            })
+        }),
+    };
+    assert_eq!(
+        registry.register_dynamic(big),
+        RegistrationOutcome::Registered
+    );
+    let server = McpServer::with_tools(build_context(), registry);
+    let responses = roundtrip(
+        server,
+        &[
+            json!({
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "t", "version": "0" }
+                }
+            }),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "big_blob", "arguments": {} }
+            }),
+        ],
+    )
+    .await;
+
+    let call = responses
+        .iter()
+        .find(|r| r.get("id") == Some(&json!(1)))
+        .expect("tools/call response");
+    // MR-C3: is_error survives truncation.
+    assert_eq!(call["result"]["isError"].as_bool(), Some(true));
+    let text = call["result"]["content"][0]["text"].as_str().expect("text");
+    // Envelope + 4 KiB snippet — well under any reasonable host limit.
+    assert!(
+        text.len() <= 16 * 1024,
+        "capped body unexpectedly large: {}",
+        text.len()
+    );
+    // MR-N8: parse the envelope as JSON instead of substring-matching
+    // serde's whitespace-sensitive pretty-printer.
+    let envelope: Value = serde_json::from_str(text).expect("valid JSON envelope");
+    assert_eq!(envelope["truncated"], json!(true));
+    assert_eq!(envelope["tool"], json!("big_blob"));
+    assert_eq!(envelope["original_byte_length"], json!(1024 * 1024));
+    let snippet = envelope["snippet"].as_str().expect("snippet string");
+    assert!(
+        snippet.starts_with("DIAG_HEADER_42:"),
+        "snippet should preserve the start of the original body"
+    );
+}

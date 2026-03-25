@@ -203,11 +203,15 @@ pub struct ToolsListResult {
     pub tools: Vec<ToolDescriptor>,
 }
 
+/// MR-N3: `Cow<'static, str>` so built-in tools (whose name and
+/// description are `&'static str` constants) round-trip without a
+/// `to_owned()` copy on every `tools/list`, while dynamic tools can
+/// still hand over an owned `String` from their `DynamicTool` body.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescriptor {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: std::borrow::Cow<'static, str>,
+    pub description: std::borrow::Cow<'static, str>,
     /// JSON Schema describing the `arguments` object accepted by
     /// `tools/call`. Clients use this to render forms and to validate
     /// LLM-produced calls before dispatching.

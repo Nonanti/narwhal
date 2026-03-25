@@ -12,22 +12,35 @@ use serde_json::{Value, json};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{Tool, ToolOutput, cap_response};
+use crate::tools::{Tool, ToolOutput};
 
 pub struct DescribeTableTool;
 
-#[async_trait]
-impl Tool for DescribeTableTool {
-    fn name(&self) -> &'static str {
-        "describe_table"
-    }
-
-    fn description(&self) -> &'static str {
-        "Return the full structure of a single table or view: columns \
+impl DescribeTableTool {
+    const NAME: &'static str = "describe_table";
+    const DESCRIPTION: &'static str = "Return the full structure of a single table or view: columns \
          (with type, nullability, primary-key flag, default), indexes, \
          foreign keys, unique constraints, and — when the driver \
          supports it — the engine-native CREATE statement. Use \
-         `describe_schema` first to discover schema/table names."
+         `describe_schema` first to discover schema/table names.";
+}
+
+#[async_trait]
+impl Tool for DescribeTableTool {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {
@@ -115,7 +128,6 @@ impl Tool for DescribeTableTool {
         // H2: clamp the body — raw DDL plus thousands of columns on a
         // wide table can easily exceed the agent's response budget.
         let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
-        let (body, _truncated) = cap_response(body, "describe_table");
         Ok(ToolOutput::ok(body))
     }
 }

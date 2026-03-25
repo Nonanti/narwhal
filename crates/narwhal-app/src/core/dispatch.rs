@@ -166,12 +166,24 @@ impl AppCore {
             .as_ref()
             .and_then(|s| s.config.params.color)
             .map(connection_color_to_ratatui);
+        // MR-M3 / R3-N4: a sticky notification (set via
+        // `status.notify(...)`) wins over the per-frame `message`
+        // slot until its TTL expires, so one-shot warnings like
+        // "multi-line paste collapsed secondary cursors" survive
+        // the next keystroke instead of being clobbered. The render
+        // path uses the read-only `peek_notification`; expiry is
+        // ticked one level up (see `run_loop` / event dispatch).
+        let status_text: String = if let Some(notif) = self.ui.status.peek_notification() {
+            notif.to_owned()
+        } else {
+            self.ui.status.message.clone()
+        };
         let mut layout = RootLayout {
             mode: self.ui.vim.mode(),
             focus: self.ui.focus,
             status_bar: StatusBarView {
                 connection: self.ui.status.connection.as_deref(),
-                message: &self.ui.status.message,
+                message: &status_text,
                 transaction: self.ui.status.transaction.as_deref(),
                 pending: Some(pending_count),
                 read_only: self.session.read_only,

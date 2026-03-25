@@ -15,6 +15,15 @@ use crate::tools::{Tool, ToolOutput};
 
 pub struct ListConnectionsTool;
 
+impl ListConnectionsTool {
+    const NAME: &'static str = "list_connections";
+    const DESCRIPTION: &'static str = "List every named database connection narwhal knows about. \
+         Returns connection name, driver, a target summary (host:port/db \
+         or file path) and whether the connection is tunneled through SSH. \
+         Call this first to discover what `describe_schema` and other tools \
+         can target.";
+}
+
 #[derive(Serialize)]
 struct ConnectionView {
     name: String,
@@ -29,16 +38,20 @@ struct ConnectionView {
 
 #[async_trait]
 impl Tool for ListConnectionsTool {
-    fn name(&self) -> &'static str {
-        "list_connections"
+    fn name(&self) -> &str {
+        Self::NAME
     }
 
-    fn description(&self) -> &'static str {
-        "List every named database connection narwhal knows about. \
-         Returns connection name, driver, a target summary (host:port/db \
-         or file path) and whether the connection is tunneled through SSH. \
-         Call this first to discover what `describe_schema` and other tools \
-         can target."
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {

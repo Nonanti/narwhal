@@ -465,6 +465,28 @@ error, and the agent retries against the visible set automatically.
 | Alt-N (editor) | Multi-cursor: add a secondary cursor at the next occurrence of the word under cursor |
 | Alt-A (editor) | Multi-cursor: add a secondary cursor at every other occurrence in the buffer |
 | Esc (editor, multi-cursor active) | Collapse to a single cursor |
+
+#### `:chart` notes
+
+- **Bar** caps the visible series at the top 50 entries ranked by
+  absolute magnitude; the rest are dropped, not truncated to a tail.
+- **Line** / **Sparkline** keep the last 1000 points (FIFO drop on
+  overflow).
+- **Sparkline** renders no x-axis labels by design.
+- Numeric detection scans the whole row slice; mixed-type columns
+  must produce at least one parseable numeric cell.
+- Multi-line paste collapses the secondary-cursor set (paste-into-
+  multi-cursor lands in v2.1); status bar surfaces a hint.
+
+#### `:pivot` notes
+
+- Distinct values of `cols=` are capped at 50 by default; the
+  overflow column is labelled `(other)` and aggregates the rest.
+- `count` works on any column; `sum`/`avg`/`min`/`max` require a
+  numeric `value=` column.
+- Aggregation runs in `f64` — see crate-level `# Precision` note
+  for the integer round-off caveat over 2^53.
+
 | Ctrl-Tab / Ctrl-Shift-Tab | Cycle tabs |
 | ? / F1 | Help |
 | :q | Quit |

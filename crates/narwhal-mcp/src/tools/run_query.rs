@@ -32,7 +32,7 @@ use tracing::warn;
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::{json_array_to_values, value_to_json};
-use crate::tools::{Tool, ToolOutput, cap_response};
+use crate::tools::{Tool, ToolOutput};
 
 /// Default ceiling on returned rows. A handful of agents (Claude Desktop,
 /// Cursor) cap tool-call responses at ~100 KB; 1 000 rows is well under
@@ -79,14 +79,9 @@ const fn default_read_only() -> bool {
 
 pub struct RunQueryTool;
 
-#[async_trait]
-impl Tool for RunQueryTool {
-    fn name(&self) -> &'static str {
-        "run_query"
-    }
-
-    fn description(&self) -> &'static str {
-        "Execute a SQL statement against a named connection. Defaults to \
+impl RunQueryTool {
+    const NAME: &'static str = "run_query";
+    const DESCRIPTION: &'static str = "Execute a SQL statement against a named connection. Defaults to \
          read-only: the statement is rejected unless it begins with \
          SELECT/WITH/SHOW/EXPLAIN/DESCRIBE/PRAGMA/VALUES, and even then it \
          runs inside a transaction that always ROLLBACKs. Set \
@@ -94,7 +89,25 @@ impl Tool for RunQueryTool {
          to bind values for placeholder tokens (`$1`/`$2` on Postgres, \
          `?` elsewhere) and avoid string-concatenation SQL injection. \
          Rows are truncated to `limit` (default 1000, max 10000) and the \
-         response includes a `truncated` flag when truncation occurred."
+         response includes a `truncated` flag when truncation occurred.";
+}
+
+#[async_trait]
+impl Tool for RunQueryTool {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {
@@ -317,7 +330,6 @@ impl Tool for RunQueryTool {
         // `limit * MAX_CELL_BYTES` (10k * 64 KiB ≈ 640 MiB) on the
         // table, which trivially exceeds the agent host's reply budget.
         let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
-        let (body, _truncated) = cap_response(body, "run_query");
         Ok(ToolOutput::ok(body))
     }
 }

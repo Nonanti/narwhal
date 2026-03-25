@@ -23,6 +23,15 @@
 //! [`AggKind::Sum`], [`AggKind::Avg`], [`AggKind::Min`],
 //! [`AggKind::Max`]. `First`, `Last`, `DistinctCount` are listed in
 //! the roadmap but deferred to v2.1.
+//!
+//! # Precision (review note N2)
+//!
+//! Numeric aggregation runs in `f64`. Integer columns are coerced
+//! via `as f64`; values past 2^53 lose trailing-bit precision
+//! typical of IEEE-754. For `SUM` over very large 64-bit IDs or
+//! amounts the rendered total may differ from a server-side
+//! `SUM(...)` by 1–2 ULP. Treat the pivot pane as a presentation
+//! tool, not a financial source-of-truth.
 
 #![forbid(unsafe_code)]
 
@@ -254,18 +263,87 @@ fn value_as_f64(v: &Value) -> Option<f64> {
 }
 
 /// Best-effort textual rendering of a [`Value`] as a label. Strips
-/// control characters that would smear the grid.
+/// control / zero-width / bidi-override characters that would smear
+/// the grid (review fix N9).
 fn value_as_label(v: &Value) -> String {
     let raw = v.to_string();
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
-        if ch.is_control() {
+        if is_grid_unsafe(ch) {
             out.push('·');
         } else {
             out.push(ch);
         }
     }
     out
+}
+
+/// Characters that should never reach a grid cell. Includes ASCII
+/// control, `BiDi` overrides (RTL/LTR), zero-width joiners, the
+/// `BOM`, soft hyphens and the line/paragraph separators.
+///
+/// MR-M6: `pub` so the chart crate (and any other grid renderer in
+/// the workspace) can re-use the same filter without copying the
+/// list and drifting on future updates.
+#[must_use]
+pub fn is_grid_unsafe(ch: char) -> bool {
+    if ch.is_control() {
+        return true;
+    }
+    matches!(
+        ch,
+        '\u{00AD}'      // soft hyphen
+        | '\u{200B}'..='\u{200F}'  // ZWSP, ZWNJ, ZWJ, LRM, RLM
+        | '\u{202A}'..='\u{202E}'  // bidi embedding / override
+        | '\u{2060}'..='\u{2064}'  // word joiner, invisible operators
+        | '\u{2066}'..='\u{2069}'  // bidi isolates
+        | '\u{2028}'..='\u{2029}'  // line / paragraph separator
+        | '\u{FEFF}'    // BOM / zero-width no-break space
+    )
+}
+
+#[cfg(test)]
+mod grid_unsafe_tests {
+    use super::is_grid_unsafe;
+
+    /// MR-M5: characters that *must* be redacted because they smear
+    /// the grid (control, zero-width, `BiDi` override, line /
+    /// paragraph separators, `BOM`, soft hyphen).
+    #[test]
+    fn flags_the_known_problematic_characters() {
+        for ch in [
+            '\0',       // NUL
+            '\x07',     // BEL
+            '\t',       // TAB — already control
+            '\n',       // LF  — already control
+            '\u{00AD}', // soft hyphen
+            '\u{200B}', // ZWSP
+            '\u{200D}', // ZWJ
+            '\u{200E}', // LRM
+            '\u{200F}', // RLM
+            '\u{202E}', // RLO
+            '\u{2060}', // word joiner
+            '\u{2066}', // LRI
+            '\u{2028}', // LSEP
+            '\u{2029}', // PSEP
+            '\u{FEFF}', // BOM
+        ] {
+            assert!(
+                is_grid_unsafe(ch),
+                "U+{:04X} should be flagged unsafe",
+                ch as u32
+            );
+        }
+    }
+
+    /// MR-M5: ordinary printable characters and common non-Latin
+    /// scripts must not be flagged.
+    #[test]
+    fn passes_through_ordinary_text() {
+        for ch in ['a', 'Z', '0', 'ö', '中', 'あ', '👍', ' ', '-'] {
+            assert!(!is_grid_unsafe(ch), "U+{:04X} should be safe", ch as u32);
+        }
+    }
 }
 
 /// Locate a column by case-insensitive name.
@@ -279,9 +357,13 @@ fn find_column(columns: &[ColumnHeader], name: &str) -> Result<usize, PivotError
         })
 }
 
-/// Check whether at least one non-null cell in `col` parses numerically.
+/// Check whether at least one non-null cell in `col` parses
+/// numerically. Walks the full slice; the previous 32-row heuristic
+/// (review fix M6) was flaky against streaming results where early
+/// batches were null and the numeric values arrived later — the
+/// guard would reject a perfectly valid pivot the first time it ran.
 fn column_is_numeric(rows: &[Row], col: usize) -> bool {
-    rows.iter().take(32).any(|row| {
+    rows.iter().any(|row| {
         row.0
             .get(col)
             .is_some_and(|cell| !matches!(cell, Value::Null) && value_as_f64(cell).is_some())

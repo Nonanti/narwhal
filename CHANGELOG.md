@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Operator notes
+
+- **Audit log rotation suffix format** (MR-N4): rotated files
+  previously carried a seconds-resolution timestamp
+  (`audit.log.20260604T143012Z`); they now carry a millisecond
+  timestamp (`audit.log.20260604T143012.473Z`), with a numeric
+  `-N` suffix on the unlikely sub-millisecond collision. Any log
+  shipper that greps for the old pattern needs its regex updated
+  to accept `.\d{3}Z` (or `.\d{9}Z` for the nanosecond fallback).
+- **MR-N3 ToolDescriptor**: `name` and `description` are now
+  `Cow<'static, str>` for zero-alloc round-trips on built-in
+  tools. JSON wire shape is unchanged.
+- **MR-N9 LspError::Timeout**: now carries the method name, so
+  status-bar surfacing reads `"LSP request 'textDocument/hover'
+  timed out"` instead of a generic message.
+
+## [2.0.0] - 2026-06-04
+
+Major v2.0 release: full Tier 0 + Tier 1 + Tier 2 of the v2.0 roadmap.
+Breaking changes are concentrated in Tier 0 (edition 2024 / MSRV 1.85,
+Connection trait native `async fn`, driver crate consolidation, settings
+schema v2, API audit). Tier 1 ships feature work without semantic
+breaks; Tier 2 is pure polish + ecosystem expansion.
+
+### Highlights
+
+- **Streaming results** (`QueryStream`) — rows arrive incrementally;
+  the result pane ticks live. T1-T4-A.
+- **MSSQL driver** via `tiberius`. T1-T2-A.
+- **Connection vault v1** (HashiCorp + 1Password). T1-T2-B.
+- **Treesitter SQL parser** — scope-aware completion + cursor
+  context. T1-T3-A.
+- **Workspace persistence** — tabs / cursor / sidebar restore across
+  launches. T1-T3-B.
+- **Parquet + Markdown exporters**. T1-T4-B.
+- **WASM plugin runtime** (`wasmtime` + capability sandbox v2).
+  T1-T5-A / T1-T5-B.
+- **Audit log** — append-only JSONL sink for SOC2 / ISO 27001
+  evidence. T2-T2-D.
+- **Schema diff** — `:schema-diff src tgt` and headless
+  `narwhal schema-diff` emit dialect-specific migration DDL.
+  T2-T2-C.
+- **Inline ASCII charts** — `:chart bar|line|sparkline` over any
+  result. T2-T4-C.
+- **Pivot table** — `:pivot rows=.. cols=.. value=.. agg=..` with
+  count / sum / avg / min / max aggregators. T2-T4-D.
+- **Multi-cursor editing** — Alt-N / Alt-A / Esc collapses; insert
+  and delete propagate across cursors. T2-T3-D (MVP; vim block-
+  visual + undo-as-one-step deferred to v2.1).
+- **Embedded LSP client crate** (sqls / sqlls protocol primitives).
+  Editor wiring deferred to v2.1. T2-T3-C.
+- **Plugin-defined MCP tools** — host-side registration with
+  collision policy; WIT bridge deferred to v2.1. T2-T5-C.
+
+### Breaking
+
+- **MSRV bumped to 1.85**; edition 2024 throughout. T0-01.
+- **`Connection` trait uses native `async fn` (RPITIT)**; downstream
+  drivers no longer depend on `async-trait`. T0-02.
+- **Driver crate consolidation**: the six per-backend crates
+  collapsed into `narwhal-drivers` with one cargo feature per
+  backend. T0-03.
+- **Settings schema v2** with the `narwhal migrate-config` helper
+  to bring v1 files forward. T0-04.
+- **API surface audit** — several previously-public types are now
+  `pub(crate)`. T0-05.
+
+### Added
+
+- New workspace members: `narwhal-audit`, `narwhal-schema-diff`,
+  `narwhal-pivot`, `narwhal-lsp`, `narwhal-plugin-wasm`.
+- `narwhal audit tail` CLI for the audit JSONL sink.
+- `narwhal schema-diff` CLI (headless complement to the TUI command).
+- `narwhal migrate-config` CLI.
+
+### Deferred to v2.1
+
+- Multi-cursor: vim block-visual interop, undo/redo as a single step,
+  Alt-Click and column-mode chords.
+- LSP client wiring into the editor pane (completion popup, hover
+  tooltip, definition jump, server restart logic).
+- MCP plugin-tool WIT bridge (WIT world v0.2.0), JSON-schema input
+  validation, `mcp.register` capability, example WASM plugin.
+
 ## [1.2.0] - 2026-06-02
 
 ### Fixed

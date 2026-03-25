@@ -129,6 +129,16 @@ where
 /// Reads and writes round-trip through a shared `VecDeque<Vec<u8>>` so
 /// a stub server can be implemented as a few `enqueue_response` calls
 /// without spawning a subprocess.
+///
+/// MR-N10: this type implements [`Clone`] and exposes
+/// [`push_inbound`] / [`pop_sent`] *only* for the test harness;
+/// production transports ([`StdioTransport`], future TCP / Unix-
+/// socket variants) intentionally do not. If you find yourself
+/// reaching for these helpers outside `#[cfg(test)]`, you are
+/// almost certainly papering over a missing trait method.
+///
+/// [`push_inbound`]: Self::push_inbound
+/// [`pop_sent`]: Self::pop_sent
 #[derive(Clone, Default)]
 pub struct MemoryTransport {
     inner: Arc<Mutex<MemoryState>>,

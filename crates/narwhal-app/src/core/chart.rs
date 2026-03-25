@@ -32,17 +32,23 @@ impl ChartKind {
         }
     }
 
-    /// Default cap for the data buffer. Bars get a small cap because the
-    /// chart visually smears past ~50 bars on a typical terminal; lines
-    /// and sparklines can soak much more data.
+    /// Default cap for the data buffer. Bars get a small cap because
+    /// the chart visually smears past [`DEFAULT_BAR_BOUND`] bars on a
+    /// typical terminal; lines and sparklines soak much more data
+    /// (capped at [`DEFAULT_LINE_BOUND`]).
     pub(super) const fn default_bound(self) -> usize {
         match self {
-            Self::Bar => 50,
-            Self::Line => 1_000,
-            Self::Sparkline => 1_000,
+            Self::Bar => DEFAULT_BAR_BOUND,
+            Self::Line | Self::Sparkline => DEFAULT_LINE_BOUND,
         }
     }
 }
+
+/// MR-N12: extracted from the inline `match` so the README, the
+/// chart command parser and any future opt-in CLI flag share one
+/// source of truth.
+pub(super) const DEFAULT_BAR_BOUND: usize = 50;
+pub(super) const DEFAULT_LINE_BOUND: usize = 1_000;
 
 /// Sticky chart configuration attached to a tab. Resolved column
 /// overrides are stored by name (string) so the binding survives a
@@ -145,12 +151,15 @@ pub(super) fn value_as_f64(v: &Value) -> Option<f64> {
 }
 
 /// Best-effort textual rendering of a [`Value`] as a chart label.
-/// Strips control / wide-cell characters that would smear the chart.
+/// Strips control, zero-width and bidi-override characters that
+/// would smear the chart (review fix N9 / MR-M6: shared with
+/// [`narwhal_pivot::is_grid_unsafe`] so the filter can't drift
+/// between renderers).
 pub(super) fn value_as_label(v: &Value) -> String {
     let raw = v.render();
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
-        if ch.is_control() {
+        if narwhal_pivot::is_grid_unsafe(ch) {
             out.push('·');
         } else {
             out.push(ch);
@@ -179,12 +188,18 @@ pub(super) fn detect_categorical_column(columns: &[ColumnHeader], rows: &[Row]) 
 }
 
 fn column_is_numeric(rows: &[Row], col: usize) -> bool {
-    for row in rows.iter().take(32) {
+    // Review fix M6: walk the full slice. The previous 32-row
+    // heuristic mis-classified streaming results whose early
+    // batches were null and produced spurious `NotNumeric` errors
+    // that flipped on a later frame.
+    for row in rows {
         let Some(cell) = row.0.get(col) else { continue };
         if matches!(cell, Value::Null) {
             continue;
         }
-        return value_as_f64(cell).is_some();
+        if value_as_f64(cell).is_some() {
+            return true;
+        }
     }
     false
 }
@@ -273,7 +288,15 @@ pub(super) fn derive_chart_data(
     if points.len() > bound {
         match config.kind {
             ChartKind::Bar => {
-                points.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                // Review fix N4: top-N by absolute magnitude so a
+                // mixed signed series (revenue vs loss) keeps its
+                // largest *and* smallest entries instead of dropping
+                // every negative value off the bottom of the sort.
+                points.sort_by(|a, b| {
+                    b.1.abs()
+                        .partial_cmp(&a.1.abs())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 points.truncate(bound);
             }
             ChartKind::Line | ChartKind::Sparkline => {
@@ -524,5 +547,36 @@ mod tests {
         cfg.title = Some("My Chart".into());
         let data = derive_chart_data(&cfg, &cols, &rows).expect("derive");
         assert_eq!(data.title, "My Chart");
+    }
+
+    /// Review fix N4 / MR-N6: top-N for a bar chart picks by
+    /// **absolute magnitude** so a mixed signed series keeps both
+    /// the largest positive and the largest negative entries.
+    /// Naive descending-by-value sorting (the pre-N4 behaviour)
+    /// would drop every negative value off the bottom when the
+    /// bound is tight.
+    #[test]
+    fn bar_topn_keeps_largest_magnitude_on_mixed_signs() {
+        let cols = vec![col("region", "text"), col("pnl", "int")];
+        let rows = vec![
+            row(vec![Value::String("a".into()), Value::Int(100)]),
+            row(vec![Value::String("b".into()), Value::Int(-200)]),
+            row(vec![Value::String("c".into()), Value::Int(50)]),
+            row(vec![Value::String("d".into()), Value::Int(-300)]),
+            row(vec![Value::String("e".into()), Value::Int(10)]),
+        ];
+        let mut cfg = ChartConfig::new(ChartKind::Bar);
+        cfg.bounded_to = 3;
+        let data = derive_chart_data(&cfg, &cols, &rows).expect("derive");
+        assert_eq!(data.values.len(), 3);
+        // d (-300), b (-200), a (100) — the three largest by abs.
+        let kept: Vec<f64> = data.values.clone();
+        assert!(
+            kept.contains(&-300.0) && kept.contains(&-200.0) && kept.contains(&100.0),
+            "expected d/b/a kept, got {kept:?}"
+        );
+        // The two smallest-magnitude entries (c=50, e=10) must be dropped.
+        assert!(!kept.contains(&50.0));
+        assert!(!kept.contains(&10.0));
     }
 }

@@ -25,7 +25,7 @@ use tracing::warn;
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::value_to_json;
-use crate::tools::{Tool, ToolOutput, cap_response};
+use crate::tools::{Tool, ToolOutput};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,19 +42,32 @@ struct Args {
 
 pub struct ExplainQueryTool;
 
-#[async_trait]
-impl Tool for ExplainQueryTool {
-    fn name(&self) -> &'static str {
-        "explain_query"
-    }
-
-    fn description(&self) -> &'static str {
-        "Return the driver-native EXPLAIN output for a SQL statement. The \
+impl ExplainQueryTool {
+    const NAME: &'static str = "explain_query";
+    const DESCRIPTION: &'static str = "Return the driver-native EXPLAIN output for a SQL statement. The \
          response includes the dialect tag (postgres/mysql/sqlite/duckdb/\
          clickhouse) so the agent knows how to interpret the plan. Set \
          `analyze=true` for Postgres/MySQL to actually run the statement \
          and gather real row counts — use with care, EXPLAIN ANALYZE \
-         performs the work."
+         performs the work.";
+}
+
+#[async_trait]
+impl Tool for ExplainQueryTool {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {
@@ -170,7 +183,6 @@ impl Tool for ExplainQueryTool {
         // routinely exceed 100 KB; clamp the body so the agent gets a
         // structured truncation signal instead of a wall of text.
         let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
-        let (body, _truncated) = cap_response(body, "explain_query");
         Ok(ToolOutput::ok(body))
     }
 }

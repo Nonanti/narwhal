@@ -48,10 +48,21 @@ pub const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 /// (truncating mid-array breaks the parser), so we replace it with a
 /// minimal JSON envelope that surfaces the truncation reason. Agents
 /// then know to re-issue a narrower query.
+/// How many bytes of the original body to keep verbatim inside the
+/// truncation envelope. Small enough to round-trip safely under the
+/// overall response cap; large enough that the agent can usually
+/// diagnose the underlying error.
+const CAP_SNIPPET_BYTES: usize = 4 * 1024;
+
 pub fn cap_response(body: String, tool: &str) -> (String, bool) {
     if body.len() <= MAX_RESPONSE_BYTES {
         return (body, false);
     }
+    // MR-C3: keep a UTF-8-safe prefix of the original body so the
+    // agent can read the start of the actual error / payload instead
+    // of losing it completely behind a generic envelope.
+    let snippet_end = floor_to_char_boundary(&body, CAP_SNIPPET_BYTES.min(body.len()));
+    let snippet = &body[..snippet_end];
     let envelope = serde_json::json!({
         "truncated": true,
         "tool": tool,
@@ -63,11 +74,24 @@ pub fn cap_response(body: String, tool: &str) -> (String, bool) {
         ),
         "original_byte_length": body.len(),
         "max_byte_length": MAX_RESPONSE_BYTES,
+        "snippet": snippet,
     });
     (
         serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| "{\"truncated\":true}".into()),
         true,
     )
+}
+
+/// Find the largest char-boundary index `<= idx`. R3-N5: renamed
+/// from `floor_char_boundary` to avoid colliding with the eventually-
+/// stable `str::floor_char_boundary` API. Once stdlib's stabilises,
+/// this helper can be deleted in favour of the method.
+fn floor_to_char_boundary(s: &str, idx: usize) -> usize {
+    let mut i = idx.min(s.len());
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// A single MCP tool callable via `tools/call`.
@@ -77,19 +101,36 @@ pub fn cap_response(body: String, tool: &str) -> (String, bool) {
 #[async_trait]
 pub trait Tool: Send + Sync {
     /// Stable identifier the client passes to `tools/call`.
-    fn name(&self) -> &'static str;
+    ///
+    /// The lifetime is tied to `&self` so dynamic tools can return a
+    /// borrowed slice of their owned `String`; built-ins return
+    /// `&'static str` constants without ceremony.
+    fn name(&self) -> &str;
 
     /// Human-readable description shown in `tools/list`.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
 
     /// JSON Schema for the `arguments` object accepted by this tool.
     fn input_schema(&self) -> Value;
 
+    /// Descriptor name as a `Cow<'static, str>`. MR-N3: built-ins
+    /// override this with `Cow::Borrowed("name")` so the descriptor
+    /// round-trips without an allocation; the default impl falls
+    /// back to an owned clone, which dynamic tools rely on.
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Owned(self.name().to_owned())
+    }
+
+    /// Same shape as [`Self::descriptor_name`] for the description.
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Owned(self.description().to_owned())
+    }
+
     /// Convenience for assembling the on-the-wire descriptor.
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
-            name: self.name(),
-            description: self.description(),
+            name: self.descriptor_name(),
+            description: self.descriptor_description(),
             input_schema: self.input_schema(),
         }
     }
@@ -193,36 +234,16 @@ pub enum RegistrationOutcome {
 
 #[async_trait]
 impl Tool for DynamicTool {
-    fn name(&self) -> &'static str {
-        // Dynamic tools own their string; the trait method returns
-        // `&'static str`, so we leak the storage at construction time
-        // via [`DynamicTool::leak_name`]. Callers go through
-        // [`ToolRegistry::register_dynamic`] which manages the leak.
-        unreachable!("DynamicTool::name() is shadowed by registry lookup")
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    fn description(&self) -> &'static str {
-        unreachable!("DynamicTool::description() is shadowed by registry lookup")
+    fn description(&self) -> &str {
+        &self.description
     }
 
     fn input_schema(&self) -> Value {
         self.input_schema.clone()
-    }
-
-    fn descriptor(&self) -> ToolDescriptor {
-        // Build a leak-free descriptor: clone the owned strings and
-        // hand back static-borrowed views via leaking the boxed
-        // String once at descriptor time. This is only called from
-        // the registry's `descriptors()` accessor on startup-level
-        // paths, so the leak cost is bounded by the dynamic tool
-        // count.
-        let name: &'static str = Box::leak(self.name.clone().into_boxed_str());
-        let description: &'static str = Box::leak(self.description.clone().into_boxed_str());
-        ToolDescriptor {
-            name,
-            description,
-            input_schema: self.input_schema.clone(),
-        }
     }
 
     async fn call(&self, ctx: &ServerContext, arguments: Value) -> Result<ToolOutput, McpError> {
@@ -248,11 +269,7 @@ impl ToolRegistry {
 
     pub fn descriptors(&self) -> Vec<ToolDescriptor> {
         let mut out: Vec<ToolDescriptor> = self.tools.iter().map(|t| t.descriptor()).collect();
-        out.extend(self.dynamic.iter().map(|d| ToolDescriptor {
-            name: Box::leak(d.name.clone().into_boxed_str()),
-            description: Box::leak(d.description.clone().into_boxed_str()),
-            input_schema: d.input_schema.clone(),
-        }));
+        out.extend(self.dynamic.iter().map(|d| d.descriptor()));
         out
     }
 
@@ -324,8 +341,12 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let outcome = reg.register_dynamic(make_tool("my_tool", "plugin-a", counter));
         assert_eq!(outcome, RegistrationOutcome::Registered);
-        let names: Vec<&str> = reg.descriptors().iter().map(|d| d.name).collect();
-        assert!(names.contains(&"my_tool"));
+        let names: Vec<String> = reg
+            .descriptors()
+            .into_iter()
+            .map(|d| d.name.into_owned())
+            .collect();
+        assert!(names.iter().any(|n| n == "my_tool"));
     }
 
     #[test]

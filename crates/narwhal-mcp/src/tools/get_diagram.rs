@@ -20,9 +20,19 @@ use narwhal_diagram::{
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{Tool, ToolOutput, cap_response};
+use crate::tools::{Tool, ToolOutput};
 
 pub struct GetDiagramTool;
+
+impl GetDiagramTool {
+    const NAME: &'static str = "get_diagram";
+    const DESCRIPTION: &'static str = "Render an ER diagram of a connection's schema as Mermaid \
+         (`erDiagram`) or Graphviz (`dot`). When `table` is given the \
+         output is restricted to that table and its 1-hop foreign-key \
+         neighbours; otherwise it covers the whole schema (or a single \
+         schema if `schema` is set). Use after `describe_schema` to get \
+         a human-readable view of FK relationships.";
+}
 
 /// Output format the agent requested.
 #[derive(Debug, Clone, Copy)]
@@ -50,17 +60,20 @@ impl DiagramFormat {
 
 #[async_trait]
 impl Tool for GetDiagramTool {
-    fn name(&self) -> &'static str {
-        "get_diagram"
+    fn name(&self) -> &str {
+        Self::NAME
     }
 
-    fn description(&self) -> &'static str {
-        "Render an ER diagram of a connection's schema as Mermaid \
-         (`erDiagram`) or Graphviz (`dot`). When `table` is given the \
-         output is restricted to that table and its 1-hop foreign-key \
-         neighbours; otherwise it covers the whole schema (or a single \
-         schema if `schema` is set). Use after `describe_schema` to get \
-         a human-readable view of FK relationships."
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {
@@ -255,7 +268,6 @@ impl Tool for GetDiagramTool {
             "source": rendered,
         });
         let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
-        let (body, _truncated) = cap_response(body, "get_diagram");
         Ok(ToolOutput::ok(body))
     }
 }
