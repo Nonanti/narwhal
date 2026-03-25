@@ -6,17 +6,25 @@ members = [
     "crates/narwhal-sql",
     "crates/narwhal-pool",
     "crates/narwhal-history",
+    # T2-T2-D: append-only JSONL audit log sink for compliance use.
+    "crates/narwhal-audit",
     # T0-03: 5 driver crates + narwhal-driver-registry consolidated
     # into narwhal-drivers with one cargo feature per backend.
     "crates/narwhal-drivers",
     "crates/narwhal-domain",
     "crates/narwhal-commands",
+    # T2-T2-C: schema diff + DDL emit between two connections.
+    "crates/narwhal-schema-diff",
     "crates/narwhal-plugin",
     "crates/narwhal-plugin-lua",
     # T1-T5-A: WASM plugin runtime (wasmtime + component model).
     "crates/narwhal-plugin-wasm",
     "crates/narwhal-vim",
     "crates/narwhal-diagram",
+    # T2-T3-C: embedded LSP client (sqls / sqlls).
+    "crates/narwhal-lsp",
+    # T2-T4-D: pivot table aggregation engine.
+    "crates/narwhal-pivot",
     "crates/narwhal-tui",
     "crates/narwhal-app",
     "crates/narwhal-mcp",
@@ -130,9 +138,11 @@ narwhal-config = { path = "crates/narwhal-config", version = "1.0.0" }
 narwhal-sql = { path = "crates/narwhal-sql", version = "1.0.0" }
 narwhal-pool = { path = "crates/narwhal-pool", version = "1.0.0" }
 narwhal-history = { path = "crates/narwhal-history", version = "1.0.0" }
+narwhal-audit = { path = "crates/narwhal-audit", version = "1.0.0" }
 narwhal-drivers = { path = "crates/narwhal-drivers", version = "1.0.0", default-features = false }
 narwhal-domain = { path = "crates/narwhal-domain", version = "1.0.0" }
 narwhal-commands = { path = "crates/narwhal-commands", version = "1.0.0" }
+narwhal-schema-diff = { path = "crates/narwhal-schema-diff", version = "1.0.0" }
 narwhal-plugin = { path = "crates/narwhal-plugin", version = "1.0.0" }
 narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "1.0.0" }
 narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "1.0.0" }
@@ -144,6 +154,10 @@ wasmtime = { version = "45", default-features = false, features = ["runtime", "c
 wat = "1.0"
 narwhal-vim = { path = "crates/narwhal-vim", version = "1.0.0" }
 narwhal-diagram = { path = "crates/narwhal-diagram", version = "1.0.0" }
+# T2-T3-C: embedded LSP client.
+narwhal-lsp = { path = "crates/narwhal-lsp", version = "1.0.0" }
+# T2-T4-D: pivot table aggregation.
+narwhal-pivot = { path = "crates/narwhal-pivot", version = "1.0.0" }
 narwhal-tui = { path = "crates/narwhal-tui", version = "1.0.0" }
 narwhal-app = { path = "crates/narwhal-app", version = "1.0.0" }
 narwhal-mcp = { path = "crates/narwhal-mcp", version = "1.0.0" }

@@ -233,15 +233,131 @@ pub enum Command {
         left: String,
         right: String,
     },
+    /// T2-T2-C: full-schema diff between two **connections**
+    /// (`:schema-diff source target`). Opens both transiently,
+    /// introspects every user table, runs `narwhal-schema-diff`,
+    /// dumps the emitted DDL into a fresh editor tab. Optional
+    /// flags pick the dialect, narrow the scope, or rewrite target
+    /// schema names. Note this is distinct from `:diff-schema`,
+    /// which is single-connection two-table.
+    SchemaDiff {
+        /// Source connection (desired state).
+        source: String,
+        /// Target connection (will be migrated).
+        target: String,
+        /// Override the auto-picked dialect; `None` uses the
+        /// source connection's driver name.
+        dialect: Option<String>,
+        /// Restrict the diff to one schema (both sides).
+        schema: Option<String>,
+        /// Restrict the diff to one table.
+        table: Option<String>,
+        /// `(source, target)` schema renames applied to the
+        /// target-side introspection before diffing.
+        schema_map: Vec<(String, String)>,
+    },
     /// v1.3 #9: run the lint rule set over the active buffer and
     /// dump findings to a fresh tab. `:lint` reuses the active tab's
     /// content; no argument needed.
     Lint,
+    /// T2-T4-C: toggle the inline ASCII chart pane over the active
+    /// result. `:chart bar|line|sparkline` activates the pane;
+    /// `:chart off` (or `:chart none`) removes it. Optional flags:
+    /// `--x col`, `--y col`, `--col col` (sparkline alias), `--title T`.
+    Chart(ChartArg),
+    /// T2-T4-D: toggle the inline pivot-table pane over the active
+    /// result. `:pivot rows=col[,col..] [cols=col] [value=col]
+    /// [agg=count|sum|avg|min|max]` activates; `:pivot off` removes it.
+    Pivot(PivotArg),
     /// v1.3 #10: insert a built-in SQL template at the cursor.
     /// `:tpl sel` etc.; `:tpl` (no arg) shows the available names.
     Template(Option<String>),
     Unknown(String),
     Empty,
+}
+
+/// Argument to [`Command::Chart`]. The parser turns the command-line
+/// flags into a structured payload so the dispatch layer can wire the
+/// chart config in one step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChartArg {
+    /// Activate the chart pane with the given kind and overrides.
+    On {
+        /// Token the user typed: `bar`, `line`, or `sparkline`.
+        kind: ChartKindArg,
+        /// `--title T` override; rendered in the chart's title bar.
+        title: Option<String>,
+        /// `--x col` override; ignored for sparkline.
+        x_col: Option<String>,
+        /// `--y col` (or `--col col` for sparkline) override.
+        y_col: Option<String>,
+    },
+    /// `:chart off` / `:chart none` — dismiss the chart pane.
+    Off,
+}
+
+/// Chart kind token parsed by [`Command::Chart`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartKindArg {
+    Bar,
+    Line,
+    Sparkline,
+}
+
+impl ChartKindArg {
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token.to_ascii_lowercase().as_str() {
+            "bar" => Some(Self::Bar),
+            "line" => Some(Self::Line),
+            "sparkline" | "spark" => Some(Self::Sparkline),
+            _ => None,
+        }
+    }
+}
+
+/// Argument to [`Command::Pivot`]. The parser turns the
+/// `key=value` tokens into a structured payload so the dispatch
+/// layer can wire the pivot config in one step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PivotArg {
+    /// Activate the pivot pane with the given config.
+    On {
+        /// Row-dimension columns (comma-separated on the command line).
+        rows: Vec<String>,
+        /// Optional column-dimension; when `None` the pivot is a
+        /// single collapsed column.
+        cols: Option<String>,
+        /// Optional value column; required for sum / avg / min / max.
+        value: Option<String>,
+        /// Aggregator kind token; the dispatch layer maps to
+        /// `narwhal_pivot::AggKind`.
+        agg: PivotAggArg,
+    },
+    /// `:pivot off` — dismiss the pivot pane.
+    Off,
+}
+
+/// Aggregator token parsed by [`Command::Pivot`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PivotAggArg {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+}
+
+impl PivotAggArg {
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token.to_ascii_lowercase().as_str() {
+            "count" | "cnt" | "n" => Some(Self::Count),
+            "sum" | "total" => Some(Self::Sum),
+            "avg" | "mean" | "average" => Some(Self::Avg),
+            "min" | "minimum" => Some(Self::Min),
+            "max" | "maximum" => Some(Self::Max),
+            _ => None,
+        }
+    }
 }
 
 /// Argument to [`Command::Sort`].
@@ -293,6 +409,9 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "dumpschema",
     "diagram",
     "diag",
+    "schema-diff",
+    "schemadiff",
+    "chart",
     "add",
     "format",
     "fmt",
@@ -347,6 +466,7 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "rm-snippet",
     "rmsnippet",
     "snippets",
+    "pivot",
 ];
 
 /// Short descriptions for built-in commands, looked up by `:help <name>`.
@@ -393,6 +513,14 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
     (
         "diagram",
         "export an ER diagram (:diagram export mermaid|dot [path] [--table T] [--schema S])",
+    ),
+    (
+        "schema-diff",
+        "full-schema diff between two connections (:schema-diff src tgt [--dialect ..] [--schema ..] [--table ..] [--schema-map src=tgt])",
+    ),
+    (
+        "chart",
+        "render an inline ASCII chart over the active result (:chart bar|line|sparkline [--x col] [--y col] [--title T]; :chart off)",
     ),
     ("add", "open the connection wizard to save a new connection"),
     (
@@ -481,6 +609,10 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
         "snippets",
         "open the snippets modal to browse and load saved queries",
     ),
+    (
+        "pivot",
+        "render an inline pivot table over the active result (:pivot rows=col[,col..] [cols=col] [value=col] [agg=count|sum|avg|min|max]; :pivot off)",
+    ),
 ];
 
 /// Map an alias token back to its primary command key so that `:help o`
@@ -494,6 +626,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "streamall" => "stream-all",
         "dumpschema" => "dump-schema",
         "diag" => "diagram",
+        "schemadiff" => "schema-diff",
         "next" | "npage" => "next-page",
         "prev" | "ppage" => "prev-page",
         "pagesize" => "page-size",
@@ -665,6 +798,7 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "lint" => Command::Lint,
+        "pivot" => parse_pivot(arg),
         "tpl" | "template" => {
             let trimmed = arg.trim();
             if trimmed.is_empty() {
@@ -683,6 +817,8 @@ pub fn parse(input: &str) -> Command {
                 _ => Command::Unknown("diff-schema: expected two qualified table names".into()),
             }
         }
+        "schema-diff" | "schemadiff" => parse_schema_diff(arg),
+        "chart" => parse_chart(arg),
         "submit" | "commit-pending" => Command::Submit,
         "revert" | "discard-pending" => Command::Revert,
         "new" | "tabnew" => Command::NewTab,
@@ -948,6 +1084,165 @@ fn parse_diagram_table_subcommand(
     builder(rest.to_owned())
 }
 
+/// Parse `:schema-diff source target [--dialect d] [--schema s]
+/// [--table t] [--schema-map src=tgt]...`.
+///
+/// Two positional args (source + target connection names) are
+/// required. Repeating `--schema-map` builds the rename map. The
+/// `--out` flag is intentionally **omitted** from the TUI parser:
+/// the in-editor render is the whole point of the TUI command. Use
+/// the `narwhal schema-diff` headless subcommand when you want a
+/// file.
+fn parse_schema_diff(arg: &str) -> Command {
+    let mut tokens = arg.split_whitespace();
+    let mut positional: Vec<String> = Vec::new();
+    let mut dialect: Option<String> = None;
+    let mut schema: Option<String> = None;
+    let mut table: Option<String> = None;
+    let mut schema_map: Vec<(String, String)> = Vec::new();
+
+    while let Some(tok) = tokens.next() {
+        match tok {
+            "--dialect" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("schema-diff: --dialect requires a value".into());
+                };
+                dialect = Some(value.to_owned());
+            }
+            "--schema" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("schema-diff: --schema requires a value".into());
+                };
+                schema = Some(value.to_owned());
+            }
+            "--table" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("schema-diff: --table requires a value".into());
+                };
+                table = Some(value.to_owned());
+            }
+            "--schema-map" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown(
+                        "schema-diff: --schema-map requires a source=target value".into(),
+                    );
+                };
+                let Some((src, tgt)) = value.split_once('=') else {
+                    return Command::Unknown(format!(
+                        "schema-diff: --schema-map expects `source=target`, got `{value}`"
+                    ));
+                };
+                if src.is_empty() || tgt.is_empty() {
+                    return Command::Unknown(format!(
+                        "schema-diff: --schema-map: empty side in `{value}`"
+                    ));
+                }
+                schema_map.push((src.to_owned(), tgt.to_owned()));
+            }
+            other if other.starts_with("--") => {
+                return Command::Unknown(format!("schema-diff: unknown flag '{other}'"));
+            }
+            other => positional.push(other.to_owned()),
+        }
+    }
+
+    if positional.len() != 2 {
+        return Command::Unknown(
+            "schema-diff: expected two connection names \
+             (`:schema-diff source target [--dialect ..] [--schema ..] [--table ..] \
+             [--schema-map src=tgt]`)"
+                .into(),
+        );
+    }
+    let target = positional.pop().expect("len == 2");
+    let source = positional.pop().expect("len == 2");
+
+    Command::SchemaDiff {
+        source,
+        target,
+        dialect,
+        schema,
+        table,
+        schema_map,
+    }
+}
+
+/// Parse the argument to `:chart`. Grammar:
+///
+/// ```text
+/// bar|line|sparkline [--x col] [--y col] [--col col] [--title T]
+/// off|none
+/// ```
+///
+/// `--col` is an alias for `--y` so the sparkline form
+/// (`:chart sparkline --col revenue`) reads naturally. `--x` on a
+/// sparkline is silently accepted but stored — the renderer ignores
+/// it.
+fn parse_chart(arg: &str) -> Command {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return Command::Unknown("chart: subcommand required (bar|line|sparkline|off)".into());
+    }
+    let mut tokens = trimmed.split_whitespace();
+    let Some(head) = tokens.next() else {
+        return Command::Unknown("chart: subcommand required (bar|line|sparkline|off)".into());
+    };
+    let lower = head.to_ascii_lowercase();
+    if matches!(lower.as_str(), "off" | "none" | "hide") {
+        if tokens.next().is_some() {
+            return Command::Unknown("chart off: no extra arguments expected".into());
+        }
+        return Command::Chart(ChartArg::Off);
+    }
+    let Some(kind) = ChartKindArg::from_token(&lower) else {
+        return Command::Unknown(format!(
+            "chart: unknown subcommand '{head}' (expected bar|line|sparkline|off)"
+        ));
+    };
+
+    let mut x_col: Option<String> = None;
+    let mut y_col: Option<String> = None;
+    let mut title: Option<String> = None;
+
+    while let Some(tok) = tokens.next() {
+        match tok {
+            "--x" | "-x" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("chart: --x requires a column name".into());
+                };
+                x_col = Some(value.to_owned());
+            }
+            "--y" | "-y" | "--col" | "-c" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("chart: --y / --col requires a column name".into());
+                };
+                y_col = Some(value.to_owned());
+            }
+            "--title" | "-t" => {
+                let Some(value) = tokens.next() else {
+                    return Command::Unknown("chart: --title requires a value".into());
+                };
+                title = Some(value.to_owned());
+            }
+            other if other.starts_with("--") => {
+                return Command::Unknown(format!("chart: unknown flag '{other}'"));
+            }
+            other => {
+                return Command::Unknown(format!(
+                    "chart: unexpected argument '{other}' (use --x / --y / --title)"
+                ));
+            }
+        }
+    }
+
+    Command::Chart(ChartArg::On {
+        kind,
+        title,
+        x_col,
+        y_col,
+    })
+}
+
 fn parse_diagram_export(rest: &str) -> Command {
     let mut tokens = rest.split_whitespace();
     let Some(format_tok) = tokens.next() else {
@@ -998,6 +1293,108 @@ fn parse_diagram_export(rest: &str) -> Command {
 
 /// Try to parse `:s/pat/rep/[gc]` or `:%s/pat/rep/[gc]`.
 /// Returns `None` if the input doesn't match the substitute pattern.
+/// Parse the argument to `:pivot`. Grammar:
+///
+/// ```text
+/// rows=col1[,col2..] [cols=col] [value=col] [agg=count|sum|avg|min|max]
+/// off|none
+/// ```
+///
+/// Tokens are `key=value` pairs; order-independent. `rows=` accepts a
+/// comma-separated list and may be omitted only when `cols=` is
+/// present. Missing `agg` defaults to `count`.
+fn parse_pivot(arg: &str) -> Command {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return Command::Unknown(
+            "pivot: subcommand required (rows=col[,col..] [cols=col] [value=col] [agg=fn]; or off)"
+                .into(),
+        );
+    }
+    let lower_head = trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(lower_head.as_str(), "off" | "none" | "hide") {
+        if trimmed.split_whitespace().count() > 1 {
+            return Command::Unknown("pivot off: no extra arguments expected".into());
+        }
+        return Command::Pivot(PivotArg::Off);
+    }
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut cols: Option<String> = None;
+    let mut value: Option<String> = None;
+    let mut agg: PivotAggArg = PivotAggArg::Count;
+    let mut saw_agg = false;
+
+    for token in trimmed.split_whitespace() {
+        let Some((key, val)) = token.split_once('=') else {
+            return Command::Unknown(format!("pivot: expected key=value pair, got '{token}'"));
+        };
+        if val.is_empty() {
+            return Command::Unknown(format!("pivot: '{key}' needs a value"));
+        }
+        match key.to_ascii_lowercase().as_str() {
+            "rows" | "row" | "r" => {
+                rows = val
+                    .split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if rows.is_empty() {
+                    return Command::Unknown("pivot: rows= needs at least one column".into());
+                }
+            }
+            "cols" | "col" | "c" => cols = Some(val.to_owned()),
+            "value" | "val" | "v" => value = Some(val.to_owned()),
+            "agg" | "a" => {
+                let Some(parsed) = PivotAggArg::from_token(val) else {
+                    return Command::Unknown(format!(
+                        "pivot: unknown aggregator '{val}' (expected count|sum|avg|min|max)"
+                    ));
+                };
+                agg = parsed;
+                saw_agg = true;
+            }
+            other => {
+                return Command::Unknown(format!("pivot: unknown key '{other}'"));
+            }
+        }
+    }
+
+    if rows.is_empty() && cols.is_none() {
+        return Command::Unknown("pivot: at least one of rows= or cols= is required".into());
+    }
+    // sum / avg / min / max all need a value column. The dispatch
+    // layer will surface a richer error if the column is non-numeric.
+    if matches!(
+        agg,
+        PivotAggArg::Sum | PivotAggArg::Avg | PivotAggArg::Min | PivotAggArg::Max
+    ) && value.is_none()
+    {
+        return Command::Unknown(format!(
+            "pivot: agg={} requires value=<col>",
+            match agg {
+                PivotAggArg::Sum => "sum",
+                PivotAggArg::Avg => "avg",
+                PivotAggArg::Min => "min",
+                PivotAggArg::Max => "max",
+                PivotAggArg::Count => unreachable!(),
+            }
+        ));
+    }
+    let _ = saw_agg; // suppress unused-var lint without `_` rename
+
+    Command::Pivot(PivotArg::On {
+        rows,
+        cols,
+        value,
+        agg,
+    })
+}
+
 fn try_parse_substitute(input: &str) -> Option<Command> {
     let (range, rest) = if let Some(r) = input.strip_prefix("%s/") {
         (SubstituteRange::WholeBuffer, r)
@@ -1308,6 +1705,301 @@ mod tests {
         assert_eq!(parse("zz"), Command::Unknown("zz".into()));
     }
 
+    // T2-T2-C parser coverage.
+    #[test]
+    fn schema_diff_minimal() {
+        let cmd = parse("schema-diff prod staging");
+        assert_eq!(
+            cmd,
+            Command::SchemaDiff {
+                source: "prod".into(),
+                target: "staging".into(),
+                dialect: None,
+                schema: None,
+                table: None,
+                schema_map: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn schema_diff_with_flags() {
+        let cmd = parse(
+            "schema-diff prod staging --dialect postgres --schema public \
+             --table users --schema-map prod_app=staging_app \
+             --schema-map prod_log=staging_log",
+        );
+        let Command::SchemaDiff {
+            source,
+            target,
+            dialect,
+            schema,
+            table,
+            schema_map,
+        } = cmd
+        else {
+            panic!("expected SchemaDiff, got {cmd:?}");
+        };
+        assert_eq!(source, "prod");
+        assert_eq!(target, "staging");
+        assert_eq!(dialect.as_deref(), Some("postgres"));
+        assert_eq!(schema.as_deref(), Some("public"));
+        assert_eq!(table.as_deref(), Some("users"));
+        assert_eq!(
+            schema_map,
+            vec![
+                ("prod_app".to_owned(), "staging_app".to_owned()),
+                ("prod_log".to_owned(), "staging_log".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn schema_diff_alias_resolves() {
+        // `schemadiff` (no hyphen) routes through the same parser.
+        let cmd = parse("schemadiff src tgt");
+        assert!(matches!(cmd, Command::SchemaDiff { .. }));
+    }
+
+    #[test]
+    fn schema_diff_missing_target_is_unknown() {
+        let cmd = parse("schema-diff onlyone");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("expected two connection names"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_diff_malformed_map_is_unknown() {
+        let cmd = parse("schema-diff a b --schema-map noequals");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("--schema-map expects"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_diff_unknown_flag_is_rejected() {
+        let cmd = parse("schema-diff a b --bogus");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("unknown flag"), "got: {msg}");
+    }
+
+    #[test]
+    fn chart_bar_defaults() {
+        assert_eq!(
+            parse("chart bar"),
+            Command::Chart(ChartArg::On {
+                kind: ChartKindArg::Bar,
+                title: None,
+                x_col: None,
+                y_col: None,
+            })
+        );
+    }
+
+    #[test]
+    fn chart_off_dismisses() {
+        assert_eq!(parse("chart off"), Command::Chart(ChartArg::Off));
+        assert_eq!(parse("chart none"), Command::Chart(ChartArg::Off));
+        assert_eq!(parse("chart hide"), Command::Chart(ChartArg::Off));
+    }
+
+    #[test]
+    fn chart_off_rejects_extra_args() {
+        let cmd = parse("chart off bogus");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("no extra arguments"), "got: {msg}");
+    }
+
+    #[test]
+    fn chart_line_with_x_and_y_overrides() {
+        assert_eq!(
+            parse("chart line --x ts --y revenue"),
+            Command::Chart(ChartArg::On {
+                kind: ChartKindArg::Line,
+                title: None,
+                x_col: Some("ts".into()),
+                y_col: Some("revenue".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn chart_sparkline_col_alias() {
+        assert_eq!(
+            parse("chart sparkline --col revenue"),
+            Command::Chart(ChartArg::On {
+                kind: ChartKindArg::Sparkline,
+                title: None,
+                x_col: None,
+                y_col: Some("revenue".into()),
+            })
+        );
+        // Short alias `spark` is also accepted.
+        assert_eq!(
+            parse("chart spark -c revenue"),
+            Command::Chart(ChartArg::On {
+                kind: ChartKindArg::Sparkline,
+                title: None,
+                x_col: None,
+                y_col: Some("revenue".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn chart_title_flag() {
+        assert_eq!(
+            parse("chart bar --title sales"),
+            Command::Chart(ChartArg::On {
+                kind: ChartKindArg::Bar,
+                title: Some("sales".into()),
+                x_col: None,
+                y_col: None,
+            })
+        );
+    }
+
+    #[test]
+    fn chart_requires_subcommand() {
+        let cmd = parse("chart");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("subcommand required"), "got: {msg}");
+    }
+
+    #[test]
+    fn chart_unknown_kind_is_rejected() {
+        let cmd = parse("chart pie");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("unknown subcommand"), "got: {msg}");
+    }
+
+    #[test]
+    fn chart_unknown_flag_is_rejected() {
+        let cmd = parse("chart bar --bogus value");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("unknown flag"), "got: {msg}");
+    }
+
+    #[test]
+    fn chart_flag_without_value_errors() {
+        let cmd = parse("chart bar --x");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("--x requires"), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_minimal_rows_only() {
+        assert_eq!(
+            parse("pivot rows=country"),
+            Command::Pivot(PivotArg::On {
+                rows: vec!["country".into()],
+                cols: None,
+                value: None,
+                agg: PivotAggArg::Count,
+            })
+        );
+    }
+
+    #[test]
+    fn pivot_full_spec() {
+        assert_eq!(
+            parse("pivot rows=country,year cols=segment value=revenue agg=sum"),
+            Command::Pivot(PivotArg::On {
+                rows: vec!["country".into(), "year".into()],
+                cols: Some("segment".into()),
+                value: Some("revenue".into()),
+                agg: PivotAggArg::Sum,
+            })
+        );
+    }
+
+    #[test]
+    fn pivot_off_aliases() {
+        assert_eq!(parse("pivot off"), Command::Pivot(PivotArg::Off));
+        assert_eq!(parse("pivot none"), Command::Pivot(PivotArg::Off));
+        assert_eq!(parse("pivot hide"), Command::Pivot(PivotArg::Off));
+    }
+
+    #[test]
+    fn pivot_off_rejects_extra_args() {
+        let cmd = parse("pivot off bogus");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("no extra arguments"), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_requires_dim() {
+        let cmd = parse("pivot agg=sum value=revenue");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("rows= or cols="), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_sum_requires_value() {
+        let cmd = parse("pivot rows=country agg=sum");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("requires value="), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_rejects_unknown_agg() {
+        let cmd = parse("pivot rows=k agg=median");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("unknown aggregator"), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_rejects_unknown_key() {
+        let cmd = parse("pivot rows=k foo=bar");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("unknown key"), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_rejects_malformed_token() {
+        let cmd = parse("pivot rows");
+        let Command::Unknown(msg) = cmd else {
+            panic!("expected Unknown, got {cmd:?}");
+        };
+        assert!(msg.contains("key=value"), "got: {msg}");
+    }
+
+    #[test]
+    fn pivot_aggregator_aliases() {
+        for (token, expected) in [
+            ("sum", PivotAggArg::Sum),
+            ("total", PivotAggArg::Sum),
+            ("mean", PivotAggArg::Avg),
+            ("n", PivotAggArg::Count),
+        ] {
+            assert_eq!(PivotAggArg::from_token(token), Some(expected));
+        }
+    }
     /// `:help <cmd>` walks `BUILTIN_COMMAND_DESCRIPTIONS` after
     /// resolving aliases through `resolve_builtin_alias`. The lookup
     /// only stays useful as long as every parser-accepted built-in

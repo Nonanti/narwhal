@@ -184,6 +184,18 @@ fn find_subsequence(haystack: &[u8], tag: &[u8], closer_len: usize) -> Option<us
 /// match, so chaining `replace_all` directly avoids the double scan a
 /// separate `is_match` would do — the regex engine only walks the
 /// string once per pattern in the common (no-secret) path.
+/// Redact secret literals from an arbitrary SQL string.
+///
+/// Exposed for reuse by `narwhal-audit`, which projects the same query
+/// stream into a separate compliance sink and must apply the same
+/// masking so cleartext credentials never reach the audit log.
+///
+/// Returns `Cow::Borrowed` when no patterns match (no allocation).
+#[must_use]
+pub fn redact_sql_secrets(sql: &str) -> Cow<'_, str> {
+    redact_secrets(sql)
+}
+
 fn redact_secrets(sql: &str) -> Cow<'_, str> {
     let mut result: Cow<'_, str> = Cow::Borrowed(sql);
     // Hand-rolled pass first so subsequent regexes don't see the

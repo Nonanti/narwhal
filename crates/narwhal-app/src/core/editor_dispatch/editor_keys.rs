@@ -1,6 +1,6 @@
 //! Editor pane key handling and action interpretation.
 
-use crossterm::event::{KeyCode as CtKey, KeyEvent};
+use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_core::ColumnHeader;
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::translate_key_event;
@@ -33,6 +33,30 @@ const fn domain_motion(m: VimMotion) -> DomainMotion {
 }
 
 impl AppCore {
+    /// T2-T3-D: add a secondary cursor at the next occurrence of the
+    /// word under the primary cursor.
+    pub(crate) async fn add_multi_cursor_next(&mut self) {
+        let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
+        if buf.add_secondary_cursor_at_next_word_match() {
+            let count = buf.secondary_cursors().len();
+            self.ui.status.message = format!("multi-cursor: {count} secondary cursor(s)");
+        } else {
+            self.ui.status.message = "multi-cursor: no match for word under cursor".into();
+        }
+    }
+
+    /// T2-T3-D: add a secondary cursor at every other occurrence of
+    /// the word under the primary cursor.
+    pub(crate) async fn add_multi_cursor_all(&mut self) {
+        let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
+        let added = buf.add_secondary_cursors_at_all_word_matches();
+        if added > 0 {
+            self.ui.status.message = format!("multi-cursor: added {added} cursor(s)");
+        } else {
+            self.ui.status.message = "multi-cursor: no other matches".into();
+        }
+    }
+
     pub(crate) async fn accept_completion_at(&mut self, index: usize) {
         let Some(state) = self.ui.tabs[self.ui.active_tab].completion.as_mut() else {
             return;
@@ -68,6 +92,35 @@ impl AppCore {
         if self.ui.tabs[self.ui.active_tab].editor_search.prompt_open {
             self.handle_editor_search_key(key).await;
             return;
+        }
+        // T2-T3-D: multi-cursor chords intercepted before vim:
+        // - Alt-N: add a secondary cursor at the next occurrence of
+        //   the word under the primary cursor
+        // - Alt-A: add a secondary cursor at every other occurrence
+        // - Esc when multi-cursor is active: collapse to primary
+        //   (intercepted only if not in vim insert mode — normal-mode
+        //   Esc behaviour stays untouched)
+        if key.modifiers == KeyModifiers::ALT {
+            match key.code {
+                CtKey::Char('n' | 'N') => {
+                    self.add_multi_cursor_next().await;
+                    return;
+                }
+                CtKey::Char('a' | 'A') => {
+                    self.add_multi_cursor_all().await;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if key.code == CtKey::Esc && self.ui.tabs[self.ui.active_tab].editor.has_multi_cursors() {
+            self.ui.tabs[self.ui.active_tab]
+                .editor
+                .collapse_to_primary();
+            self.ui.status.message = "multi-cursor: collapsed".into();
+            // Fall through so vim still receives the Esc — leaves
+            // insert mode like normal. The buffer's secondary set has
+            // already been cleared.
         }
         // The completion popup is modal while it's open: Tab cycles,
         // Enter accepts, Esc closes. Plain character keys fall through

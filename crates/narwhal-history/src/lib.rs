@@ -9,4 +9,6 @@
 
 pub mod journal;
 
-pub use journal::{HistoryEntry, HistoryError, Journal, JournalReader, Outcome};
+pub use journal::{
+    HistoryEntry, HistoryError, Journal, JournalReader, Outcome, redact_sql_secrets,
+};

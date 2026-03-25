@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 narwhal-core.workspace = true
+narwhal-audit.workspace = true
 narwhal-diagram.workspace = true
 serde.workspace = true
 toml.workspace = true

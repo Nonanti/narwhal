@@ -1,0 +1,41 @@
+[package]
+name = "narwhal-audit"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Append-only JSONL audit log sink for narwhal (SOC2 / ISO 27001 evidence)"
+keywords = ["database", "audit", "compliance", "jsonl", "narwhal"]
+categories = ["database"]
+
+[dependencies]
+narwhal-history.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[features]
+default = []
+# Optional syslog sink. Off by default so non-Linux targets don't pay
+# the dependency cost and the audit crate stays portable.
+syslog = ["dep:syslog"]
+
+[dependencies.syslog]
+version = "7"
+optional = true
+
+[dev-dependencies]
+tempfile = "3"
+toml.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true

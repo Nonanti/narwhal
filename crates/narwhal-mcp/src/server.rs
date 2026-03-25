@@ -47,6 +47,20 @@ impl McpServer {
         }
     }
 
+    /// T2-T5-C: construct the server with a *pre-populated* tool
+    /// registry. The host caller (typically the `narwhal mcp` binary)
+    /// builds the registry first, registers dynamic plugin tools via
+    /// [`ToolRegistry::register_dynamic`], then hands the result to
+    /// the server. This is the v2.0 wiring path; the v2.1 follow-up
+    /// will move the registration call inside narwhal-plugin so the
+    /// WASM-side `mcp::register-tools` export is auto-invoked.
+    pub fn with_tools(ctx: ServerContext, tools: ToolRegistry) -> Self {
+        Self {
+            ctx,
+            tools: Arc::new(tools),
+        }
+    }
+
     /// Run the server on the current process's stdin/stdout pair.
     ///
     /// Returns `Ok(())` when stdin closes cleanly (EOF). Returns `Err` only

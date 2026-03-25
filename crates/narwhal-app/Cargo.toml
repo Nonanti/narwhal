@@ -22,12 +22,15 @@ narwhal-tui.workspace = true
 narwhal-domain.workspace = true
 narwhal-commands.workspace = true
 narwhal-diagram.workspace = true
+narwhal-pivot.workspace = true
 narwhal-drivers = { workspace = true }
 narwhal-plugin.workspace = true
 narwhal-plugin-lua.workspace = true
 async-trait.workspace = true
 narwhal-pool.workspace = true
 narwhal-history.workspace = true
+narwhal-audit.workspace = true
+narwhal-schema-diff.workspace = true
 narwhal-sql.workspace = true
 
 tokio.workspace = true

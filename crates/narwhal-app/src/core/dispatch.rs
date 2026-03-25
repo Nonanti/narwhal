@@ -4,8 +4,9 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
-    CompletionItemView, CompletionPopupView, ConfirmModalView, EditorSearchHighlight,
-    GotoModalView, GotoRowView, HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout,
+    ChartPlaceholder, ChartView, ChartViewKind, CompletionItemView, CompletionPopupView,
+    ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView, HistoryModalState,
+    HistoryRow, HistoryRowOutcome, Pane, PivotPlaceholder, PivotTableView, RootLayout,
     RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
     WizardFieldView, WizardView, render_confirm_modal, render_goto_modal, render_help_modal,
     render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
@@ -14,7 +15,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render_helpers::{
-    connection_color_to_ratatui, display_from_state, sidebar_depth, sidebar_kind, sidebar_label,
+    ChartLayoutOwned, PivotLayoutOwned, chart_payload, connection_color_to_ratatui,
+    display_from_state, pivot_payload, sidebar_depth, sidebar_kind, sidebar_label,
 };
 use super::text_utils::split_head_arg;
 use super::{AppCore, ResultState};
@@ -112,6 +114,49 @@ impl AppCore {
                 None
             };
         let result_count = tab.results.len();
+        // T2-T4-C: derive the chart payload, if a chart is active on
+        // this tab. The owned envelope below outlives the borrow we
+        // hand into `RootLayout`; without it the labels / values
+        // references would dangle.
+        let chart_owned: Option<ChartLayoutOwned> = tab
+            .chart
+            .as_ref()
+            .and_then(|cfg| chart_payload(cfg, &tab.results.states[active_idx]));
+        let chart_layout = chart_owned.as_ref().map(|owned| match owned {
+            ChartLayoutOwned::Ok(data) => Ok(ChartView {
+                kind: match data.kind {
+                    crate::core::chart::ChartKind::Bar => ChartViewKind::Bar,
+                    crate::core::chart::ChartKind::Line => ChartViewKind::Line,
+                    crate::core::chart::ChartKind::Sparkline => ChartViewKind::Sparkline,
+                },
+                title: data.title.as_str(),
+                labels: data.labels.as_slice(),
+                values: data.values.as_slice(),
+            }),
+            ChartLayoutOwned::Err { title, message } => Err(ChartPlaceholder {
+                title: title.as_str(),
+                message: message.as_str(),
+            }),
+        });
+        // T2-T4-D: derive the pivot payload, if a pivot is active on
+        // this tab. Same owned-envelope pattern as the chart slot.
+        let pivot_owned: Option<PivotLayoutOwned> = tab
+            .pivot
+            .as_ref()
+            .and_then(|cfg| pivot_payload(cfg, &tab.results.states[active_idx]));
+        let pivot_layout = pivot_owned.as_ref().map(|owned| match owned {
+            PivotLayoutOwned::Ok { table, agg_label } => Ok(PivotTableView {
+                title: "result",
+                agg_label: agg_label.as_str(),
+                row_dim_headers: table.row_dim_headers.as_slice(),
+                col_headers: table.col_headers.as_slice(),
+                rows: table.rows.as_slice(),
+            }),
+            PivotLayoutOwned::Err { title, message } => Err(PivotPlaceholder {
+                title: title.as_str(),
+                message: message.as_str(),
+            }),
+        });
         // v1.1 #2: pull the active connection's accent colour, if any.
         // Lives on `Session.config.params.color`; the conversion to
         // ratatui::Color is in `connection_color_to_ratatui` below.
@@ -145,6 +190,8 @@ impl AppCore {
             // (`Tab::sql_highlights()`) and is refreshed lazily on
             // dirty marks; see docs/dev/t1-t3-a-treesitter.md.
             editor_sql_highlights: tab.sql_highlights.as_deref(),
+            chart: chart_layout,
+            pivot: pivot_layout,
             result_count,
             active_result: active_idx,
             accent_color,
@@ -754,7 +801,20 @@ impl AppCore {
             Command::Filter(spec) => self.apply_filter_command(spec).await,
             Command::Sort(arg) => self.apply_sort_command(arg).await,
             Command::DiffSchema { left, right } => self.diff_schema_command(left, right).await,
+            Command::SchemaDiff {
+                source,
+                target,
+                dialect,
+                schema,
+                table,
+                schema_map,
+            } => {
+                self.schema_diff_command(source, target, dialect, schema, table, schema_map)
+                    .await;
+            }
             Command::Lint => self.lint_buffer_command().await,
+            Command::Chart(arg) => self.chart_command(arg).await,
+            Command::Pivot(arg) => self.pivot_command(arg).await,
             Command::Template(name) => self.insert_template_command(name).await,
             Command::Empty => {}
             Command::Unknown(text) => {

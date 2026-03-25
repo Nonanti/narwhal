@@ -111,3 +111,6 @@ uuid = { workspace = true }
 tempfile = "3.13"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres", "mysql", "mssql_server"] }
+# T2-T2-C: round-trip test wires the schema-diff emit path against a
+# live Postgres container.
+narwhal-schema-diff.workspace = true

@@ -458,6 +458,13 @@ error, and the agent retries against the visible set automatically.
 | :submit / :revert | Flush / drop the pending-mutation queue |
 | :filter `[expr\|clear]` | Set / clear the result filter |
 | :sort `<N\|clear>` | Toggle the result sort on column N |
+| :chart `bar\|line\|sparkline` `[--x col] [--y col] [--title T]` | Open an inline ASCII chart over the active result; updates progressively as rows stream in |
+| :chart off | Hide the chart pane |
+| :pivot `rows=col[,col..] [cols=col] [value=col] [agg=count\|sum\|avg\|min\|max]` | Open an inline pivot table over the active result |
+| :pivot off | Hide the pivot pane |
+| Alt-N (editor) | Multi-cursor: add a secondary cursor at the next occurrence of the word under cursor |
+| Alt-A (editor) | Multi-cursor: add a secondary cursor at every other occurrence in the buffer |
+| Esc (editor, multi-cursor active) | Collapse to a single cursor |
 | Ctrl-Tab / Ctrl-Shift-Tab | Cycle tabs |
 | ? / F1 | Help |
 | :q | Quit |

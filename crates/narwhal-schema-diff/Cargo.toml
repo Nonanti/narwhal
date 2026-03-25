@@ -1,0 +1,23 @@
+[package]
+name = "narwhal-schema-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Structural schema diff and DDL emission for narwhal"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+narwhal-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

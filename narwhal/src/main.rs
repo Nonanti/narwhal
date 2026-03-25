@@ -59,6 +59,85 @@ enum Mode {
     /// schema version, parse errors, and whether migration is
     /// required. Exit code is non-zero on any non-OK outcome.
     Config(ConfigArgs),
+    /// Inspect the audit log.
+    ///
+    /// T2-T2-D: read-only viewer for the JSONL audit sink. Resolves
+    /// the active sink path from `settings.audit.sinks` (the first
+    /// `file:` entry) unless `--path` overrides it.
+    Audit(AuditArgs),
+    /// Diff two connections and emit DDL that migrates target onto
+    /// source.
+    ///
+    /// T2-T2-C: headless variant of the `:schema-diff` TUI command.
+    /// Opens both connections, introspects their schemas, computes
+    /// a structural diff, and renders DDL through the chosen
+    /// dialect emitter.
+    SchemaDiff(SchemaDiffArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct AuditArgs {
+    #[command(subcommand)]
+    command: AuditCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditCommand {
+    /// Print the tail of the audit log, optionally following new
+    /// lines as they are appended.
+    Tail {
+        /// Override the audit file path. When absent, the first
+        /// `file:` sink from `settings.audit.sinks` is used.
+        #[arg(long = "path", value_name = "PATH")]
+        path: Option<std::path::PathBuf>,
+        /// Print this many lines before tailing (defaults to all when
+        /// `--follow` is not set).
+        #[arg(short = 'n', long = "lines", value_name = "N")]
+        lines: Option<usize>,
+        /// Keep the file open and stream new lines as they appear.
+        #[arg(short = 'f', long = "follow")]
+        follow: bool,
+        /// Filter to a single event kind: `query`, `connection_opened`,
+        /// `connection_closed`, `configuration`, `plugin_loaded`.
+        #[arg(long = "kind", value_name = "KIND")]
+        kind: Option<String>,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+struct SchemaDiffArgs {
+    /// Source connection (desired state). Looked up in
+    /// `connections.toml` by name.
+    source: String,
+    /// Target connection (the one that will be migrated). Looked up
+    /// by name. The emitted DDL transforms this side into the source.
+    target: String,
+    /// Dialect to emit. Defaults to the source connection's driver
+    /// (`postgres`, `mysql`, `sqlite`, `mssql`). `generic` is the
+    /// ANSI fallback.
+    #[arg(long = "dialect", value_name = "NAME")]
+    dialect: Option<String>,
+    /// Write the DDL to this file instead of stdout.
+    #[arg(short = 'o', long = "out", value_name = "PATH")]
+    out: Option<std::path::PathBuf>,
+    /// Restrict the diff to one schema (matches `schema` on both
+    /// sides after `--schema-map` resolution).
+    #[arg(long = "schema", value_name = "NAME")]
+    schema: Option<String>,
+    /// Restrict the diff to one table (matches the table name on
+    /// both sides; combine with `--schema` to disambiguate).
+    #[arg(long = "table", value_name = "NAME")]
+    table: Option<String>,
+    /// Map a source schema to a different target schema. Repeatable.
+    /// Format: `--schema-map source=target`. Useful when prod and
+    /// staging use different namespaces (`prod.public` vs
+    /// `staging.public2`).
+    #[arg(long = "schema-map", value_name = "MAP")]
+    schema_map: Vec<String>,
+    /// Exit with a non-zero status when the diff is non-empty.
+    /// Pairs naturally with CI gating.
+    #[arg(long = "fail-on-drift")]
+    fail_on_drift: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -139,6 +218,8 @@ async fn main() -> Result<()> {
         Some(Mode::Exec(args)) => run_exec(paths, args, cli.read_only).await,
         Some(Mode::MigrateConfig(args)) => run_migrate_config(paths, args),
         Some(Mode::Config(args)) => run_config(paths, args),
+        Some(Mode::Audit(args)) => run_audit(paths, args).await,
+        Some(Mode::SchemaDiff(args)) => run_schema_diff(paths, args, cli.read_only).await,
         None => run_tui(paths, cli.read_only).await,
     }
 }
@@ -364,16 +445,28 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     // actual `password = "vault:…"` reference will fail at connect
     // time with a clear NotConfigured error.
     let vault = Arc::new(build_vault_registry(&settings.vault, "TUI"));
+    // T2-T2-D: build the audit service if at least one sink is
+    // configured. Failure to open any individual sink is non-fatal
+    // — the TUI still starts; missing sinks are logged. When the
+    // resulting service has zero live sinks, audit stays silent.
+    let audit = build_audit_service(&settings.audit).await;
     // T1-T3-B: workspace-state restore. Wired before `with_settings`
     // so the persist toggles from `[settings.workspace.persist]` are
     // already cached when `with_workspace_state_path` consults them.
     let workspace_state_path = paths.workspace_state_file();
-    let app = App::with_services(registry, connections, history, credentials, clipboard)
+    let mut app = App::with_services(registry, connections, history, credentials, clipboard)
         .with_vault(vault)
         .with_connections_path(paths.connections_file())
         .with_last_used_path(paths.last_used_file())
         .with_settings(settings)
-        .with_workspace_state_path(workspace_state_path)
+        .with_workspace_state_path(workspace_state_path);
+    // T2-T2-D: install the audit service *before* auto-loading
+    // plugins so the `PluginLoaded` event for each startup plugin
+    // makes it into the audit log alongside `:plug-load` events.
+    if let Some(svc) = audit {
+        app = app.with_audit_service(svc);
+    }
+    app = app
         .with_plugins_dir(&paths.plugins_dir())
         .with_read_only(read_only);
 
@@ -694,4 +787,484 @@ fn build_vault_registry(
             VaultRegistry::empty()
         }
     }
+}
+
+/// T2-T2-D: build an [`narwhal_audit::AuditService`] from the
+/// `[settings.audit]` block.
+///
+/// Returns `None` when audit is disabled, no sinks are configured, or
+/// every configured sink failed to open. The TUI still starts in any
+/// of those cases — audit is opt-in compliance machinery, not a
+/// load-bearing feature.
+async fn build_audit_service(
+    cfg: &narwhal_audit::AuditConfig,
+) -> Option<Arc<narwhal_audit::AuditService>> {
+    if !cfg.enabled || cfg.sinks.is_empty() {
+        return None;
+    }
+    let mut builder = narwhal_audit::AuditService::builder().block_on_full(cfg.block_on_full);
+    builder = builder.with_redactor(narwhal_audit::Redactor::new(
+        narwhal_audit::RedactorConfig {
+            redact_passwords: cfg.redact_passwords,
+            redact_columns: cfg.redact_columns.clone(),
+        },
+    ));
+    for spec in &cfg.sinks {
+        match spec {
+            narwhal_audit::SinkSpec::File(path) => {
+                match narwhal_audit::sinks::FileSink::open(
+                    narwhal_audit::sinks::file::FileSinkConfig::new(path),
+                )
+                .await
+                {
+                    Ok(sink) => builder = builder.with_sink(Arc::new(sink)),
+                    Err(error) => {
+                        tracing::warn!(%error, path = %path, "audit file sink open failed; skipping");
+                    }
+                }
+            }
+            narwhal_audit::SinkSpec::Stdout => {
+                builder = builder.with_sink(Arc::new(narwhal_audit::sinks::StdoutSink::new()));
+            }
+            narwhal_audit::SinkSpec::Syslog => {
+                #[cfg(feature = "audit-syslog")]
+                {
+                    match narwhal_audit::sinks::syslog::SyslogSink::open() {
+                        Ok(sink) => builder = builder.with_sink(Arc::new(sink)),
+                        Err(error) => {
+                            tracing::warn!(%error, "audit syslog sink open failed; skipping");
+                        }
+                    }
+                }
+                #[cfg(not(feature = "audit-syslog"))]
+                {
+                    tracing::warn!(
+                        "audit sink 'syslog' configured but binary was built without the \
+                         `audit-syslog` feature; skipping"
+                    );
+                }
+            }
+        }
+    }
+    let svc = builder.start()?;
+    tracing::info!(
+        sinks = svc.sink_count(),
+        block_on_full = cfg.block_on_full,
+        "audit log enabled"
+    );
+    Some(Arc::new(svc))
+}
+
+/// T2-T2-D: `narwhal audit tail` implementation.
+///
+/// Resolves the audit file path (CLI override > first `file:` sink
+/// from `settings.audit.sinks`), prints the requested tail, and
+/// optionally follows. Designed as a read-only inspector — never
+/// rotates, truncates, or mutates the file.
+async fn run_audit(paths: ConfigPaths, args: AuditArgs) -> Result<()> {
+    // Stderr-only logging so the JSONL output stays clean for pipes.
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with(fmt::layer().with_writer(std::io::stderr).with_ansi(false))
+        .init();
+
+    match args.command {
+        AuditCommand::Tail {
+            path,
+            lines,
+            follow,
+            kind,
+        } => audit_tail(&paths, path, lines, follow, kind).await,
+    }
+}
+
+/// Resolve, open, optionally seek-back-N-lines, and stream a JSONL
+/// audit file. Filters are applied per-line so a stale `--kind`
+/// argument never accidentally drops a real entry from disk.
+async fn audit_tail(
+    paths: &ConfigPaths,
+    path_override: Option<std::path::PathBuf>,
+    lines: Option<usize>,
+    follow: bool,
+    kind: Option<String>,
+) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt as _, AsyncSeekExt as _, BufReader};
+
+    let path = resolve_audit_path(paths, path_override)?;
+
+    let mut file = tokio::fs::File::open(&path)
+        .await
+        .with_context(|| format!("opening audit file {}", path.display()))?;
+
+    // Default behaviour: when --follow is unset, dump everything.
+    // When --follow is set without --lines, start from EOF (the
+    // standard `tail -f` shape). `--lines N --follow` does both:
+    // print the last N then continue streaming.
+    let lines_to_print = match (lines, follow) {
+        (Some(n), _) => Some(n),
+        (None, true) => Some(0),
+        (None, false) => None,
+    };
+
+    if let Some(n) = lines_to_print {
+        let metadata = file.metadata().await?;
+        let size = metadata.len();
+        let start = seek_back_n_lines(&mut file, size, n).await?;
+        file.seek(std::io::SeekFrom::Start(start)).await?;
+    }
+
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let mut stdout = tokio::io::stdout();
+    use tokio::io::AsyncWriteExt as _;
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            if !follow {
+                break;
+            }
+            // Sleep briefly to avoid busy-looping. The audit emit rate
+            // is dominated by query dispatch, not by this tail loop.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            continue;
+        }
+        if let Some(filter) = kind.as_deref() {
+            if !line_matches_kind(&line, filter) {
+                continue;
+            }
+        }
+        stdout.write_all(line.as_bytes()).await?;
+    }
+    stdout.flush().await?;
+    Ok(())
+}
+
+/// Pick the audit file the operator is most likely tailing.
+///
+/// Preference order: explicit `--path`, then the first `file:` entry
+/// in `settings.audit.sinks`. The strftime tokens in the configured
+/// path are expanded against UTC `now` — the same logic the runtime
+/// uses — so a daily-rotating template resolves to today's file.
+fn resolve_audit_path(
+    paths: &ConfigPaths,
+    explicit: Option<std::path::PathBuf>,
+) -> Result<std::path::PathBuf> {
+    if let Some(p) = explicit {
+        return Ok(p);
+    }
+    let settings = load_settings_or_warn(paths);
+    let template = settings
+        .audit
+        .sinks
+        .iter()
+        .find_map(|s| match s {
+            narwhal_audit::SinkSpec::File(p) => Some(p.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no `file:` sink configured in settings.audit.sinks; pass --path to override"
+            )
+        })?;
+    let resolved = chrono::Utc::now().format(&template).to_string();
+    Ok(std::path::PathBuf::from(resolved))
+}
+
+/// Seek back through `file` (size: `size` bytes) until we have crossed
+/// `n` newlines, then return that offset. `n == 0` yields the EOF
+/// offset (the classic `tail -f` starting point).
+async fn seek_back_n_lines(file: &mut tokio::fs::File, size: u64, n: usize) -> Result<u64> {
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+
+    if n == 0 {
+        return Ok(size);
+    }
+    // Walk backwards in 4 KiB chunks counting newlines. Switches to
+    // returning the start of the file once we exhaust it without
+    // hitting the target count — the operator sees the entire log,
+    // which is the only sensible fallback for a short file.
+    const CHUNK: u64 = 4096;
+    let mut pos = size;
+    let mut buf = vec![0u8; CHUNK as usize];
+    let mut newlines = 0usize;
+    while pos > 0 {
+        let read_size = pos.min(CHUNK);
+        pos -= read_size;
+        file.seek(std::io::SeekFrom::Start(pos)).await?;
+        let slice = &mut buf[..read_size as usize];
+        file.read_exact(slice).await?;
+        for (i, b) in slice.iter().enumerate().rev() {
+            if *b == b'\n' {
+                newlines += 1;
+                if newlines > n {
+                    // Skip the newline itself so the next read starts
+                    // at the first byte of the kept line.
+                    return Ok(pos + i as u64 + 1);
+                }
+            }
+        }
+    }
+    Ok(0)
+}
+
+/// Return true when `line` (a serialised audit JSON object) has the
+/// `kind` field equal to `expected`. Matches case-insensitively to
+/// match the user's lowercase wire convention regardless of how they
+/// typed the flag.
+fn line_matches_kind(line: &str, expected: &str) -> bool {
+    // Cheap text scan beats `serde_json::from_str` on a hot path that
+    // may chew through gigabytes of history; the audit wire format
+    // pins the discriminant key as `"kind":"<lower_snake>"`.
+    let needle = format!("\"kind\":\"{}\"", expected.to_ascii_lowercase());
+    line.to_ascii_lowercase().contains(&needle)
+}
+
+/// T2-T2-C: headless `schema-diff` runner.
+///
+/// Opens two connections (source + target) just long enough to walk
+/// their full schema catalogues, computes a structural diff via
+/// `narwhal_schema_diff::diff`, then renders DDL through the chosen
+/// dialect emitter. The result is written to `--out` when provided,
+/// otherwise dumped to stdout so the caller can pipe it onwards.
+async fn run_schema_diff(
+    paths: ConfigPaths,
+    args: SchemaDiffArgs,
+    global_read_only: bool,
+) -> Result<()> {
+    // Stderr-only logging keeps stdout clean for `| psql staging`
+    // style piping.
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with(fmt::layer().with_writer(std::io::stderr).with_ansi(false))
+        .init();
+
+    let connections_file = match ConnectionsFile::load(&paths.connections_file()) {
+        Ok(c) => c,
+        Err(error) => {
+            anyhow::bail!("loading {}: {error}", paths.connections_file().display());
+        }
+    };
+
+    let source_cfg = lookup_connection(&connections_file, &args.source)
+        .with_context(|| format!("source connection `{}` not found", args.source))?;
+    let target_cfg = lookup_connection(&connections_file, &args.target)
+        .with_context(|| format!("target connection `{}` not found", args.target))?;
+
+    let schema_map = parse_schema_map(&args.schema_map)?;
+    let dialect_name = args
+        .dialect
+        .clone()
+        .unwrap_or_else(|| source_cfg.driver.clone());
+    let emitter = narwhal_schema_diff::emit::emitter_by_name(&dialect_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown dialect `{dialect_name}` — \
+            recognised: postgres, mysql, sqlite, mssql, generic"
+        )
+    })?;
+
+    let registry = McpDriverRegistry::with_defaults();
+    let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let settings = load_settings_or_warn(&paths);
+    let vault = build_vault_registry(&settings.vault, "schema-diff");
+
+    let source_tables = introspect_for_diff(
+        &registry,
+        &*credentials,
+        &vault,
+        source_cfg,
+        global_read_only,
+    )
+    .await
+    .with_context(|| format!("introspecting source `{}`", args.source))?;
+    let target_tables = introspect_for_diff(
+        &registry,
+        &*credentials,
+        &vault,
+        target_cfg,
+        global_read_only,
+    )
+    .await
+    .with_context(|| format!("introspecting target `{}`", args.target))?;
+
+    let source_filtered =
+        apply_filters(source_tables, args.schema.as_deref(), args.table.as_deref());
+    let target_filtered =
+        apply_filters(target_tables, args.schema.as_deref(), args.table.as_deref());
+    let target_mapped = apply_schema_map(target_filtered, &schema_map);
+
+    let diff = narwhal_schema_diff::diff(&source_filtered, &target_mapped);
+    let ddl = emitter
+        .emit(&diff)
+        .map_err(|e| anyhow::anyhow!("emit: {e}"))?;
+
+    if let Some(path) = args.out.as_ref() {
+        std::fs::write(path, &ddl).with_context(|| format!("writing {}", path.display()))?;
+        tracing::info!(
+            path = %path.display(),
+            changes = diff.change_count(),
+            tables = diff.tables.len(),
+            "schema-diff written"
+        );
+    } else {
+        print!("{ddl}");
+    }
+
+    if args.fail_on_drift && !diff.is_empty() {
+        // Spell out the failure on stderr so a CI log shows what
+        // tripped the gate without forcing the operator to count
+        // bytes on stdout.
+        eprintln!(
+            "schema drift detected: {} table change(s), {} total deltas",
+            diff.tables.len(),
+            diff.change_count()
+        );
+        std::process::exit(2);
+    }
+    Ok(())
+}
+
+/// Connection lookup with a small forgiving touch: exact-name match
+/// preferred, then case-insensitive fallback so the operator typing
+/// `Prod` against an entry named `prod` gets a hit instead of an
+/// "unknown connection" surprise.
+fn lookup_connection(file: &ConnectionsFile, name: &str) -> Option<ConnectionConfig> {
+    file.connections
+        .iter()
+        .find(|c| c.name == name)
+        .or_else(|| {
+            file.connections
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(name))
+        })
+        .cloned()
+}
+
+/// Parse the `--schema-map source=target` flag values into a map.
+/// Repeats are allowed; the *last* mapping wins, matching how clap's
+/// `Vec<String>` arrives at the function.
+fn parse_schema_map(raw: &[String]) -> Result<std::collections::HashMap<String, String>> {
+    let mut out = std::collections::HashMap::new();
+    for entry in raw {
+        let (src, tgt) = entry.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("--schema-map expects `source=target`, got `{entry}`")
+        })?;
+        let src = src.trim();
+        let tgt = tgt.trim();
+        if src.is_empty() || tgt.is_empty() {
+            anyhow::bail!("--schema-map: empty side in `{entry}`");
+        }
+        out.insert(src.to_owned(), tgt.to_owned());
+    }
+    Ok(out)
+}
+
+/// Open one connection, introspect every user table, close. Pre-
+/// connect / SSH / vault / keyring resolution mirror the `exec`
+/// subcommand so a connection that works for `narwhal exec` also
+/// works for `narwhal schema-diff`.
+async fn introspect_for_diff(
+    registry: &McpDriverRegistry,
+    credentials: &dyn CredentialStore,
+    vault: &VaultRegistry,
+    mut config: ConnectionConfig,
+    global_read_only: bool,
+) -> Result<Vec<narwhal_core::TableSchema>> {
+    let mut password = resolve_password(credentials, vault, &config).await;
+
+    if global_read_only && !config.params.pre_connect.is_empty() {
+        tracing::warn!(
+            steps = config.params.pre_connect.len(),
+            "schema-diff: skipping pre-connect under --read-only"
+        );
+    } else if !config.params.pre_connect.is_empty() {
+        let pc_vars = narwhal_commands::pre_connect::run_pre_connect(&config.params.pre_connect)
+            .await
+            .context("running pre-connect steps")?;
+        narwhal_commands::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
+            .context("applying pre-connect substitution")?;
+        password = narwhal_commands::pre_connect::substitute_password(password, &pc_vars)
+            .context("applying pre-connect password substitution")?;
+    }
+
+    let driver = registry
+        .get(&config.driver)
+        .map_err(|e| anyhow::anyhow!("driver: {e}"))?;
+    let mut conn = driver
+        .connect(&config, password.as_deref())
+        .await
+        .context("opening connection")?;
+
+    let catalog = conn.list_all_tables().await.context("listing tables")?;
+    let mut tables = Vec::new();
+    for (schema, table_list) in catalog {
+        for t in table_list {
+            // Views and system tables are filtered by the diff
+            // crate's own system-schema filter; here we keep
+            // user-visible tables. `MaterializedView` is left out
+            // for v2.0 — its DDL emission is engine-specific and
+            // out of scope per the brief.
+            if !matches!(t.kind, narwhal_core::TableKind::Table) {
+                continue;
+            }
+            match conn.describe_table(&schema.name, &t.name).await {
+                Ok(ts) => tables.push(ts),
+                Err(error) => {
+                    // Don't abort the whole diff on one bad table —
+                    // a permission glitch on `pg_catalog`-style
+                    // hidden tables shouldn't bring down a perfectly
+                    // valid migration plan. Surface on stderr so the
+                    // operator notices.
+                    tracing::warn!(
+                        schema = %schema.name,
+                        table = %t.name,
+                        error = %error,
+                        "describe_table failed; skipping"
+                    );
+                }
+            }
+        }
+    }
+    let _ = conn.close().await;
+    Ok(tables)
+}
+
+/// `--schema` / `--table` filter pass. An entry survives when (a) no
+/// schema filter is set or it matches, AND (b) no table filter is set
+/// or it matches.
+fn apply_filters(
+    tables: Vec<narwhal_core::TableSchema>,
+    schema: Option<&str>,
+    table: Option<&str>,
+) -> Vec<narwhal_core::TableSchema> {
+    tables
+        .into_iter()
+        .filter(|t| schema.is_none_or(|s| t.table.schema == s))
+        .filter(|t| table.is_none_or(|n| t.table.name == n))
+        .collect()
+}
+
+/// Rewrite target-side schema names according to the `--schema-map`
+/// table. Foreign-key `referenced_schema` is also rewritten so the
+/// FK comparison stays sane after the move.
+fn apply_schema_map(
+    mut tables: Vec<narwhal_core::TableSchema>,
+    map: &std::collections::HashMap<String, String>,
+) -> Vec<narwhal_core::TableSchema> {
+    if map.is_empty() {
+        return tables;
+    }
+    for t in &mut tables {
+        if let Some(new_schema) = map.get(&t.table.schema) {
+            t.table.schema = new_schema.clone();
+        }
+        for fk in &mut t.foreign_keys {
+            if let Some(ref_schema) = fk.referenced_schema.as_ref() {
+                if let Some(new_schema) = map.get(ref_schema) {
+                    fk.referenced_schema = Some(new_schema.clone());
+                }
+            }
+        }
+    }
+    tables
 }

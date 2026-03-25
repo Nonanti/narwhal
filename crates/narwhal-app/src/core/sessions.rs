@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use narwhal_audit::AuditEvent;
 use narwhal_core::ConnectionConfig;
 use narwhal_tui::Pane;
 use tracing::{debug, error};
@@ -135,6 +136,26 @@ impl AppCore {
             state.in_transaction = false;
         }
         let opened_id = session.config.id;
+        // T2-T2-D: stamp a fresh audit session id so every Query
+        // event emitted during this open shares a correlation key,
+        // record the wall-clock start so `ConnectionClosed` can
+        // compute its `duration_ms`, then emit `ConnectionOpened`.
+        let session_id = uuid::Uuid::new_v4();
+        self.session.audit_session_id = session_id;
+        self.session.audit_session_started_at = Some(Instant::now());
+        if let Some(audit) = self.session.audit_service.clone() {
+            let event = AuditEvent::ConnectionOpened {
+                conn: session.config.name.clone(),
+                user: session.config.params.username.clone(),
+                host: audit_host_label(&session.config),
+                session_id,
+            };
+            // sync site: hand off to the worker without awaiting; the
+            // bounded mpsc protects the runtime from a slow sink.
+            tokio::spawn(async move {
+                audit.emit(event).await;
+            });
+        }
         self.session.active = Some(session);
         self.touch_last_used(opened_id);
         self.rebuild_sidebar();
@@ -143,6 +164,24 @@ impl AppCore {
 
     pub(super) async fn close_session(&mut self) {
         if self.session.active.take().is_some() {
+            // T2-T2-D: emit `ConnectionClosed` with the wall-clock
+            // duration measured since `apply_opened_session`, then
+            // invalidate the correlation id so subsequent emits land
+            // outside any session.
+            if let Some(audit) = self.session.audit_service.as_ref() {
+                let duration_ms = self
+                    .session
+                    .audit_session_started_at
+                    .map_or(0, |started| started.elapsed().as_millis() as u64);
+                audit
+                    .emit(AuditEvent::ConnectionClosed {
+                        session_id: self.session.audit_session_id,
+                        duration_ms,
+                    })
+                    .await;
+            }
+            self.session.audit_session_id = uuid::Uuid::nil();
+            self.session.audit_session_started_at = None;
             let mut state = self
                 .deps
                 .plugin_state
@@ -366,6 +405,8 @@ impl AppCore {
         let ctx = RunContext {
             target,
             history: self.session.history_journal.clone(),
+            audit: self.session.audit_service.clone(),
+            audit_session_id: self.session.audit_session_id,
             connection_id: session.config.id,
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
@@ -654,6 +695,13 @@ impl AppCore {
                 return;
             }
         }
+        // T2-T2-D: connection list mutation is a configuration
+        // change. Emit after the on-disk save succeeds so we do not
+        // log a change that was rolled back.
+        emit_audit_config_change(
+            self.session.audit_service.as_ref(),
+            format!("connection removed: {}", removed.name),
+        );
         // Drop the recency entry so the cache doesn't leak tombstones
         // and the next-sort run doesn't trip over a stale id.
         self.session.last_used.forget(removed.id);
@@ -715,6 +763,13 @@ impl AppCore {
         let name_owned = name.to_owned();
         let meta_tx = self.process.meta_tx.clone();
         self.ui.status.message = format!("forgetting password for '{name}'…");
+        // T2-T2-D: credential rotation is an auditable configuration
+        // event. We emit before the keyring round-trip starts so the
+        // intent is recorded even if the keyring write later fails.
+        emit_audit_config_change(
+            self.session.audit_service.as_ref(),
+            format!("credential forgotten: {name_owned}"),
+        );
         tokio::spawn(async move {
             let result = credentials
                 .delete(config_id)
@@ -728,4 +783,49 @@ impl AppCore {
                 .await;
         });
     }
+}
+
+/// Friendly host label for `ConnectionOpened` audit events.
+///
+/// Prefer `host:port` when the driver carries network coordinates;
+/// fall back to the local path for filesystem drivers (sqlite,
+/// duckdb). Returns `"<unknown>"` when neither field is populated —
+/// the audit log should still record the event so an operator can
+/// see the malformed entry.
+fn audit_host_label(config: &ConnectionConfig) -> String {
+    if let Some(host) = config.params.host.as_deref() {
+        return match config.params.port {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_owned(),
+        };
+    }
+    config
+        .params
+        .path
+        .clone()
+        .unwrap_or_else(|| "<unknown>".to_owned())
+}
+
+/// Fire-and-forget audit emit helper for sync-call configuration
+/// events (wizard commit, connection remove, credential rotate).
+///
+/// We `tokio::spawn` rather than spending an `.await` because every
+/// call site is inside the TUI's tight key-handler loop; pushing the
+/// emit onto the worker keeps the UI responsive while still funnelling
+/// the event through the same redactor + sink pipeline.
+pub(super) fn emit_audit_config_change(
+    audit: Option<&Arc<narwhal_audit::AuditService>>,
+    change: String,
+) {
+    let Some(audit) = audit.cloned() else {
+        return;
+    };
+    tokio::spawn(async move {
+        audit
+            .emit(AuditEvent::Configuration {
+                change,
+                by: "cli".to_owned(),
+            })
+            .await;
+    });
 }

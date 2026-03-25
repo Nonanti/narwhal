@@ -178,6 +178,14 @@ impl AppCore {
         self.session.read_only = on;
     }
 
+    /// Install the audit service (T2-T2-D). Default is `None` — emit
+    /// sites become no-ops. The binary constructs the service from
+    /// `settings.audit` and calls this method during startup; tests
+    /// usually leave it `None`.
+    pub fn set_audit_service(&mut self, svc: Arc<narwhal_audit::AuditService>) {
+        self.session.audit_service = Some(svc);
+    }
+
     /// Swap in a configured [`VaultRegistry`] (T1-T2-B).
     ///
     /// Default state after [`Self::with_services`] is an empty
