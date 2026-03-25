@@ -23,3 +23,6 @@ Thumbs.db
 
 # direnv
 .direnv/
+
+# Local review artifacts (subagent outputs)
+.review/
