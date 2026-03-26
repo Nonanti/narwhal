@@ -8,14 +8,14 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use narwhal_config::{ConfigPaths, ConnectionsFile, KeyringStore, CredentialStore};
+//! use narwhal_config::{ConfigPaths, ConnectionsFile, KeyringStore, DynCredentialStore};
 //! use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let paths = ConfigPaths::discover()?;
 //! let connections = ConnectionsFile::load(&paths.connections_file())?;
 //! let drivers = Arc::new(DriverRegistry::with_defaults());
-//! let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+//! let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
 //! let ctx = ServerContext::new(drivers, Arc::new(connections), credentials);
 //! McpServer::new(ctx).serve_stdio().await?;
 //! # Ok(())

@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifi
 use narwhal_app::DriverRegistry;
 use narwhal_app::clipboard::{Clipboard, InMemoryClipboard};
 use narwhal_app::core::{AppCore, ResultState};
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_tui::Pane;
 use tempfile::TempDir;
@@ -64,7 +64,7 @@ async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
             }),
         }],
     };
-    let creds: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let creds: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
     let clip = Arc::new(InMemoryClipboard::new());
     let clip_dyn: Arc<dyn Clipboard> = clip.clone();
     let mut core = AppCore::with_services(registry, connections, None, creds, clip_dyn);

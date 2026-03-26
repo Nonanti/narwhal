@@ -5,34 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use narwhal_core::schema::ReferentialAction;
 
-/// Fully-qualified `schema.table` identifier.
-///
-/// Two qualified names are equal iff both their `schema` and `name` parts
-/// are equal; this is the join key used by the model when wiring foreign
-/// keys to their referenced node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct QualifiedName {
-    pub schema: String,
-    pub name: String,
-}
-
-impl QualifiedName {
-    pub fn new(schema: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            schema: schema.into(),
-            name: name.into(),
-        }
-    }
-
-    /// `schema.name` for display and identifier sanitisation.
-    pub fn display(&self) -> String {
-        if self.schema.is_empty() {
-            self.name.clone()
-        } else {
-            format!("{}.{}", self.schema, self.name)
-        }
-    }
-}
+// Re-export from narwhal-domain so downstream consumers can still use
+// `narwhal_diagram::{QualifiedName, Cardinality}`.
+pub use narwhal_domain::{Cardinality, QualifiedName};
 
 /// One column of a [`Node`], enriched with constraint flags so renderers
 /// do not need to walk the original `TableSchema` again.
@@ -72,72 +47,6 @@ impl EdgeKind {
     /// the dashed-line style.
     pub const fn is_logical(&self) -> bool {
         matches!(self, Self::Logical { .. })
-    }
-}
-
-/// Cardinality of an edge.
-///
-/// For foreign keys the variant is derived from column nullability +
-/// uniqueness; for logical relations the user picks it explicitly
-/// (nullable / unique are flaky concepts across shard / service
-/// boundaries). Mermaid notation is given in parentheses
-/// (parent on the left).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Cardinality {
-    /// FK NOT NULL, not UNIQUE  (`||--o{`).
-    OneToMany,
-    /// FK nullable, not UNIQUE  (`|o--o{`).
-    ZeroOrOneToMany,
-    /// FK NOT NULL, UNIQUE      (`||--||`).
-    OneToOne,
-    /// FK nullable, UNIQUE      (`|o--o|`).
-    ZeroOrOneToOne,
-    /// Logical-only: many on the child side, one on the parent side
-    /// (`}o--||`). Use when the child relates to exactly one parent
-    /// but the engine does not enforce it.
-    ManyToOne,
-    /// Logical-only: many on both sides (`}o--o{`). Junction tables
-    /// already represented as two 1-to-many edges don't need this;
-    /// it is for cross-boundary M:N where no junction table exists
-    /// in this database.
-    ManyToMany,
-}
-
-impl Cardinality {
-    /// Mermaid `erDiagram` cardinality token (parent left, child right).
-    pub const fn mermaid(self) -> &'static str {
-        match self {
-            Self::OneToMany => "||--o{",
-            Self::ZeroOrOneToMany => "|o--o{",
-            Self::OneToOne => "||--||",
-            Self::ZeroOrOneToOne => "|o--o|",
-            Self::ManyToOne => "}o--||",
-            Self::ManyToMany => "}o--o{",
-        }
-    }
-
-    /// Graphviz arrowhead style (`crow` = many, `none` = one).
-    pub const fn dot_arrowhead(self) -> &'static str {
-        match self {
-            Self::OneToMany | Self::ZeroOrOneToMany | Self::ManyToOne | Self::ManyToMany => "crow",
-            Self::OneToOne | Self::ZeroOrOneToOne => "none",
-        }
-    }
-
-    /// Parse a kebab-case token used by config (`"one-to-many"`,
-    /// `"many-to-one"`, ...). Returns `None` on unknown input so
-    /// callers can surface a friendly error.
-    pub fn parse(token: &str) -> Option<Self> {
-        match token.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-            "one-to-many" | "1-to-many" => Some(Self::OneToMany),
-            "zero-or-one-to-many" | "0..1-to-many" => Some(Self::ZeroOrOneToMany),
-            "one-to-one" | "1-to-1" => Some(Self::OneToOne),
-            "zero-or-one-to-one" | "0..1-to-1" => Some(Self::ZeroOrOneToOne),
-            "many-to-one" | "n-to-1" => Some(Self::ManyToOne),
-            "many-to-many" | "n-to-n" | "m-to-n" => Some(Self::ManyToMany),
-            _ => None,
-        }
     }
 }
 

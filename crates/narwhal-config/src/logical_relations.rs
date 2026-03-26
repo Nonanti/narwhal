@@ -1,6 +1,6 @@
 //! Logical-relation resolution: convert [`LogicalRelationConfig`]
 //! entries (parsed from `connections.toml` or `.narwhal/workspace.toml`)
-//! into the runtime [`narwhal_diagram::LogicalRelation`] type the
+//! into the runtime [`narwhal_domain::LogicalRelation`] type the
 //! diagram model consumes.
 //!
 //! This module knows nothing about live `TableSchema` data; column /
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use narwhal_diagram::{Cardinality, LogicalRelation, QualifiedName};
+use narwhal_domain::{Cardinality, LogicalRelation, QualifiedName};
 
 use crate::settings::LogicalRelationConfig;
 

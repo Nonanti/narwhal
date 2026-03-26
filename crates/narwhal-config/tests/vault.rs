@@ -35,7 +35,7 @@ use narwhal_config::settings::{
     HashicorpVaultSettings, OnePasswordVaultSettings, VaultProviderSettings, VaultSettings,
 };
 use narwhal_config::{
-    CredentialStore, InMemoryStore, Reference, VaultError, VaultRegistry,
+    DynCredentialStore, InMemoryStore, Reference, VaultError, VaultRegistry,
     resolve_connection_password,
     vault::{HashicorpVault, OnepasswordCli},
 };

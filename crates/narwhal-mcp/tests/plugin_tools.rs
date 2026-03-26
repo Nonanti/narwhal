@@ -8,7 +8,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use narwhal_config::{ConnectionsFile, CredentialError, CredentialStore};
 use narwhal_mcp::tools::{DynamicTool, RegistrationOutcome, ToolOutput, ToolRegistry};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
@@ -19,7 +18,6 @@ use uuid::Uuid;
 
 struct NoopStore;
 
-#[async_trait]
 impl CredentialStore for NoopStore {
     async fn get(&self, _: Uuid) -> Result<Option<SecretString>, CredentialError> {
         Ok(None)

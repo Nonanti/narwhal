@@ -13,7 +13,7 @@ pub mod url;
 pub mod vault;
 
 pub use credentials::{
-    CredentialError, CredentialStore, InMemoryStore, KeyringStore,
+    CredentialError, CredentialStore, DynCredentialStore, InMemoryStore, KeyringStore,
     resolve_password as resolve_connection_password,
 };
 // `VaultProvider` is intentionally NOT re-exported here — the

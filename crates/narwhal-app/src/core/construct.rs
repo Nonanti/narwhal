@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore, VaultRegistry};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore, VaultRegistry};
 use narwhal_history::Journal;
 use narwhal_plugin::PluginRegistry;
 use narwhal_tui::Theme;
@@ -39,7 +39,7 @@ impl AppCore {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
     ) -> Self {
         Self::with_services(
             registry,
@@ -58,7 +58,7 @@ impl AppCore {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
         clipboard: Arc<dyn Clipboard>,
     ) -> Self {
         let (run_tx, run_rx) = mpsc::channel(RUN_CHANNEL_CAPACITY);
@@ -89,7 +89,7 @@ impl AppCore {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
         clipboard: Arc<dyn Clipboard>,
         run_tx: mpsc::Sender<RunUpdate>,
         run_rx: mpsc::Receiver<RunUpdate>,

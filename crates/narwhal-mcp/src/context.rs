@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, VaultRegistry};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, VaultRegistry};
 use narwhal_core::{ConnectionConfig, DynConnection};
 use narwhal_history::{HistoryEntry, Journal};
 use secrecy::ExposeSecret;
@@ -29,7 +29,7 @@ pub const AUDIT_SOURCE: &str = "mcp";
 pub struct ServerContext {
     drivers: Arc<DriverRegistry>,
     connections: Arc<ConnectionsFile>,
-    credentials: Arc<dyn CredentialStore>,
+    credentials: Arc<dyn DynCredentialStore>,
     /// Secret-vault provider registry (T1-T2-B). Defaults to
     /// [`VaultRegistry::empty`] when [`Self::new`] runs; replaced
     /// via [`Self::with_vault`] before the server accepts requests.
@@ -58,7 +58,7 @@ impl ServerContext {
     pub fn new(
         drivers: Arc<DriverRegistry>,
         connections: Arc<ConnectionsFile>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
     ) -> Self {
         Self {
             drivers,

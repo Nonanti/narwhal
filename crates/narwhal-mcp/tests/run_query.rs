@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_history::{Journal, JournalReader};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
@@ -44,7 +44,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
         connections: vec![config],
     };
     let drivers = Arc::new(DriverRegistry::with_defaults());
-    let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
     ServerContext::new(drivers, Arc::new(connections), credentials)
 }
 

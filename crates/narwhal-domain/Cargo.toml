@@ -11,11 +11,10 @@ description = "Pure domain models for narwhal: editor buffer, results, tabs, ses
 
 [dependencies]
 narwhal-core.workspace = true
-serde = { workspace = true, optional = true }
+serde.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde"]
 
 [lints]
 workspace = true
