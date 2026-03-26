@@ -23,7 +23,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
 tracing.workspace = true
 regex = "1"
-once_cell = "1"
 rev_lines = "0.3"
 
 [dev-dependencies]

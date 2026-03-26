@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Each pattern captures the keyword prefix (group 1) and the quoted
 /// secret value (group 2) so the replacement preserves the keyword and
 /// only masks the secret. Patterns are compiled once at first use via
-/// `once_cell::sync::Lazy` to avoid per-call compilation cost.
+/// `std::sync::LazyLock` to avoid per-call compilation cost.
 ///
 /// **Note:** Only *newly written* entries are redacted. Existing history
 /// files with cleartext secrets are **not** automatically retrofitted —
@@ -73,7 +73,7 @@ static REDACT_PATTERNS: std::sync::LazyLock<Vec<Regex>> = std::sync::LazyLock::n
         // the schemes we ship drivers for plus a couple of common ones
         // that show up in errors.
         Regex::new(
-            r"(?i)\b(postgres(?:ql)?|mysql|clickhouse|redis|mongodb(?:\+srv)?|jdbc:[a-z0-9]+)://([^:@/\s]+):([^@/\s]+)@",
+            r"(?i)\b(postgres(?:ql)?|mysql|clickhouse|mssql|sqlserver|redis|mongodb(?:\+srv)?|jdbc:[a-z0-9]+)://([^:@/\s]+):([^@/\s]+)@",
         )
         .unwrap(),
     ]
@@ -793,6 +793,20 @@ mod tests {
         assert!(!r1.contains("toor"), "got: {r1}");
         let r2 = redact_secrets("clickhouse://user:p4ss@db:8123/d");
         assert!(!r2.contains("p4ss"), "got: {r2}");
+    }
+
+    #[test]
+    fn redacts_mssql_dsn_password() {
+        let r = redact_secrets("mssql://sa:Password1@db:1433/master");
+        assert!(!r.contains("Password1"), "got: {r}");
+        assert!(r.contains("mssql://sa:***@"), "got: {r}");
+    }
+
+    #[test]
+    fn redacts_sqlserver_dsn_password() {
+        let r = redact_secrets("sqlserver://admin:s3cret@db:1433/prod");
+        assert!(!r.contains("s3cret"), "got: {r}");
+        assert!(r.contains("sqlserver://admin:***@"), "got: {r}");
     }
 
     #[test]
