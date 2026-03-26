@@ -82,7 +82,7 @@ pub(crate) fn column_to_value(row: &Row, idx: usize, ty: &Type) -> Result<Value>
             match row.try_get::<_, Option<$t>>(idx) {
                 Ok(Some(v)) => Ok($map(v)),
                 Ok(None) => Ok(Value::Null),
-                Err(error) => Err(Error::Query(error.to_string())),
+                Err(error) => Err(Error::query_with("tokio-postgres column read", error)),
             }
         }};
     }

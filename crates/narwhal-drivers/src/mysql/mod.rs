@@ -113,14 +113,14 @@ impl DatabaseDriver for MysqlDriver {
         debug!(target: "narwhal::mysql", "establishing connection");
         let mut conn = Conn::new(opts.clone())
             .await
-            .map_err(|e| Error::Connection(e.to_string()))?;
+            .map_err(|e| Error::connection_with("mysql handshake", e))?;
 
         // L31: capture CONNECTION_ID() so the cancel handle can target
         // the right thread via KILL QUERY on a second connection.
         let connection_id: u64 = conn
             .query_first("SELECT CONNECTION_ID()")
             .await
-            .map_err(|e| Error::Connection(e.to_string()))?
+            .map_err(|e| Error::connection_with("mysql CONNECTION_ID() lookup", e))?
             .unwrap_or(0);
 
         info!(
@@ -157,6 +157,16 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
     }
     if let Some(db) = config.params.database.as_deref() {
         builder = builder.db_name(Some(db));
+    }
+
+    // M2.1-mysql: ssl_cert and ssl_key must both be provided or both
+    // omitted. A half-configured mTLS setup previously fell through
+    // silently to a non-mTLS connection, which is a security trap.
+    // Mirror the PostgreSQL driver's validation exactly.
+    if config.params.ssl_cert.is_some() != config.params.ssl_key.is_some() {
+        return Err(Error::Config(
+            "ssl_cert and ssl_key must both be provided or both omitted".into(),
+        ));
     }
 
     // Wire TLS options from the connection params.
@@ -246,7 +256,7 @@ impl CancelHandle for MysqlCancelHandle {
         }
         let mut killer = Conn::new(self.opts.clone())
             .await
-            .map_err(|e| Error::Connection(format!("cancel: open killer conn: {e}")))?;
+            .map_err(|e| Error::connection_with("cancel: open killer conn", e))?;
         let sql = format!("KILL QUERY {}", self.connection_id);
         debug!(
             target: "narwhal::mysql",
@@ -256,7 +266,7 @@ impl CancelHandle for MysqlCancelHandle {
         killer
             .query_drop(&sql)
             .await
-            .map_err(|e| Error::Query(format!("KILL QUERY {}: {e}", self.connection_id)))?;
+            .map_err(|e| Error::query_with(format!("KILL QUERY {}", self.connection_id), e))?;
         // Best-effort disconnect; ignore errors because the kill
         // already landed if we got here.
         let _ = killer.disconnect().await;
@@ -430,7 +440,7 @@ impl Connection for MysqlConnection {
                     let result = conn
                         .query_iter(sql.as_str())
                         .await
-                        .map_err(|e| Error::Query(e.to_string()))?;
+                        .map_err(|e| Error::query_with("mysql text-protocol query", e))?;
                     collect_text(result, started).await
                 } else {
                     // Everything else goes through the binary protocol
@@ -447,7 +457,7 @@ impl Connection for MysqlConnection {
                     let result = conn
                         .exec_iter(sql.as_str(), params)
                         .await
-                        .map_err(|e| Error::Query(e.to_string()))?;
+                        .map_err(|e| Error::query_with("mysql binary-protocol query", e))?;
                     collect_binary(result, started).await
                 }
             })
@@ -712,7 +722,7 @@ impl Connection for MysqlConnection {
             Box::pin(async move {
                 conn.ping()
                     .await
-                    .map_err(|e| Error::Connection(e.to_string()))
+                    .map_err(|e| Error::connection_with("mysql ping", e))
             })
         })
         .await
@@ -733,7 +743,7 @@ impl Connection for MysqlConnection {
             Box::pin(async move {
                 conn.query_drop(sql)
                     .await
-                    .map_err(|e| Error::Connection(e.to_string()))
+                    .map_err(|e| Error::connection_with("mysql set_read_only", e))
             })
         })
         .await
@@ -762,7 +772,7 @@ impl Connection for MysqlConnection {
         if let Some(conn) = guard.take() {
             conn.disconnect()
                 .await
-                .map_err(|e| Error::Connection(e.to_string()))?;
+                .map_err(|e| Error::connection_with("mysql disconnect", e))?;
         }
         Ok(())
     }
@@ -781,7 +791,7 @@ async fn collect_text(
         result
             .drop_result()
             .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(|e| Error::query_with("mysql text-protocol drop_result", e))?;
         return Ok(QueryResult {
             columns: Vec::new(),
             rows: Vec::new(),
@@ -792,7 +802,7 @@ async fn collect_text(
     let raw_rows: Vec<mysql_async::Row> = result
         .collect()
         .await
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("mysql text-protocol collect", e))?;
     let rows = map_rows(raw_rows, columns.len());
     Ok(QueryResult {
         columns,
@@ -815,7 +825,7 @@ async fn collect_binary(
         result
             .drop_result()
             .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(|e| Error::query_with("mysql binary-protocol drop_result", e))?;
         return Ok(QueryResult {
             columns: Vec::new(),
             rows: Vec::new(),
@@ -826,7 +836,7 @@ async fn collect_binary(
     let raw_rows: Vec<mysql_async::Row> = result
         .collect()
         .await
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("mysql binary-protocol collect", e))?;
     let rows = map_rows(raw_rows, columns.len());
     Ok(QueryResult {
         columns,
@@ -995,4 +1005,74 @@ impl RowStream for BufferedRowStream {
 
 fn quote_ident(name: &str) -> String {
     format!("`{}`", name.replace('`', "``"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use narwhal_core::ConnectionParams;
+
+    fn test_config(params: ConnectionParams) -> ConnectionConfig {
+        ConnectionConfig {
+            id: uuid::Uuid::new_v4(),
+            name: "test".into(),
+            driver: "mysql".into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn mtls_half_config_rejected_cert_without_key() {
+        let config = test_config(ConnectionParams::with(|p| {
+            p.host = Some("localhost".into());
+            p.username = Some("root".into());
+            p.ssl_cert = Some("/tmp/cert.pem".into());
+        }));
+        let err = build_opts(&config, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("ssl_cert and ssl_key must both be provided or both omitted"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn mtls_half_config_rejected_key_without_cert() {
+        let config = test_config(ConnectionParams::with(|p| {
+            p.host = Some("localhost".into());
+            p.username = Some("root".into());
+            p.ssl_key = Some("/tmp/key.pem".into());
+        }));
+        let err = build_opts(&config, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("ssl_cert and ssl_key must both be provided or both omitted"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn mtls_both_provided_passes_validation() {
+        // ssl_cert + ssl_key together should not trigger the half-config
+        // error. The connection itself will fail (no server), but
+        // build_opts should succeed.
+        let config = test_config(ConnectionParams::with(|p| {
+            p.host = Some("localhost".into());
+            p.username = Some("root".into());
+            p.ssl_cert = Some("/tmp/cert.pem".into());
+            p.ssl_key = Some("/tmp/key.pem".into());
+        }));
+        let result = build_opts(&config, None);
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
+
+    #[test]
+    fn mtls_neither_provided_passes_validation() {
+        let config = test_config(ConnectionParams::with(|p| {
+            p.host = Some("localhost".into());
+            p.username = Some("root".into());
+        }));
+        let result = build_opts(&config, None);
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
 }

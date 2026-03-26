@@ -20,10 +20,20 @@ async fn sqlite_set_read_only_blocks_writes() {
         .execute("INSERT INTO t VALUES (1)", &[])
         .await
         .unwrap_err();
-    let msg = err.to_string();
+    // C3: walk the source chain — the rusqlite error is now in `Error::source`,
+    // not flattened into the top-level Display string.
+    let mut combined = err.to_string();
+    let mut src: Option<&dyn std::error::Error> = std::error::Error::source(&err);
+    while let Some(s) = src {
+        combined.push_str(" | ");
+        combined.push_str(&s.to_string());
+        src = s.source();
+    }
     assert!(
-        msg.contains("read") || msg.contains("query_only") || msg.contains("attempt to write"),
-        "got: {msg}"
+        combined.contains("read")
+            || combined.contains("query_only")
+            || combined.contains("attempt to write"),
+        "got: {combined}"
     );
     conn.set_read_only(false).await.unwrap();
     conn.execute("INSERT INTO t VALUES (2)", &[]).await.unwrap();

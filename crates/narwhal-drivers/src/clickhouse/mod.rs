@@ -204,6 +204,16 @@ impl DatabaseDriver for ClickhouseDriver {
                 .danger_accept_invalid_hostnames(accept_invalid_hostnames);
         }
 
+        // M2.1: ssl_cert and ssl_key must both be provided or both omitted.
+        // A half-configured mTLS setup (cert without key or vice versa)
+        // would silently skip client authentication or fail at runtime
+        // with a confusing error.
+        if config.params.ssl_cert.is_some() != config.params.ssl_key.is_some() {
+            return Err(Error::Config(
+                "ssl_cert and ssl_key must both be provided or both omitted".into(),
+            ));
+        }
+
         // Client identity (mTLS) is not directly supported by reqwest's
         // high-level API in the same way as mysql_async / rustls.
         // If ssl_cert and ssl_key are both provided, we read them and
@@ -233,7 +243,7 @@ impl DatabaseDriver for ClickhouseDriver {
 
         let client = client_builder
             .build()
-            .map_err(|e| Error::Connection(e.to_string()))?;
+            .map_err(|e| Error::connection_with("failed to build HTTP client", e))?;
 
         // Ping to verify connectivity.
         let mut url = base_url.clone();
@@ -244,7 +254,7 @@ impl DatabaseDriver for ClickhouseDriver {
             .basic_auth(&user, if pw.is_empty() { None } else { Some(&pw) })
             .send()
             .await
-            .map_err(|e| Error::Connection(e.to_string()))?;
+            .map_err(|e| Error::connection_with("ping failed", e))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -350,7 +360,14 @@ fn build_base_url(params: &ConnectionParams) -> Result<Url> {
     } else {
         "https"
     };
-    Url::parse(&format!("{scheme}://{host}:{port}/"))
+    // C2: bracket IPv6 addresses so the URL is valid.
+    // Pre-bracketed hosts (e.g. `[::1]`) are left unchanged.
+    let host_part = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    Url::parse(&format!("{scheme}://{host_part}:{port}/"))
         .map_err(|e| Error::Config(format!("invalid URL: {e}")))
 }
 
@@ -409,7 +426,7 @@ impl ClickhouseConnection {
                 if let Some(qid) = query_id {
                     state.active_queries.lock().remove(qid);
                 }
-                return Err(Error::Query(e.to_string()));
+                return Err(Error::query_with("HTTP request failed", e));
             }
         };
 
@@ -437,7 +454,7 @@ impl ClickhouseConnection {
         response
             .bytes()
             .await
-            .map_err(|e| Error::Query(e.to_string()))
+            .map_err(|e| Error::query_with("failed to read response body", e))
     }
 
     /// Send a query with `TabSeparatedWithNamesAndTypes` format and
@@ -705,7 +722,7 @@ impl Connection for ClickhouseConnection {
                 .build_request(&url, formatted_sql)
                 .send()
                 .await
-                .map_err(|e| Error::Query(e.to_string()))?;
+                .map_err(|e| Error::query_with("HTTP request failed", e))?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -748,7 +765,7 @@ impl Connection for ClickhouseConnection {
             .build_request(&url, full_sql)
             .send()
             .await
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(|e| Error::query_with("HTTP request failed", e))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -1311,7 +1328,7 @@ async fn stream_tsv_chunks<S>(
                 }
             }
             Some(Err(e)) => {
-                let _ = header_tx.send(Err(Error::Query(e.to_string())));
+                let _ = header_tx.send(Err(Error::query_with("stream error", e)));
                 return;
             }
             None => {
@@ -1385,7 +1402,7 @@ async fn stream_tsv_chunks<S>(
                 buf.extend_from_slice(&chunk);
             }
             Some(Err(e)) => {
-                let _ = row_tx.send(Err(Error::Query(e.to_string()))).await;
+                let _ = row_tx.send(Err(Error::query_with("stream error", e))).await;
                 return;
             }
             None => {
@@ -1638,5 +1655,104 @@ mod cancel_tests {
 
         // Active set should still be empty.
         assert!(active.lock().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod build_base_url_tests {
+    use super::*;
+    use narwhal_core::SslMode;
+
+    fn params(host: &str, port: Option<u16>, ssl_mode: SslMode) -> ConnectionParams {
+        ConnectionParams::with(|p| {
+            p.host = Some(host.to_owned());
+            p.port = port;
+            p.ssl_mode = ssl_mode;
+        })
+    }
+
+    #[test]
+    fn ipv6_loopback() {
+        let url = build_base_url(&params("::1", None, SslMode::Disable)).unwrap();
+        assert_eq!(url.as_str(), "http://[::1]:8123/");
+    }
+
+    #[test]
+    fn ipv6_full_address() {
+        let url = build_base_url(&params("2001:db8::1", Some(8443), SslMode::Prefer)).unwrap();
+        assert_eq!(url.as_str(), "https://[2001:db8::1]:8443/");
+    }
+
+    #[test]
+    fn pre_bracketed_ipv6() {
+        // Host that already has brackets should not be double-bracketed.
+        let url = build_base_url(&params("[::1]", None, SslMode::Disable)).unwrap();
+        assert_eq!(url.as_str(), "http://[::1]:8123/");
+    }
+
+    #[test]
+    fn ipv4_unchanged() {
+        let url = build_base_url(&params("192.168.1.1", Some(8123), SslMode::Disable)).unwrap();
+        assert_eq!(url.as_str(), "http://192.168.1.1:8123/");
+    }
+
+    #[test]
+    fn dns_hostname_unchanged() {
+        let url = build_base_url(&params("clickhouse.prod", None, SslMode::Require)).unwrap();
+        assert_eq!(url.as_str(), "https://clickhouse.prod:8123/");
+    }
+
+    #[test]
+    fn missing_host_returns_config_error() {
+        let params = ConnectionParams::default();
+        let err = build_base_url(&params).unwrap_err();
+        assert!(matches!(err, Error::Config(msg) if msg.contains("host is required")));
+    }
+}
+
+#[cfg(test)]
+mod mtls_tests {
+    use super::*;
+    use narwhal_core::SslMode;
+
+    fn make_config(ssl_cert: Option<&str>, ssl_key: Option<&str>) -> ConnectionConfig {
+        let params = ConnectionParams::with(|p| {
+            p.host = Some("localhost".to_owned());
+            p.port = Some(8123);
+            p.ssl_mode = SslMode::Prefer;
+            p.ssl_cert = ssl_cert.map(std::path::PathBuf::from);
+            p.ssl_key = ssl_key.map(std::path::PathBuf::from);
+        });
+        ConnectionConfig {
+            id: uuid::Uuid::new_v4(),
+            name: "test".into(),
+            driver: "clickhouse".into(),
+            params,
+        }
+    }
+
+    #[tokio::test]
+    async fn mtls_half_config_rejected() {
+        let driver = ClickhouseDriver::new();
+
+        // ssl_cert without ssl_key
+        let config = make_config(Some("/tmp/cert.pem"), None);
+        let result = driver.connect(&config, None).await;
+        assert!(result.is_err(), "expected error when only ssl_cert is set");
+        let err = result.err().unwrap();
+        assert!(
+            matches!(err, Error::Config(ref msg) if msg.contains("ssl_cert and ssl_key must both be provided or both omitted")),
+            "expected Config error about ssl_cert/ssl_key, got: {err:?}"
+        );
+
+        // ssl_key without ssl_cert
+        let config = make_config(None, Some("/tmp/key.pem"));
+        let result = driver.connect(&config, None).await;
+        assert!(result.is_err(), "expected error when only ssl_key is set");
+        let err = result.err().unwrap();
+        assert!(
+            matches!(err, Error::Config(ref msg) if msg.contains("ssl_cert and ssl_key must both be provided or both omitted")),
+            "expected Config error about ssl_cert/ssl_key, got: {err:?}"
+        );
     }
 }

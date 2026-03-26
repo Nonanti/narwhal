@@ -35,6 +35,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use duckdb::AccessMode;
 use duckdb::params_from_iter;
 use duckdb::types::Value as DuckValue;
 use narwhal_core::{
@@ -116,16 +117,27 @@ impl DatabaseDriver for DuckdbDriver {
             canonical = canonical.as_deref().unwrap_or("<unresolved>"),
             "opening database"
         );
+        // C1: honour `params.read_only` by opening with
+        // `Config::access_mode(AccessMode::ReadOnly)`. DuckDB has no
+        // session-level toggle, so read-only must be set at open time.
+        let read_only = config.params.read_only;
         let conn = task::spawn_blocking(move || {
-            if path == ":memory:" {
+            if read_only {
+                let config = duckdb::Config::default().access_mode(AccessMode::ReadOnly)?;
+                if path == ":memory:" {
+                    duckdb::Connection::open_in_memory_with_flags(config)
+                } else {
+                    duckdb::Connection::open_with_flags(PathBuf::from(path), config)
+                }
+            } else if path == ":memory:" {
                 duckdb::Connection::open_in_memory()
             } else {
                 duckdb::Connection::open(PathBuf::from(path))
             }
         })
         .await
-        .map_err(|e| Error::Other(e.to_string()))?
-        .map_err(|e| Error::Connection(e.to_string()))?;
+        .map_err(|e| Error::connection_with("duckdb spawn_blocking join", e))?
+        .map_err(|e| Error::connection_with("duckdb open", e))?;
 
         info!(
             target: "narwhal::duckdb",
@@ -134,14 +146,14 @@ impl DatabaseDriver for DuckdbDriver {
         );
         let interrupt = conn.interrupt_handle();
         Ok(Box::new(DuckdbConnection {
-            inner: Arc::new(Mutex::new(conn)),
+            inner: Arc::new(Mutex::new(Some(conn))),
             interrupt,
         }))
     }
 }
 
 pub struct DuckdbConnection {
-    inner: Arc<Mutex<duckdb::Connection>>,
+    inner: Arc<Mutex<Option<duckdb::Connection>>>,
     interrupt: Arc<duckdb::InterruptHandle>,
 }
 
@@ -172,19 +184,21 @@ impl DuckdbConnection {
 
         task::spawn_blocking(move || run_blocking(&inner, &sql, bound))
             .await
-            .map_err(|e| Error::Other(e.to_string()))?
+            .map_err(|e| Error::connection_with("duckdb spawn_blocking join", e))?
     }
 
     async fn execute_batch(&self, sql: &'static str) -> Result<()> {
         let inner = self.inner.clone();
         task::spawn_blocking(move || {
-            inner
-                .blocking_lock()
-                .execute_batch(sql)
-                .map_err(|e| Error::Query(e.to_string()))
+            let mut guard = inner.blocking_lock();
+            let conn = guard
+                .as_mut()
+                .ok_or_else(|| Error::Connection("duckdb connection closed".into()))?;
+            conn.execute_batch(sql)
+                .map_err(|e| Error::query_with("duckdb execute_batch", e))
         })
         .await
-        .map_err(|e| Error::Other(e.to_string()))?
+        .map_err(|e| Error::connection_with("duckdb spawn_blocking join", e))?
     }
 }
 
@@ -321,20 +335,23 @@ fn format_column_type(ty: &duckdb::types::Type) -> String {
 }
 
 fn run_blocking(
-    inner: &Arc<Mutex<duckdb::Connection>>,
+    inner: &Arc<Mutex<Option<duckdb::Connection>>>,
     sql: &str,
     params: Vec<DuckValue>,
 ) -> Result<QueryResult> {
     let started = Instant::now();
-    let guard = inner.blocking_lock();
-    let mut statement = guard
+    let mut guard = inner.blocking_lock();
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| Error::Connection("duckdb connection closed".into()))?;
+    let mut statement = conn
         .prepare(sql)
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("duckdb prepare", e))?;
 
     if !statement_returns_rows(sql) {
         let affected = statement
             .execute(params_from_iter(params.iter()))
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(|e| Error::query_with("duckdb execute", e))?;
         return Ok(QueryResult {
             columns: Vec::new(),
             rows: Vec::new(),
@@ -345,7 +362,7 @@ fn run_blocking(
 
     let mut rows = statement
         .query(params_from_iter(params.iter()))
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("duckdb query", e))?;
 
     // After query() the statement has been executed, so column metadata is
     // available via the borrow handed back by [`Rows::as_ref`].
@@ -369,10 +386,15 @@ fn run_blocking(
     };
 
     let mut collected = Vec::new();
-    while let Some(row) = rows.next().map_err(|e| Error::Query(e.to_string()))? {
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| Error::query_with("duckdb fetch", e))?
+    {
         let mut values = Vec::with_capacity(column_count);
         for idx in 0..column_count {
-            let v = row.get_ref(idx).map_err(|e| Error::Query(e.to_string()))?;
+            let v = row
+                .get_ref(idx)
+                .map_err(|e| Error::query_with("duckdb get_ref", e))?;
             values.push(value_from_ref(v));
         }
         collected.push(CoreRow(values));
@@ -403,11 +425,17 @@ impl Connection for DuckdbConnection {
         let (row_tx, row_rx) = mpsc::channel::<Result<CoreRow>>(64);
 
         task::spawn_blocking(move || {
-            let guard = inner.blocking_lock();
-            let mut statement = match guard.prepare(&sql) {
+            let mut guard = inner.blocking_lock();
+            let conn = if let Some(c) = guard.as_mut() {
+                c
+            } else {
+                let _ = header_tx.send(Err(Error::Connection("duckdb connection closed".into())));
+                return;
+            };
+            let mut statement = match conn.prepare(&sql) {
                 Ok(stmt) => stmt,
                 Err(error) => {
-                    let _ = header_tx.send(Err(Error::Query(error.to_string())));
+                    let _ = header_tx.send(Err(Error::query_with("duckdb stream prepare", error)));
                     return;
                 }
             };
@@ -423,7 +451,7 @@ impl Connection for DuckdbConnection {
             let mut rows = match statement.query(params_from_iter(bound.iter())) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    let _ = header_tx.send(Err(Error::Query(error.to_string())));
+                    let _ = header_tx.send(Err(Error::query_with("duckdb stream query", error)));
                     return;
                 }
             };
@@ -462,7 +490,8 @@ impl Connection for DuckdbConnection {
                             match row.get_ref(idx) {
                                 Ok(v) => values.push(value_from_ref(v)),
                                 Err(error) => {
-                                    failure = Some(Error::Query(error.to_string()));
+                                    failure =
+                                        Some(Error::query_with("duckdb stream get_ref", error));
                                     break;
                                 }
                             }
@@ -477,7 +506,8 @@ impl Connection for DuckdbConnection {
                     }
                     Ok(None) => break,
                     Err(error) => {
-                        let _ = row_tx.blocking_send(Err(Error::Query(error.to_string())));
+                        let _ = row_tx
+                            .blocking_send(Err(Error::query_with("duckdb stream fetch", error)));
                         break;
                     }
                 }
@@ -486,7 +516,7 @@ impl Connection for DuckdbConnection {
 
         let columns = header_rx
             .await
-            .map_err(|_| Error::Other("duckdb stream cancelled".into()))??;
+            .map_err(|_| Error::Connection("duckdb stream cancelled".into()))??;
 
         Ok(Box::new(DuckdbRowStream {
             columns,
@@ -798,7 +828,7 @@ impl Connection for DuckdbConnection {
     }
 
     /// Issue C (sprint 5): `DuckDB` enforces read-only at open time via
-    /// the `access_mode='READ_ONLY'` connection-string option; there is
+    /// `duckdb::Config::access_mode(AccessMode::ReadOnly)`; there is
     /// no session-level toggle equivalent to PG's
     /// `default_transaction_read_only` or `SQLite`'s `PRAGMA query_only`.
     /// Returning a *typed* [`Error::Unsupported`] with a precise hint
@@ -807,9 +837,10 @@ impl Connection for DuckdbConnection {
     async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
         if read_only {
             Err(Error::unsupported(
-                "DuckDB does not expose a session-level read-only flag; \
-                 reopen the connection with `access_mode = 'READ_ONLY'` to \
-                 enforce write rejection at the engine level",
+                "DuckDB read-only is enforced at connect time via access_mode; \
+                 there is no runtime toggle. Reopen the connection with \
+                 `params.read_only = true` to enforce write rejection at the \
+                 engine level",
             ))
         } else {
             // Turning enforcement OFF when it was never ON is a no-op.
@@ -827,7 +858,12 @@ impl Connection for DuckdbConnection {
         DuckdbDriver::capabilities()
     }
 
+    // M2.2: explicitly drop the connection handle via guard.take() so the
+    // DuckDB file lock is released immediately (matching the MySQL/SQLite
+    // pattern).
     async fn close(self: Box<Self>) -> Result<()> {
+        let mut guard = self.inner.lock().await;
+        guard.take();
         Ok(())
     }
 }
@@ -1287,5 +1323,107 @@ mod tests {
             vec!["a"]
         );
         assert!(super::parse_index_columns("not really sql").is_empty());
+    }
+
+    /// C1: `read_only=true` at connect time must cause the `DuckDB` engine
+    /// to reject write operations. `DuckDB` refuses to open an in-memory
+    /// database in read-only mode, so we use a temporary file-backed
+    /// database: create, populate, close, then reopen with `read_only`.
+    #[tokio::test]
+    async fn duckdb_read_only_enforced_at_engine() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("readonly_test.duckdb");
+        let db_path_str = db_path.display().to_string();
+
+        // Phase 1: create and populate the database.
+        let create_config = ConnectionConfig {
+            id: Uuid::nil(),
+            name: "test-create".into(),
+            driver: DuckdbDriver::NAME.into(),
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path_str.clone());
+            }),
+        };
+        let mut conn = DuckdbDriver::new()
+            .connect(&create_config, None)
+            .await
+            .expect("create database");
+        conn.execute("CREATE TABLE t (id INTEGER)", &[])
+            .await
+            .expect("create table");
+        conn.execute("INSERT INTO t VALUES (1)", &[])
+            .await
+            .expect("insert row");
+        conn.close().await.expect("close after populate");
+
+        // Phase 2: reopen as read-only.
+        let ro_config = ConnectionConfig {
+            id: Uuid::nil(),
+            name: "test-ro".into(),
+            driver: DuckdbDriver::NAME.into(),
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path_str);
+                p.read_only = true;
+            }),
+        };
+        let mut conn = DuckdbDriver::new()
+            .connect(&ro_config, None)
+            .await
+            .expect("open read-only database");
+
+        // Reads must succeed.
+        let result = conn.execute("SELECT id FROM t", &[]).await.unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        // DDL must be rejected by the engine.
+        let err = conn
+            .execute("CREATE TABLE should_fail (id INTEGER)", &[])
+            .await
+            .expect_err("CREATE TABLE must be rejected in read-only mode");
+        let msg = format!("{err}");
+        let source_msg = std::error::Error::source(&err)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let combined = format!("{msg} {source_msg}").to_lowercase();
+        assert!(
+            combined.contains("read") || combined.contains("readonly"),
+            "expected read-only rejection, got: {msg} (source: {source_msg})"
+        );
+
+        // DML must also be rejected.
+        let err2 = conn
+            .execute("INSERT INTO t VALUES (2)", &[])
+            .await
+            .expect_err("INSERT must be rejected in read-only mode");
+        let msg2 = format!("{err2}");
+        let source_msg2 = std::error::Error::source(&err2)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let combined2 = format!("{msg2} {source_msg2}").to_lowercase();
+        assert!(
+            combined2.contains("read") || combined2.contains("readonly"),
+            "expected read-only rejection, got: {msg2} (source: {source_msg2})"
+        );
+    }
+
+    /// M2.2: `close()` must drop the connection handle via `guard.take()`.
+    /// A `DuckdbConnection` whose inner has already been taken (simulates a
+    /// post-close state) must surface a clear "connection closed" error
+    /// rather than panicking.
+    #[tokio::test]
+    async fn close_drops_connection_handle() {
+        let conn = DuckdbConnection {
+            inner: Arc::new(Mutex::new(None::<duckdb::Connection>)),
+            interrupt: duckdb::Connection::open_in_memory()
+                .expect("temp conn for interrupt handle")
+                .interrupt_handle(),
+        };
+
+        let err = conn.run("SELECT 1", &[]).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("connection closed"),
+            "expected 'connection closed' in error, got: {msg}"
+        );
     }
 }
