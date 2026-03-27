@@ -25,16 +25,33 @@ pub enum Operation {
     StateAccess,
     /// `host.cmd(name, …)`.
     CmdInvoke { name: String },
-    /// `host.fs-read(path)` (reserved — `host.fs-read` is not yet
-    /// exposed on the WIT surface; T1-T5-B wires the enforcer ahead
-    /// of the import so the contract is ready when the import
-    /// lands).
+    /// `host.fs-read(path)`.
+    ///
+    /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
+    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
+    /// T1-T5-B in `docs/dev/t1-t5-b-sandbox.md`. Manual construction for
+    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
     FsRead { path: PathBuf },
     /// `host.fs-write(path)`.
+    ///
+    /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
+    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
+    /// T1-T5-B in `docs/dev/t1-t5-b-sandbox.md`. Manual construction for
+    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
     FsWrite { path: PathBuf },
     /// `host.net-connect(host, port)`.
+    ///
+    /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
+    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
+    /// T1-T5-B in `docs/dev/t1-t5-b-sandbox.md`. Manual construction for
+    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
     NetConnect { host: String, port: u16 },
     /// `host.env-read(var)`.
+    ///
+    /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
+    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
+    /// T1-T5-B in `docs/dev/t1-t5-b-sandbox.md`. Manual construction for
+    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
     EnvRead { var: String },
 }
 
