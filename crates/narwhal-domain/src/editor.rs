@@ -627,6 +627,285 @@ impl EditorBuffer {
         self.cursor_col = start + replacement.len();
     }
 
+    /// Compute the text that an operator (delete / yank / change) would
+    /// cover when applied over `(motion, count)`. Returns the text
+    /// without modifying the buffer.
+    ///
+    /// For line-wise motions (`CurrentLine`, `Up`, `Down`, `FileStart`,
+    /// `FileEnd`) the result spans complete lines. For character-wise
+    /// motions the result is the text between the current cursor and
+    /// the position after applying the motion `count` times.
+    pub fn operator_range_text(&self, motion: Motion, count: usize) -> String {
+        match motion {
+            Motion::CurrentLine => {
+                let start_row = self.cursor_row;
+                let end_row =
+                    (start_row + count.saturating_sub(1)).min(self.lines.len().saturating_sub(1));
+                self.lines[start_row..=end_row].join("\n")
+            }
+            Motion::Up => {
+                let end_row = self.cursor_row;
+                let start_row = self.cursor_row.saturating_sub(count);
+                self.lines[start_row..=end_row].join("\n")
+            }
+            Motion::Down => {
+                let start_row = self.cursor_row;
+                let end_row = (self.cursor_row + count).min(self.lines.len().saturating_sub(1));
+                self.lines[start_row..=end_row].join("\n")
+            }
+            Motion::FileStart => {
+                let end_row = self.cursor_row;
+                self.lines[0..=end_row].join("\n")
+            }
+            Motion::FileEnd => {
+                let start_row = self.cursor_row;
+                self.lines[start_row..].join("\n")
+            }
+            Motion::WordForward => {
+                // Snapshot cursor, walk forward `count` words, collect text.
+                let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+                let start_row = cur.row;
+                let start_col = cur.col;
+                for _ in 0..count {
+                    // Skip current word
+                    while cur.has_more() && cur.is_word() {
+                        cur.advance();
+                    }
+                    // Skip whitespace
+                    while cur.has_more() && cur.is_whitespace() {
+                        cur.advance();
+                    }
+                }
+                self.extract_range(start_row, start_col, cur.row, cur.col)
+            }
+            Motion::WordBackward => {
+                let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+                let start_row = cur.row;
+                let start_col = cur.col;
+                for _ in 0..count {
+                    cur.retreat();
+                    while !cur.at_start() && !cur.is_word() {
+                        cur.retreat();
+                    }
+                    while !cur.at_start() && cur.peek_prev_is_word() {
+                        cur.retreat();
+                    }
+                }
+                self.extract_range(cur.row, cur.col, start_row, start_col)
+            }
+            Motion::Left => {
+                let start_col = self.cursor_col.saturating_sub(count);
+                let line = self.current_line();
+                // Snap to char boundary
+                let mut sc = start_col;
+                while sc > 0 && !line.is_char_boundary(sc) {
+                    sc -= 1;
+                }
+                line[sc..self.cursor_col].to_owned()
+            }
+            Motion::Right => {
+                let line = self.current_line();
+                let end_col = (self.cursor_col + count).min(line.len());
+                line[self.cursor_col..end_col].to_owned()
+            }
+            Motion::LineStart => {
+                let line = self.current_line();
+                line[..self.cursor_col].to_owned()
+            }
+            Motion::LineEnd => {
+                let line = self.current_line();
+                line[self.cursor_col..].to_owned()
+            }
+        }
+    }
+
+    /// Apply the deletion side of an operator over `(motion, count)`,
+    /// mutating the buffer in place and repositioning the cursor.
+    pub fn apply_operator_delete(&mut self, motion: Motion, count: usize) {
+        match motion {
+            Motion::CurrentLine => {
+                let start_row = self.cursor_row;
+                let end_row =
+                    (start_row + count.saturating_sub(1)).min(self.lines.len().saturating_sub(1));
+                self.lines.drain(start_row..=end_row);
+                if self.lines.is_empty() {
+                    self.lines.push(String::new());
+                }
+                self.cursor_row = start_row.min(self.lines.len().saturating_sub(1));
+                self.cursor_col = 0;
+                self.clamp_cursor_col();
+            }
+            Motion::Up => {
+                let start_row = self.cursor_row.saturating_sub(count);
+                let end_row = self.cursor_row;
+                self.lines.drain(start_row..=end_row);
+                if self.lines.is_empty() {
+                    self.lines.push(String::new());
+                }
+                self.cursor_row = start_row.min(self.lines.len().saturating_sub(1));
+                self.cursor_col = 0;
+                self.clamp_cursor_col();
+            }
+            Motion::Down => {
+                let start_row = self.cursor_row;
+                let end_row = (self.cursor_row + count).min(self.lines.len().saturating_sub(1));
+                self.lines.drain(start_row..=end_row);
+                if self.lines.is_empty() {
+                    self.lines.push(String::new());
+                }
+                self.cursor_row = start_row.min(self.lines.len().saturating_sub(1));
+                self.cursor_col = 0;
+                self.clamp_cursor_col();
+            }
+            Motion::FileStart => {
+                let end_row = self.cursor_row;
+                self.lines.drain(0..=end_row);
+                if self.lines.is_empty() {
+                    self.lines.push(String::new());
+                }
+                self.cursor_row = 0;
+                self.cursor_col = 0;
+            }
+            Motion::FileEnd => {
+                let start_row = self.cursor_row;
+                self.lines.drain(start_row..);
+                if self.lines.is_empty() {
+                    self.lines.push(String::new());
+                }
+                self.cursor_row = self.lines.len().saturating_sub(1);
+                self.cursor_col = self.current_line().len();
+            }
+            Motion::WordForward => {
+                let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+                for _ in 0..count {
+                    while cur.has_more() && cur.is_word() {
+                        cur.advance();
+                    }
+                    while cur.has_more() && cur.is_whitespace() {
+                        cur.advance();
+                    }
+                }
+                self.delete_range(self.cursor_row, self.cursor_col, cur.row, cur.col);
+            }
+            Motion::WordBackward => {
+                let mut cur = LineCursor::at(&self.lines, self.cursor_row, self.cursor_col);
+                for _ in 0..count {
+                    cur.retreat();
+                    while !cur.at_start() && !cur.is_word() {
+                        cur.retreat();
+                    }
+                    while !cur.at_start() && cur.peek_prev_is_word() {
+                        cur.retreat();
+                    }
+                }
+                let target_row = cur.row;
+                let target_col = cur.col;
+                self.delete_range(target_row, target_col, self.cursor_row, self.cursor_col);
+                self.cursor_row = target_row;
+                self.cursor_col = target_col;
+            }
+            Motion::Left => {
+                let cursor_col = self.cursor_col;
+                let new_col = cursor_col.saturating_sub(count);
+                let line = self.current_line_mut();
+                line.replace_range(new_col..cursor_col, "");
+                self.cursor_col = new_col;
+            }
+            Motion::Right => {
+                let cursor_col = self.cursor_col;
+                let line = self.current_line_mut();
+                let end_col = (cursor_col + count).min(line.len());
+                line.replace_range(cursor_col..end_col, "");
+                // cursor stays at same col (text shifted left)
+            }
+            Motion::LineStart => {
+                let cursor_col = self.cursor_col;
+                let line = self.current_line_mut();
+                line.replace_range(0..cursor_col, "");
+                self.cursor_col = 0;
+            }
+            Motion::LineEnd => {
+                let cursor_col = self.cursor_col;
+                let line = self.current_line_mut();
+                line.truncate(cursor_col);
+            }
+        }
+    }
+
+    /// Extract text between two (row, col) positions (inclusive of start,
+    /// exclusive of end). Both positions are byte offsets into their
+    /// respective lines.
+    fn extract_range(
+        &self,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) -> String {
+        match start_row.cmp(&end_row) {
+            std::cmp::Ordering::Equal => {
+                let line = &self.lines[start_row];
+                let sc = start_col.min(line.len());
+                let ec = end_col.min(line.len());
+                if sc >= ec {
+                    String::new()
+                } else {
+                    line[sc..ec].to_owned()
+                }
+            }
+            std::cmp::Ordering::Less => {
+                let mut result = String::new();
+                // First line: from start_col to end
+                let first = &self.lines[start_row];
+                let sc = start_col.min(first.len());
+                result.push_str(&first[sc..]);
+                result.push('\n');
+                // Middle lines: full
+                for line in &self.lines[start_row + 1..end_row] {
+                    result.push_str(line);
+                    result.push('\n');
+                }
+                // Last line: from start to end_col
+                if end_row < self.lines.len() {
+                    let last = &self.lines[end_row];
+                    let ec = end_col.min(last.len());
+                    result.push_str(&last[..ec]);
+                }
+                result
+            }
+            std::cmp::Ordering::Greater => String::new(),
+        }
+    }
+
+    /// Delete text between two (row, col) positions (inclusive of start,
+    /// exclusive of end). Handles cross-line deletions by joining the
+    /// remaining portions of the start and end lines.
+    fn delete_range(&mut self, start_row: usize, start_col: usize, end_row: usize, end_col: usize) {
+        if start_row == end_row {
+            let line = &mut self.lines[start_row];
+            let sc = start_col.min(line.len());
+            let ec = end_col.min(line.len());
+            if sc < ec {
+                line.replace_range(sc..ec, "");
+            }
+            self.cursor_col = sc;
+        } else if start_row < end_row {
+            // Join the prefix of start_row with the suffix of end_row
+            let prefix =
+                self.lines[start_row][..start_col.min(self.lines[start_row].len())].to_owned();
+            let end_line = &self.lines[end_row];
+            let ec = end_col.min(end_line.len());
+            let suffix = end_line[ec..].to_owned();
+            let joined = format!("{prefix}{suffix}");
+            // Remove lines start_row..=end_row and insert the joined line
+            self.lines.drain(start_row..=end_row);
+            self.lines.insert(start_row, joined);
+            self.cursor_row = start_row;
+            self.cursor_col = prefix.len();
+        }
+        self.clamp_cursor_col();
+    }
+
     /// Bring the cursor row into view inside `height` visible rows.
     pub const fn ensure_visible(&mut self, height: usize) {
         if height == 0 {
@@ -1223,5 +1502,76 @@ mod tests {
         assert_eq!(floor_char_boundary(line, 2), 2);
         assert_eq!(floor_char_boundary(line, 6), 6);
         assert_eq!(floor_char_boundary(line, 99), 6);
+    }
+
+    // -- M3.1: operator range and delete helpers ---------------------------
+
+    #[test]
+    fn operator_range_text_current_line() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("line0\nline1\nline2");
+        buf.set_cursor(1, 3);
+        assert_eq!(buf.operator_range_text(Motion::CurrentLine, 1), "line1");
+        assert_eq!(
+            buf.operator_range_text(Motion::CurrentLine, 2),
+            "line1\nline2"
+        );
+    }
+
+    #[test]
+    fn operator_range_text_word_forward() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("foo bar baz");
+        buf.apply_motion(Motion::LineStart, 1);
+        assert_eq!(buf.operator_range_text(Motion::WordForward, 1), "foo ");
+    }
+
+    #[test]
+    fn operator_delete_word() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("hello world");
+        buf.apply_motion(Motion::LineStart, 1);
+        buf.apply_operator_delete(Motion::WordForward, 1);
+        assert_eq!(buf.lines(), &["world".to_owned()]);
+        assert_eq!(buf.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn operator_delete_line() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("line0\nline1\nline2");
+        buf.set_cursor(1, 2);
+        buf.apply_operator_delete(Motion::CurrentLine, 1);
+        assert_eq!(buf.lines(), &["line0".to_owned(), "line2".to_owned()]);
+        assert_eq!(buf.cursor_row(), 1);
+    }
+
+    #[test]
+    fn operator_yank_line() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("line0\nline1\nline2");
+        buf.set_cursor(1, 2);
+        let yanked = buf.operator_range_text(Motion::CurrentLine, 1);
+        assert_eq!(yanked, "line1");
+        // Buffer unchanged after yank
+        assert_eq!(buf.lines(), &["line0", "line1", "line2"]);
+    }
+
+    #[test]
+    fn operator_delete_to_file_start() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("line0\nline1\nline2");
+        buf.set_cursor(2, 3);
+        let yanked = buf.operator_range_text(Motion::FileStart, 1);
+        assert_eq!(yanked, "line0\nline1\nline2");
+    }
+
+    #[test]
+    fn operator_delete_multiple_lines() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("a\nb\nc\nd");
+        buf.set_cursor(1, 0);
+        buf.apply_operator_delete(Motion::CurrentLine, 2);
+        assert_eq!(buf.lines(), &["a".to_owned(), "d".to_owned()]);
     }
 }

@@ -17,6 +17,9 @@ pub enum Mode {
     Command,
     /// Waiting for a motion after an operator (d, y, c).
     OperatorPending(Operator),
+    /// First `g` pressed in Normal mode — waiting for `g` (file start)
+    /// or any other key that resets the state.
+    WaitingForSecondG,
 }
 
 impl Mode {
@@ -30,6 +33,7 @@ impl Mode {
             Self::OperatorPending(Operator::Delete) => "O-D",
             Self::OperatorPending(Operator::Yank) => "O-Y",
             Self::OperatorPending(Operator::Change) => "O-C",
+            Self::WaitingForSecondG => "G?g",
         }
     }
 }

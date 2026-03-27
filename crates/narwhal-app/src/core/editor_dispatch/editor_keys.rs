@@ -261,6 +261,7 @@ impl AppCore {
                     Mode::Command => ":".into(),
                     Mode::Visual => "-- VISUAL --".into(),
                     Mode::VisualLine => "-- V-LINE --".into(),
+                    Mode::WaitingForSecondG => "g?".into(),
                     Mode::OperatorPending(op) => format!(
                         "-- {} --",
                         match op {
@@ -284,9 +285,61 @@ impl AppCore {
             Action::OpenSearch(dir) => self.open_editor_search(dir).await,
             Action::RepeatSearch => self.repeat_editor_search(false).await,
             Action::RepeatSearchReverse => self.repeat_editor_search(true).await,
-            Action::Operate { .. } => {}
+            Action::Operate { op, motion, count } => {
+                self.apply_operator(op, motion, count).await;
+            }
             // Future Action variants are silently ignored until wired.
             _ => {}
         }
+    }
+
+    /// Apply a vim operator (delete / yank / change) over the range
+    /// described by `(motion, count)`. For line-wise motions the range
+    /// spans full lines; for character-wise motions it spans from the
+    /// cursor to the position after applying the motion.
+    ///
+    /// Delete and yank both copy text to the clipboard before mutating
+    /// the buffer (consistent with vim's unnamed register). Change does
+    /// the same and then enters insert mode — the mode transition has
+    /// already been set by the state machine.
+    async fn apply_operator(&mut self, op: Operator, motion: VimMotion, count: usize) {
+        let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
+        let dm = domain_motion(motion);
+
+        // Compute the text range affected by the operator.
+        let yanked = buf.operator_range_text(dm, count);
+
+        // Yank: copy to clipboard, no deletion.
+        if op == Operator::Yank {
+            if let Err(e) = self.deps.clipboard.set_text(&yanked) {
+                self.ui.status.message = format!("clipboard error: {e}");
+            } else {
+                let lines = yanked.lines().count();
+                let chars = yanked.len();
+                if lines > 1 {
+                    self.ui.status.message = format!("yanked {lines} line(s)");
+                } else {
+                    self.ui.status.message = format!("yanked {chars} character(s)");
+                }
+            }
+            return;
+        }
+
+        // Delete / Change: copy to clipboard first, then delete.
+        if !yanked.is_empty() {
+            let _ = self.deps.clipboard.set_text(&yanked);
+        }
+        buf.apply_operator_delete(dm, count);
+
+        if op == Operator::Delete {
+            let lines = yanked.lines().count();
+            if lines > 1 {
+                self.ui.status.message = format!("deleted {lines} line(s)");
+            } else {
+                self.ui.status.message = "deleted".into();
+            }
+        }
+        // Change: the vim state machine already transitioned to Insert;
+        // no additional status needed — the mode indicator handles it.
     }
 }
