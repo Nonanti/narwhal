@@ -178,14 +178,22 @@ fn mysql_drop_index_includes_on_table() {
 
 #[test]
 fn mysql_modify_without_type_emits_placeholder_comment() {
-    // Only a nullable change with no type delta — the engine still
-    // needs the type, so the emitter flags it inline rather than
-    // silently producing a syntax error.
+    // M4.2: Only a nullable change with no type delta — MySQL MODIFY
+    // COLUMN requires the full type, so we cannot emit a valid
+    // statement. Instead, emit a TODO comment so the user knows
+    // what to fill in.
     let source = vec![table("u", vec![col_not_null("c", "int4")])];
     let target = vec![table("u", vec![col("c", "int4")])];
     let sql = MysqlEmitter::new().emit(&diff(&source, &target)).unwrap();
-    assert!(sql.contains("/* keep existing type */"), "got:\n{sql}");
-    assert!(sql.contains("NOT NULL"), "got:\n{sql}");
+    assert!(!sql.contains("/*"), "inline comment is invalid SQL: {sql}");
+    assert!(
+        !sql.contains("MODIFY COLUMN"),
+        "no MODIFY COLUMN without type: {sql}"
+    );
+    assert!(
+        sql.contains("-- TODO: type required to MODIFY column 'c'"),
+        "expected TODO comment, got:\n{sql}"
+    );
 }
 
 // ---------------------------------------------------------------- sqlite

@@ -46,6 +46,7 @@
 //! change in `narwhal-core` and out of scope here.
 
 use narwhal_core::{Column, TableSchema};
+use narwhal_schema_diff::{canonical_type, defaults_equal};
 use narwhal_sql::Dialect;
 
 use crate::ddl::quote_ident_public as quote_ident;
@@ -198,7 +199,9 @@ pub fn render_alter_statements(
 }
 
 fn columns_equivalent(a: &Column, b: &Column) -> bool {
-    a.data_type == b.data_type && a.nullable == b.nullable && a.default == b.default
+    canonical_type(&a.data_type) == canonical_type(&b.data_type)
+        && a.nullable == b.nullable
+        && defaults_equal(a.default.as_deref(), b.default.as_deref())
 }
 
 #[cfg(test)]
@@ -351,5 +354,56 @@ mod tests {
         assert!(stmts[0].contains("ADD COLUMN"));
         assert!(stmts[0].contains("NOT NULL"));
         assert!(stmts[0].contains("DEFAULT now()"));
+    }
+
+    // -- M4.7: canonical type comparison -----------------------------------------
+
+    #[test]
+    fn equivalent_types_collapse_to_same_canonical() {
+        // `varchar(255)` vs `character varying(255)` — same type,
+        // different spelling from different introspection paths.
+        let before = schema(vec![Column {
+            name: "name".into(),
+            data_type: "varchar(255)".into(),
+            nullable: true,
+            default: None,
+            primary_key: false,
+        }]);
+        let after = schema(vec![Column {
+            name: "name".into(),
+            data_type: "character varying(255)".into(),
+            nullable: true,
+            default: None,
+            primary_key: false,
+        }]);
+        let changes = diff_columns(&before, &after);
+        assert!(
+            changes.is_empty(),
+            "phantom diff should be suppressed: {changes:?}"
+        );
+
+        // `int` vs `int4`
+        let before = schema(vec![col("id", "int", false)]);
+        let after = schema(vec![col("id", "int4", false)]);
+        let changes = diff_columns(&before, &after);
+        assert!(changes.is_empty(), "int vs int4 phantom diff: {changes:?}");
+
+        // Defaults with cast suffix
+        let before = schema(vec![Column {
+            name: "label".into(),
+            data_type: "text".into(),
+            nullable: true,
+            default: Some("'hello'".into()),
+            primary_key: false,
+        }]);
+        let after = schema(vec![Column {
+            name: "label".into(),
+            data_type: "text".into(),
+            nullable: true,
+            default: Some("'hello'::text".into()),
+            primary_key: false,
+        }]);
+        let changes = diff_columns(&before, &after);
+        assert!(changes.is_empty(), "default cast phantom diff: {changes:?}");
     }
 }

@@ -241,20 +241,21 @@ fn emit_column_changes_coalesced(out: &mut String, table: &str, changes: &[Colum
         // MySQL MODIFY COLUMN needs the full new shape. The diff
         // doesn't carry the unchanged attributes alongside the delta,
         // so we render what we know and let the operator review.
-        // Type defaults to a placeholder when only nullability /
-        // default changed without a type delta — the emitter calls
-        // attention to it with an inline comment so an incomplete
-        // statement never silently ships.
+        // M4.2: When no type delta exists we cannot emit a valid
+        // MODIFY COLUMN (MySQL requires the type). Emit a TODO
+        // comment instead so an incomplete statement never ships.
+        let Some(ty) = p.new_type.as_ref() else {
+            out.push_str("-- TODO: type required to MODIFY column '");
+            out.push_str(name);
+            out.push_str("' (nullable/default changed but type unknown)\n");
+            continue;
+        };
         out.push_str("ALTER TABLE ");
         out.push_str(table);
         out.push_str(" MODIFY COLUMN ");
         out.push_str(name);
         out.push(' ');
-        if let Some(ty) = p.new_type.as_ref() {
-            out.push_str(ty);
-        } else {
-            out.push_str("/* keep existing type */");
-        }
+        out.push_str(ty);
         if let Some(nullable) = p.new_nullable {
             out.push_str(if nullable { " NULL" } else { " NOT NULL" });
         }
@@ -371,4 +372,107 @@ fn emit_add_unique(out: &mut String, table: &str, u: &UniqueConstraint) {
     out.push_str(" UNIQUE (");
     out.push_str(&u.columns.join(", "));
     out.push_str(");\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use narwhal_core::schema::{Table, TableKind};
+
+    use super::MysqlEmitter;
+    use crate::diff::{ColumnChange, SchemaDiff, TableChange};
+    use crate::emit::DdlEmitter;
+
+    fn emitter() -> MysqlEmitter {
+        MysqlEmitter::new()
+    }
+
+    fn table(name: &str) -> Table {
+        Table {
+            schema: "public".into(),
+            name: name.into(),
+            kind: TableKind::Table,
+        }
+    }
+
+    fn schema_one_table(table_change: TableChange) -> SchemaDiff {
+        SchemaDiff {
+            tables: vec![table_change],
+        }
+    }
+
+    #[test]
+    fn mysql_modify_column_with_type_emits_valid_sql() {
+        // When type is present, MODIFY COLUMN is well-formed.
+        let diff = schema_one_table(TableChange::Changed {
+            table: table("users"),
+            columns: vec![ColumnChange::TypeChanged {
+                name: "id".into(),
+                source: "BIGINT".into(),
+                target: "INT".into(),
+            }],
+            indexes: vec![],
+            foreign_keys: vec![],
+            unique_constraints: vec![],
+        });
+        let sql = emitter().emit(&diff).unwrap();
+        assert!(sql.contains("MODIFY COLUMN id BIGINT"), "got: {sql}");
+        assert!(!sql.contains("/*"), "no inline comments: {sql}");
+    }
+
+    #[test]
+    fn mysql_modify_column_without_type_emits_todo_comment() {
+        // M4.2: When only nullable/default changed (no type delta),
+        // we cannot emit a valid MODIFY COLUMN without the type.
+        // The old code put `/* keep existing type */` inline which
+        // produces invalid SQL. Now it emits a TODO comment instead.
+        let diff = schema_one_table(TableChange::Changed {
+            table: table("users"),
+            columns: vec![ColumnChange::NullableChanged {
+                name: "name".into(),
+                source: false,
+                target: true,
+            }],
+            indexes: vec![],
+            foreign_keys: vec![],
+            unique_constraints: vec![],
+        });
+        let sql = emitter().emit(&diff).unwrap();
+        // Must NOT contain invalid SQL with inline comment.
+        assert!(!sql.contains("/*"), "inline comment is invalid SQL: {sql}");
+        // Must NOT contain MODIFY COLUMN without a real type.
+        assert!(
+            !sql.contains("MODIFY COLUMN"),
+            "MODIFY COLUMN without type is invalid: {sql}"
+        );
+        // Must contain a TODO comment noting the missing type.
+        assert!(
+            sql.contains("-- TODO: type required to MODIFY column 'name'"),
+            "expected TODO comment, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn mysql_modify_column_without_type_but_with_default_emits_todo() {
+        let diff = schema_one_table(TableChange::Changed {
+            table: table("orders"),
+            columns: vec![ColumnChange::DefaultChanged {
+                name: "status".into(),
+                source: Some("'pending'".into()),
+                target: None,
+            }],
+            indexes: vec![],
+            foreign_keys: vec![],
+            unique_constraints: vec![],
+        });
+        let sql = emitter().emit(&diff).unwrap();
+        assert!(!sql.contains("/*"), "no inline comments: {sql}");
+        assert!(
+            !sql.contains("MODIFY COLUMN"),
+            "no MODIFY COLUMN without type: {sql}"
+        );
+        assert!(
+            sql.contains("-- TODO: type required to MODIFY column 'status'"),
+            "expected TODO comment, got: {sql}"
+        );
+    }
 }
