@@ -3181,6 +3181,7 @@ dependencies = [
  "narwhal-domain",
  "narwhal-history",
  "narwhal-pool",
+ "narwhal-schema-diff",
  "narwhal-sql",
  "narwhal-vim",
  "parquet",
@@ -3192,6 +3193,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -3199,13 +3201,13 @@ dependencies = [
 name = "narwhal-config"
 version = "2.0.0"
 dependencies = [
- "async-trait",
  "directories",
  "futures",
  "keyring",
  "narwhal-audit",
  "narwhal-core",
- "narwhal-diagram",
+ "narwhal-domain",
+ "parking_lot",
  "reqwest",
  "secrecy",
  "serde",
@@ -3238,6 +3240,7 @@ version = "2.0.0"
 dependencies = [
  "insta",
  "narwhal-core",
+ "narwhal-domain",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -3290,7 +3293,6 @@ version = "2.0.0"
 dependencies = [
  "chrono",
  "criterion",
- "once_cell",
  "regex",
  "rev_lines",
  "serde",
