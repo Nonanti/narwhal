@@ -45,6 +45,16 @@ ignore = [
     # `error-code`/`atomic-polyfill` IterMut Stacked-Borrows unsoundness
     # — transitive only, no UB observed on stable, fix is upstream-blocked.
     { id = "RUSTSEC-2026-0002", reason = "transitive unsoundness; stable does not exercise the path" },
+
+    # `rustls-webpki` 0.101 carries two advisories (name-constraint
+    # wildcard accept + CRL panic). Reachable only through `tiberius`
+    # 0.12.3 → tokio-rustls 0.24 → rustls 0.21 → rustls-webpki 0.101.
+    # Tiberius has no release on the new rustls stack yet; we do not
+    # parse CRLs, and name-constraint exploit requires misissuance.
+    # Drop both once tiberius ships on rustls 0.23+.
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.101 via tiberius 0.12.3; URI name constraints not used in MSSQL TLS path, awaiting tiberius rustls upgrade" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101 via tiberius 0.12.3; CRL/name-constraint paths not exercised, awaiting tiberius rustls upgrade" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101 via tiberius 0.12.3; CRL parsing not used in MSSQL TLS path, awaiting tiberius rustls upgrade" },
 ]
 
 # ---------------------------------------------------------------------------
