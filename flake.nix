@@ -32,7 +32,7 @@
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "narwhal";
-          version = "1.0.0";
+          version = "2.0.0";
 
           src = ./.;
           # crates.io now refuses requests with the default `curl`
@@ -42,7 +42,7 @@
           # fixed-output `cargoHash` vendor instead: cargo runs inside
           # the sandbox, sends the right UA, and the vendored output
           # is content-addressed.
-          cargoHash = "sha256-+W/DO+d12yHW3MWy1CQC8ZnCXwkWw3BYGcZUBnR/g6Q=";
+          cargoHash = "sha256-KgmSMQlZ/Uj9dZlmgp/Z3JvSCHSrlbL1SPSOpOXknVk=";
 
           nativeBuildInputs = nativeBuildDeps;
           buildInputs = buildDeps;
