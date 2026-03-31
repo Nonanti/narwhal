@@ -413,12 +413,70 @@ pub struct WasmPluginSettings {
     pub allow_env: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Editor input model selected by the user.
+///
+/// `Vim` is the historical default and keeps the full normal /
+/// insert / visual / command machinery from `narwhal_vim`. `Basic`
+/// is a modeless IDE-style editor (arrow keys, Ctrl+C/V/Z, mouse
+/// click positions the cursor). `Emacs` exposes the classic
+/// Ctrl-/Meta- chord set (C-a, C-e, C-k, M-w, C-y, C-x C-s, ...).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum EditorMode {
+    #[default]
+    Vim,
+    Basic,
+    Emacs,
+}
+
+/// Mouse behaviour inside the editor pane.
+///
+/// `Enabled` is the full experience: click positions the cursor,
+/// drag extends a selection, double-click selects a word,
+/// triple-click selects a line, middle-click pastes the primary
+/// selection, right-click opens the context menu.
+/// `ClickOnly` keeps just the cursor-positioning behaviour for
+/// users on flaky terminals where drag events are lossy.
+/// `Disabled` reverts to the v1 behaviour where mouse events in
+/// the editor pane are no-ops.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum MouseSelectionMode {
+    #[default]
+    Enabled,
+    ClickOnly,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[non_exhaustive]
 pub struct EditorSettings {
     pub tab_width: u8,
     pub use_spaces: bool,
     pub line_numbers: bool,
+    /// Input model: vim / basic / emacs. See [`EditorMode`].
+    pub mode: EditorMode,
+    /// Mouse behaviour inside the editor pane. See [`MouseSelectionMode`].
+    pub mouse: MouseSelectionMode,
+    /// Render the `-- INSERT --` / `-- BASIC --` / `-- EMACS --`
+    /// segment in the status bar. Disable for a quieter UI.
+    pub show_mode_indicator: bool,
+    /// Carry the leading whitespace of the current line onto the
+    /// next line when the user presses Enter. Applies to every
+    /// editor mode.
+    pub auto_indent: bool,
+    /// Paint the row containing the primary cursor with a dimmed
+    /// background so the user can find it quickly in a long buffer.
+    pub highlight_current_line: bool,
+    /// Keep at least this many rows visible above/below the cursor
+    /// before scrolling kicks in. Mirrors vim's `scrolloff`.
+    pub scroll_off: u8,
+    /// Wrap long lines visually instead of letting them scroll
+    /// horizontally. The underlying buffer is never reflowed.
+    pub word_wrap: bool,
 }
 
 impl Default for EditorSettings {
@@ -427,19 +485,62 @@ impl Default for EditorSettings {
             tab_width: 4,
             use_spaces: true,
             line_numbers: true,
+            mode: EditorMode::Vim,
+            mouse: MouseSelectionMode::Enabled,
+            show_mode_indicator: true,
+            auto_indent: true,
+            highlight_current_line: false,
+            scroll_off: 3,
+            word_wrap: false,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Top-level keybinding preset applied on top of the built-in
+/// defaults. Presets only seed the `keymap.*` tables — the user
+/// can still override individual chords in `settings.toml`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum KeyPreset {
+    #[default]
+    Default,
+    Vscode,
+    Datagrip,
+    Intellij,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[non_exhaustive]
 pub struct KeybindingSettings {
+    /// **Deprecated** since the editor input model moved to
+    /// [`EditorSettings::mode`]. Kept for back-compat: a v1.x file
+    /// that only set `vim_mode = false` is interpreted as
+    /// `editor.mode = "basic"` during settings application.
+    /// New configs should leave this at the default and set
+    /// `editor.mode` instead.
+    #[deprecated(
+        since = "2.1.0",
+        note = "use `editor.mode = \"basic\"` (or `\"emacs\"`) instead"
+    )]
     pub vim_mode: bool,
+    /// Built-in chord preset layered under the user's own
+    /// `[keymap.*]` overrides. See [`KeyPreset`].
+    pub preset: KeyPreset,
+    /// Vim leader chord (default `\` to match upstream vim).
+    /// Empty string disables the leader concept entirely.
+    pub leader: String,
 }
 
 impl Default for KeybindingSettings {
     fn default() -> Self {
-        Self { vim_mode: true }
+        #[allow(deprecated)]
+        Self {
+            vim_mode: true,
+            preset: KeyPreset::Default,
+            leader: "\\".to_owned(),
+        }
     }
 }
 
