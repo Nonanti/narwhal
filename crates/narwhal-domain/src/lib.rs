@@ -12,7 +12,7 @@ pub mod motion;
 pub mod relation;
 pub mod schema;
 
-pub use editor::EditorBuffer;
+pub use editor::{EditHistory, EditOp, EditorBuffer, Position, Selection, SelectionKind};
 pub use motion::Motion;
 pub use relation::{Cardinality, LogicalRelation, QualifiedName};
 pub use schema::SchemaListing;
