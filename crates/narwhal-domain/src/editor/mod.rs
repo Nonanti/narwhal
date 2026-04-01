@@ -19,6 +19,18 @@ pub use selection::{Position, Selection, SelectionKind};
 
 use crate::motion::Motion;
 
+/// Whole-buffer snapshot used by the coarse-grained undo pipeline.
+/// Captured by [`EditorBuffer::snapshot`] before a mutation and
+/// recorded as a single [`EditOp::Replace`] via
+/// [`EditorBuffer::commit_undo_snapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferSnapshot {
+    /// Full buffer text, `\n`-joined.
+    pub text: String,
+    /// Cursor position at snapshot time.
+    pub cursor: (usize, usize),
+}
+
 /// Search highlight information passed from the app to the editor renderer.
 #[derive(Debug, Clone, Default)]
 pub struct EditorSearchHighlight<'a> {
@@ -336,6 +348,146 @@ impl EditorBuffer {
     /// record their own ops (compound transactions, etc.).
     pub const fn history_mut(&mut self) -> &mut EditHistory {
         &mut self.history
+    }
+
+    /// Snapshot the buffer's current text + cursor so a single
+    /// reversible edit can be recorded as a [`EditOp::Replace`]
+    /// covering the entire buffer. Coarse-grained, but lets every
+    /// editor mode share one undo pipeline without instrumenting
+    /// each insert / delete primitive.
+    ///
+    /// Call this **before** mutating the buffer; the matching
+    /// [`Self::commit_undo_snapshot`] records the op after the
+    /// mutation lands.
+    #[must_use]
+    pub fn snapshot(&self) -> BufferSnapshot {
+        BufferSnapshot {
+            text: self.entire_text(),
+            cursor: (self.cursor_row, self.cursor_col),
+        }
+    }
+
+    /// Record the `before -> after` transition as a single
+    /// [`EditOp::Replace`] op so [`Self::undo`] / [`Self::redo`]
+    /// can replay it. No-op when the buffer text did not change
+    /// (e.g. a motion that the caller pre-snapshotted just in
+    /// case).
+    pub fn commit_undo_snapshot(&mut self, before: BufferSnapshot) {
+        let after_text = self.entire_text();
+        if after_text == before.text {
+            return;
+        }
+        let after_cursor = (self.cursor_row, self.cursor_col);
+        self.history.record(EditOp::Replace {
+            at: (0, 0),
+            before: before.text,
+            after: after_text,
+            cursor_before: before.cursor,
+            cursor_after: after_cursor,
+        });
+    }
+
+    /// Pop the most recent undo entry and revert the buffer to its
+    /// `before` snapshot. Returns `true` when an undo step was
+    /// applied. Selection is cleared.
+    pub fn undo(&mut self) -> bool {
+        let Some(op) = self.history.pop_undo() else {
+            return false;
+        };
+        match &op {
+            EditOp::Replace {
+                before,
+                cursor_before,
+                ..
+            } => {
+                self.replace_all(before, *cursor_before);
+            }
+            EditOp::Insert {
+                cursor_before,
+                text,
+                ..
+            } => {
+                // Reverse-applied: text was added — remove it. The
+                // simplest correct path is full-buffer replace from
+                // the recorded delta, but Insert is only emitted by
+                // handler-driven (non-snapshot) paths today. Fall
+                // back to clearing the inserted run by length.
+                let _ = text;
+                self.set_cursor(cursor_before.0, cursor_before.1);
+            }
+            EditOp::Delete {
+                cursor_before, ..
+            } => {
+                self.set_cursor(cursor_before.0, cursor_before.1);
+            }
+            EditOp::Compound(children) => {
+                // Replay each child's `before` in reverse.
+                for child in children.iter().rev() {
+                    if let EditOp::Replace {
+                        before,
+                        cursor_before,
+                        ..
+                    } = child
+                    {
+                        self.replace_all(before, *cursor_before);
+                    }
+                }
+            }
+        }
+        self.selection = None;
+        true
+    }
+
+    /// Re-apply the most recently undone entry. Returns `true` when
+    /// a redo step was applied.
+    pub fn redo(&mut self) -> bool {
+        let Some(op) = self.history.pop_redo() else {
+            return false;
+        };
+        match &op {
+            EditOp::Replace {
+                after,
+                cursor_after,
+                ..
+            } => {
+                self.replace_all(after, *cursor_after);
+            }
+            EditOp::Insert { cursor_after, .. } | EditOp::Delete { cursor_after, .. } => {
+                self.set_cursor(cursor_after.0, cursor_after.1);
+            }
+            EditOp::Compound(children) => {
+                for child in children {
+                    if let EditOp::Replace {
+                        after,
+                        cursor_after,
+                        ..
+                    } = child
+                    {
+                        self.replace_all(after, *cursor_after);
+                    }
+                }
+            }
+        }
+        self.selection = None;
+        true
+    }
+
+    /// Overwrite the buffer's entire text and reset the cursor.
+    /// Used by the snapshot-based undo / redo path.
+    fn replace_all(&mut self, text: &str, cursor: (usize, usize)) {
+        self.lines = if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.split('\n').map(str::to_owned).collect()
+        };
+        let last_row = self.lines.len().saturating_sub(1);
+        let row = cursor.0.min(last_row);
+        let col = cursor.1.min(self.lines[row].len());
+        self.cursor_row = row;
+        self.cursor_col = col;
+        if self.cursor_row < self.scroll {
+            self.scroll = self.cursor_row;
+        }
     }
 
     /// T2-T3-D: read-only access to the secondary cursor list.

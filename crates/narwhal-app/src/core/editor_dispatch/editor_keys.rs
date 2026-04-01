@@ -93,6 +93,22 @@ impl AppCore {
             self.handle_editor_search_key(key).await;
             return;
         }
+        // Mode dispatch: vim is the default and historical path;
+        // basic and emacs run on dedicated modeless handlers.
+        // Multi-cursor / completion interception below stays shared
+        // because those popups are mode-agnostic.
+        match self.ui.editor_mode {
+            narwhal_config::EditorMode::Basic => {
+                self.handle_editor_key_basic(key).await;
+                return;
+            }
+            narwhal_config::EditorMode::Emacs => {
+                self.handle_editor_key_emacs(key).await;
+                return;
+            }
+            // Vim falls through into the legacy machinery below.
+            narwhal_config::EditorMode::Vim | _ => {}
+        }
         // T2-T3-D: multi-cursor chords intercepted before vim:
         // - Alt-N: add a secondary cursor at the next occurrence of
         //   the word under the primary cursor

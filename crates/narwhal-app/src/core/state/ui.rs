@@ -11,10 +11,63 @@
 //! session, connections, history, and modal overlays live in
 //! their own sub-states.
 
-use narwhal_config::DiagramIcons;
+use narwhal_config::{DiagramIcons, EditorMode, MouseSelectionMode};
 use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
 
 use super::{ResultState, SidebarItem, StatusBar, Tab};
+
+/// Mouse drag state held between `Down(Left)` and `Up(Left)` events
+/// when [`MouseSelectionMode::Enabled`] is active. `anchor` is the
+/// `(row, col)` byte offset inside the buffer at which the click
+/// landed; subsequent `Drag` events extend the editor's selection
+/// from there.
+#[derive(Debug, Clone, Copy)]
+pub struct MouseDragState {
+    pub tab_id: usize,
+    pub anchor: (usize, usize),
+}
+
+/// Click history used to detect double / triple clicks.
+#[derive(Debug, Clone, Copy)]
+pub struct LastClick {
+    pub at: std::time::Instant,
+    pub pos: (u16, u16),
+    pub count: u8,
+}
+
+/// Editor context-menu state, opened by a right-click inside the
+/// editor pane.
+#[derive(Debug, Clone)]
+pub struct ContextMenuState {
+    /// Anchor screen position the menu is rendered at.
+    pub anchor: (u16, u16),
+    /// Menu entries in display order; each carries the action id
+    /// the editor dispatcher should run when the user accepts.
+    pub items: Vec<ContextMenuItem>,
+    /// Index into `items` for the highlighted entry.
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextMenuItem {
+    pub label: &'static str,
+    pub action: ContextMenuAction,
+    /// `true` when the entry should be greyed out (e.g. Paste with
+    /// an empty clipboard, Copy without a selection).
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ContextMenuAction {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    RunSelection,
+    Find,
+    ToggleComment,
+}
 
 /// Visible-on-screen state. Mutated by the dispatcher, render
 /// helpers, and the run-loop's per-tick `RunUpdate` handler.
@@ -78,6 +131,28 @@ pub struct UiState {
     /// `[diagram].icons` in `apply_settings`; defaults to `Ascii`
     /// so terminals without a Nerd Font never see broken glyphs.
     pub diagram_icons: DiagramIcons,
+    /// Active editor input model (vim / basic / emacs). Resolved
+    /// from `[editor].mode` in `apply_settings`. The editor
+    /// dispatcher branches on this before reaching the vim layer.
+    pub editor_mode: EditorMode,
+    /// Mouse behaviour inside the editor pane. Drives the
+    /// click-position and drag-selection branches in
+    /// `core::dispatch::handle_mouse`.
+    pub mouse_mode: MouseSelectionMode,
+    /// Render the editor mode indicator (`-- INSERT --` etc.)
+    /// segment in the status bar.
+    pub show_mode_indicator: bool,
+    /// Pending `C-x` (emacs) prefix — next chord completes the
+    /// binding. Cleared after one keystroke either way.
+    pub emacs_pending_prefix: Option<char>,
+    /// In-flight mouse drag inside the editor pane. `Some` between
+    /// a `Down(Left)` and the matching `Up(Left)` (or focus loss).
+    pub mouse_drag: Option<MouseDragState>,
+    /// Last click record for double / triple-click detection.
+    pub last_click: Option<LastClick>,
+    /// Active editor context menu opened by right-click. `None`
+    /// when no menu is visible.
+    pub context_menu: Option<ContextMenuState>,
 }
 
 impl UiState {
@@ -104,6 +179,13 @@ impl UiState {
             pending_result_entries_views: Vec::new(),
             last_layout: LayoutRegions::default(),
             diagram_icons: DiagramIcons::default(),
+            editor_mode: EditorMode::default(),
+            mouse_mode: MouseSelectionMode::default(),
+            show_mode_indicator: true,
+            emacs_pending_prefix: None,
+            mouse_drag: None,
+            last_click: None,
+            context_menu: None,
         }
     }
 }
