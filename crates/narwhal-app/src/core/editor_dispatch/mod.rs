@@ -4,6 +4,7 @@
 //! implementations.
 
 mod completion;
+mod context_menu;
 mod editor_keys;
 mod mode_basic;
 mod mode_emacs;

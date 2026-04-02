@@ -87,6 +87,12 @@ impl AppCore {
     }
 
     pub(crate) async fn handle_editor_key(&mut self, key: KeyEvent) {
+        // Context menu owns the keyboard while it's visible —
+        // shared by every editor mode (vim / basic / emacs).
+        if self.ui.context_menu.is_some() {
+            self.handle_context_menu_key(key).await;
+            return;
+        }
         // The editor search prompt is modal: characters build the needle,
         // Enter accepts, Esc cancels and restores the cursor.
         if self.ui.tabs[self.ui.active_tab].editor_search.prompt_open {

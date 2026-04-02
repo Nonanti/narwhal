@@ -19,7 +19,11 @@ use crate::theme::Theme;
 /// lines reserves exactly the cells it needs for `"NNN │ "` plus the
 /// trailing space (L36). Minimum 6 to keep the historical layout for
 /// small buffers.
-fn gutter_width(line_count: usize) -> usize {
+///
+/// `pub` since the mouse-click hit-tester in `narwhal-app` needs it
+/// to translate a screen column into a buffer column without
+/// duplicating the digit-counting heuristic.
+pub fn gutter_width(line_count: usize) -> usize {
     // Account for `" │ "` (2 visible cells after the number) plus the
     // number itself.
     let digits = line_count.max(1).to_string().len();

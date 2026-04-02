@@ -8,7 +8,8 @@ use narwhal_tui::{
     ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView, HistoryModalState,
     HistoryRow, HistoryRowOutcome, Pane, PivotPlaceholder, PivotTableView, RootLayout,
     RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
-    WizardFieldView, WizardView, render_confirm_modal, render_goto_modal, render_help_modal,
+    ContextMenuItemView, ContextMenuView, WizardFieldView, WizardView, render_confirm_modal,
+    render_context_menu, render_goto_modal, render_help_modal,
     render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
 };
 use ratatui::Frame;
@@ -344,6 +345,26 @@ impl AppCore {
             render_confirm_modal(frame, area, &view, &self.ui.theme);
         }
 
+        // Editor right-click context menu. Drawn above the editor
+        // pane but below the higher-priority modals so a
+        // long-running confirm prompt still wins.
+        if let Some(menu) = self.ui.context_menu.as_ref() {
+            let items: Vec<ContextMenuItemView<'_>> = menu
+                .items
+                .iter()
+                .map(|i| ContextMenuItemView {
+                    label: i.label,
+                    disabled: i.disabled,
+                })
+                .collect();
+            let view = ContextMenuView {
+                anchor: menu.anchor,
+                items: &items,
+                selected: menu.selected,
+            };
+            render_context_menu(frame, area, &view, &self.ui.theme);
+        }
+
         // Row detail modal — same layer as cell popup, rendered on
         // top of the result pane.
         if let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_ref() {
@@ -537,15 +558,177 @@ impl AppCore {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_left_click(pos).await;
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.handle_left_drag(pos).await;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.ui.mouse_drag = None;
+            }
+            MouseEventKind::Down(MouseButton::Middle) => {
+                self.handle_middle_click(pos).await;
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                self.handle_right_click(pos).await;
+            }
             MouseEventKind::ScrollUp => {
                 self.handle_scroll(pos, -1).await;
             }
             MouseEventKind::ScrollDown => {
                 self.handle_scroll(pos, 1).await;
             }
-            // Up, Moved, Drag are no-ops for now.
             _ => {}
         }
+    }
+
+    /// Translate a screen `(col, row)` inside the editor area into a
+    /// `(buffer_row, buffer_col)` byte offset. Accounts for the
+    /// border, the line-number gutter and the current scroll.
+    /// Returns `None` when the click landed outside the editor's
+    /// inner text region (border, gutter only, ...).
+    fn editor_click_to_buffer_pos(&self, pos: (u16, u16)) -> Option<(usize, usize)> {
+        let layout = &self.ui.last_layout;
+        let rect = layout.editor;
+        if !rect.contains(ratatui::layout::Position::new(pos.0, pos.1)) {
+            return None;
+        }
+        // Editor rect has a 1-cell border on every side; the inner
+        // text area starts at (x+1, y+1).
+        let inner_x = rect.x.saturating_add(1);
+        let inner_y = rect.y.saturating_add(1);
+        if pos.0 < inner_x || pos.1 < inner_y {
+            return None;
+        }
+        let buf = &self.ui.tabs[self.ui.active_tab].editor;
+        let gutter = narwhal_tui::gutter_width(buf.line_count()) as u16;
+        let row_in_view = pos.1 - inner_y;
+        let col_in_view = pos.0.saturating_sub(inner_x).saturating_sub(gutter);
+        let target_row = (buf.scroll() + row_in_view as usize).min(
+            buf.line_count().saturating_sub(1),
+        );
+        let line_len = buf.get_line(target_row).len();
+        let target_col = (col_in_view as usize).min(line_len);
+        Some((target_row, target_col))
+    }
+
+    async fn handle_left_drag(&mut self, pos: (u16, u16)) {
+        if self.ui.mouse_mode != narwhal_config::MouseSelectionMode::Enabled {
+            return;
+        }
+        let Some(drag) = self.ui.mouse_drag else {
+            return;
+        };
+        let Some((row, col)) = self.editor_click_to_buffer_pos(pos) else {
+            return;
+        };
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
+        if tab.id() != drag.tab_id {
+            return;
+        }
+        // Anchor the selection at the original click position the
+        // first time drag is observed; subsequent drag events just
+        // move the head.
+        if tab.editor.selection().is_none() {
+            tab.editor.set_selection(Some(
+                narwhal_domain::editor::Selection::character(drag.anchor, drag.anchor),
+            ));
+        }
+        tab.editor.extend_selection_to(row, col);
+        // Move the cursor with the drag head so the renderer keeps
+        // up.
+        tab.editor.set_cursor(row, col);
+    }
+
+    async fn handle_middle_click(&mut self, pos: (u16, u16)) {
+        // Middle-click paste targets the editor only; clicks
+        // elsewhere are ignored to stay consistent with most
+        // terminals.
+        let Some((row, col)) = self.editor_click_to_buffer_pos(pos) else {
+            return;
+        };
+        let text = match self.deps.clipboard.get_text() {
+            Ok(t) => t,
+            Err(e) => {
+                self.ui.status.message = format!("clipboard error: {e}");
+                return;
+            }
+        };
+        if text.is_empty() {
+            return;
+        }
+        let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
+        let before = buf.snapshot();
+        buf.set_cursor(row, col);
+        buf.insert_str(&text);
+        buf.commit_undo_snapshot(before);
+        self.ui.focus = Pane::Editor;
+    }
+
+    async fn handle_right_click(&mut self, pos: (u16, u16)) {
+        // Only open the menu inside the editor pane; right-clicks
+        // elsewhere fall through to the keyboard-level handlers.
+        let Some((row, col)) = self.editor_click_to_buffer_pos(pos) else {
+            return;
+        };
+        let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
+        // If the click lands outside the current selection, move
+        // the cursor and drop the old selection — mirrors most
+        // desktop editors.
+        let in_selection = buf.selection().is_some_and(|s| {
+            let (start, end) = s.normalised();
+            (start.0, start.1) <= (row, col) && (row, col) <= (end.0, end.1)
+        });
+        if !in_selection {
+            buf.clear_selection();
+            buf.set_cursor(row, col);
+        }
+        self.ui.focus = Pane::Editor;
+        let has_selection = buf.has_selection();
+        let has_clipboard = self
+            .deps
+            .clipboard
+            .get_text()
+            .is_ok_and(|t| !t.is_empty());
+        self.ui.context_menu = Some(crate::core::state::ui::ContextMenuState {
+            anchor: pos,
+            selected: 0,
+            items: vec![
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Cut",
+                    action: crate::core::state::ui::ContextMenuAction::Cut,
+                    disabled: !has_selection,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Copy",
+                    action: crate::core::state::ui::ContextMenuAction::Copy,
+                    disabled: !has_selection,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Paste",
+                    action: crate::core::state::ui::ContextMenuAction::Paste,
+                    disabled: !has_clipboard,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Select All",
+                    action: crate::core::state::ui::ContextMenuAction::SelectAll,
+                    disabled: false,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Run Selection",
+                    action: crate::core::state::ui::ContextMenuAction::RunSelection,
+                    disabled: !has_selection,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Find",
+                    action: crate::core::state::ui::ContextMenuAction::Find,
+                    disabled: false,
+                },
+                crate::core::state::ui::ContextMenuItem {
+                    label: "Toggle Comment",
+                    action: crate::core::state::ui::ContextMenuAction::ToggleComment,
+                    disabled: false,
+                },
+            ],
+        });
     }
 
     async fn handle_left_click(&mut self, pos: (u16, u16)) {
@@ -597,6 +780,59 @@ impl AppCore {
             }
         }
 
+        // Editor body: place the cursor (and on double/triple
+        // click select a word / line) before falling through to a
+        // plain focus change.
+        if self.ui.mouse_mode != narwhal_config::MouseSelectionMode::Disabled {
+            if let Some((row, col)) = self.editor_click_to_buffer_pos(pos) {
+                let click_count = self.bump_click_counter(pos);
+                let tab = &mut self.ui.tabs[self.ui.active_tab];
+                tab.editor.set_cursor(row, col);
+                match click_count {
+                    1 => {
+                        tab.editor.clear_selection();
+                        // Arm drag-selection: subsequent Drag
+                        // events extend from this anchor.
+                        if self.ui.mouse_mode
+                            == narwhal_config::MouseSelectionMode::Enabled
+                        {
+                            self.ui.mouse_drag =
+                                Some(crate::core::state::ui::MouseDragState {
+                                    tab_id: tab.id(),
+                                    anchor: (row, col),
+                                });
+                        }
+                    }
+                    2 => {
+                        // Word select: snap to the surrounding word.
+                        let (w_start, w_end) = word_bounds_at(
+                            tab.editor.get_line(row),
+                            col,
+                        );
+                        tab.editor.set_selection(Some(
+                            narwhal_domain::editor::Selection::character(
+                                (row, w_start),
+                                (row, w_end),
+                            ),
+                        ));
+                        tab.editor.set_cursor(row, w_end);
+                    }
+                    _ => {
+                        // Triple-and-up: line select.
+                        let line_len = tab.editor.get_line(row).len();
+                        tab.editor.set_selection(Some(
+                            narwhal_domain::editor::Selection::line(
+                                (row, 0),
+                                (row, line_len),
+                            ),
+                        ));
+                    }
+                }
+                self.ui.focus = Pane::Editor;
+                return;
+            }
+        }
+
         // Fall through to pane focus change.
         if layout
             .sidebar
@@ -617,6 +853,32 @@ impl AppCore {
             self.ui.focus = Pane::Results;
             self.ui.status.message = format!("focus → {}", Pane::Results.label());
         }
+    }
+
+    /// Bump the multi-click counter at `pos`. Returns the resulting
+    /// click count (1 = single, 2 = double, 3+ = triple-and-up).
+    /// Clicks reset to 1 when more than 500ms elapsed since the
+    /// last click or the position moved by more than 2 cells in
+    /// either axis.
+    fn bump_click_counter(&mut self, pos: (u16, u16)) -> u8 {
+        let now = std::time::Instant::now();
+        const WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+        let next_count = match self.ui.last_click {
+            Some(prev)
+                if now.duration_since(prev.at) <= WINDOW
+                    && prev.pos.0.abs_diff(pos.0) <= 2
+                    && prev.pos.1.abs_diff(pos.1) <= 2 =>
+            {
+                prev.count.saturating_add(1)
+            }
+            _ => 1,
+        };
+        self.ui.last_click = Some(crate::core::state::ui::LastClick {
+            at: now,
+            pos,
+            count: next_count,
+        });
+        next_count
     }
 
     async fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
@@ -867,4 +1129,79 @@ impl AppCore {
 
     // Run-loop / meta-update / finalize_statement / spawn_cancel moved to
     // `core::run_loop` (L21).
+}
+
+/// Find the start + end (exclusive) byte offsets of the word that
+/// contains `col` inside `line`. A "word" is a maximal run of
+/// alphanumeric or `_` characters; if the cursor lands on whitespace
+/// the range collapses around the cursor (start == end).
+fn word_bounds_at(line: &str, col: usize) -> (usize, usize) {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    if col > len {
+        return (len, len);
+    }
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    // If the cursor sits on a non-word byte but the *previous* byte
+    // is a word byte, snap left so double-clicking just past the
+    // end of a word still selects it.
+    let pivot = if col == len || !is_word(bytes[col]) {
+        if col > 0 && is_word(bytes[col - 1]) {
+            col - 1
+        } else {
+            return (col, col);
+        }
+    } else {
+        col
+    };
+    let mut start = pivot;
+    while start > 0 && is_word(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = pivot + 1;
+    while end < len && is_word(bytes[end]) {
+        end += 1;
+    }
+    (start, end)
+}
+
+#[cfg(test)]
+mod word_bounds_tests {
+    use super::word_bounds_at;
+
+    #[test]
+    fn middle_of_word() {
+        assert_eq!(word_bounds_at("hello world", 2), (0, 5));
+    }
+
+    #[test]
+    fn end_of_word_snaps_left() {
+        // col == 5 sits on the space; previous byte 'o' is a word
+        // char so we snap.
+        assert_eq!(word_bounds_at("hello world", 5), (0, 5));
+    }
+
+    #[test]
+    fn whitespace_collapses() {
+        // col 5 is space, col 5-1='o' is word - that hits the snap.
+        // Use col=6 (start of "world" but prev is space too).
+        assert_eq!(word_bounds_at("a  b", 1), (0, 1));
+        // The middle space.
+        assert_eq!(word_bounds_at("a  b", 2), (2, 2));
+    }
+
+    #[test]
+    fn beginning_of_word() {
+        assert_eq!(word_bounds_at("select count", 7), (7, 12));
+    }
+
+    #[test]
+    fn beyond_end_clamps() {
+        assert_eq!(word_bounds_at("abc", 99), (3, 3));
+    }
+
+    #[test]
+    fn underscore_is_word() {
+        assert_eq!(word_bounds_at("user_id = 1", 2), (0, 7));
+    }
 }
