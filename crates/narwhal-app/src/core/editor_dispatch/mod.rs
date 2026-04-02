@@ -9,7 +9,10 @@ mod editor_keys;
 mod mode_basic;
 mod mode_emacs;
 mod search;
+mod settings_modal;
 mod sidebar;
+
+pub(crate) use settings_modal::SECTION_LABELS;
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_tui::Pane;

@@ -12,10 +12,101 @@
 //! convention. If a future feature needs cross-modal state, add it
 //! here rather than scattering it back into `AppCore`.
 
+use narwhal_config::{EditorMode, KeyPreset, MouseSelectionMode, Settings, Theme};
 use narwhal_core::Value;
 
 use super::{GotoModal, HistoryState, SnippetsModal};
 use crate::wizard::ConnectionWizard;
+
+/// In-app settings editor.
+///
+/// Opened by `:settings`; modifies a `draft` copy of the live
+/// settings so Esc cancels cleanly. `Ctrl+S` writes the draft to
+/// disk and re-applies it to the running `AppCore`.
+///
+/// The modal is organised as a list of sections (Editor, Theme,
+/// Display, Keybindings, Runtime). Within each section the fields
+/// render as a vertical list; `Tab` switches sections,
+/// `Up/Down/j/k` walk fields, `Space`/`Enter` toggles or cycles
+/// the highlighted field's value.
+#[derive(Debug, Clone)]
+pub struct SettingsModal {
+    /// Working copy mutated by the user. Committed by `Ctrl+S`,
+    /// dropped by `Esc`.
+    pub draft: Settings,
+    /// Snapshot taken when the modal opened; restored on `Esc`
+    /// without touching disk.
+    pub original: Settings,
+    pub selected_section: usize,
+    pub selected_field: usize,
+    /// `true` while a draft edit has not yet been persisted.
+    pub dirty: bool,
+    /// Sticky message shown in the modal footer.
+    pub message: String,
+}
+
+impl SettingsModal {
+    /// Build a modal whose draft is the current settings.
+    #[must_use]
+    pub fn new(current: Settings) -> Self {
+        Self {
+            draft: current.clone(),
+            original: current,
+            selected_section: 0,
+            selected_field: 0,
+            dirty: false,
+            message: "Tab: section | Up/Down: field | Space: toggle | Ctrl+S: save | Esc: cancel"
+                .into(),
+        }
+    }
+
+    /// Mark the draft dirty and refresh the footer hint.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.message = "modified — press Ctrl+S to save, Esc to discard".into();
+    }
+
+    /// Cycle the editor mode to the next variant.
+    pub fn cycle_editor_mode(&mut self) {
+        self.draft.editor.mode = match self.draft.editor.mode {
+            EditorMode::Vim => EditorMode::Basic,
+            EditorMode::Basic => EditorMode::Emacs,
+            _ => EditorMode::Vim,
+        };
+        self.mark_dirty();
+    }
+
+    /// Cycle the mouse mode to the next variant.
+    pub fn cycle_mouse_mode(&mut self) {
+        self.draft.editor.mouse = match self.draft.editor.mouse {
+            MouseSelectionMode::Enabled => MouseSelectionMode::ClickOnly,
+            MouseSelectionMode::ClickOnly => MouseSelectionMode::Disabled,
+            _ => MouseSelectionMode::Enabled,
+        };
+        self.mark_dirty();
+    }
+
+    /// Cycle through the available themes.
+    pub fn cycle_theme(&mut self) {
+        self.draft.theme = match self.draft.theme {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::HighContrast,
+            _ => Theme::Dark,
+        };
+        self.mark_dirty();
+    }
+
+    /// Cycle through the keybinding presets.
+    pub fn cycle_preset(&mut self) {
+        self.draft.keybindings.preset = match self.draft.keybindings.preset {
+            KeyPreset::Default => KeyPreset::Vscode,
+            KeyPreset::Vscode => KeyPreset::Datagrip,
+            KeyPreset::Datagrip => KeyPreset::Intellij,
+            _ => KeyPreset::Default,
+        };
+        self.mark_dirty();
+    }
+}
 
 /// What the user is about to do once they confirm.
 ///
@@ -138,6 +229,9 @@ pub struct ModalState {
     /// v1.1 #1: `:goto` fuzzy schema navigator. Owns the corpus
     /// snapshot at open time and the user's query state.
     pub goto: Option<GotoModal>,
+    /// In-app settings editor (`:settings`). Holds the draft until
+    /// Ctrl+S writes it to `settings.toml`.
+    pub settings: Option<SettingsModal>,
 }
 
 impl ModalState {
@@ -151,6 +245,7 @@ impl ModalState {
             || self.help_open
             || self.confirm.is_some()
             || self.goto.is_some()
+            || self.settings.is_some()
     }
 
     /// Close every modal and drop their state. Used by the global
@@ -165,6 +260,7 @@ impl ModalState {
         self.help_open = false;
         self.confirm = None;
         self.goto = None;
+        self.settings = None;
     }
 }
 

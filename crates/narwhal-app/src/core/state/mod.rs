@@ -17,7 +17,7 @@ pub mod ui;
 pub use deps::AppDeps;
 pub use goto_modal::{GotoEntry, GotoMatch, GotoModal};
 pub use history::HistoryState;
-pub use modals::{ConfirmModal, ModalState, PendingConfirm};
+pub use modals::{ConfirmModal, ModalState, PendingConfirm, SettingsModal};
 pub use process::ProcessState;
 pub use result::{
     CellEdit, CompletionState, DiagramModalState, DiagramMode, EditorSearchState, JsonViewerState,

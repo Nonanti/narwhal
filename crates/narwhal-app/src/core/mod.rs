@@ -30,6 +30,7 @@ mod results_actions;
 mod run_loop;
 mod schema_diff_cmd;
 mod sessions;
+mod settings_modal;
 mod tabs;
 pub(super) mod text_utils;
 mod transactions;
@@ -43,7 +44,8 @@ pub use state::{
     AppDeps, CellEdit, CompletionState, ConfirmModal, DiagramModalState, DiagramMode,
     EditorSearchState, GotoCorpusCache, GotoEntry, GotoMatch, GotoModal, HistoryState,
     JsonViewerState, ModalState, PendingConfirm, ProcessState, ResultBundle, ResultSearch,
-    ResultState, RowDetailState, RowSource, SessionState, SidebarItem, SnippetsModal, StatusBar,
+    ResultState, RowDetailState, RowSource, SessionState, SettingsModal, SidebarItem,
+    SnippetsModal, StatusBar,
     Tab, UiState,
 };
 

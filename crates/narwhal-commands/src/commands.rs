@@ -218,6 +218,13 @@ pub enum Command {
     /// via fuzzy match, inserts `<schema>.<table>` at the cursor on
     /// confirm.
     Goto,
+    /// In-app settings editor (`:settings` / `:set`). Opens the
+    /// modal that drives editor mode, mouse mode, theme,
+    /// keybinding preset, etc. Commits to `settings.toml` on save.
+    Settings,
+    /// Quick editor-mode switch (`:mode vim|basic|emacs`). Bypasses
+    /// the settings modal; persists to disk via the same code path.
+    Mode(String),
     /// v1.2 #7: set the result-pane filter (`:filter <expr>`) or
     /// clear it (`:filter clear`). Same expression that the inline
     /// `f` prompt accepts; commits immediately.
@@ -467,6 +474,9 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "rmsnippet",
     "snippets",
     "pivot",
+    "settings",
+    "set",
+    "mode",
 ];
 
 /// Short descriptions for built-in commands, looked up by `:help <name>`.
@@ -613,6 +623,14 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
         "pivot",
         "render an inline pivot table over the active result (:pivot rows=col[,col..] [cols=col] [value=col] [agg=count|sum|avg|min|max]; :pivot off)",
     ),
+    (
+        "settings",
+        "open the in-app settings editor (:settings / :set) — editor mode, mouse, theme, keybindings",
+    ),
+    (
+        "mode",
+        "switch the editor input model on the fly (:mode vim|basic|emacs); persists to settings.toml",
+    ),
 ];
 
 /// Map an alias token back to its primary command key so that `:help o`
@@ -647,6 +665,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "h" => "help",
         "noh" => "nohlsearch",
         "rmsnippet" => "rm-snippet",
+        "set" => "settings",
         other => other,
     }
 }
@@ -862,6 +881,8 @@ pub fn parse(input: &str) -> Command {
         }
         "snippets" => Command::ListSnippets,
         "goto" | "g" => Command::Goto,
+        "settings" | "set" => Command::Settings,
+        "mode" => Command::Mode(arg.to_owned()),
         "filter" => {
             // `:filter` (no arg)        → open inline prompt
             // `:filter clear`           → drop the active filter

@@ -8,8 +8,9 @@ use narwhal_tui::{
     ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView, HistoryModalState,
     HistoryRow, HistoryRowOutcome, Pane, PivotPlaceholder, PivotTableView, RootLayout,
     RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
-    ContextMenuItemView, ContextMenuView, WizardFieldView, WizardView, render_confirm_modal,
-    render_context_menu, render_goto_modal, render_help_modal,
+    ContextMenuItemView, ContextMenuView, SettingsModalView, WizardFieldView, WizardView,
+    render_confirm_modal, render_context_menu, render_goto_modal, render_help_modal,
+    render_settings_modal,
     render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
 };
 use ratatui::Frame;
@@ -345,6 +346,41 @@ impl AppCore {
             render_confirm_modal(frame, area, &view, &self.ui.theme);
         }
 
+        // Settings modal sits above the main panes but below
+        // confirm / wizard so destructive prompts can't be hidden
+        // behind a half-edited settings draft.
+        if let Some(modal) = self.modals.settings.as_ref() {
+            let sections = crate::core::editor_dispatch::SECTION_LABELS;
+            let fields: Vec<(&str, String)> = match modal.selected_section {
+                0 => vec![
+                    ("Editor mode", format!("{:?}", modal.draft.editor.mode).to_lowercase()),
+                    ("Mouse", format!("{:?}", modal.draft.editor.mouse).to_lowercase()),
+                    ("Line numbers", on_off(modal.draft.editor.line_numbers)),
+                    ("Mode indicator", on_off(modal.draft.editor.show_mode_indicator)),
+                ],
+                1 => vec![("Theme", format!("{:?}", modal.draft.theme).to_lowercase())],
+                2 => vec![
+                    ("Auto indent", on_off(modal.draft.editor.auto_indent)),
+                    ("Highlight cur. line", on_off(modal.draft.editor.highlight_current_line)),
+                    ("Word wrap", on_off(modal.draft.editor.word_wrap)),
+                ],
+                3 => vec![(
+                    "Preset",
+                    format!("{:?}", modal.draft.keybindings.preset).to_lowercase(),
+                )],
+                _ => Vec::new(),
+            };
+            let view = SettingsModalView {
+                sections,
+                fields: &fields,
+                selected_section: modal.selected_section,
+                selected_field: modal.selected_field,
+                dirty: modal.dirty,
+                footer: modal.message.as_str(),
+            };
+            render_settings_modal(frame, area, &view, &self.ui.theme);
+        }
+
         // Editor right-click context menu. Drawn above the editor
         // pane but below the higher-priority modals so a
         // long-running confirm prompt still wins.
@@ -508,6 +544,11 @@ impl AppCore {
         // v1.1 #1: goto fuzzy navigator owns the foreground while open.
         if self.modals.goto.is_some() {
             self.handle_goto_key(key).await;
+            return;
+        }
+        // Settings modal owns the foreground while open.
+        if self.modals.settings.is_some() {
+            self.handle_settings_modal_key(key).await;
             return;
         }
         if self.handle_global_key(key).await {
@@ -1072,6 +1113,8 @@ impl AppCore {
             Command::RemoveSnippet { name } => self.remove_snippet(&name).await,
             Command::ListSnippets => self.open_snippets_modal().await,
             Command::Goto => self.open_goto_modal().await,
+            Command::Settings => self.open_settings_modal().await,
+            Command::Mode(arg) => self.switch_editor_mode_command(&arg).await,
             Command::Filter(spec) => self.apply_filter_command(spec).await,
             Command::Sort(arg) => self.apply_sort_command(arg).await,
             Command::DiffSchema { left, right } => self.diff_schema_command(left, right).await,
@@ -1129,6 +1172,11 @@ impl AppCore {
 
     // Run-loop / meta-update / finalize_statement / spawn_cancel moved to
     // `core::run_loop` (L21).
+}
+
+/// Stringify a bool as `on` / `off` for the settings modal grid.
+fn on_off(b: bool) -> String {
+    if b { "on".into() } else { "off".into() }
 }
 
 /// Find the start + end (exclusive) byte offsets of the word that
