@@ -131,6 +131,7 @@ impl AppCore {
             run_rx,
             meta_rx,
             keymap_warnings: Vec::new(),
+            last_self_settings_write: None,
         }
     }
 
