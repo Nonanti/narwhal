@@ -1,6 +1,5 @@
 ---
 source: crates/narwhal-app/tests/snapshots.rs
-assertion_line: 131
 expression: "snapshot_core_sized(&mut core, 130, 66)"
 ---
 ┌ narwhal ───────────────────────┐┌ editor ──────────────────────────────────────────────────────────────────────────────────────┐
@@ -22,7 +21,7 @@ expression: "snapshot_core_sized(&mut core, 130, 66)"
 │                            │  :format / :fmt              pretty-print the statement under the cur│                            │
 │                            │  :format-all / :fmtall       pretty-print every statement in the buff│                            │
 │                            │                                                                      │                            │
-│                            │ Editor                                                               │                            │
+│                            │ Editor (vim)                                                         │                            │
 │                            │  i / a                       enter insert mode                       │                            │
 │                            │  Esc                         back to normal mode                     │                            │
 │                            │  Tab / Ctrl-Space            completion                              │                            │

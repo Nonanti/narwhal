@@ -90,7 +90,7 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
         ],
     },
     CheatsheetSection {
-        title: "Editor",
+        title: "Editor (vim)",
         entries: &[
             CheatsheetEntry {
                 keys: "i / a",
@@ -287,12 +287,65 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
     },
 ];
 
+/// Editor mode hint used to swap which cheatsheet pages get
+/// rendered. Only the editor-mode chord set changes; the global
+/// shortcuts stay constant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HelpEditorMode {
+    #[default]
+    Vim,
+    Basic,
+    Emacs,
+}
+
+/// Cheatsheet entries for basic (modeless) editor mode.
+pub const CHEATSHEET_BASIC_EDITOR: &[CheatsheetEntry] = &[
+    CheatsheetEntry { keys: "Arrow / Home / End", description: "move cursor" },
+    CheatsheetEntry { keys: "Ctrl-Arrow", description: "word / paragraph jump" },
+    CheatsheetEntry { keys: "Shift-Arrow", description: "extend selection" },
+    CheatsheetEntry { keys: "Ctrl-A", description: "select all" },
+    CheatsheetEntry { keys: "Ctrl-C / Ctrl-X", description: "copy / cut selection" },
+    CheatsheetEntry { keys: "Ctrl-V", description: "paste clipboard" },
+    CheatsheetEntry { keys: "Ctrl-Z / Ctrl-Y", description: "undo / redo" },
+    CheatsheetEntry { keys: "Ctrl-F", description: "find in buffer" },
+    CheatsheetEntry { keys: "Tab", description: "completion / indent" },
+    CheatsheetEntry { keys: ":", description: "open command palette" },
+    CheatsheetEntry { keys: "Esc", description: "clear selection / close popups" },
+];
+
+/// Cheatsheet entries for emacs editor mode.
+pub const CHEATSHEET_EMACS_EDITOR: &[CheatsheetEntry] = &[
+    CheatsheetEntry { keys: "C-f / C-b", description: "forward / backward char" },
+    CheatsheetEntry { keys: "C-n / C-p", description: "next / previous line" },
+    CheatsheetEntry { keys: "C-a / C-e", description: "beginning / end of line" },
+    CheatsheetEntry { keys: "M-f / M-b", description: "forward / backward word" },
+    CheatsheetEntry { keys: "M-< / M->", description: "beginning / end of buffer" },
+    CheatsheetEntry { keys: "C-Space", description: "set mark" },
+    CheatsheetEntry { keys: "C-w / M-w", description: "kill / copy region" },
+    CheatsheetEntry { keys: "C-y", description: "yank (paste)" },
+    CheatsheetEntry { keys: "C-k", description: "kill to end of line" },
+    CheatsheetEntry { keys: "C-d / M-d", description: "delete char / word" },
+    CheatsheetEntry { keys: "C-/ or C-_", description: "undo" },
+    CheatsheetEntry { keys: "C-s / C-r", description: "search forward / backward" },
+    CheatsheetEntry { keys: "C-x C-s", description: "submit / run statement" },
+    CheatsheetEntry { keys: "C-g", description: "cancel / clear region" },
+];
+
 /// Render the help modal on top of the current frame.
 ///
 /// The modal occupies a centred rectangle (max 60×24, otherwise 70% of
 /// available space) and displays each cheatsheet section as a labelled
 /// two-column table (shortcut → description).
-pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+///
+/// `editor_mode` swaps the editor-section content between vim,
+/// basic and emacs without rebuilding the entire cheatsheet.
+pub fn render_help_modal(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    theme: &Theme,
+    editor_mode: HelpEditorMode,
+) {
     let (max_width, max_height) = crate::constants::HELP_MODAL_MAX;
     let width = (area.width * 8 / 10).min(max_width);
     let height = (area.height * 9 / 10).min(max_height);
@@ -325,14 +378,27 @@ pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         .add_modifier(Modifier::BOLD);
 
     for section in CHEATSHEET {
+        // Replace the vim editor section with the matching
+        // basic / emacs chord set when one of those modes is
+        // active; every other section is mode-agnostic.
+        let entries: &[CheatsheetEntry] = match (section.title, editor_mode) {
+            ("Editor (vim)", HelpEditorMode::Basic) => CHEATSHEET_BASIC_EDITOR,
+            ("Editor (vim)", HelpEditorMode::Emacs) => CHEATSHEET_EMACS_EDITOR,
+            _ => section.entries,
+        };
+        let title = match (section.title, editor_mode) {
+            ("Editor (vim)", HelpEditorMode::Basic) => "Editor (basic)",
+            ("Editor (vim)", HelpEditorMode::Emacs) => "Editor (emacs)",
+            (t, _) => t,
+        };
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
         lines.push(Line::from(Span::styled(
-            format!(" {} ", section.title),
+            format!(" {title} "),
             heading_style,
         )));
-        for entry in section.entries {
+        for entry in entries {
             lines.push(Line::from(vec![
                 Span::styled(format!("  {:<28}", entry.keys), key_style),
                 Span::styled(entry.description, desc_style),

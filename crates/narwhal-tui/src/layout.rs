@@ -98,6 +98,14 @@ pub struct StatusBarView<'a> {
 
 pub struct RootLayout<'a> {
     pub mode: Mode,
+    /// When `Some`, replaces the vim mode short label with the
+    /// provided text — used by basic / emacs editor modes to render
+    /// `BASIC` / `EMACS` instead of `NOR`/`INS`. When `None`, the
+    /// `mode` field above drives the label as before.
+    pub mode_label_override: Option<&'a str>,
+    /// When `false`, the mode indicator segment is hidden entirely.
+    /// Mapped from `[editor].show_mode_indicator` in `settings.toml`.
+    pub show_mode_indicator: bool,
     pub focus: Pane,
     pub status_bar: StatusBarView<'a>,
     pub running: bool,
@@ -268,7 +276,14 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         _ => view.theme.mode_normal(),
     };
 
-    let mode_label = format!(" {} ", view.mode.short_label());
+    let mode_label = if view.show_mode_indicator {
+        let label = view
+            .mode_label_override
+            .map_or_else(|| view.mode.short_label().to_owned(), str::to_owned);
+        format!(" {label} ")
+    } else {
+        String::new()
+    };
     let _mode_width = mode_label.width() as u16;
 
     let focus_label = view.focus.label();

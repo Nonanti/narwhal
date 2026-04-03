@@ -11,7 +11,7 @@
 //! session, connections, history, and modal overlays live in
 //! their own sub-states.
 
-use narwhal_config::{DiagramIcons, EditorMode, MouseSelectionMode};
+use narwhal_config::{DiagramIcons, EditorMode, KeyPreset, MouseSelectionMode};
 use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
 
 use super::{ResultState, SidebarItem, StatusBar, Tab};
@@ -153,6 +153,9 @@ pub struct UiState {
     /// Active editor context menu opened by right-click. `None`
     /// when no menu is visible.
     pub context_menu: Option<ContextMenuState>,
+    /// Keybinding preset layered on top of the built-in chords.
+    /// Wired from `[keybindings].preset` in `apply_settings`.
+    pub key_preset: KeyPreset,
 }
 
 impl UiState {
@@ -186,6 +189,7 @@ impl UiState {
             mouse_drag: None,
             last_click: None,
             context_menu: None,
+            key_preset: KeyPreset::default(),
         }
     }
 }

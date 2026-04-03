@@ -239,6 +239,7 @@ impl AppCore {
         }
         self.ui.mouse_mode = settings.editor.mouse;
         self.ui.show_mode_indicator = settings.editor.show_mode_indicator;
+        self.ui.key_preset = settings.keybindings.preset;
 
         // L36: turn the `[keymap.<group>]` TOML sections into a typed
         // override table, apply on top of the built-in defaults, and
