@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Distribution
+
+- **One-line installer** — `curl -fsSL https://github.com/Nonanti/narwhal/releases/latest/download/install.sh | sh` detects the OS/arch, verifies the SHA-256, and drops the binary into `~/.local/bin`. The script ships as a release asset (immutable) and as `scripts/install.sh` in the repo (always tracks `main`). Honours `NARWHAL_VERSION`, `NARWHAL_BIN_DIR`, and `NARWHAL_FORCE`.
+- **Statically linked libdbus** — the `keyring` Secret Service backend now uses the `vendored` feature, eliminating the runtime `libdbus-1.so.3` dependency. Prebuilt Linux binaries now run on minimal containers, Alpine, and NixOS without any host-side libdbus installation.
+
 ### Editor customization
 
 Three-way editor input model + full mouse support + in-app settings
