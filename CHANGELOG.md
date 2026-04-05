@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-08
+
 ### Distribution
 
 - **One-line installer** — `curl -fsSL https://github.com/Nonanti/narwhal/releases/latest/download/install.sh | sh` detects the OS/arch, verifies the SHA-256, and drops the binary into `~/.local/bin`. The script ships as a release asset (immutable) and as `scripts/install.sh` in the repo (always tracks `main`). Honours `NARWHAL_VERSION`, `NARWHAL_BIN_DIR`, and `NARWHAL_FORCE`.

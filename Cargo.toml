@@ -32,7 +32,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Nonantiy <nonantiy1@gmail.com>"]
@@ -143,19 +143,19 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # `cargo publish` produces a manifest the registry accepts — path is
 # used for local development, version for the published artefact.
 # Keep these in lock-step with `workspace.package.version`.
-narwhal-core = { path = "crates/narwhal-core", version = "2.0.0" }
-narwhal-config = { path = "crates/narwhal-config", version = "2.0.0" }
-narwhal-sql = { path = "crates/narwhal-sql", version = "2.0.0" }
-narwhal-pool = { path = "crates/narwhal-pool", version = "2.0.0" }
-narwhal-history = { path = "crates/narwhal-history", version = "2.0.0" }
-narwhal-audit = { path = "crates/narwhal-audit", version = "2.0.0" }
-narwhal-drivers = { path = "crates/narwhal-drivers", version = "2.0.0", default-features = false }
-narwhal-domain = { path = "crates/narwhal-domain", version = "2.0.0" }
-narwhal-commands = { path = "crates/narwhal-commands", version = "2.0.0" }
-narwhal-schema-diff = { path = "crates/narwhal-schema-diff", version = "2.0.0" }
-narwhal-plugin = { path = "crates/narwhal-plugin", version = "2.0.0" }
-narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "2.0.0" }
-narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "2.0.0" }
+narwhal-core = { path = "crates/narwhal-core", version = "2.1.0" }
+narwhal-config = { path = "crates/narwhal-config", version = "2.1.0" }
+narwhal-sql = { path = "crates/narwhal-sql", version = "2.1.0" }
+narwhal-pool = { path = "crates/narwhal-pool", version = "2.1.0" }
+narwhal-history = { path = "crates/narwhal-history", version = "2.1.0" }
+narwhal-audit = { path = "crates/narwhal-audit", version = "2.1.0" }
+narwhal-drivers = { path = "crates/narwhal-drivers", version = "2.1.0", default-features = false }
+narwhal-domain = { path = "crates/narwhal-domain", version = "2.1.0" }
+narwhal-commands = { path = "crates/narwhal-commands", version = "2.1.0" }
+narwhal-schema-diff = { path = "crates/narwhal-schema-diff", version = "2.1.0" }
+narwhal-plugin = { path = "crates/narwhal-plugin", version = "2.1.0" }
+narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "2.1.0" }
+narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "2.1.0" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }
 # T1-T5-A: WASM runtime — pinned so plugin SDK and host agree on the
 # component-model ABI. wasmtime 45 ships the stable component model
