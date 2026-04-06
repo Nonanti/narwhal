@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use narwhal_app::DriverRegistry;
 use narwhal_app::clipboard::{Clipboard, InMemoryClipboard};
 use narwhal_app::core::AppCore;
-use narwhal_app::DriverRegistry;
 use narwhal_config::{ConnectionsFile, EditorMode, InMemoryStore, MouseSelectionMode, Settings};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use ratatui::Terminal;
@@ -182,12 +182,8 @@ async fn middle_click_pastes_at_cursor() {
     render(&mut core);
 
     let (ox, oy) = editor_text_origin(&core);
-    core.handle_mouse(mouse(
-        ox + 1,
-        oy,
-        MouseEventKind::Down(MouseButton::Middle),
-    ))
-    .await;
+    core.handle_mouse(mouse(ox + 1, oy, MouseEventKind::Down(MouseButton::Middle)))
+        .await;
     assert!(
         core.editor().entire_text().contains("INSERT"),
         "buffer should include pasted text, got {:?}",
@@ -202,12 +198,8 @@ async fn right_click_opens_context_menu() {
     render(&mut core);
 
     let (ox, oy) = editor_text_origin(&core);
-    core.handle_mouse(mouse(
-        ox + 2,
-        oy,
-        MouseEventKind::Down(MouseButton::Right),
-    ))
-    .await;
+    core.handle_mouse(mouse(ox + 2, oy, MouseEventKind::Down(MouseButton::Right)))
+        .await;
     assert!(core.context_menu_open(), "right-click should open the menu");
 }
 

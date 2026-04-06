@@ -233,8 +233,7 @@ impl AppCore {
         // its explicit `editor.mode` choice.
         self.ui.editor_mode = settings.editor.mode;
         #[allow(deprecated)]
-        if !settings.keybindings.vim_mode
-            && settings.editor.mode == narwhal_config::EditorMode::Vim
+        if !settings.keybindings.vim_mode && settings.editor.mode == narwhal_config::EditorMode::Vim
         {
             self.ui.editor_mode = narwhal_config::EditorMode::Basic;
         }

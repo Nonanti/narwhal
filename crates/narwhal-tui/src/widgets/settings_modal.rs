@@ -46,7 +46,11 @@ pub fn render_settings_modal(
     };
     frame.render_widget(Clear, area);
 
-    let title = if view.dirty { " settings * " } else { " settings " };
+    let title = if view.dirty {
+        " settings * "
+    } else {
+        " settings "
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.accent))
@@ -91,10 +95,7 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, view: &SettingsModalView<'_>, 
             } else {
                 Style::default().fg(theme.foreground)
             };
-            vec![
-                Span::styled(format!(" {label} "), style),
-                Span::raw(" "),
-            ]
+            vec![Span::styled(format!(" {label} "), style), Span::raw(" ")]
         })
         .collect();
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -112,14 +113,18 @@ fn render_section_list(
         .enumerate()
         .map(|(idx, label)| {
             let style = if idx == view.selected_section {
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.muted)
             };
             Line::from(Span::styled(format!("  {label}"), style))
         })
         .collect();
-    let block = Block::default().borders(Borders::RIGHT).border_style(Style::default().fg(theme.muted));
+    let block = Block::default()
+        .borders(Borders::RIGHT)
+        .border_style(Style::default().fg(theme.muted));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines), inner);
@@ -163,7 +168,9 @@ fn render_field_grid(
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, view: &SettingsModalView<'_>, theme: &Theme) {
     let style = if view.dirty {
-        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme.warning)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.muted)
     };

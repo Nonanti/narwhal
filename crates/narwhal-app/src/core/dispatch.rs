@@ -5,13 +5,13 @@ use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
     ChartPlaceholder, ChartView, ChartViewKind, CompletionItemView, CompletionPopupView,
-    ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView, HistoryModalState,
-    HistoryRow, HistoryRowOutcome, Pane, PivotPlaceholder, PivotTableView, RootLayout,
-    RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
-    ContextMenuItemView, ContextMenuView, SettingsModalView, WizardFieldView, WizardView,
-    HelpEditorMode, render_confirm_modal, render_context_menu, render_goto_modal,
-    render_help_modal, render_settings_modal,
-    render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
+    ConfirmModalView, ContextMenuItemView, ContextMenuView, EditorSearchHighlight, GotoModalView,
+    GotoRowView, HelpEditorMode, HistoryModalState, HistoryRow, HistoryRowOutcome, Pane,
+    PivotPlaceholder, PivotTableView, RootLayout, RowDetailView, SearchHighlight,
+    SettingsModalView, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,
+    WizardView, render_confirm_modal, render_context_menu, render_goto_modal, render_help_modal,
+    render_history_modal, render_root, render_row_detail, render_settings_modal,
+    render_snippets_modal, render_wizard,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -376,15 +376,27 @@ impl AppCore {
             let sections = crate::core::editor_dispatch::SECTION_LABELS;
             let fields: Vec<(&str, String)> = match modal.selected_section {
                 0 => vec![
-                    ("Editor mode", format!("{:?}", modal.draft.editor.mode).to_lowercase()),
-                    ("Mouse", format!("{:?}", modal.draft.editor.mouse).to_lowercase()),
+                    (
+                        "Editor mode",
+                        format!("{:?}", modal.draft.editor.mode).to_lowercase(),
+                    ),
+                    (
+                        "Mouse",
+                        format!("{:?}", modal.draft.editor.mouse).to_lowercase(),
+                    ),
                     ("Line numbers", on_off(modal.draft.editor.line_numbers)),
-                    ("Mode indicator", on_off(modal.draft.editor.show_mode_indicator)),
+                    (
+                        "Mode indicator",
+                        on_off(modal.draft.editor.show_mode_indicator),
+                    ),
                 ],
                 1 => vec![("Theme", format!("{:?}", modal.draft.theme).to_lowercase())],
                 2 => vec![
                     ("Auto indent", on_off(modal.draft.editor.auto_indent)),
-                    ("Highlight cur. line", on_off(modal.draft.editor.highlight_current_line)),
+                    (
+                        "Highlight cur. line",
+                        on_off(modal.draft.editor.highlight_current_line),
+                    ),
                     ("Word wrap", on_off(modal.draft.editor.word_wrap)),
                 ],
                 3 => vec![(
@@ -666,9 +678,8 @@ impl AppCore {
         let gutter = narwhal_tui::gutter_width(buf.line_count()) as u16;
         let row_in_view = pos.1 - inner_y;
         let col_in_view = pos.0.saturating_sub(inner_x).saturating_sub(gutter);
-        let target_row = (buf.scroll() + row_in_view as usize).min(
-            buf.line_count().saturating_sub(1),
-        );
+        let target_row =
+            (buf.scroll() + row_in_view as usize).min(buf.line_count().saturating_sub(1));
         let line_len = buf.get_line(target_row).len();
         let target_col = (col_in_view as usize).min(line_len);
         Some((target_row, target_col))
@@ -692,9 +703,11 @@ impl AppCore {
         // first time drag is observed; subsequent drag events just
         // move the head.
         if tab.editor.selection().is_none() {
-            tab.editor.set_selection(Some(
-                narwhal_domain::editor::Selection::character(drag.anchor, drag.anchor),
-            ));
+            tab.editor
+                .set_selection(Some(narwhal_domain::editor::Selection::character(
+                    drag.anchor,
+                    drag.anchor,
+                )));
         }
         tab.editor.extend_selection_to(row, col);
         // Move the cursor with the drag head so the renderer keeps
@@ -747,11 +760,7 @@ impl AppCore {
         }
         self.ui.focus = Pane::Editor;
         let has_selection = buf.has_selection();
-        let has_clipboard = self
-            .deps
-            .clipboard
-            .get_text()
-            .is_ok_and(|t| !t.is_empty());
+        let has_clipboard = self.deps.clipboard.get_text().is_ok_and(|t| !t.is_empty());
         self.ui.context_menu = Some(crate::core::state::ui::ContextMenuState {
             anchor: pos,
             selected: 0,
@@ -857,22 +866,16 @@ impl AppCore {
                         tab.editor.clear_selection();
                         // Arm drag-selection: subsequent Drag
                         // events extend from this anchor.
-                        if self.ui.mouse_mode
-                            == narwhal_config::MouseSelectionMode::Enabled
-                        {
-                            self.ui.mouse_drag =
-                                Some(crate::core::state::ui::MouseDragState {
-                                    tab_id: tab.id(),
-                                    anchor: (row, col),
-                                });
+                        if self.ui.mouse_mode == narwhal_config::MouseSelectionMode::Enabled {
+                            self.ui.mouse_drag = Some(crate::core::state::ui::MouseDragState {
+                                tab_id: tab.id(),
+                                anchor: (row, col),
+                            });
                         }
                     }
                     2 => {
                         // Word select: snap to the surrounding word.
-                        let (w_start, w_end) = word_bounds_at(
-                            tab.editor.get_line(row),
-                            col,
-                        );
+                        let (w_start, w_end) = word_bounds_at(tab.editor.get_line(row), col);
                         tab.editor.set_selection(Some(
                             narwhal_domain::editor::Selection::character(
                                 (row, w_start),
@@ -884,12 +887,11 @@ impl AppCore {
                     _ => {
                         // Triple-and-up: line select.
                         let line_len = tab.editor.get_line(row).len();
-                        tab.editor.set_selection(Some(
-                            narwhal_domain::editor::Selection::line(
+                        tab.editor
+                            .set_selection(Some(narwhal_domain::editor::Selection::line(
                                 (row, 0),
                                 (row, line_len),
-                            ),
-                        ));
+                            )));
                     }
                 }
                 self.ui.focus = Pane::Editor;

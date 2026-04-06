@@ -46,8 +46,7 @@ pub use state::{
     EditorSearchState, GotoCorpusCache, GotoEntry, GotoMatch, GotoModal, HistoryState,
     JsonViewerState, ModalState, PendingConfirm, ProcessState, ResultBundle, ResultSearch,
     ResultState, RowDetailState, RowSource, SessionState, SettingsModal, SidebarItem,
-    SnippetsModal, StatusBar,
-    Tab, UiState,
+    SnippetsModal, StatusBar, Tab, UiState,
 };
 
 /// Pure, IO-free application state and behaviour.

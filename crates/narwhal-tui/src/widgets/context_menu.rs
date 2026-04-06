@@ -35,7 +35,12 @@ pub struct ContextMenuItemView<'a> {
 
 /// Render the menu inside `screen`. The menu width is the longest
 /// label plus 4 cells of padding; height is `items.len() + 2`.
-pub fn render_context_menu(frame: &mut Frame<'_>, screen: Rect, view: &ContextMenuView<'_>, theme: &Theme) {
+pub fn render_context_menu(
+    frame: &mut Frame<'_>,
+    screen: Rect,
+    view: &ContextMenuView<'_>,
+    theme: &Theme,
+) {
     if view.items.is_empty() {
         return;
     }
@@ -45,7 +50,9 @@ pub fn render_context_menu(frame: &mut Frame<'_>, screen: Rect, view: &ContextMe
         .map(|i| i.label.chars().count())
         .max()
         .unwrap_or(8) as u16;
-    let width = widest.saturating_add(4).clamp(12, screen.width.saturating_sub(2));
+    let width = widest
+        .saturating_add(4)
+        .clamp(12, screen.width.saturating_sub(2));
     let height = (view.items.len() as u16).saturating_add(2);
 
     // Clamp the anchor so the menu stays on-screen.

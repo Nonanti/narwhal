@@ -43,7 +43,10 @@ impl AppCore {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         // Mark active <=> selection present. Motions extend it.
-        let keep_selection = self.ui.tabs[self.ui.active_tab].editor.selection().is_some();
+        let keep_selection = self.ui.tabs[self.ui.active_tab]
+            .editor
+            .selection()
+            .is_some();
 
         match key.code {
             // ---------- C-x prefix ----------------------------

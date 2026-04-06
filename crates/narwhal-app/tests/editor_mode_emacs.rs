@@ -5,9 +5,9 @@
 //! undo, and the two-stroke `C-x` prefix.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use narwhal_app::DriverRegistry;
 use narwhal_app::clipboard::{Clipboard, InMemoryClipboard};
 use narwhal_app::core::AppCore;
-use narwhal_app::DriverRegistry;
 use narwhal_config::{ConnectionsFile, EditorMode, InMemoryStore, Settings};
 use std::sync::Arc;
 
@@ -204,7 +204,8 @@ async fn arrow_keys_move_cursor() {
     for c in ['a', 'b', 'c'] {
         core.handle_key(plain(c)).await;
     }
-    core.handle_key(key(KeyCode::Left, KeyModifiers::NONE)).await;
+    core.handle_key(key(KeyCode::Left, KeyModifiers::NONE))
+        .await;
     core.handle_key(plain('X')).await;
     assert_eq!(buffer_text(&core), "abXc");
 }

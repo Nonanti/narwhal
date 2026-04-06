@@ -20,8 +20,7 @@ use crate::core::AppCore;
 /// Per-section field counts. Keeping them as a const table keeps the
 /// dispatcher in lockstep with the renderer; both pull the same
 /// numbers.
-pub(crate) const SECTION_LABELS: &[&str] =
-    &["Editor", "Theme", "Display", "Keybindings"];
+pub(crate) const SECTION_LABELS: &[&str] = &["Editor", "Theme", "Display", "Keybindings"];
 
 /// Field counts in the same order as `SECTION_LABELS`.
 pub(crate) const SECTION_FIELD_COUNTS: &[usize] = &[
@@ -55,8 +54,7 @@ impl AppCore {
                 modal.selected_field = 0;
             }
             CtKey::Tab => {
-                modal.selected_section =
-                    (modal.selected_section + 1) % SECTION_LABELS.len();
+                modal.selected_section = (modal.selected_section + 1) % SECTION_LABELS.len();
                 modal.selected_field = 0;
             }
             CtKey::Down | CtKey::Char('j') => {
@@ -97,8 +95,7 @@ impl AppCore {
                 modal.mark_dirty();
             }
             (0, 3) => {
-                modal.draft.editor.show_mode_indicator =
-                    !modal.draft.editor.show_mode_indicator;
+                modal.draft.editor.show_mode_indicator = !modal.draft.editor.show_mode_indicator;
                 modal.mark_dirty();
             }
             // ---------- Theme ----------

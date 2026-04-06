@@ -66,9 +66,7 @@ impl EditOp {
             Self::Insert { cursor_before, .. }
             | Self::Delete { cursor_before, .. }
             | Self::Replace { cursor_before, .. } => *cursor_before,
-            Self::Compound(children) => children
-                .first()
-                .map_or((0, 0), Self::cursor_before),
+            Self::Compound(children) => children.first().map_or((0, 0), Self::cursor_before),
         }
     }
 
@@ -81,9 +79,7 @@ impl EditOp {
             Self::Insert { cursor_after, .. }
             | Self::Delete { cursor_after, .. }
             | Self::Replace { cursor_after, .. } => *cursor_after,
-            Self::Compound(children) => children
-                .last()
-                .map_or((0, 0), Self::cursor_after),
+            Self::Compound(children) => children.last().map_or((0, 0), Self::cursor_after),
         }
     }
 }
@@ -292,10 +288,7 @@ mod tests {
         let oldest = h.pop_undo();
         let _newer = h.pop_undo();
         let _newest = h.pop_undo();
-        assert!(matches!(
-            oldest,
-            Some(EditOp::Insert { at: (0, 4), .. })
-        ));
+        assert!(matches!(oldest, Some(EditOp::Insert { at: (0, 4), .. })));
     }
 
     #[test]

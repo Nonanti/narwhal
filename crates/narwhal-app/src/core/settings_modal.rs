@@ -60,9 +60,7 @@ impl AppCore {
             "basic" => EditorMode::Basic,
             "emacs" => EditorMode::Emacs,
             other => {
-                self.ui.status.message = format!(
-                    "mode: expected vim|basic|emacs, got '{other}'"
-                );
+                self.ui.status.message = format!("mode: expected vim|basic|emacs, got '{other}'");
                 return;
             }
         };
@@ -110,8 +108,8 @@ impl AppCore {
     /// `last_self_settings_write` timestamp so the live-reload
     /// watcher can suppress the echo of our own write.
     async fn persist_settings(&mut self, settings: &Settings) -> Result<(), String> {
-        let paths = narwhal_config::ConfigPaths::discover()
-            .map_err(|e| format!("config paths: {e}"))?;
+        let paths =
+            narwhal_config::ConfigPaths::discover().map_err(|e| format!("config paths: {e}"))?;
         settings
             .save(&paths.settings_file())
             .map_err(|e| format!("{e}"))?;

@@ -63,10 +63,7 @@ impl AppCore {
         if self.ui.focus == Pane::Editor
             && self.ui.editor_mode != narwhal_config::EditorMode::Vim
             && key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(
-                key.code,
-                CtKey::Char('w' | 'n' | 'r' | 's' | ' ')
-            )
+            && matches!(key.code, CtKey::Char('w' | 'n' | 'r' | 's' | ' '))
         {
             return false;
         }
@@ -93,8 +90,7 @@ impl AppCore {
                     if self.ui.focus != Pane::Editor {
                         self.ui.focus = Pane::Editor;
                     }
-                    let k =
-                        crossterm::event::KeyEvent::new(CtKey::Char(':'), KeyModifiers::NONE);
+                    let k = crossterm::event::KeyEvent::new(CtKey::Char(':'), KeyModifiers::NONE);
                     self.handle_editor_key(k).await;
                     return true;
                 }

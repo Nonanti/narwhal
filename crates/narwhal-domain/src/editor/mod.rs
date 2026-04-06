@@ -210,9 +210,7 @@ impl EditorBuffer {
         let (start, end) = sel.normalised();
         match sel.kind {
             SelectionKind::Line => self.collect_line_range(start.0, end.0),
-            SelectionKind::Character | SelectionKind::Block => {
-                self.collect_char_range(start, end)
-            }
+            SelectionKind::Character | SelectionKind::Block => self.collect_char_range(start, end),
         }
     }
 
@@ -231,9 +229,7 @@ impl EditorBuffer {
         let (start, end) = sel.normalised();
         let removed = match sel.kind {
             SelectionKind::Line => self.remove_line_range(start.0, end.0),
-            SelectionKind::Character | SelectionKind::Block => {
-                self.remove_char_range(start, end)
-            }
+            SelectionKind::Character | SelectionKind::Block => self.remove_char_range(start, end),
         };
         self.cursor_row = start.0.min(self.lines.len().saturating_sub(1));
         let line_len = self.lines[self.cursor_row].len();
@@ -415,9 +411,7 @@ impl EditorBuffer {
                 let _ = text;
                 self.set_cursor(cursor_before.0, cursor_before.1);
             }
-            EditOp::Delete {
-                cursor_before, ..
-            } => {
+            EditOp::Delete { cursor_before, .. } => {
                 self.set_cursor(cursor_before.0, cursor_before.1);
             }
             EditOp::Compound(children) => {
