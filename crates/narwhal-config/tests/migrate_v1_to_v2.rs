@@ -663,7 +663,7 @@ fn editor_mode_wire_format_accepts_all_variants() {
         ("basic", narwhal_config::EditorMode::Basic),
         ("emacs", narwhal_config::EditorMode::Emacs),
     ] {
-        let body = format!("schema_version = 2\n[settings.editor]\nmode = \"{wire}\"\n",);
+        let body = format!("schema_version = 2\n[settings.editor]\nmode = \"{wire}\"\n");
         let dir = temp_dir();
         let path = dir.path().join("settings.toml");
         fs::write(&path, &body).unwrap();
@@ -680,7 +680,7 @@ fn mouse_mode_wire_format_accepts_all_variants() {
         ("click-only", narwhal_config::MouseSelectionMode::ClickOnly),
         ("disabled", narwhal_config::MouseSelectionMode::Disabled),
     ] {
-        let body = format!("schema_version = 2\n[settings.editor]\nmouse = \"{wire}\"\n",);
+        let body = format!("schema_version = 2\n[settings.editor]\nmouse = \"{wire}\"\n");
         let dir = temp_dir();
         let path = dir.path().join("settings.toml");
         fs::write(&path, &body).unwrap();
@@ -698,7 +698,7 @@ fn key_preset_wire_format_accepts_all_variants() {
         ("datagrip", narwhal_config::KeyPreset::Datagrip),
         ("intellij", narwhal_config::KeyPreset::Intellij),
     ] {
-        let body = format!("schema_version = 2\n[settings.keybindings]\npreset = \"{wire}\"\n",);
+        let body = format!("schema_version = 2\n[settings.keybindings]\npreset = \"{wire}\"\n");
         let dir = temp_dir();
         let path = dir.path().join("settings.toml");
         fs::write(&path, &body).unwrap();
