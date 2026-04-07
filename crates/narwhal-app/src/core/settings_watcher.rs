@@ -3,7 +3,7 @@
 //! When the user edits `~/.config/narwhal/config.toml` from another
 //! editor (vim, VS Code, ...), this watcher spots the change and
 //! forwards it to the main run loop, which re-parses the file and
-//! calls [`AppCore::apply_settings`]. The settings modal's own save
+//! calls `AppCore::apply_settings`. The settings modal's own save
 //! path emits a "self-write" suppression token so the watcher
 //! doesn't double-apply changes the modal already wired in.
 //!

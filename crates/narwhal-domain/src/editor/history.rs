@@ -8,9 +8,10 @@
 //! Compound edits — for example "delete a multi-line selection and
 //! type the replacement" — are wrapped in [`EditOp::Compound`] so a
 //! single `Ctrl+Z` reverts the whole intent rather than the
-//! individual primitives. The buffer wraps a [`HistoryTxn`] guard
-//! around such operations: on drop, the recorded primitives become
-//! one compound entry.
+//! individual primitives. The buffer opens a transaction via
+//! [`EditHistory::begin`] around such operations and closes it with
+//! [`EditHistory::commit`]: the recorded primitives become one
+//! compound entry.
 //!
 //! The history is **mode-agnostic** — vim, basic and emacs handlers
 //! all funnel their mutations through the same buffer methods, so a
