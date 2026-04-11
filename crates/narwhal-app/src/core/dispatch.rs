@@ -716,6 +716,13 @@ impl AppCore {
     }
 
     async fn handle_middle_click(&mut self, pos: (u16, u16)) {
+        // Cancel command-line prompt on middle-click (same rationale
+        // as handle_left_click).
+        if self.ui.vim.mode() == narwhal_vim::Mode::Command {
+            let esc = narwhal_vim::Key::special(narwhal_vim::KeyCode::Esc);
+            let action = self.ui.vim.handle(esc);
+            self.apply_action(action).await;
+        }
         // Middle-click paste targets the editor only; clicks
         // elsewhere are ignored to stay consistent with most
         // terminals.
@@ -741,6 +748,13 @@ impl AppCore {
     }
 
     async fn handle_right_click(&mut self, pos: (u16, u16)) {
+        // Cancel command-line prompt on right-click (same rationale
+        // as handle_left_click).
+        if self.ui.vim.mode() == narwhal_vim::Mode::Command {
+            let esc = narwhal_vim::Key::special(narwhal_vim::KeyCode::Esc);
+            let action = self.ui.vim.handle(esc);
+            self.apply_action(action).await;
+        }
         // Only open the menu inside the editor pane; right-clicks
         // elsewhere fall through to the keyboard-level handlers.
         let Some((row, col)) = self.editor_click_to_buffer_pos(pos) else {
@@ -805,6 +819,18 @@ impl AppCore {
     }
 
     async fn handle_left_click(&mut self, pos: (u16, u16)) {
+        // Cancel the vim command-line prompt on any left click.
+        // Clicking anywhere signals the user's intent to interact
+        // with the clicked region; leaving vim in Command mode would
+        // strand key dispatch (the sidebar/results handlers don't
+        // forward to the vim layer, so the prompt becomes
+        // unreachable and Esc won't close it).
+        if self.ui.vim.mode() == narwhal_vim::Mode::Command {
+            let esc = narwhal_vim::Key::special(narwhal_vim::KeyCode::Esc);
+            let action = self.ui.vim.handle(esc);
+            self.apply_action(action).await;
+        }
+
         let layout = self.ui.last_layout.clone();
 
         // Priority: completion popup > sidebar tables > result headers/rows > pane focus.
