@@ -222,3 +222,24 @@ async fn home_and_end_jump_to_line_extremes() {
     core.handle_key(plain('!')).await;
     assert_eq!(buffer_text(&core), "-hello!");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn colon_command_prompt_does_not_leak_into_buffer() {
+    // Regression: in basic mode, `:` opens the vim command prompt
+    // via the cross-mode shortcut. Without the Mode::Command check
+    // in handle_editor_key, the following characters (`s`, `e`,
+    // `t`, ...) would fall through to the basic-mode handler and
+    // be inserted into the SQL buffer instead of building the
+    // command name. Users would then see `set` (with completions)
+    // in the editor while wondering why `:settings` did nothing.
+    let mut core = basic_core();
+    core.handle_key(plain(':')).await;
+    for c in ['s', 'e', 't', 't', 'i', 'n', 'g', 's'] {
+        core.handle_key(plain(c)).await;
+    }
+    assert_eq!(
+        buffer_text(&core),
+        "",
+        "basic-mode `:settings` should compose the command, not type into the buffer"
+    );
+}
