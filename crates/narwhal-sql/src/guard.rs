@@ -196,12 +196,18 @@ fn first_keyword(stripped: &str) -> String {
         .to_ascii_uppercase()
 }
 
-/// Replace the contents of every SQL string literal (`'…'`) and
-/// double-quoted identifier (`"…"`) with spaces so that subsequent
-/// keyword scans see only structural tokens. Handles the SQL standard
+/// Replace the contents of every SQL string literal (`'…'`),
+/// double-quoted identifier (`"…"`), line comment (`-- …`), and
+/// block comment (`/* … */`) with spaces so that subsequent keyword
+/// scans see only structural tokens. Handles the SQL standard
 /// doubled-quote escapes (`''` inside a single-quoted literal, `""`
 /// inside a double-quoted identifier). Backslash escapes are *not*
 /// honoured — the goal is keyword stripping, not full lexing.
+///
+/// Comment masking was added in v2.1.1 (B7) because a trailing
+/// `-- benchmark candidate, sleep(1)` or `/* TODO: drop pg_sleep */`
+/// was tripping the denylist even though the keywords were not
+/// executable code.
 ///
 /// Sprint 11 follow-up: an earlier draft added `MySQL` backticks to
 /// the strip set on the assumption that ``SELECT `SLEEP`(10)``
@@ -216,6 +222,39 @@ fn strip_sql_literals(sql: &str) -> String {
     let mut iter = sql.chars().peekable();
     while let Some(c) = iter.next() {
         match c {
+            // Line comment: keep `--` delimiter, mask body until newline.
+            '-' if iter.peek() == Some(&'-') => {
+                iter.next();
+                out.push('-');
+                out.push('-');
+                while let Some(&next) = iter.peek() {
+                    iter.next();
+                    if next == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                    out.push(' ');
+                }
+            }
+            // Block comment: keep `/* */` delimiters, mask body.
+            '/' if iter.peek() == Some(&'*') => {
+                iter.next();
+                out.push('/');
+                out.push('*');
+                loop {
+                    match iter.next() {
+                        Some('*') if iter.peek() == Some(&'/') => {
+                            iter.next();
+                            out.push('*');
+                            out.push('/');
+                            break;
+                        }
+                        Some('\n') => out.push('\n'),
+                        Some(_) => out.push(' '),
+                        None => break,
+                    }
+                }
+            }
             '\'' | '"' => {
                 let quote = c;
                 out.push(c);
@@ -469,5 +508,47 @@ mod tests {
             classify_statement("WITH cte AS (SELECT 1) INSERT INTO t SELECT * FROM cte"),
             StatementKind::Read,
         );
+    }
+
+    // -----------------------------------------------------------------
+    // B7: comment-masking — pg_sleep / sleep / waitfor in comments
+    // must NOT trip the denylist.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn guard_allows_pg_sleep_in_trailing_line_comment() {
+        let sql = "SELECT * FROM users -- benchmark candidate, sleep(1)";
+        assert!(guard_read_only(sql).is_ok(), "must accept: {sql:?}");
+    }
+
+    #[test]
+    fn guard_allows_sleep_in_block_comment() {
+        let sql = "SELECT 1 /* uses SLEEP for soak */";
+        assert!(guard_read_only(sql).is_ok(), "must accept: {sql:?}");
+    }
+
+    #[test]
+    fn guard_allows_waitfor_in_mid_statement_block_comment() {
+        let sql = "SELECT id /* TODO: drop pg_sleep usage */ FROM t";
+        assert!(guard_read_only(sql).is_ok(), "must accept: {sql:?}");
+    }
+
+    /// Regression: actual executable blocked functions must still be rejected.
+    #[test]
+    fn guard_still_rejects_pg_sleep_in_actual_code() {
+        for sql in [
+            "SELECT pg_sleep(1)",
+            "SELECT * FROM t WHERE SLEEP(5) = 0",
+            "SELECT BENCHMARK(1000000, SHA1('test'))",
+            "SELECT 1; WAITFOR DELAY '00:00:05'",
+        ] {
+            assert!(guard_read_only(sql).is_err(), "must reject: {sql:?}");
+        }
+    }
+
+    #[test]
+    fn guard_handles_block_comment_with_newlines() {
+        let sql = "SELECT id\n/* multi-line\n   WAITFOR DELAY workaround\n*/\nFROM t";
+        assert!(guard_read_only(sql).is_ok(), "must accept: {sql:?}");
     }
 }
