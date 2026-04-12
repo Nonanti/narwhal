@@ -220,3 +220,54 @@ async fn mouse_disabled_swallows_drag() {
         .await;
     assert_eq!(core.editor().selected_text(), "");
 }
+
+/// Regression: in basic/emacs mode, opening the `:` command prompt
+/// then clicking on the editor body (or elsewhere) must cancel the
+/// prompt. Without the fix, vim stays in Command mode and subsequent
+/// characters are swallowed by the command buffer instead of being
+/// inserted as SQL text.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn click_cancels_command_prompt_mode() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    render(&mut core);
+
+    // Open the command prompt via `:`.
+    let colon = KeyEvent {
+        code: KeyCode::Char(':'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(colon).await;
+    assert_eq!(
+        core.mode(),
+        narwhal_vim::Mode::Command,
+        "`:` should put vim into Command mode"
+    );
+
+    // Click on the editor body — this must cancel command mode.
+    let (ox, oy) = editor_text_origin(&core);
+    core.handle_mouse(mouse(ox, oy, MouseEventKind::Down(MouseButton::Left)))
+        .await;
+    assert_ne!(
+        core.mode(),
+        narwhal_vim::Mode::Command,
+        "left click should cancel Command mode"
+    );
+
+    // Typing should now insert into the SQL buffer, not the command prompt.
+    let a_key = KeyEvent {
+        code: KeyCode::Char('a'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(a_key).await;
+    assert_eq!(
+        core.editor().entire_text(),
+        "a",
+        "character should be inserted into the editor after click cancels command prompt"
+    );
+}
