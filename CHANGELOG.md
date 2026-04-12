@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-06-08
+
+Patch release focused on regressions introduced by the v2.1.0 editor
+customization + mouse + settings live-reload work, plus a handful of
+pre-existing correctness and safety fixes uncovered during the review.
+
+### Fixed
+
+- **Mouse click no longer strands the `:` command prompt** — clicking
+  outside the editor pane while vim was in `Mode::Command` routed
+  subsequent keystrokes to the sidebar/results handlers, which have no
+  Command-mode awareness; the prompt was unreachable, Esc did nothing,
+  and the user had to use Ctrl-W to escape. Each mouse click handler
+  now cancels Command mode up front.
+
+_Additional entries land here as Wave 1 fixes merge._
+
 ## [2.1.0] - 2026-06-08
 
 ### Distribution
