@@ -99,10 +99,23 @@ impl DatabaseDriver for SqliteDriver {
             canonical = canonical.as_deref().unwrap_or("<unresolved>"),
             "opening database"
         );
-        let conn = task::spawn_blocking(move || rusqlite::Connection::open(path_buf))
-            .await
-            .map_err(|e| Error::connection_with("sqlite spawn_blocking join", e))?
-            .map_err(|e| Error::connection_with("sqlite open", e))?;
+        let conn = task::spawn_blocking(move || {
+            let conn = rusqlite::Connection::open(path_buf)
+                .map_err(|e| Error::connection_with("sqlite open", e))?;
+            // B4: SQLite defaults to foreign_keys = OFF per connection.
+            // Without this PRAGMA, REFERENCES … ON DELETE CASCADE is never
+            // enforced and orphan inserts succeed silently.
+            conn.execute_batch("PRAGMA foreign_keys = ON;")
+                .map_err(|e| Error::connection_with("sqlite pragma foreign_keys", e))?;
+            // O2: soften SQLITE_BUSY under concurrent reader/writer
+            // pressure by retrying internally for up to 5 s instead of
+            // failing instantly.
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .map_err(|e| Error::connection_with("sqlite busy_timeout", e))?;
+            Ok::<_, Error>(conn)
+        })
+        .await
+        .map_err(|e| Error::connection_with("sqlite spawn_blocking join", e))??;
 
         info!(
             target: "narwhal::sqlite",
