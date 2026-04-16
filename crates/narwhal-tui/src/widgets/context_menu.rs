@@ -44,16 +44,28 @@ pub fn render_context_menu(
     if view.items.is_empty() {
         return;
     }
+
+    // Bail out when the terminal is too small to show even a
+    // one-line menu. `u16::clamp(min, max)` panics if min > max,
+    // which happened when screen.width <= 13 (max = width - 2
+    // <= 11 < 12 = min). Using min().max() avoids that, and the
+    // early return prevents rendering a zero-size area.
+    let max_width = screen.width.saturating_sub(2);
+    let max_height = screen.height.saturating_sub(2);
+    if max_width == 0 || max_height == 0 {
+        return;
+    }
+
     let widest = view
         .items
         .iter()
         .map(|i| i.label.chars().count())
         .max()
         .unwrap_or(8) as u16;
-    let width = widest
-        .saturating_add(4)
-        .clamp(12, screen.width.saturating_sub(2));
-    let height = (view.items.len() as u16).saturating_add(2);
+    let min_width: u16 = 12;
+    let desired = widest.saturating_add(4);
+    let width = desired.min(max_width).max(min_width.min(max_width));
+    let height = (view.items.len() as u16).saturating_add(2).min(max_height);
 
     // Clamp the anchor so the menu stays on-screen.
     let max_x = screen.x + screen.width.saturating_sub(width);
