@@ -48,6 +48,15 @@ impl SettingsWatcher {
         let (tx, rx) = mpsc::channel::<SettingsUpdate>(8);
         let last_emit: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let tx_for_handler = tx.clone();
+
+        // Capture the file name so the callback can reject sibling-file events
+        // (connections.toml, workspace-state.toml, sessions/*.toml, …) that
+        // arrive because we watch the parent directory for atomic rename.
+        let settings_file_name = path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .expect("settings path must have a file name");
+
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 let Ok(event) = res else {
@@ -57,6 +66,15 @@ impl SettingsWatcher {
                     event.kind,
                     EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
                 ) {
+                    return;
+                }
+                // Only react to paths whose file name matches the watched
+                // settings file — ignore all sibling changes.
+                let matches = event
+                    .paths
+                    .iter()
+                    .any(|p| p.file_name() == Some(settings_file_name.as_os_str()));
+                if !matches {
                     return;
                 }
                 // Coalesce burst writes (vim's swap-then-rename).
