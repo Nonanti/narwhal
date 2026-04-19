@@ -74,7 +74,16 @@ impl AppCore {
         // palette equivalent.
         // DataGrip / IntelliJ: Ctrl+B focuses the sidebar,
         // Ctrl+Enter runs the statement under the cursor.
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
+        //
+        // B3: preset chords must NOT fire when the editor pane is
+        // focused in emacs or basic mode — otherwise Ctrl-B steals
+        // backward-char, Ctrl-P steals previous-line, etc. The
+        // preset only owns the chord when focus is outside the
+        // editor or the editor is in vim mode (where these Ctrl
+        // chords have no motion meaning).
+        let preset_owns_chord = self.ui.focus != Pane::Editor
+            || matches!(self.ui.editor_mode, narwhal_config::EditorMode::Vim);
+        if preset_owns_chord && key.modifiers.contains(KeyModifiers::CONTROL) {
             match (self.ui.key_preset, key.code) {
                 (narwhal_config::KeyPreset::Vscode, CtKey::Char('p'))
                     if !key.modifiers.contains(KeyModifiers::SHIFT) =>
