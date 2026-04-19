@@ -231,11 +231,19 @@ impl AppCore {
         // explicitly — a v1.x config flips to Basic without a
         // migration pass, while a v2.x config that sets both keeps
         // its explicit `editor.mode` choice.
+        let prev_mode = self.ui.editor_mode;
         self.ui.editor_mode = settings.editor.mode;
         #[allow(deprecated)]
         if !settings.keybindings.vim_mode && settings.editor.mode == narwhal_config::EditorMode::Vim
         {
             self.ui.editor_mode = narwhal_config::EditorMode::Basic;
+        }
+        // FIX V2: Reset the vim state machine when the editor mode
+        // changes at runtime. Without this, switching from Vim to Basic
+        // while in Command mode leaves keystrokes routing through the
+        // dead vim handler.
+        if prev_mode != self.ui.editor_mode {
+            self.ui.vim = narwhal_vim::Vim::new();
         }
         self.ui.mouse_mode = settings.editor.mouse;
         self.ui.show_mode_indicator = settings.editor.show_mode_indicator;
@@ -244,6 +252,12 @@ impl AppCore {
         // L36: turn the `[keymap.<group>]` TOML sections into a typed
         // override table, apply on top of the built-in defaults, and
         // stash diagnostics so the first render surfaces them.
+        //
+        // FIX B1+B8: Rebuild from builtin defaults on every reload so
+        // that removed user overrides no longer persist, and clear the
+        // warnings vec so diagnostics don't accumulate across reloads.
+        self.deps.keymap = crate::keymap::Keymap::builtin();
+        self.keymap_warnings.clear();
         if !settings.keymap.is_empty() {
             let mut typed: std::collections::HashMap<
                 crate::action::KeyGroup,

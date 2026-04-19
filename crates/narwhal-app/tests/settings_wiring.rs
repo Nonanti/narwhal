@@ -9,7 +9,7 @@
 //! testing of the actual palette belongs in `narwhal-tui`.
 
 use narwhal_app::{AppCore, DriverRegistry};
-use narwhal_config::{ConnectionsFile, Settings, Theme};
+use narwhal_config::{ConnectionsFile, EditorMode, Settings, Theme};
 
 fn core() -> AppCore {
     AppCore::new(
@@ -40,4 +40,27 @@ fn apply_settings_default_is_dark_equivalent() {
     // Default `Settings::theme` is `Theme::Dark`; just confirm the
     // call returns without panicking and the core remains usable.
     let _ = c.status_bar();
+}
+
+/// FIX V2: switching editor.mode at runtime must reset the vim state
+/// machine so the old mode (e.g. Command) doesn't keep intercepting
+/// keystrokes.
+#[test]
+fn apply_settings_resets_vim_state_when_mode_changes() {
+    let mut c = core();
+    // Default editor mode is Vim. Confirm vim starts in Normal.
+    assert_eq!(c.mode(), narwhal_vim::Mode::Normal);
+
+    // Switch to Basic — vim must be reset (still Normal, but the
+    // key point is it's freshly constructed, not stuck in Command).
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Basic;
+    c.apply_settings(settings);
+    assert_eq!(c.mode(), narwhal_vim::Mode::Normal);
+
+    // Now switch back to Vim — fresh vim again.
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Vim;
+    c.apply_settings(settings);
+    assert_eq!(c.mode(), narwhal_vim::Mode::Normal);
 }

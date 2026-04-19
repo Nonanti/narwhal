@@ -110,3 +110,64 @@ fn empty_keymap_section_leaves_defaults_intact() {
         Some(Action::ResultsOpenCellPopup)
     );
 }
+
+/// FIX B1: when a user removes an override from settings.toml, the
+/// next `apply_settings` call must reset the keymap to defaults so
+/// the removed binding no longer shadows the built-in.
+#[test]
+fn keymap_override_is_reset_when_user_removes_entry() {
+    let registry = DriverRegistry::with_defaults();
+    let connections = ConnectionsFile::default();
+    let mut core = AppCore::new(registry, connections, None);
+
+    // First reload: rebind `d` to discard-pending.
+    let toml_with_override = r#"
+[keymap.results]
+"d" = "results-discard-pending"
+"#;
+    let settings = settings_from_toml(toml_with_override);
+    core.apply_settings(settings);
+    assert_eq!(
+        core.keymap().resolve(KeyGroup::Results, KeyChord::ch('d')),
+        Some(Action::ResultsDiscardPending),
+        "override should take effect"
+    );
+
+    // Second reload: the user removed the override (empty keymap).
+    let toml_without_override = "# nothing here\n";
+    let settings = settings_from_toml(toml_without_override);
+    core.apply_settings(settings);
+    assert_eq!(
+        core.keymap().resolve(KeyGroup::Results, KeyChord::ch('d')),
+        Some(Action::ResultsDeleteRow),
+        "d must revert to built-in default after override is removed"
+    );
+}
+
+/// FIX B8: `keymap_warnings` must not accumulate duplicates across
+/// successive `apply_settings` reloads.
+#[test]
+fn keymap_warnings_dont_duplicate_across_reloads() {
+    let registry = DriverRegistry::with_defaults();
+    let connections = ConnectionsFile::default();
+    let mut core = AppCore::new(registry, connections, None);
+
+    let toml = r#"
+[keymap.results]
+"d" = "this-action-does-not-exist"
+"#;
+
+    // Apply the same broken config twice.
+    let settings = settings_from_toml(toml);
+    core.apply_settings(settings);
+    let count_first = core.keymap_warnings().len();
+    assert!(count_first >= 1, "must produce at least one warning");
+
+    let settings = settings_from_toml(toml);
+    core.apply_settings(settings);
+    let count_second = core.keymap_warnings().len();
+    assert_eq!(
+        count_first, count_second,
+        "warnings must not accumulate: first={count_first}, second={count_second}"
+    );
+}
