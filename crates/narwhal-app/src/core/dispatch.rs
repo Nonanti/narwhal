@@ -15,6 +15,7 @@ use narwhal_tui::{
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use unicode_width::UnicodeWidthChar;
 
 use super::render_helpers::{
     ChartLayoutOwned, PivotLayoutOwned, chart_payload, connection_color_to_ratatui,
@@ -601,6 +602,14 @@ impl AppCore {
             }
             return;
         }
+        // MC2: if vim is in Command mode, all keystrokes must route
+        // to the editor handler regardless of which pane currently
+        // has focus. Without this, Ctrl-W focus cycling while the
+        // `:` prompt is open would strand the command buffer.
+        if self.ui.vim.mode() == narwhal_vim::Mode::Command {
+            self.handle_editor_key(key).await;
+            return;
+        }
         match self.ui.focus {
             Pane::Editor => self.handle_editor_key(key).await,
             Pane::Sidebar => self.handle_sidebar_key(key).await,
@@ -627,6 +636,15 @@ impl AppCore {
     /// provides the hit-test rects.
     pub async fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseButton, MouseEventKind};
+
+        // CB-1: when a keyboard-owning modal (anything except the
+        // context menu) is open, mouse clicks must not mutate
+        // background pane state. Left-clicks that land outside an
+        // open context menu dismiss the menu and fall through;
+        // everything else is swallowed.
+        if self.modals.any_open_except_context_menu() {
+            return;
+        }
 
         let pos = (event.column, event.row);
 
@@ -680,8 +698,23 @@ impl AppCore {
         let col_in_view = pos.0.saturating_sub(inner_x).saturating_sub(gutter);
         let target_row =
             (buf.scroll() + row_in_view as usize).min(buf.line_count().saturating_sub(1));
-        let line_len = buf.get_line(target_row).len();
-        let target_col = (col_in_view as usize).min(line_len);
+        // CB-9: walk by display width instead of byte length so
+        // clicks on multi-byte UTF-8 lines land on a valid char
+        // boundary rather than a continuation byte.
+        let line = buf.get_line(target_row);
+        let visual_col = col_in_view as usize;
+        let mut byte_offset = 0usize;
+        let mut acc = 0usize;
+        for (idx, ch) in line.char_indices() {
+            let w = ch.width().unwrap_or(0);
+            if acc + w > visual_col {
+                byte_offset = idx;
+                break;
+            }
+            acc += w;
+            byte_offset = idx + ch.len_utf8();
+        }
+        let target_col = byte_offset.min(line.len());
         Some((target_row, target_col))
     }
 
@@ -716,6 +749,11 @@ impl AppCore {
     }
 
     async fn handle_middle_click(&mut self, pos: (u16, u16)) {
+        // V5: clear any pending leader chord so a click after a
+        // partial sequence does not silently swallow the next key.
+        self.ui.pending_result_leader = None;
+        self.ui.pending_sidebar_leader = None;
+        self.ui.emacs_pending_prefix = None;
         // Cancel command-line prompt on middle-click (same rationale
         // as handle_left_click).
         if self.ui.vim.mode() == narwhal_vim::Mode::Command {
@@ -748,6 +786,11 @@ impl AppCore {
     }
 
     async fn handle_right_click(&mut self, pos: (u16, u16)) {
+        // V5: clear any pending leader chord so a click after a
+        // partial sequence does not silently swallow the next key.
+        self.ui.pending_result_leader = None;
+        self.ui.pending_sidebar_leader = None;
+        self.ui.emacs_pending_prefix = None;
         // Cancel command-line prompt on right-click (same rationale
         // as handle_left_click).
         if self.ui.vim.mode() == narwhal_vim::Mode::Command {
@@ -819,6 +862,11 @@ impl AppCore {
     }
 
     async fn handle_left_click(&mut self, pos: (u16, u16)) {
+        // V5: clear any pending leader chord so a click after a
+        // partial sequence does not silently swallow the next key.
+        self.ui.pending_result_leader = None;
+        self.ui.pending_sidebar_leader = None;
+        self.ui.emacs_pending_prefix = None;
         // Cancel the vim command-line prompt on any left click.
         // Clicking anywhere signals the user's intent to interact
         // with the clicked region; leaving vim in Command mode would
@@ -974,6 +1022,11 @@ impl AppCore {
     }
 
     async fn handle_scroll(&mut self, pos: (u16, u16), delta: i32) {
+        // V5: clear any pending leader chord so a scroll after a
+        // partial sequence does not silently swallow the next key.
+        self.ui.pending_result_leader = None;
+        self.ui.pending_sidebar_leader = None;
+        self.ui.emacs_pending_prefix = None;
         let layout = &self.ui.last_layout;
 
         if layout

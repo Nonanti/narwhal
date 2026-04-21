@@ -53,6 +53,7 @@ secrecy = { workspace = true }
 zeroize = { workspace = true }
 # v1.1 #1: `:goto` fuzzy navigator scorer.
 nucleo-matcher.workspace = true
+unicode-width.workspace = true
 
 [features]
 default = ["driver-postgres", "driver-sqlite"]

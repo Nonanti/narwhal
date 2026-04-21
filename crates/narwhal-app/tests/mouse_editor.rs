@@ -271,3 +271,133 @@ async fn click_cancels_command_prompt_mode() {
         "character should be inserted into the editor after click cancels command prompt"
     );
 }
+
+/// CB-9: clicking on a multi-byte UTF-8 line must not panic due to
+/// landing on a continuation byte. The display-width walk in
+/// `editor_click_to_buffer_pos` must find a valid char boundary.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_click_does_not_panic_on_multibyte_line() {
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    core.insert_into_editor("merhaba dünya naïve").await;
+    render(&mut core);
+
+    let (ox, oy) = editor_text_origin(&core);
+    // Click at several offsets across the multi-byte text.
+    // None of these should panic.
+    for offset in 0..20u16 {
+        core.handle_mouse(mouse(
+            ox + offset,
+            oy,
+            MouseEventKind::Down(MouseButton::Left),
+        ))
+        .await;
+    }
+    // Double-click inside the word "dünya" (visual col ~9).
+    core.handle_mouse(mouse(ox + 9, oy, MouseEventKind::Down(MouseButton::Left)))
+        .await;
+    core.handle_mouse(mouse(ox + 9, oy, MouseEventKind::Down(MouseButton::Left)))
+        .await;
+    // No panic is the success criterion; also verify cursor is on a
+    // valid line.
+    assert!(core.editor().cursor_row() == 0);
+}
+
+/// MC2: when vim is in Command mode, keyboard-driven focus changes
+/// (Ctrl-W) must not strand keystrokes — subsequent keys should
+/// still route to the editor's command handler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn command_mode_keyboard_focus_drift_protected() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    // Switch to vim mode for this test.
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Vim;
+    settings.editor.mouse = MouseSelectionMode::Enabled;
+    core.apply_settings(settings);
+    render(&mut core);
+
+    // Enter command mode via `:`.
+    let colon = KeyEvent {
+        code: KeyCode::Char(':'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(colon).await;
+    assert_eq!(core.mode(), narwhal_vim::Mode::Command);
+
+    // Cycle focus via Ctrl-W — this would move focus to Sidebar.
+    let ctrl_w = KeyEvent {
+        code: KeyCode::Char('w'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(ctrl_w).await;
+
+    // Even though focus might have moved, typing 's' in Command mode
+    // should still be handled by the editor (command buffer), not
+    // by the sidebar handler.
+    let s_key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(s_key).await;
+
+    // The vim layer should still be in Command mode (the 's' went
+    // into the command buffer) OR it exited cleanly — either way
+    // the sidebar must not have processed the 's' as a sidebar action.
+    // In vim Command mode, 's' is just a character in the prompt.
+    // The key test: we must not have crashed and the sidebar index
+    // should be unchanged from its initial position.
+    let sidebar_idx = core.ui_for_test().sidebar_index;
+    assert_eq!(sidebar_idx, 0, "sidebar should not have reacted to 's'");
+}
+
+/// CB-1: when a keyboard-owning modal (e.g. :settings) is open,
+/// mouse clicks must not mutate background pane state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn modal_keyboard_owner_blocks_mouse_state_mutation() {
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    render(&mut core);
+
+    // Open the settings modal.
+    core.execute_command("settings").await;
+    assert!(
+        core.settings_modal_open(),
+        ":settings should open the modal"
+    );
+
+    let sidebar_idx_before = core.ui_for_test().sidebar_index;
+    let focus_before = core.focused_pane();
+
+    // Click on the sidebar area — this should be blocked.
+    let sidebar_rect = core.last_layout().sidebar;
+    core.handle_mouse(mouse(
+        sidebar_rect.x + 2,
+        sidebar_rect.y + 2,
+        MouseEventKind::Down(MouseButton::Left),
+    ))
+    .await;
+
+    // Modal should still be open.
+    assert!(
+        core.settings_modal_open(),
+        "settings modal should remain open after background click"
+    );
+    // Sidebar state should not have changed.
+    assert_eq!(
+        core.ui_for_test().sidebar_index,
+        sidebar_idx_before,
+        "sidebar index must not change while modal owns keyboard"
+    );
+    // Focus should not have changed.
+    assert_eq!(
+        core.focused_pane(),
+        focus_before,
+        "focus must not change while modal owns keyboard"
+    );
+}

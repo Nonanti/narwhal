@@ -235,6 +235,14 @@ pub struct ModalState {
 }
 
 impl ModalState {
+    /// True if any keyboard-owning modal is open, excluding the
+    /// editor context menu (which is anchored to the editor and
+    /// handled separately). Used by the mouse handler to block
+    /// background state mutations while a modal is in the foreground.
+    pub const fn any_open_except_context_menu(&self) -> bool {
+        self.any_open()
+    }
+
     /// True if any modal currently owns the foreground. Callers use
     /// this to decide whether a global hotkey (e.g. tab cycling)
     /// should fire or be swallowed by the modal layer.
