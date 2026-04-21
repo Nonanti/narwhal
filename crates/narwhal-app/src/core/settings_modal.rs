@@ -132,9 +132,17 @@ impl AppCore {
             return;
         };
         self.apply_settings(settings);
-        self.ui.status.notify(
-            "settings reloaded from disk",
-            std::time::Duration::from_secs(3),
-        );
+
+        // Close the settings modal if open so that the stale draft
+        // cannot silently overwrite the external edit on Ctrl+S.
+        if self.modals.settings.is_some() {
+            self.modals.settings = None;
+            self.ui.status.message = "settings reloaded from disk; modal closed".into();
+        } else {
+            self.ui.status.notify(
+                "settings reloaded from disk",
+                std::time::Duration::from_secs(3),
+            );
+        }
     }
 }

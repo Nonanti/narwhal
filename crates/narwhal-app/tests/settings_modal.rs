@@ -111,3 +111,34 @@ async fn mode_command_rejects_unknown_value() {
     // is set.
     assert_eq!(core.runtime_editor_mode(), EditorMode::Vim);
 }
+
+/// CB-6: An external settings reload while the modal is open must
+/// close the modal so the stale draft cannot silently overwrite
+/// the external edit on Ctrl+S.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settings_reload_with_open_modal_does_not_lose_external_edits() {
+    let mut core = AppCore::new(
+        DriverRegistry::with_defaults(),
+        ConnectionsFile::default(),
+        None,
+    );
+    // Open the settings modal — draft is snapshotted from current state.
+    core.execute_command("settings").await;
+    assert!(core.settings_modal_open());
+
+    // Simulate an external reload (e.g. another editor saved config.toml).
+    // The self-write suppression window is not active, so this should
+    // be treated as a genuine external change.
+    core.handle_settings_reload().await;
+
+    // The modal must be closed to prevent the stale draft from
+    // overwriting the freshly-loaded settings.
+    assert!(
+        !core.settings_modal_open(),
+        "modal should be closed after external reload"
+    );
+    assert!(
+        core.status_message().contains("modal closed"),
+        "status bar should inform the user the modal was closed"
+    );
+}
