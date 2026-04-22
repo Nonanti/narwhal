@@ -10,19 +10,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.1] - 2026-06-08
 
 Patch release focused on regressions introduced by the v2.1.0 editor
-customization + mouse + settings live-reload work, plus a handful of
-pre-existing correctness and safety fixes uncovered during the review.
+customization + mouse + settings live-reload work, plus pre-existing
+correctness and safety fixes uncovered during a top-to-bottom review.
 
-### Fixed
+### Fixed (event dispatch / editor)
 
 - **Mouse click no longer strands the `:` command prompt** — clicking
   outside the editor pane while vim was in `Mode::Command` routed
   subsequent keystrokes to the sidebar/results handlers, which have no
   Command-mode awareness; the prompt was unreachable, Esc did nothing,
-  and the user had to use Ctrl-W to escape. Each mouse click handler
-  now cancels Command mode up front.
+  SQL could not be typed. Each click handler now cancels Command mode.
+- **Keyboard focus cycling (`Ctrl-W`) gets the same protection** —
+  `handle_key` now routes Command-mode keystrokes through the editor
+  handler before per-pane dispatch, closing the keyboard-driven variant
+  of the stranded-prompt bug.
+- **Mouse no longer mutates background state while a modal is open**
+  — clicking sidebar/editor while `:settings`/`:goto`/help/history/
+  snippets/confirm/wizard/diagram/json_viewer/pending_preview owns the
+  keyboard used to silently change focus, move the editor cursor, or
+  fire a sidebar preview query underneath the modal.
+- **Multi-byte editor clicks (Türkçe, CJK, accented Latin)** now walk
+  by display width (`UnicodeWidthChar`) instead of byte length, so
+  clicks land on a valid grapheme boundary and never produce a
+  UTF-8 continuation-byte cursor that downstream slicing would panic
+  on. Double-click word selection respects grapheme boundaries.
+- **Pending key leaders are cleared on every mouse event** — a click
+  after `]r`, `g`, or emacs `C-x` no longer silently swallows the next
+  keystroke.
+- **Keybinding presets no longer steal emacs/basic editor chords** —
+  VSCode `C-p`, DataGrip/IntelliJ `C-b`, and `C-Shift-P` now fall
+  through to the per-pane handler when the editor is in basic/emacs
+  mode, so emacs `backward-char` / `previous-line` work as expected.
 
-_Additional entries land here as Wave 1 fixes merge._
+### Fixed (settings live-reload)
+
+- **`apply_settings` rebuilds the keymap from builtin defaults on every
+  apply** — a removed override used to linger until process restart.
+- **`keymap_warnings` is cleared on every apply** — the same malformed
+  binding no longer accumulates one duplicate warning per file write.
+- **Editor mode switch resets the vim state machine** — a user stuck
+  in Command mode no longer silently stays there after a runtime
+  switch to basic/emacs.
+- **The settings watcher filters events by file name** — sibling
+  writes (`connections.toml`, `workspace-state.toml`,
+  `sessions/*.toml`) no longer trigger a full settings reload, keymap
+  rebuild, and stream-tuning resend.
+- **External edits to `config.toml` while `:settings` is open** now
+  cleanly close the stale modal with a status-bar message, instead of
+  silently overwriting the external edit on the next Ctrl-S.
+
+### Fixed (correctness / robustness)
+
+- **SQLite driver now sets `PRAGMA foreign_keys = ON` and
+  `busy_timeout = 5s`** at connect time. `REFERENCES … ON DELETE
+  CASCADE` declarations are now actually enforced; concurrent
+  reader/writer collisions retry for 5 s instead of failing instantly.
+- **`guard_read_only` no longer rejects safe `SELECT`s with sleep
+  keywords in comments** — line and block comment bodies are now
+  mask-replaced before the denylist scan, matching the handling of
+  string literals. MCP `run_query` accepts annotated SQL again.
+- **Context menu render no longer panics on narrow terminals** —
+  `u16::clamp(12, screen.width - 2)` could panic with `min > max` for
+  terminals under 14 cells, crashing the app on right-click.
 
 ## [2.1.0] - 2026-06-08
 
