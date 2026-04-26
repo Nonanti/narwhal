@@ -44,7 +44,8 @@ use thiserror::Error;
 /// `agg=<name>` token on the `:pivot` command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggKind {
-    /// Count of non-null rows in the bucket. Works on any value type.
+    /// Count of rows in the bucket (`COUNT(*)` semantics; rows where
+    /// the value column is NULL are still counted).
     Count,
     /// Sum of numeric values; non-numeric coerces to NaN and is
     /// rendered as the empty token.
