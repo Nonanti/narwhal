@@ -195,9 +195,11 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
         // to chain-only verification, which surprised operators who
         // assumed the two drivers behaved identically when configured
         // with the same `SslMode`. Only `Require` (the documented
-        // "encryption without identity check" mode) keeps the lax
-        // hostname behaviour now.
-        let skip_domain = matches!(config.params.ssl_mode, SslMode::Require);
+        // "encryption without identity check" mode) and `VerifyCa`
+        // (verify CA chain but allow CN/hostname mismatches) keep the
+        // lax hostname behaviour now — consistent with the Postgres
+        // driver's `verify_ca_client_config`.
+        let skip_domain = compute_skip_domain(config.params.ssl_mode);
         let accept_invalid_certs = false;
 
         ssl_opts = ssl_opts.with_danger_skip_domain_validation(skip_domain);
@@ -207,6 +209,21 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
     }
 
     Ok(Opts::from(builder))
+}
+
+/// Decide whether hostname (domain) validation should be skipped for a
+/// given [`SslMode`].
+///
+/// - **`Require`**: encryption without identity check -> skip hostname.
+/// - **`VerifyCa`**: verify the CA chain but allow CN/hostname mismatches
+///   (covers wildcard certs, load-balancer fronts) -> skip hostname.
+/// - All other modes (**`Prefer`**, **`VerifyFull`**, **`Disable`**) retain
+///   hostname verification.
+///
+/// Extracted as a pure function so the decision can be unit-tested
+/// without mocking `SslOpts`.
+pub(crate) const fn compute_skip_domain(mode: SslMode) -> bool {
+    matches!(mode, SslMode::Require | SslMode::VerifyCa)
 }
 
 pub struct MysqlConnection {
@@ -1074,5 +1091,47 @@ mod tests {
         }));
         let result = build_opts(&config, None);
         assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
+
+    // --- compute_skip_domain unit tests ---
+
+    #[test]
+    fn skip_domain_require() {
+        assert!(
+            compute_skip_domain(SslMode::Require),
+            "Require should skip hostname validation"
+        );
+    }
+
+    #[test]
+    fn skip_domain_verify_ca() {
+        assert!(
+            compute_skip_domain(SslMode::VerifyCa),
+            "VerifyCa should skip hostname validation (CA chain is still verified)"
+        );
+    }
+
+    #[test]
+    fn no_skip_domain_prefer() {
+        assert!(
+            !compute_skip_domain(SslMode::Prefer),
+            "Prefer should retain hostname validation"
+        );
+    }
+
+    #[test]
+    fn no_skip_domain_verify_full() {
+        assert!(
+            !compute_skip_domain(SslMode::VerifyFull),
+            "VerifyFull should retain hostname validation"
+        );
+    }
+
+    #[test]
+    fn no_skip_domain_disable() {
+        assert!(
+            !compute_skip_domain(SslMode::Disable),
+            "Disable should not skip hostname validation (TLS is off anyway)"
+        );
     }
 }
