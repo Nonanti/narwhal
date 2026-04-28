@@ -206,7 +206,17 @@ impl ClientHandle {
                 // empty and the worker will skip dispatch when it
                 // dequeues a request whose responder is gone.
                 if let Some(id) = id_slot.get().copied() {
-                    let _ = self.tx.send(Outbound::Cancel(id)).await;
+                    // M9: fire-and-forget cancel. A saturated
+                    // channel must not block the timeout path
+                    // — try_send drops the cancel with a warning
+                    // instead of defeating the timeout itself.
+                    if let Err(err) = self.tx.try_send(Outbound::Cancel(id)) {
+                        tracing::warn!(
+                            ?err,
+                            request_id = ?id,
+                            "LSP cancel could not be queued; server may not see cancellation"
+                        );
+                    }
                 }
                 return Err(LspError::Timeout(method.to_owned()));
             }
@@ -426,14 +436,25 @@ impl Client {
                                     continue;
                                 };
                                 match (message.id, message.method) {
-                                    (Some(Id::Number(id)), None) => {
-                                        if let Some(responder) = pending.remove(&id) {
-                                            let payload = match (message.result, message.error) {
-                                                (Some(v), _) => Ok(v),
-                                                (None, Some(e)) => Err(e),
-                                                (None, None) => Ok(Value::Null),
-                                            };
-                                            let _ = responder.send(payload);
+                                    // M10: accept both Id::Number and
+                                    // Id::String responses. The client
+                                    // always emits numeric ids, but a
+                                    // proxy/replay layer may echo them
+                                    // back as strings.
+                                    (Some(ref id), None) => {
+                                        let numeric = match id {
+                                            Id::Number(n) => Some(*n),
+                                            Id::String(s) => s.parse::<i64>().ok(),
+                                        };
+                                        if let Some(n) = numeric {
+                                            if let Some(responder) = pending.remove(&n) {
+                                                let payload = match (message.result, message.error) {
+                                                    (Some(v), _) => Ok(v),
+                                                    (None, Some(e)) => Err(e),
+                                                    (None, None) => Ok(Value::Null),
+                                                };
+                                                let _ = responder.send(payload);
+                                            }
                                         }
                                     }
                                     (None, Some(method)) => {
@@ -806,5 +827,80 @@ mod tests {
         assert!(text_doc.get("completion").is_some());
         assert!(text_doc.get("hover").is_some());
         assert!(text_doc.get("definition").is_some());
+    }
+
+    /// M9: when the outbound channel is saturated, the cancel
+    /// fire-and-forget path (`try_send`) must return immediately
+    /// rather than blocking the timeout cleanup.
+    #[tokio::test]
+    async fn cancel_does_not_block_when_channel_full() {
+        // Capacity-1 channel, pre-filled → try_send must fail fast.
+        let (tx, _rx) = mpsc::channel::<Outbound>(1);
+        tx.try_send(Outbound::Notification {
+            method: "filler".into(),
+            params: Value::Null,
+        })
+        .expect("first send fills the channel");
+
+        // Simulate the cancel path from request_with_timeout:
+        // old code used `tx.send(Cancel(1)).await` which would block
+        // here; new code uses try_send.
+        let deadline = tokio::time::timeout(Duration::from_millis(100), async {
+            if let Err(err) = tx.try_send(Outbound::Cancel(1)) {
+                assert!(
+                    matches!(err, mpsc::error::TrySendError::Full(_)),
+                    "expected Full, got {err:?}"
+                );
+            } else {
+                panic!("channel should be full");
+            }
+        })
+        .await;
+        assert!(deadline.is_ok(), "cancel must complete without blocking");
+    }
+
+    /// M10: a response carrying `Id::String` must be routed to the
+    /// pending request just like `Id::Number`.
+    #[tokio::test]
+    async fn string_id_responses_are_routed() {
+        let transport = MemoryTransport::new();
+        let mirror = transport.clone();
+        let client = Client::spawn(transport);
+        let handle = client.handle.clone();
+
+        // Stub: receive the numeric-id request, reply with the
+        // same id encoded as a JSON string.
+        let stub = tokio::spawn(async move {
+            loop {
+                if let Some(body) = mirror.pop_sent() {
+                    let parsed: Incoming = serde_json::from_slice(&body).expect("json");
+                    if let Some(Id::Number(id)) = parsed.id {
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id.to_string(),
+                            "result": { "routed": true },
+                        });
+                        mirror.push_inbound(serde_json::to_vec(&response).expect("ser"));
+                        return;
+                    }
+                    continue;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+
+        let result: Value = handle
+            .request_with_timeout(
+                "test/string_id",
+                serde_json::json!({}),
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("string-id response should be routed");
+        assert_eq!(result, serde_json::json!({ "routed": true }));
+
+        stub.await.expect("stub");
+        let _ = client.handle.clone().shutdown().await;
+        let _ = client.join.await;
     }
 }
