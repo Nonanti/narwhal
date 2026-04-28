@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use chrono::Utc;
+use chrono::format::{Item, StrftimeItems};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -264,11 +265,22 @@ impl AuditSink for FileSink {
 
 /// Resolve strftime tokens in `template` against the current UTC time
 /// and return the materialised path.
+///
+/// Validates the template up front by parsing it through
+/// [`chrono::format::StrftimeItems`]. If the template contains any
+/// invalid strftime token (e.g. `%K`), returns [`SinkError::Path`]
+/// instead of letting chrono panic inside `DelayedFormat::to_string`.
 fn resolve_path(template: &Path) -> Result<PathBuf, SinkError> {
     let raw = template
         .to_str()
         .ok_or_else(|| SinkError::Path(format!("non-UTF8 path: {}", template.display())))?;
-    let resolved = Utc::now().format(raw).to_string();
+    let items: Vec<Item<'_>> = StrftimeItems::new(raw).collect();
+    if items.iter().any(|i| matches!(i, Item::Error)) {
+        return Err(SinkError::Path(format!(
+            "invalid strftime template in audit path: {raw:?}"
+        )));
+    }
+    let resolved = Utc::now().format_with_items(items.into_iter()).to_string();
     if resolved.is_empty() {
         return Err(SinkError::Path("empty path after strftime".into()));
     }
@@ -328,6 +340,49 @@ mod tests {
         assert_eq!(entries.len(), 2, "rotation did not happen: {entries:?}");
         let active = fs::read_to_string(&path).await.unwrap();
         assert_eq!(active.trim(), r#"{"kind":"c"}"#);
+    }
+
+    #[test]
+    fn resolve_path_rejects_invalid_strftime_token() {
+        let path = PathBuf::from("audit-%K-full.jsonl");
+        let result = resolve_path(&path);
+        assert!(
+            result.is_err(),
+            "expected Err for invalid token %K, got {result:?}"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("invalid strftime"),
+            "error message should mention invalid strftime: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_path_accepts_literal_percent() {
+        // chrono treats %% as a literal % character
+        let path = PathBuf::from("audit-100%%-full.jsonl");
+        let result = resolve_path(&path);
+        assert!(result.is_ok(), "expected Ok for %% literal, got {result:?}");
+        let resolved = result.unwrap();
+        let name = resolved.file_name().unwrap().to_str().unwrap();
+        assert_eq!(name, "audit-100%-full.jsonl");
+    }
+
+    #[test]
+    fn resolve_path_substitutes_valid_tokens() {
+        let path = PathBuf::from("audit-%Y-%m-%d.jsonl");
+        let result = resolve_path(&path);
+        assert!(
+            result.is_ok(),
+            "expected Ok for valid tokens, got {result:?}"
+        );
+        let resolved = result.unwrap();
+        let name = resolved.file_name().unwrap().to_str().unwrap();
+        assert!(
+            !name.contains("%Y") && !name.contains("%m") && !name.contains("%d"),
+            "tokens should have been substituted: {name}"
+        );
+        assert!(!name.is_empty(), "resolved filename should not be empty");
     }
 
     #[tokio::test]
