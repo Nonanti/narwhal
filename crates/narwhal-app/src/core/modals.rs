@@ -99,7 +99,7 @@ impl AppCore {
                 state.filter.pop();
                 state.selected = 0;
             }
-            CtKey::Char(c) => {
+            CtKey::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
                 state.filter.push(c);
                 state.selected = 0;
             }
@@ -380,7 +380,7 @@ impl AppCore {
             CtKey::Right if wizard.focused == 0 => wizard.cycle_driver(1),
             CtKey::Enter => self.commit_wizard().await,
             CtKey::Backspace => wizard.pop_char(),
-            CtKey::Char(c) => {
+            CtKey::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
                 if wizard.focused == 0 {
                     // Allow first-letter shortcuts on the driver row.
                     if let Some(idx) = DRIVERS.iter().position(|d| d.starts_with(c)) {

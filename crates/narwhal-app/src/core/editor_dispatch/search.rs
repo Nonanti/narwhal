@@ -1,6 +1,6 @@
 //! Editor in-pane search and `:s/old/new` substitution.
 
-use crossterm::event::{KeyCode as CtKey, KeyEvent};
+use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_vim::SearchDirection;
 
 use crate::core::AppCore;
@@ -76,7 +76,7 @@ impl AppCore {
                 };
                 self.ui.status.message = format!("{prompt_char}{needle}");
             }
-            CtKey::Char(c) => {
+            CtKey::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
                 self.ui.tabs[self.ui.active_tab]
                     .editor_search
                     .needle
