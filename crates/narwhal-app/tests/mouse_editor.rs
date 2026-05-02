@@ -401,3 +401,97 @@ async fn modal_keyboard_owner_blocks_mouse_state_mutation() {
         "focus must not change while modal owns keyboard"
     );
 }
+
+/// CB-7: `mouse_mode=disabled` blocks right-click context menu.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_disabled_swallows_right_click_menu() {
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Basic;
+    settings.editor.mouse = MouseSelectionMode::Disabled;
+    core.apply_settings(settings);
+    core.insert_into_editor("select 1").await;
+    render(&mut core);
+
+    let (ox, oy) = editor_text_origin(&core);
+    core.handle_mouse(mouse(ox + 2, oy, MouseEventKind::Down(MouseButton::Right)))
+        .await;
+    assert!(
+        !core.context_menu_open(),
+        "right-click must not open the context menu when mouse is disabled"
+    );
+}
+
+/// CB-7: `mouse_mode=disabled` blocks middle-click paste.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_disabled_swallows_middle_click_paste() {
+    let clipboard = Arc::new(InMemoryClipboard::new());
+    clipboard.set_text("PASTE").unwrap();
+    let mut core = setup(clipboard).await;
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Basic;
+    settings.editor.mouse = MouseSelectionMode::Disabled;
+    core.apply_settings(settings);
+    core.insert_into_editor("ab").await;
+    render(&mut core);
+
+    let (ox, oy) = editor_text_origin(&core);
+    core.handle_mouse(mouse(ox + 1, oy, MouseEventKind::Down(MouseButton::Middle)))
+        .await;
+    assert!(
+        !core.editor().entire_text().contains("PASTE"),
+        "middle-click must not paste when mouse is disabled, got {:?}",
+        core.editor().entire_text(),
+    );
+}
+
+/// CB-7: `mouse_mode=disabled` blocks scroll events.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_disabled_swallows_scroll() {
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Basic;
+    settings.editor.mouse = MouseSelectionMode::Disabled;
+    core.apply_settings(settings);
+    core.insert_into_editor("line1\nline2\nline3\nline4\nline5")
+        .await;
+    render(&mut core);
+
+    let cursor_before = core.editor().cursor_row();
+    let (ox, oy) = editor_text_origin(&core);
+    core.handle_mouse(mouse(ox, oy, MouseEventKind::ScrollDown))
+        .await;
+    core.handle_mouse(mouse(ox, oy, MouseEventKind::ScrollDown))
+        .await;
+    assert_eq!(
+        core.editor().cursor_row(),
+        cursor_before,
+        "scroll must not move cursor when mouse is disabled"
+    );
+}
+
+/// CB-7: `mouse_mode=disabled` blocks pane focus change via left-click.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mouse_disabled_swallows_pane_focus_change() {
+    let mut core = setup(Arc::new(InMemoryClipboard::new())).await;
+    let mut settings = Settings::default();
+    settings.editor.mode = EditorMode::Basic;
+    settings.editor.mouse = MouseSelectionMode::Disabled;
+    core.apply_settings(settings);
+    render(&mut core);
+
+    let focus_before = core.focused_pane();
+    // Click on the sidebar area — should be blocked.
+    let sidebar_rect = core.last_layout().sidebar;
+    core.handle_mouse(mouse(
+        sidebar_rect.x + 2,
+        sidebar_rect.y + 2,
+        MouseEventKind::Down(MouseButton::Left),
+    ))
+    .await;
+    assert_eq!(
+        core.focused_pane(),
+        focus_before,
+        "pane focus must not change when mouse is disabled"
+    );
+}

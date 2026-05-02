@@ -646,6 +646,14 @@ impl AppCore {
             return;
         }
 
+        // CB-7: when `editor.mouse = disabled`, ALL mouse paths are
+        // blocked — not just editor-body selection. This ensures
+        // right-click context menus, middle-click paste, scroll and
+        // pane-focus changes are all suppressed.
+        if self.ui.mouse_mode == narwhal_config::MouseSelectionMode::Disabled {
+            return;
+        }
+
         let pos = (event.column, event.row);
 
         match event.kind {
