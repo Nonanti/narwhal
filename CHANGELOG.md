@@ -72,6 +72,34 @@ correctness and safety fixes uncovered during a top-to-bottom review.
 - **Context menu render no longer panics on narrow terminals** —
   `u16::clamp(12, screen.width - 2)` could panic with `min > max` for
   terminals under 14 cells, crashing the app on right-click.
+- **MySQL `SslMode::VerifyCa` now skips hostname validation** while
+  still verifying the CA chain, matching the Postgres driver's
+  `verify_ca_client_config` semantics. VerifyCa users no longer get
+  surprising hostname failures on wildcard or load-balancer certs.
+- **Audit file sink rejects invalid `strftime` tokens** at startup
+  instead of panicking on the first event. A stray `%` in the path
+  template now surfaces as `SinkError::Path`.
+- **LSP cancel is now fire-and-forget (`try_send`)** — a saturated
+  outbound channel can no longer block the very timeout cleanup that
+  triggered the cancel.
+- **LSP response routing now normalises `Id::String`** — proxy/replay
+  layers that rewrite ids to strings round-trip correctly; previously
+  string-id responses were silently dropped.
+- **Connection wizard / history modal / editor search input fields**
+  no longer absorb Ctrl-modified `Char` keystrokes. Ctrl-C / Ctrl-V /
+  Ctrl-A reflexes are now handled by the upper chord layer instead of
+  inserting literal `c` / `v` / `a` into the input.
+- **Tab switch resets vim state to Normal mode** — transient modes
+  (Visual, Command, Insert, OperatorPending) on tab[1] no longer leak
+  into tab[2], so a mid-`:` tab switch never strands the command
+  buffer in the wrong editor.
+- **`editor.mouse = disabled` now blocks all mouse paths** — the
+  guard previously only covered editor-body selection, so right-click
+  context menus, middle-click paste, scroll, and pane-focus changes
+  still fired. All mouse paths are now gated.
+- **`AggKind::Count` rustdoc updated to `COUNT(*)` semantics** —
+  rows where the value column is NULL are still counted, matching
+  the long-standing implementation.
 
 ## [2.1.0] - 2026-06-08
 
