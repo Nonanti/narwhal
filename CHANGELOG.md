@@ -12,6 +12,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Patch release focused on regressions introduced by the v2.1.0 editor
 customization + mouse + settings live-reload work, plus pre-existing
 correctness and safety fixes uncovered during a top-to-bottom review.
+Also includes one security hardening change that is BREAKING for hosts
+that ship Lua plugins relying on `io`/`os`/`debug` — see the **Security
+/ BREAKING** section.
+
+### Security / BREAKING
+
+- **`LuaSandbox::default()` flipped from `Permissive` to `Restricted`.**
+  Scripts loaded via [`LuaPlugin::from_script`] or [`LuaPlugin::from_path`]
+  now run in a VM where `io`, `os`, `package`, `debug`, and `ffi` are
+  absent. Trusted scripts that genuinely need that surface (e.g. the
+  shipped `examples/plugins/csv_export.lua`, which writes via
+  `io.open`) must be loaded through the new
+  [`LuaPlugin::from_path_with_sandbox`] /
+  [`LuaPlugin::from_script_with_sandbox`] opt-in APIs with
+  `LuaSandbox::Permissive`.
+
+  **Migration:** if you embed `narwhal-plugin-lua` and load plugins
+  you trust to native-code level, replace
+  `LuaPlugin::from_path(path)` with
+  `LuaPlugin::from_path_with_sandbox(path, LuaSandbox::Permissive)`.
+  If you load user-installed plugins, leave the default — untrusted
+  scripts can no longer reach the filesystem, spawn processes, or
+  escape via `debug.getregistry`.
+
+  `narwhaldb`'s plugin auto-loader uses the new safe default, so user
+  plugins from `~/.config/narwhal/plugins/` that depend on `io`/`os`
+  will now load but fail at dispatch with `attempt to index a nil
+  value (global 'io')`. A future release will surface this as a
+  per-plugin manifest flag.
+
 
 ### Fixed (event dispatch / editor)
 

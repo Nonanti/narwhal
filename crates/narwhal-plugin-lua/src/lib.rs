@@ -92,12 +92,19 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// M12: prior to this enum the runtime always called `Lua::new()`,
 /// which loads every standard library mlua ships, including `io`,
 /// `os` (with `os.execute`), `package` (with `package.loadlib`) and
-/// `debug`. Trusted local scripts (e.g. `examples/plugins/csv_export.lua`,
-/// which writes a CSV via `io.open`) rely on that surface, so the
-/// default stays permissive for backwards compatibility — but hosts
-/// that load *untrusted* scripts (curated marketplace, network sync,
-/// etc.) can now opt in to a restricted VM that excludes the
-/// filesystem, process-spawning, dynamic-library, and debug surfaces.
+/// `debug`. The default is [`LuaSandbox::Restricted`] so plugins
+/// loaded from disk cannot touch the filesystem, spawn processes, or
+/// escape via `debug.getregistry` unless the host explicitly opts in.
+/// Trusted scripts that still need that surface (e.g.
+/// `examples/plugins/csv_export.lua`, which writes via `io.open`)
+/// must be loaded via [`LuaPlugin::from_script_with_sandbox`] or
+/// [`LuaPlugin::from_path_with_sandbox`] with
+/// [`LuaSandbox::Permissive`].
+///
+/// **v2.1.1 BREAKING:** the default flipped from `Permissive` to
+/// `Restricted`. Existing scripts that relied on `io`, `os`,
+/// `package`, `debug`, or `ffi` must now be loaded with the explicit
+/// opt-in API or refactored to use only the safe standard library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LuaSandbox {
@@ -139,14 +146,14 @@ impl LuaSandbox {
     }
 }
 
-// `Default` is derived rather than hand-written so future variants
-// don't accidentally change the default without an explicit annotation.
+// `Default` is hand-written so future variants don't accidentally
+// change the default without an explicit annotation. v2.1.1 flipped
+// this from `Permissive` to `Restricted` (security hardening, listed
+// as BREAKING in the changelog).
 impl Default for LuaSandbox {
     #[inline]
     fn default() -> Self {
-        // Equivalent to `#[derive(Default)]` + `#[default]`, written
-        // explicitly so the choice is obvious at the variant site.
-        Self::Permissive
+        Self::Restricted
     }
 }
 
@@ -231,11 +238,11 @@ impl LuaPlugin {
     /// Compile and run `script` in a VM configured with the given
     /// [`LuaSandbox`] policy.
     ///
-    /// M12: prefer [`LuaSandbox::Restricted`] for scripts that come
-    /// from an untrusted source. The current default policy
-    /// ([`LuaSandbox::Permissive`]) keeps the historical behaviour so
-    /// existing scripts that use `io.open`, `os.date`, etc. continue
-    /// to work — the security trade-off is the caller's to make.
+    /// M12 / v2.1.1: the default policy is now
+    /// [`LuaSandbox::Restricted`], which hides `io`, `os`, `package`,
+    /// `debug`, and `ffi`. Pass [`LuaSandbox::Permissive`] for trusted
+    /// scripts that genuinely need those libraries — the security
+    /// trade-off is the caller's to make.
     pub fn from_script_with_sandbox(
         name: impl Into<String>,
         script: &str,
@@ -357,7 +364,25 @@ impl LuaPlugin {
     /// we fall back to a path-derived display string so two such plugins
     /// don't collide in the registry display. The name is deterministic
     /// across restarts — no randomized hash.
+    ///
+    /// Uses the default [`LuaSandbox::Restricted`] policy. To load a
+    /// trusted script that needs `io`/`os`/`debug`, call
+    /// [`Self::from_path_with_sandbox`] with [`LuaSandbox::Permissive`].
     pub fn from_path(path: impl AsRef<Path>) -> PluginResult<Self> {
+        Self::from_path_with_sandbox(path, LuaSandbox::default())
+    }
+
+    /// Read a script from disk and load it under an explicit sandbox
+    /// policy. Counterpart to [`Self::from_script_with_sandbox`] for the
+    /// disk-loading path.
+    ///
+    /// Prefer this over [`Self::from_path`] when the host distinguishes
+    /// between trusted (host-shipped) and untrusted (user-installed)
+    /// plugin directories.
+    pub fn from_path_with_sandbox(
+        path: impl AsRef<Path>,
+        sandbox: LuaSandbox,
+    ) -> PluginResult<Self> {
         let path = path.as_ref();
         let source = std::fs::read_to_string(path)
             .map_err(|e| PluginError::Runtime(format!("read {}: {e}", path.display())))?;
@@ -369,7 +394,7 @@ impl LuaPlugin {
             format!("plugin-{}", path.display())
         };
         let name = format!("lua-{stem}");
-        Self::from_script(name, &source)
+        Self::from_script_with_sandbox(name, &source, sandbox)
     }
 }
 
@@ -1224,6 +1249,46 @@ mod tests {
         "#;
         let _plugin = LuaPlugin::from_script_with_sandbox("escape", script, LuaSandbox::Restricted)
             .expect("restricted must contain loadstring escape attempts");
+    }
+
+    /// v2.1.1 BREAKING: the default sandbox policy is now `Restricted`.
+    /// Existing hosts that relied on the historical `Permissive`
+    /// default must opt in via [`LuaPlugin::from_script_with_sandbox`]
+    /// or [`LuaPlugin::from_path_with_sandbox`].
+    #[test]
+    fn default_sandbox_is_restricted() {
+        assert_eq!(LuaSandbox::default(), LuaSandbox::Restricted);
+        // A script that touches `io` must now fail under the default
+        // (it would have loaded silently in v2.1.0 and earlier).
+        let script = r#"
+            assert(io == nil, "default must hide io")
+            assert(os == nil, "default must hide os")
+            narwhal.register_command("x", "x", function() end)
+        "#;
+        let _plugin = LuaPlugin::from_script("default-is-restricted", script)
+            .expect("default-loaded script must see a restricted environment");
+    }
+
+    /// v2.1.1: `from_path_with_sandbox` is the disk-loading counterpart
+    /// of `from_script_with_sandbox`. Hosts that distinguish trusted vs.
+    /// untrusted plugin directories use this to keep `io`/`os` visible
+    /// to host-shipped scripts.
+    #[tokio::test]
+    async fn from_path_with_permissive_keeps_io_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trusted.lua");
+        std::fs::write(
+            &path,
+            r#"
+                assert(io ~= nil, "permissive must keep io")
+                assert(type(io.open) == "function")
+                narwhal.register_command("x", "x", function() return "ok" end)
+            "#,
+        )
+        .unwrap();
+        let plugin = LuaPlugin::from_path_with_sandbox(&path, LuaSandbox::Permissive)
+            .expect("permissive must load script that uses io");
+        assert_eq!(plugin.name(), "lua-trusted");
     }
 
     /// M19: Plugin name derived from file stem is deterministic across

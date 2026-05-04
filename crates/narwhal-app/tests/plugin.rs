@@ -500,8 +500,32 @@ async fn shipped_example_plugins_load_and_work() {
     );
 
     let (mut core, _dir) = core_with_items().await;
-    let loaded = core.auto_load_plugins(&plugins_dir);
-    assert!(loaded >= 4, "expected ≥4 plugins, got {loaded}");
+    // v2.1.1: the default sandbox is Restricted, but csv_export.lua
+    // needs `io.open`. Load each example file manually so we can give
+    // csv_export the Permissive sandbox while keeping every other
+    // example under the safe default — this exercises the new
+    // from_path_with_sandbox opt-in API end-to-end.
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&plugins_dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("lua"))
+        .collect();
+    entries.sort();
+    let mut loaded = 0;
+    for path in &entries {
+        let needs_permissive = path.file_name().and_then(|s| s.to_str()) == Some("csv_export.lua");
+        let sandbox = if needs_permissive {
+            narwhal_plugin_lua::LuaSandbox::Permissive
+        } else {
+            narwhal_plugin_lua::LuaSandbox::default()
+        };
+        let plugin = narwhal_plugin_lua::LuaPlugin::from_path_with_sandbox(path, sandbox)
+            .unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
+        core.register_lua_plugin(plugin)
+            .unwrap_or_else(|e| panic!("register {}: {e}", path.display()));
+        loaded += 1;
+    }
+    assert!(loaded >= 5, "expected ≥5 plugins, got {loaded}");
 
     // :top exercises the snippet plugin (sql injection outcome).
     core.execute_command("top items").await;
@@ -517,7 +541,7 @@ async fn shipped_example_plugins_load_and_work() {
     core.execute_command("rc items").await;
     assert_eq!(core.status_message(), "items: 3 row(s)");
 
-    // :csv-export exercises the CSV export plugin against the active sqlite.
+    // :csv-export was loaded above under Permissive.
     // Per-test tempdir keeps parallel runs of this suite from racing on
     // a single fixed /tmp path.
     let csv_dir = tempfile::tempdir().unwrap();
@@ -751,13 +775,18 @@ async fn plugin_timeout_uses_resolved_plugin_name_and_hints_at_set_timeout() {
     // *resolved* plugin name (not a re-lookup that could resolve
     // differently) and an actionable hint mentioning
     // `narwhal.set_timeout`.
+    //
+    // v2.1.1: the default sandbox is Restricted (no `os`), so this
+    // test uses a pure-Lua busy loop rather than `os.clock()`. The
+    // 0.05 s budget is small enough that the iteration count below
+    // will trip the hook well before completing.
     let plugin = LuaPlugin::from_script(
         "slowpoke",
         r#"
         narwhal.set_timeout(0.05)
         narwhal.register_command("slow", "intentionally slow", function(_)
-            local end_time = os.clock() + 10
-            while os.clock() < end_time do end
+            local x = 0
+            for i = 1, 1e10 do x = x + 1 end
             return "never"
         end)
         "#,

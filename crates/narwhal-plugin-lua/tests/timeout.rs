@@ -46,15 +46,23 @@ async fn infinite_loop_times_out() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn set_timeout_extends_budget() {
-    // The plugin requests a 500 ms budget, then runs a 200 ms busy
+    // The plugin requests a 500 ms budget, then runs a ~200 ms busy
     // loop — well within the limit. Should succeed without a timeout.
+    //
+    // v2.1.1: the default sandbox is Restricted (no `os`), so we use
+    // a fixed-iteration counter loop instead of `os.clock()`. The
+    // exact wall-clock duration is unimportant; we only need the
+    // loop body to take well under 500 ms.
     let plugin = LuaPlugin::from_script(
         "slow-ok",
         r#"
         narwhal.set_timeout(0.5)
         narwhal.register_command("slow", "slow but within budget", function()
-            local deadline = os.clock() + 0.2
-            while os.clock() < deadline do end
+            -- ~1e6 iterations of a no-op stay well under 500 ms on
+            -- any tier-1 host. The hook fires every ~256 instructions
+            -- so the loop is also covered by the timeout machinery.
+            local x = 0
+            for i = 1, 1000000 do x = x + 1 end
             return "ok"
         end)
         "#,
