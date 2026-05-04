@@ -1,7 +1,7 @@
 -- :csv-export <table> <path>  -  dump a table to a CSV file
 --
 -- ⚠️  SANDBOX: this plugin uses `io.open` and therefore requires the
---    *Permissive* Lua sandbox. v2.1.1 made the default sandbox
+--    *Permissive* Lua sandbox. v2.2.0 made the default sandbox
 --    `Restricted` (no `io`/`os`/`debug`/`package`), so loading this
 --    file through the default plugin auto-loader will fail with
 --    "attempt to index a nil value (global 'io')".
@@ -10,7 +10,7 @@
 --      LuaPlugin::from_path_with_sandbox(path, LuaSandbox::Permissive)
 --    explicitly — only do that for plugins you trust to the same
 --    degree as native code. A future release will expose this opt-in
---    via a per-plugin manifest flag (see CHANGELOG v2.1.1 BREAKING).
+--    via a per-plugin manifest flag (see CHANGELOG v2.2.0 BREAKING).
 --
 -- Queries the given table via narwhal.sql_run and writes the result
 -- to <path> as comma-separated values. The first line is the column

@@ -1,6 +1,6 @@
 //! Regression tests for context-menu rendering on tiny terminals.
 //!
-//! Before the v2.1.1 fix, `render_context_menu` called
+//! Before the v2.2.0 fix, `render_context_menu` called
 //! `u16::clamp(12, screen.width - 2)`. When `screen.width <= 13`,
 //! the lower bound exceeded the upper bound and `clamp` panicked,
 //! crashing the app on right-click. These tests verify the renderer

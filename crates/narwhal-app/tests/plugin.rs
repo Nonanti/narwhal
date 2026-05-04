@@ -500,7 +500,7 @@ async fn shipped_example_plugins_load_and_work() {
     );
 
     let (mut core, _dir) = core_with_items().await;
-    // v2.1.1: the default sandbox is Restricted, but csv_export.lua
+    // v2.2.0: the default sandbox is Restricted, but csv_export.lua
     // needs `io.open`. Load each example file manually so we can give
     // csv_export the Permissive sandbox while keeping every other
     // example under the safe default — this exercises the new
@@ -776,7 +776,7 @@ async fn plugin_timeout_uses_resolved_plugin_name_and_hints_at_set_timeout() {
     // differently) and an actionable hint mentioning
     // `narwhal.set_timeout`.
     //
-    // v2.1.1: the default sandbox is Restricted (no `os`), so this
+    // v2.2.0: the default sandbox is Restricted (no `os`), so this
     // test uses a pure-Lua busy loop rather than `os.clock()`. The
     // 0.05 s budget is small enough that the iteration count below
     // will trip the hook well before completing.

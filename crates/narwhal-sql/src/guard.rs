@@ -204,7 +204,7 @@ fn first_keyword(stripped: &str) -> String {
 /// inside a double-quoted identifier). Backslash escapes are *not*
 /// honoured — the goal is keyword stripping, not full lexing.
 ///
-/// Comment masking was added in v2.1.1 (B7) because a trailing
+/// Comment masking was added in v2.2.0 (B7) because a trailing
 /// `-- benchmark candidate, sleep(1)` or `/* TODO: drop pg_sleep */`
 /// was tripping the denylist even though the keywords were not
 /// executable code.

@@ -101,7 +101,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// [`LuaPlugin::from_path_with_sandbox`] with
 /// [`LuaSandbox::Permissive`].
 ///
-/// **v2.1.1 BREAKING:** the default flipped from `Permissive` to
+/// **v2.2.0 BREAKING:** the default flipped from `Permissive` to
 /// `Restricted`. Existing scripts that relied on `io`, `os`,
 /// `package`, `debug`, or `ffi` must now be loaded with the explicit
 /// opt-in API or refactored to use only the safe standard library.
@@ -147,7 +147,7 @@ impl LuaSandbox {
 }
 
 // `Default` is hand-written so future variants don't accidentally
-// change the default without an explicit annotation. v2.1.1 flipped
+// change the default without an explicit annotation. v2.2.0 flipped
 // this from `Permissive` to `Restricted` (security hardening, listed
 // as BREAKING in the changelog).
 impl Default for LuaSandbox {
@@ -238,7 +238,7 @@ impl LuaPlugin {
     /// Compile and run `script` in a VM configured with the given
     /// [`LuaSandbox`] policy.
     ///
-    /// M12 / v2.1.1: the default policy is now
+    /// M12 / v2.2.0: the default policy is now
     /// [`LuaSandbox::Restricted`], which hides `io`, `os`, `package`,
     /// `debug`, and `ffi`. Pass [`LuaSandbox::Permissive`] for trusted
     /// scripts that genuinely need those libraries — the security
@@ -1251,7 +1251,7 @@ mod tests {
             .expect("restricted must contain loadstring escape attempts");
     }
 
-    /// v2.1.1 BREAKING: the default sandbox policy is now `Restricted`.
+    /// v2.2.0 BREAKING: the default sandbox policy is now `Restricted`.
     /// Existing hosts that relied on the historical `Permissive`
     /// default must opt in via [`LuaPlugin::from_script_with_sandbox`]
     /// or [`LuaPlugin::from_path_with_sandbox`].
@@ -1269,7 +1269,7 @@ mod tests {
             .expect("default-loaded script must see a restricted environment");
     }
 
-    /// v2.1.1: `from_path_with_sandbox` is the disk-loading counterpart
+    /// v2.2.0: `from_path_with_sandbox` is the disk-loading counterpart
     /// of `from_script_with_sandbox`. Hosts that distinguish trusted vs.
     /// untrusted plugin directories use this to keep `io`/`os` visible
     /// to host-shipped scripts.

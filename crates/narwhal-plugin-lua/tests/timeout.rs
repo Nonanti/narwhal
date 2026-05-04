@@ -49,7 +49,7 @@ async fn set_timeout_extends_budget() {
     // The plugin requests a 500 ms budget, then runs a ~200 ms busy
     // loop — well within the limit. Should succeed without a timeout.
     //
-    // v2.1.1: the default sandbox is Restricted (no `os`), so we use
+    // v2.2.0: the default sandbox is Restricted (no `os`), so we use
     // a fixed-iteration counter loop instead of `os.clock()`. The
     // exact wall-clock duration is unimportant; we only need the
     // loop body to take well under 500 ms.

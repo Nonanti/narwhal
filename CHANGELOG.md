@@ -7,14 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.1] - 2026-06-08
+## [2.2.0] - 2026-06-08
 
-Patch release focused on regressions introduced by the v2.1.0 editor
-customization + mouse + settings live-reload work, plus pre-existing
-correctness and safety fixes uncovered during a top-to-bottom review.
-Also includes one security hardening change that is BREAKING for hosts
-that ship Lua plugins relying on `io`/`os`/`debug` — see the **Security
-/ BREAKING** section.
+Release originally scoped as a v2.1.1 patch (regressions in v2.1.0's
+editor customization + mouse + settings live-reload work, plus
+pre-existing correctness and safety fixes uncovered during a
+top-to-bottom review). The Lua sandbox default flip
+(`Permissive` → `Restricted`) is a public API behaviour change, so
+the release is published as a minor bump per SemVer instead of a
+patch — see the **Security / BREAKING** section.
 
 ### Security / BREAKING
 
@@ -26,7 +27,8 @@ that ship Lua plugins relying on `io`/`os`/`debug` — see the **Security
   `io.open`) must be loaded through the new
   [`LuaPlugin::from_path_with_sandbox`] /
   [`LuaPlugin::from_script_with_sandbox`] opt-in APIs with
-  `LuaSandbox::Permissive`.
+  `LuaSandbox::Permissive`. This is the reason the release is a minor
+  bump (v2.2.0) rather than a patch (v2.1.1).
 
   **Migration:** if you embed `narwhal-plugin-lua` and load plugins
   you trust to native-code level, replace
