@@ -17,22 +17,33 @@ async fn settings_watcher_ignores_sibling_files() {
     let (_watcher, mut rx) = SettingsWatcher::spawn(&cfg).expect("watcher spawn failed");
 
     // Give the watcher a moment to settle after initial file creation.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // macOS FSEvents has a longer initial delivery latency than
+    // inotify (often ~500 ms on CI runners), so we wait longer there.
+    let settle = if cfg!(target_os = "macos") { 1500 } else { 300 };
+    tokio::time::sleep(Duration::from_millis(settle)).await;
 
-    // Drain any leftover event from the initial write.
-    let _ = rx.try_recv();
+    // Drain any leftover event from the initial write. macOS may
+    // coalesce several FSEvents into one notification batch, so loop
+    // until the queue is empty.
+    while rx.try_recv().is_ok() {}
 
     // Write to a sibling file — must NOT trigger a settings reload.
+    // The wait must be long enough that a real sibling-driven event
+    // would have arrived on a quiet runner; macOS FSEvents bunches
+    // events on a ~1 s timer so we give it 2 s of headroom.
     std::fs::write(dir.path().join("connections.toml"), "noise").expect("sibling write failed");
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let negative_wait = if cfg!(target_os = "macos") { 2000 } else { 500 };
+    tokio::time::sleep(Duration::from_millis(negative_wait)).await;
     assert!(
         rx.try_recv().is_err(),
         "watcher must not fire for sibling file changes"
     );
 
     // Write to the actual settings file — MUST trigger a reload.
+    // 10 s upper bound accommodates FSEvents on a heavily loaded
+    // macOS CI runner (inotify on Linux typically delivers in <50 ms).
     std::fs::write(&cfg, "# real change").expect("config write failed");
-    let received = timeout(Duration::from_secs(3), rx.recv())
+    let received = timeout(Duration::from_secs(10), rx.recv())
         .await
         .expect("timed out waiting for settings change event");
     assert!(
