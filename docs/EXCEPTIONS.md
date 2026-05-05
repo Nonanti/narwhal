@@ -6,30 +6,36 @@ short rationale.
 
 ## File size > 500 LOC
 
-| File                                            | LOC   | Reason |
-|-------------------------------------------------|-------|--------|
-| `crates/narwhal-driver-clickhouse/src/lib.rs`   | 1625  | Single-file driver; TSV streaming, type lattice and HTTP transport are tightly coupled. Splitting buys little. |
-| `crates/narwhal-driver-duckdb/src/lib.rs`       | 1280  | Same shape as the ClickHouse driver — embedded engine with a rich type lattice. |
-| `crates/narwhal-plugin-lua/src/lib.rs`          | 1106  | Lua FFI wiring lives in one place by convention; splitting interferes with `mlua` lifetime gymnastics. |
-| `crates/narwhal-driver-postgres/src/lib.rs`     | 1018  | `tokio-postgres` binding + value codec. |
-| `crates/narwhal-driver-mysql/src/lib.rs`        |  960  | Similar shape to other driver `lib.rs` files. |
-| `crates/narwhal-driver-sqlite/src/lib.rs`       |  848  | `rusqlite` binding + value codec. |
-| `crates/narwhal-commands/src/commands.rs`       |  754  | Command dispatch table. Each handler is small; the file is mostly a switch. |
-| `crates/narwhal-app/src/core/results_actions.rs`|  730  | Action handlers over the result pane. Splits naturally per action group; on the to-do list. |
-| `crates/narwhal-domain/src/editor.rs`           |  703  | Editor buffer + line cursor iterator. Single concept, kept together. |
-| `crates/narwhal-driver-clickhouse/src/types.rs` |  694  | TSV type parser. Internal helper used only by the driver. |
-| `crates/narwhal-vim/src/machine.rs`             |  680  | The vim state machine itself; splitting would shred a single concept. |
-| `crates/narwhal-commands/src/export/mod.rs`     |  604  | Dispatcher + tests. The actual format-specific writers live in sibling files. |
-| `crates/narwhal-history/src/journal.rs`         |  598  | JSONL journal with redaction. Single responsibility. |
-| `crates/narwhal-driver-postgres/src/tls.rs`     |  569  | TLS config negotiation. |
+Driver `mod.rs` files exceed 500 LOC; they are scheduled for a
+submodule split (see roadmap Faz 1 Madde 4). Until that lands they
+remain documented exceptions.
+
+| File                                             | LOC   | Reason |
+|--------------------------------------------------|-------|--------|
+| `crates/narwhal-drivers/src/mssql/mod.rs`        | 1877  | Tiberius binding + value codec + streaming. Scheduled split. |
+| `crates/narwhal-drivers/src/clickhouse/mod.rs`   | 1758  | HTTP transport + TSV streaming + type lattice. Scheduled split. |
+| `crates/narwhal-drivers/src/duckdb/mod.rs`       | 1429  | Embedded engine with rich type lattice. Scheduled split. |
+| `crates/narwhal-drivers/src/mysql/mod.rs`        | 1137  | `mysql_async` binding + value codec. Scheduled split. |
+| `crates/narwhal-plugin-lua/src/lib.rs`           | 1106  | Lua FFI wiring lives in one place by convention; splitting interferes with `mlua` lifetime gymnastics. |
+| `crates/narwhal-drivers/src/postgres/mod.rs`     | 1042  | `tokio-postgres` binding + value codec. Reference layout for the upcoming split (already has `ddl.rs`, `tls.rs`, `types.rs`). |
+| `crates/narwhal-drivers/src/sqlite/mod.rs`       |  970  | `rusqlite` binding + value codec. Scheduled split. |
+| `crates/narwhal-commands/src/commands.rs`        | 2045  | Command dispatch table. Scheduled split (one module per command). |
+| `crates/narwhal-app/src/core/results_actions.rs` | 1030  | Action handlers over the result pane. Scheduled move to `narwhal-domain`. |
+| `crates/narwhal-app/src/core/sessions.rs`        |  831  | Session state + IO. Scheduled state→domain, IO→app split. |
+| `crates/narwhal-domain/src/editor.rs`            |  703  | Editor buffer + line cursor iterator. Single concept, kept together. |
+| `crates/narwhal-drivers/src/clickhouse/types.rs` |  692  | TSV type parser. Internal helper used only by the driver. |
+| `crates/narwhal-vim/src/machine.rs`              |  680  | The vim state machine itself; splitting would shred a single concept. |
+| `crates/narwhal-commands/src/export/mod.rs`      |  604  | Dispatcher + tests. The actual format-specific writers live in sibling files. |
+| `crates/narwhal-history/src/journal.rs`          |  598  | JSONL journal with redaction. Single responsibility. |
+| `crates/narwhal-drivers/src/postgres/tls.rs`     |  560  | TLS config negotiation. |
 
 ## Clippy allow-list
 
 Workspace allow-list lives in the root `Cargo.toml` under
 `[workspace.lints.clippy]`:
 
-- `module_name_repetitions` — narwhal-style names (`DriverRegistry` in
-  `narwhal-driver-registry`) intentionally repeat.
+- `module_name_repetitions` — narwhal-style names (`DriverRegistry`
+  inside `narwhal-drivers::registry`) intentionally repeat.
 - `must_use_candidate` — too noisy on builders and accessor methods.
 - `missing_errors_doc` / `missing_panics_doc` — domain-level errors
   are documented at the `Error` enum, not on every fallible function.

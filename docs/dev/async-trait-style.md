@@ -115,7 +115,7 @@ where
 ## Consumer authoring rules
 
 Crates that hold trait objects (`narwhal-pool`, `narwhal-app`,
-`narwhal-mcp`, `narwhal-driver-registry`, the `narwhal` binary) **do**
+`narwhal-mcp`, `narwhal-drivers`, the `narwhal` binary) **do**
 import the `Dyn*` traits so the methods are in scope. They never
 import the sized trait — there is no need, the dyn trait covers the
 full API.

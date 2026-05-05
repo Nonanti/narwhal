@@ -22,11 +22,11 @@ Target architecture after the refactor. Authoritative reference for crate bounda
                          │
         ┌────────────────┼────────────────┐
         ▼                ▼                ▼
-  narwhal-pool   narwhal-driver-registry  narwhal-sql / history / config / vim
+  narwhal-pool     narwhal-drivers       narwhal-sql / history / config / vim
                          │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-   driver-postgres   driver-sqlite    driver-{mysql,duckdb,clickhouse}
+                         ▼
+        feature-gated backends inside narwhal-drivers:
+        postgres │ sqlite │ mysql │ duckdb │ clickhouse │ mssql
 ```
 
 Dependency rules:
@@ -35,14 +35,14 @@ Dependency rules:
 - No sibling-to-sibling at the same layer except where the diagram shows.
 - `narwhal-tui` knows about `narwhal-domain` (read-only). It does **not** know about `narwhal-app`, `narwhal-commands`, or any driver.
 - `narwhal-app` is the only crate allowed to mutate domain state in response to user input.
-- `narwhal-mcp` talks to drivers exclusively through `narwhal-driver-registry`.
+- `narwhal-mcp` talks to drivers exclusively through `narwhal-drivers::registry`.
 
 ## Crate responsibilities
 
 ### narwhal-core
 Shared primitives: `Value`, `Row`, `ColumnSchema`, `QueryResult`, `Identifier`, `Error` types reused across the workspace. No state, no IO.
 
-### narwhal-domain (new)
+### narwhal-domain
 Pure model state. Owns:
 - `EditorModel` — text buffer, cursor, selection, undo stack.
 - `ResultModel` — rows, column metadata, sort/filter spec, viewport.
@@ -50,14 +50,17 @@ Pure model state. Owns:
 
 No async, no IO, no `ratatui` types. Pure data + transition methods.
 
-### narwhal-driver-registry (new)
-- `trait Driver` — connect, execute, introspect, cancel.
+### narwhal-drivers
+Umbrella crate consolidating every backend behind cargo features.
+- `trait DatabaseDriver` — connect, execute, introspect, cancel
+  (re-exported from `narwhal-core`).
 - `DriverKind` enum gated by features.
-- `Registry` — name → factory map, populated at startup based on enabled features.
-- Re-exported from `narwhal-driver-*` crates.
-
-### narwhal-driver-{postgres,sqlite,mysql,duckdb,clickhouse}
-Concrete `Driver` implementations. Each behind a feature flag in `narwhal` and `narwhal-mcp`.
+- `registry::Registry` — name → factory map, populated at startup
+  based on enabled features.
+- One submodule per backend: `postgres`, `sqlite`, `mysql`, `duckdb`,
+  `clickhouse`, `mssql`. Each is behind a feature flag.
+- Sibling submodules carry shared TLS, URL parsing and value-codec
+  helpers.
 
 ### narwhal-pool
 Connection pooling. Consumes `Driver`, hands out connections. No driver-specific code.
@@ -74,7 +77,7 @@ Config file loading, profile resolution.
 ### narwhal-vim
 Vim emulation state machine. Consumes key events, returns motion intents.
 
-### narwhal-commands (new)
+### narwhal-commands
 Everything in today's `narwhal-app` that is "command" logic:
 - Command parsing and dispatch (`:set`, `:open`, `:export`).
 - Tab completion engine.
@@ -100,7 +103,7 @@ Thin orchestrator:
 - ≤ 2000 LOC total. ≤ 10 files.
 
 ### narwhal-mcp
-MCP server. Driver-agnostic via `narwhal-driver-registry`.
+MCP server. Driver-agnostic via `narwhal-drivers::registry`.
 
 ### narwhal (binary)
 CLI parsing, config bootstrap, terminal init, `App::run`. ≤ 400 LOC.
@@ -127,12 +130,13 @@ Workspace root `narwhal` and `narwhal-mcp` expose:
 
 ```
 default      = ["postgres", "sqlite"]
-postgres     = ["narwhal-driver-postgres"]
-sqlite       = ["narwhal-driver-sqlite"]
-mysql        = ["narwhal-driver-mysql"]
-duckdb       = ["narwhal-driver-duckdb"]
-clickhouse   = ["narwhal-driver-clickhouse"]
-all-drivers  = ["postgres", "sqlite", "mysql", "duckdb", "clickhouse"]
+postgres     = ["narwhal-drivers/postgres"]
+sqlite       = ["narwhal-drivers/sqlite"]
+mysql        = ["narwhal-drivers/mysql"]
+duckdb       = ["narwhal-drivers/duckdb"]
+clickhouse   = ["narwhal-drivers/clickhouse"]
+mssql        = ["narwhal-drivers/mssql"]
+all-drivers  = ["postgres", "sqlite", "mysql", "duckdb", "clickhouse", "mssql"]
 ```
 
 CI builds: `default`, `all-drivers`, and one minimal `--no-default-features --features sqlite` matrix entry.

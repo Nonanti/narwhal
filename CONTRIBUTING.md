@@ -80,12 +80,13 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full map.
 
 ## Adding a new database driver
 
-1. Create `crates/narwhal-driver-<name>/` mirroring the layout of an
-   existing driver (sqlite is the smallest reference).
+1. Create `crates/narwhal-drivers/src/<name>/` mirroring the layout
+   of an existing backend (sqlite is the smallest reference).
 2. Implement `DatabaseDriver` + `Connection` from `narwhal-core`.
-3. Add a feature flag in the workspace `Cargo.toml`:
-   `driver-<name> = ["narwhal-app/driver-<name>", "narwhal-mcp/driver-<name>"]`.
-4. Register it in `narwhal-driver-registry::with_defaults` behind the flag.
+3. Add a cargo feature in `crates/narwhal-drivers/Cargo.toml` and
+   surface it from the workspace root + `narwhal-mcp`.
+4. Register it in `narwhal-drivers::registry::with_defaults` behind
+   the feature.
 5. Add a row to the capability table in the README.
 6. Add at least one integration test under `#[ignore]` that exercises
    the real driver against a docker-compose'd instance.

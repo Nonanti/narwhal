@@ -57,16 +57,17 @@ cargo publish -p narwhal-config
 cargo publish -p narwhal-domain
 cargo publish -p narwhal-plugin
 
-# 3. Plugins + drivers
+# 3. Plugins + consolidated drivers
 cargo publish -p narwhal-plugin-lua
-cargo publish -p narwhal-driver-postgres
-cargo publish -p narwhal-driver-mysql
-cargo publish -p narwhal-driver-sqlite
-cargo publish -p narwhal-driver-duckdb
-cargo publish -p narwhal-driver-clickhouse
+cargo publish -p narwhal-plugin-wasm
+cargo publish -p narwhal-drivers
 
-# 4. Registry (after all drivers) + UI + command surface
-cargo publish -p narwhal-driver-registry
+# 4. UI + command surface + audit
+cargo publish -p narwhal-audit
+cargo publish -p narwhal-schema-diff
+cargo publish -p narwhal-diagram
+cargo publish -p narwhal-pivot
+cargo publish -p narwhal-lsp
 cargo publish -p narwhal-tui
 cargo publish -p narwhal-commands
 

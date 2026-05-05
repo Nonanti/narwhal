@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy per-driver crate directories purged.** The on-disk
+  `crates/narwhal-driver-{postgres,mysql,sqlite,duckdb,clickhouse,registry}/`
+  trees were left behind when T0-03 folded those crates into
+  `narwhal-drivers`. They were not workspace members (so they never
+  built and never affected releases) but they had silently diverged
+  from the canonical copies under `crates/narwhal-drivers/src/`,
+  which made grep noisy and risked accidental edits to the dead
+  copies. No user-facing impact.
+
+### Docs
+
+- `docs/ARCHITECTURE.md`, `docs/EXCEPTIONS.md`, `docs/RELEASING.md`,
+  `docs/dev/async-trait-style.md`, `CONTRIBUTING.md` and the
+  `narwhal-mcp` README now reflect the consolidated `narwhal-drivers`
+  layout instead of the deleted per-driver crates.
+
 ## [2.2.0] - 2026-06-08
 
 Release originally scoped as a v2.1.1 patch (regressions in v2.1.0's

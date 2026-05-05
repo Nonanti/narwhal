@@ -8,8 +8,9 @@ members = [
     "crates/narwhal-history",
     # T2-T2-D: append-only JSONL audit log sink for compliance use.
     "crates/narwhal-audit",
-    # T0-03: 5 driver crates + narwhal-driver-registry consolidated
-    # into narwhal-drivers with one cargo feature per backend.
+    # T0-03: every backend lives inside `narwhal-drivers` behind a
+    # cargo feature. The legacy per-driver crate trees were removed
+    # from disk in the Unreleased cycle after v2.2.0.
     "crates/narwhal-drivers",
     "crates/narwhal-domain",
     "crates/narwhal-commands",
