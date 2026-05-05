@@ -12,7 +12,7 @@ use ratatui::widgets::Paragraph;
 use super::cells::{compute_column_widths, render_for_grid};
 use super::model::{ResultHitRegions, ResultView, SearchHighlight};
 use super::popups::{draw_cell_edit, draw_cell_popup};
-use super::sort::SortDir;
+use narwhal_domain::result::SortDir;
 use crate::theme::Theme;
 
 pub(super) fn draw_table(

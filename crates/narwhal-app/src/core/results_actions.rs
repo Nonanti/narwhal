@@ -733,8 +733,6 @@ impl AppCore {
             Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
             Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
             None => "sort: cleared".into(),
-            // Future SortDir variants: fall back to ascending wording.
-            Some((c, _)) => format!("sort: column {} (custom)", c + 1),
         };
         self.ui.status.message = msg;
     }
@@ -808,7 +806,6 @@ impl AppCore {
                     Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
                     Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
                     None => "sort: cleared".into(),
-                    Some((c, _)) => format!("sort: column {} (custom)", c + 1),
                 };
             }
         }

@@ -3323,6 +3323,7 @@ version = "2.2.0"
 dependencies = [
  "narwhal-core",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

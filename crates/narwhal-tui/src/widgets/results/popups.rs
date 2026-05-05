@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use super::cells::sanitize_for_display;
-use super::model::{CellEditView, CellPopup, ExplainPlanLine};
+use narwhal_domain::result::{CellEditView, CellPopup, ExplainPlanLine};
 use crate::theme::Theme;
 
 use crate::widgets::centred_rect;

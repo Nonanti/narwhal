@@ -10,6 +10,7 @@
 pub mod editor;
 pub mod motion;
 pub mod relation;
+pub mod result;
 pub mod schema;
 
 pub use editor::{
@@ -17,4 +18,5 @@ pub use editor::{
 };
 pub use motion::Motion;
 pub use relation::{Cardinality, LogicalRelation, QualifiedName};
+pub use result::{CellEditView, CellPopup, ExplainPlanLine, MetaTab, SortDir, compare_values};
 pub use schema::SchemaListing;

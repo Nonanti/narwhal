@@ -1,87 +1,23 @@
-//! Result-view state types. Most carry both data and a sliver of
-//! ratatui state (`TableState`); a future split moves the pure
-//! data half into narwhal-domain. For now the whole bundle lives
-//! together.
+//! Result-view state types. The pure value types (`MetaTab`,
+//! `CellPopup`, `CellEditView`, `ExplainPlanLine`, plus `SortDir`)
+//! now live in `narwhal_domain::result`; this module keeps the
+//! ratatui-bound `ResultView` (carries a `TableState`) and the
+//! `ResultDisplay<'a>` render argument here.
+//!
+//! A future split (Faz 1 Madde 3, Adım 2) lifts the pure half of
+//! `ResultView` into the domain crate and leaves only the ratatui
+//! adapter behind.
 
 use narwhal_core::{ColumnHeader, Row, TableSchema};
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 
-use super::sort::{SortDir, compare_values};
-
-/// Which metadata sub-view of [`ResultDisplay::TableDetail`] is on
-/// screen. Mapped 1:1 from the numeric chord (`1`..=`5`) on the
-/// Results pane and round-trips through [`MetaTab::index`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MetaTab {
-    /// `1`: the row preview (paged `SELECT *`). Selecting this tab
-    /// from any other dispatches a preview query against the table;
-    /// the active state becomes [`ResultDisplay::Rows`] until the
-    /// user navigates back.
-    Records,
-    /// `2`: columns table with type / nullability / PK / default.
-    #[default]
-    Columns,
-    /// `3`: primary key + unique constraints.
-    Constraints,
-    /// `4`: foreign keys with ON UPDATE/ON DELETE actions.
-    ForeignKeys,
-    /// `5`: secondary indexes.
-    Indexes,
-}
-
-impl MetaTab {
-    /// 1-based display index used both in the tab strip and as the
-    /// numeric keybinding (`1` selects `Records`, etc.).
-    pub const fn index(self) -> u8 {
-        match self {
-            Self::Records => 1,
-            Self::Columns => 2,
-            Self::Constraints => 3,
-            Self::ForeignKeys => 4,
-            Self::Indexes => 5,
-        }
-    }
-
-    /// Inverse of [`Self::index`]; `None` for out-of-range inputs so
-    /// future chord additions can grow without panicking.
-    pub const fn from_index(n: u8) -> Option<Self> {
-        match n {
-            1 => Some(Self::Records),
-            2 => Some(Self::Columns),
-            3 => Some(Self::Constraints),
-            4 => Some(Self::ForeignKeys),
-            5 => Some(Self::Indexes),
-            _ => None,
-        }
-    }
-
-    /// Short label shown in the tab strip. Stays ASCII so the renderer
-    /// width math (one column per character) keeps working in TTYs
-    /// that lack wide-glyph support.
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Records => "Records",
-            Self::Columns => "Columns",
-            Self::Constraints => "Constraints",
-            Self::ForeignKeys => "FKs",
-            Self::Indexes => "Indexes",
-        }
-    }
-
-    /// All variants in display order. Iterating is preferred over
-    /// hand-rolled lists so a new variant lights up everywhere at
-    /// once.
-    pub const fn all() -> &'static [Self] {
-        &[
-            Self::Records,
-            Self::Columns,
-            Self::Constraints,
-            Self::ForeignKeys,
-            Self::Indexes,
-        ]
-    }
-}
+// `mod.rs` re-exports these so the `narwhal_tui::MetaTab` / etc.
+// import paths keep working; here we only need them in scope for
+// the field types of `ResultView` and `ResultDisplay`.
+use narwhal_domain::result::{
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, SortDir, compare_values,
+};
 
 #[derive(Debug, Default)]
 pub struct ResultView {
@@ -110,33 +46,10 @@ pub struct ResultView {
     pub visible_indices: Vec<usize>,
 }
 
-/// Editor-style popup used by inline cell edits.
-#[derive(Debug, Clone)]
-pub struct CellEditView {
-    pub column_name: String,
-    pub column_type: String,
-    pub row_index: usize,
-    /// Current buffer the user is editing.
-    pub buffer: String,
-    /// Optional error message rendered below the input (e.g. UPDATE
-    /// rejected by the engine).
-    pub error: Option<String>,
-}
-
 /// Highlight information for [`ResultDisplay::Rows`] when search is active.
 pub struct SearchHighlight<'a> {
     pub matches: &'a [usize],
     pub current: Option<usize>,
-}
-
-/// Modal description of one cell, shown over the result grid when the user
-/// requests detail with Enter.
-#[derive(Debug, Clone)]
-pub struct CellPopup {
-    pub column_name: String,
-    pub column_type: String,
-    pub value_text: String,
-    pub row_index: usize,
 }
 
 impl ResultView {
@@ -300,34 +213,6 @@ pub enum ResultDisplay<'a> {
         message: &'a str,
         elapsed_ms: u64,
     },
-}
-
-/// One rendered line of a query plan. Independent of the parser so the
-/// widget crate does not need a dependency on `serde_json`.
-///
-/// v1.1 #3: extended with optional cost / divergence metadata so the
-/// renderer can draw cost bars and colour the hot path. The fields
-/// default to inert values so callers that haven't migrated still
-/// produce a sensible monochrome plan.
-#[derive(Debug, Clone, Default)]
-pub struct ExplainPlanLine {
-    pub depth: usize,
-    pub text: String,
-    /// Total cost of this node normalised to the plan's max cost
-    /// (0.0–1.0). Drives the cost-bar fill width. `None` suppresses
-    /// the bar entirely.
-    pub cost_ratio: Option<f64>,
-    /// `true` when the node is on the plan's hot path (highest cost
-    /// branch from root to a leaf). Drawn with the accent colour.
-    pub hot: bool,
-    /// `true` when the actual rows diverge from the planner estimate
-    /// by more than 10×. Drawn with a yellow badge.
-    pub divergent: bool,
-    /// Tree connector for this line, e.g. `"  ├─ "` / `"  └─ "`. When
-    /// non-empty it is rendered verbatim *instead of* the indent +
-    /// glyph the renderer used to compute itself, so callers can
-    /// produce a proper box-drawing tree.
-    pub connector: String,
 }
 
 /// Hit-test regions computed during the last render of the results pane.

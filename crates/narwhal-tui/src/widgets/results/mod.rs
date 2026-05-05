@@ -6,15 +6,16 @@ mod cells;
 mod model;
 mod popups;
 mod schema_detail;
-mod sort;
 mod table_paint;
 
 pub use cells::sanitize_for_display;
-pub use model::{
-    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions, ResultView,
-    SearchHighlight,
+pub use model::{ResultDisplay, ResultHitRegions, ResultView, SearchHighlight};
+// Pure value types live in `narwhal-domain`; the TUI re-exports them
+// so existing `narwhal_tui::MetaTab` / `narwhal_tui::SortDir` import
+// paths keep working.
+pub use narwhal_domain::result::{
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, SortDir, compare_values,
 };
-pub use sort::{SortDir, compare_values};
 
 use popups::draw_explain;
 use schema_detail::draw_table_detail;
@@ -302,10 +303,7 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
     use std::time::Duration;
-
-    use narwhal_core::Value;
 
     use super::cells::render_for_grid;
     use super::*;
@@ -386,61 +384,6 @@ mod tests {
         assert_eq!(output, "a⏎·b");
     }
 
-    #[test]
-    fn compare_json_structural_matches_string_for_equal_inputs() {
-        let a = serde_json::json!({"id": 1, "tags": ["a", "b"]});
-        let b = serde_json::json!({"id": 1, "tags": ["a", "b"]});
-        assert_eq!(
-            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
-            Ordering::Equal
-        );
-    }
-
-    #[test]
-    fn compare_json_orders_by_first_differing_field() {
-        let a = serde_json::json!({"name": "alice"});
-        let b = serde_json::json!({"name": "bob"});
-        assert_eq!(
-            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
-            Ordering::Less
-        );
-    }
-
-    #[test]
-    fn compare_json_orders_numbers_numerically_not_lexically() {
-        // String-based compare would put "10" before "2"; structural
-        // compare orders 2 < 10.
-        let a = serde_json::json!(2);
-        let b = serde_json::json!(10);
-        assert_eq!(
-            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
-            Ordering::Less
-        );
-    }
-
-    #[test]
-    fn compare_json_arrays_use_lexicographic_order() {
-        let a = serde_json::json!([1, 2, 3]);
-        let b = serde_json::json!([1, 2, 4]);
-        let c = serde_json::json!([1, 2]);
-        assert_eq!(
-            compare_values(Some(&Value::Json(a.clone())), Some(&Value::Json(b))),
-            Ordering::Less
-        );
-        assert_eq!(
-            compare_values(Some(&Value::Json(c)), Some(&Value::Json(a))),
-            Ordering::Less
-        );
-    }
-
-    #[test]
-    fn compare_json_different_kinds_use_type_rank() {
-        // bool ranks below string, regardless of payload.
-        let a = serde_json::json!(true);
-        let b = serde_json::json!("a");
-        assert_eq!(
-            compare_values(Some(&Value::Json(a)), Some(&Value::Json(b))),
-            Ordering::Less
-        );
-    }
+    // compare_values / compare_json tests have moved with the
+    // function bodies into `narwhal_domain::result`.
 }
