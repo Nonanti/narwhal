@@ -9,12 +9,12 @@ mod schema_detail;
 mod table_paint;
 
 pub use cells::sanitize_for_display;
-pub use model::{ResultDisplay, ResultHitRegions, ResultView, SearchHighlight};
+pub use model::{ResultDisplay, ResultHitRegions, SearchHighlight};
 // Pure value types live in `narwhal-domain`; the TUI re-exports them
-// so existing `narwhal_tui::MetaTab` / `narwhal_tui::SortDir` import
-// paths keep working.
+// so existing `narwhal_tui::MetaTab` / `narwhal_tui::ResultView` /
+// `narwhal_tui::SortDir` import paths keep working.
 pub use narwhal_domain::result::{
-    CellEditView, CellPopup, ExplainPlanLine, MetaTab, SortDir, compare_values,
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultView, SortDir, compare_values,
 };
 
 use popups::draw_explain;

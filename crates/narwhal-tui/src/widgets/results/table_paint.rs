@@ -5,14 +5,14 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Row as TableRow, Table};
+use ratatui::widgets::{Cell, Row as TableRow, Table, TableState};
 
 use ratatui::widgets::Paragraph;
 
 use super::cells::{compute_column_widths, render_for_grid};
-use super::model::{ResultHitRegions, ResultView, SearchHighlight};
+use super::model::{ResultHitRegions, SearchHighlight};
 use super::popups::{draw_cell_edit, draw_cell_popup};
-use narwhal_domain::result::SortDir;
+use narwhal_domain::result::{ResultView, SortDir};
 use crate::theme::Theme;
 
 pub(super) fn draw_table(
@@ -94,7 +94,17 @@ pub(super) fn draw_table(
         .header(header)
         .highlight_style(Style::default().bg(theme.muted))
         .column_spacing(1);
-    frame.render_stateful_widget(table, table_area, &mut view.state);
+
+    // Materialise a ratatui `TableState` from the pure domain fields,
+    // hand it to the renderer (which may scroll it), then copy the
+    // possibly-updated values back into the view. `TableState`
+    // doesn't carry any other persistent state we care about.
+    let mut table_state = TableState::default();
+    table_state.select(view.selected);
+    *table_state.offset_mut() = view.scroll_offset;
+    frame.render_stateful_widget(table, table_area, &mut table_state);
+    view.selected = table_state.selected();
+    view.scroll_offset = table_state.offset();
 
     // Render the filter prompt row at the bottom of the result area.
     if filter_prompt_open {
@@ -140,7 +150,7 @@ pub(super) fn draw_table(
         x_offset += w16 + 1; // +1 for column_spacing
     }
 
-    let scroll_offset = view.state.offset();
+    let scroll_offset = view.scroll_offset;
     let data_y_start = table_area.y + header_height;
     let visible_height = table_area.height.saturating_sub(header_height) as usize;
     let mut row_rects = Vec::new();

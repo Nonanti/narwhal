@@ -18,5 +18,7 @@ pub use editor::{
 };
 pub use motion::Motion;
 pub use relation::{Cardinality, LogicalRelation, QualifiedName};
-pub use result::{CellEditView, CellPopup, ExplainPlanLine, MetaTab, SortDir, compare_values};
+pub use result::{
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultView, SortDir, compare_values,
+};
 pub use schema::SchemaListing;

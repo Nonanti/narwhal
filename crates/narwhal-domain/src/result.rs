@@ -12,7 +12,7 @@
 
 use std::cmp::Ordering;
 
-use narwhal_core::Value;
+use narwhal_core::{ColumnHeader, Row, Value};
 
 // ---------------------------------------------------------------------
 // MetaTab
@@ -259,6 +259,155 @@ pub struct CellEditView {
     /// Optional error message rendered below the input (e.g. UPDATE
     /// rejected by the engine).
     pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------
+// ResultView
+// ---------------------------------------------------------------------
+
+/// Pure data half of the result-pane view. Carries every piece of
+/// state the result grid needs *except* the ratatui `TableState` that
+/// the renderer briefly materialises each frame.
+///
+/// The selection / scroll offset that ratatui drives at render time
+/// are persisted here as plain fields so the TUI can rebuild a
+/// `TableState` from them, hand it to `render_stateful_widget`, then
+/// copy the (possibly updated) values back — see the renderer in
+/// `narwhal-tui::widgets::results::table_paint` for the round-trip.
+#[derive(Debug, Default)]
+pub struct ResultView {
+    /// Index of the selected row (post-filter/sort), if any. Mirrors
+    /// `ratatui::widgets::TableState::selected`.
+    pub selected: Option<usize>,
+    /// Vertical scroll offset (post-filter/sort). Mirrors
+    /// `ratatui::widgets::TableState::offset`.
+    pub scroll_offset: usize,
+    pub column_index: usize,
+    pub popup: Option<CellPopup>,
+    /// When `Some`, the cell editor is drawn on top of the result grid in
+    /// place of the read-only popup. Only one of `popup` and `edit` is
+    /// rendered at a time; the host app enforces this.
+    pub edit: Option<CellEditView>,
+    /// Active sort: `(column_index, direction)`.
+    pub sort: Option<(usize, SortDir)>,
+    /// Active filter text. Rows that don't contain this
+    /// case-insensitive substring in any column are hidden.
+    pub filter: String,
+    /// When `true`, the filter input prompt is open for editing.
+    pub filter_prompt_open: bool,
+    /// Cached visible row indices computed by the last render.
+    /// `visible_indices[i]` is the original row index of the i-th
+    /// rendered row.
+    pub visible_indices: Vec<usize>,
+}
+
+impl ResultView {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the index of the selected row, or `None` when no row is
+    /// selected. Mirrors `ratatui::widgets::TableState::selected`.
+    pub const fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// Select the row at `index`, or pass `None` to clear the
+    /// selection.
+    pub const fn select(&mut self, index: Option<usize>) {
+        self.selected = index;
+    }
+
+    /// Vertical scroll offset.
+    pub const fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    /// Set the vertical scroll offset.
+    pub const fn set_scroll_offset(&mut self, offset: usize) {
+        self.scroll_offset = offset;
+    }
+
+    pub const fn move_down(&mut self, total_rows: usize) {
+        if total_rows == 0 {
+            return;
+        }
+        let next = match self.selected {
+            Some(i) => i + 1,
+            None => 0,
+        };
+        let max = total_rows - 1;
+        self.selected = Some(if next < max { next } else { max });
+    }
+
+    pub const fn move_up(&mut self) {
+        match self.selected {
+            Some(i) => self.selected = Some(i.saturating_sub(1)),
+            None => self.selected = Some(0),
+        }
+    }
+
+    pub const fn move_left(&mut self) {
+        self.column_index = self.column_index.saturating_sub(1);
+    }
+
+    pub const fn move_right(&mut self, total_cols: usize) {
+        if total_cols == 0 {
+            return;
+        }
+        if self.column_index + 1 < total_cols {
+            self.column_index += 1;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.selected = None;
+        self.column_index = 0;
+        self.popup = None;
+        self.sort = None;
+        self.filter.clear();
+        self.filter_prompt_open = false;
+        self.visible_indices.clear();
+    }
+
+    /// Derive the visible row indices after applying filter then sort.
+    /// Filter applies first; sort applies to the filtered subset.
+    /// Sort is stable across ties.
+    pub fn visible_rows(&self, columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..rows.len()).collect();
+
+        // Filter: keep rows where any cell contains the needle
+        // (case-insensitive).
+        if !self.filter.is_empty() {
+            let needle = self.filter.to_lowercase();
+            indices.retain(|&i| {
+                rows[i]
+                    .0
+                    .iter()
+                    .any(|v| v.render().to_lowercase().contains(&needle))
+            });
+        }
+
+        // Sort: stable sort on the filtered subset.
+        if let Some((col, dir)) = self.sort {
+            let col_clamped = if col < columns.len() {
+                col
+            } else {
+                return indices;
+            };
+            indices.sort_by(|&a, &b| {
+                let av = rows[a].0.get(col_clamped);
+                let bv = rows[b].0.get(col_clamped);
+                let ord = compare_values(av, bv);
+                match dir {
+                    SortDir::Asc => ord,
+                    SortDir::Desc => ord.reverse(),
+                }
+            });
+        }
+
+        indices
+    }
 }
 
 // ---------------------------------------------------------------------
