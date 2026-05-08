@@ -88,7 +88,7 @@ pub struct PersistedTab {
     /// module-level docs.
     pub buffer: String,
     /// Caret row (0-indexed). Restored via
-    /// [`narwhal_tui::EditorBuffer::set_cursor`] so an
+    /// [`narwhal_domain::editor::EditorBuffer::set_cursor`] so an
     /// out-of-bounds value clamps to the last line rather than
     /// panicking.
     pub cursor_row: usize,

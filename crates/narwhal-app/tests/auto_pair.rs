@@ -1,6 +1,6 @@
 //! Integration tests for auto-pair brackets and quotes in insert mode.
 
-use narwhal_tui::EditorBuffer;
+use narwhal_domain::editor::EditorBuffer;
 
 /// Helper: insert a character via `insert_char` on a fresh buffer and return it.
 fn buf_with_chars(chars: &[char]) -> EditorBuffer {

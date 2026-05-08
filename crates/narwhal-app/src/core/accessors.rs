@@ -1,7 +1,8 @@
 //! `AppCore` read-only accessors used by tests, the renderer and
 //! external callers (e.g. the binary).
 
-use narwhal_tui::{EditorBuffer, Pane};
+use narwhal_domain::editor::EditorBuffer;
+use narwhal_tui::Pane;
 use narwhal_vim::Mode;
 
 use super::{

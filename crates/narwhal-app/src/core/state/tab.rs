@@ -2,7 +2,7 @@
 
 use narwhal_pivot::PivotConfig;
 use narwhal_sql::treesitter::{HighlightSpan, Parser as TsParser};
-use narwhal_tui::EditorBuffer;
+use narwhal_domain::editor::EditorBuffer;
 
 use crate::core::chart::ChartConfig;
 

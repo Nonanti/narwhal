@@ -50,6 +50,11 @@ pub use help::{
 };
 pub use history::{HistoryModalState, HistoryRow, HistoryRowOutcome, render_history_modal};
 pub use json_viewer::{JsonViewerView, render_json_viewer};
+// `EditorBuffer` and friends live in `narwhal-domain`. The TUI
+// re-exports them at this path so widget consumers don't need a direct
+// `narwhal-domain` dependency just to spell the types. Hosts that
+// already depend on the domain crate (e.g. `narwhal-app`) should
+// import from `narwhal_domain::editor::*` directly.
 pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };

@@ -4,7 +4,7 @@
 //! state. They live in their own module so the main module stays focused on
 //! event handling and state transitions.
 
-use narwhal_tui::widgets::EditorBuffer;
+use narwhal_domain::editor::EditorBuffer;
 
 /// Split a one-line command argument into `(head, tail)` where `head` is the
 /// first whitespace-delimited token and `tail` is the rest with leading

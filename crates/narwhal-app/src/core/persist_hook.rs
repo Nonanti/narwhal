@@ -38,7 +38,7 @@
 //!   `AppCore::new` wiring.
 
 use narwhal_config::WorkspacePersistSettings;
-use narwhal_tui::EditorBuffer;
+use narwhal_domain::editor::EditorBuffer;
 
 use super::AppCore;
 use super::state::Tab;
