@@ -1,25 +1,10 @@
-//! Candidate types surfaced by the completion engine.
+//! Re-export of the candidate types that now live in `narwhal-domain`.
+//!
+//! `Completion` and `CompletionKind` moved out of this crate so the
+//! result-pane state in `narwhal-domain` can name the candidate
+//! without pulling `narwhal-commands` along. The engine that produces
+//! candidates stays in this crate; this shim just keeps the old
+//! `narwhal_commands::completion::{Completion, CompletionKind}` import
+//! path working.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CompletionKind {
-    /// Reserved SQL keyword (`SELECT`, `FROM`, …).
-    Keyword,
-    /// Table or view name.
-    Table,
-    /// Column belonging to a known table.
-    Column,
-    /// Built-in / aggregate function (`COUNT(`, `SUM(`, …).
-    /// Inserted with the trailing `(` so the cursor lands inside the
-    /// argument list ready for the user to type the column.
-    Function,
-}
-
-/// Single completion candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Completion {
-    pub text: String,
-    pub kind: CompletionKind,
-    /// Optional secondary text shown next to the completion (e.g. the
-    /// schema for a table or the type for a column).
-    pub detail: Option<String>,
-}
+pub use narwhal_domain::completion::{Completion, CompletionKind};

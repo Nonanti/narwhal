@@ -21,4 +21,7 @@ pub use relation::{Cardinality, LogicalRelation, QualifiedName};
 pub use result::{
     CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultView, SortDir, compare_values,
 };
+
+pub mod completion;
+pub use completion::{Completion, CompletionKind};
 pub use schema::SchemaListing;
