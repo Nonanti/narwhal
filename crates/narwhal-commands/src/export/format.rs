@@ -146,18 +146,8 @@ impl ExportOptions {
     }
 }
 
-/// A qualified table name of the form `schema.table` or just `table`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QualifiedName {
-    pub schema: Option<String>,
-    pub table: String,
-}
-
-impl std::fmt::Display for QualifiedName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.schema {
-            Some(s) => write!(f, "{s}.{}", self.table),
-            None => write!(f, "{}", self.table),
-        }
-    }
-}
+// `QualifiedName` moved to `narwhal_domain::export` so the result-pane
+// state in `narwhal-domain` can name it without pulling
+// `narwhal-commands` along. Re-exported here so the
+// `narwhal_commands::export::QualifiedName` import path keeps working.
+pub use narwhal_domain::export::QualifiedName;

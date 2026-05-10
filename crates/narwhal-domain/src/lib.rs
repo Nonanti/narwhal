@@ -24,4 +24,6 @@ pub use result::{
 
 pub mod completion;
 pub use completion::{Completion, CompletionKind};
+
+pub mod export;
 pub use schema::SchemaListing;
