@@ -6,9 +6,10 @@ use narwhal_domain::editor::EditorBuffer;
 
 use crate::core::chart::ChartConfig;
 
+use super::diagram_modal::DiagramModalState;
 use super::result::{
-    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState, ResultBundle,
-    ResultSearch, RowDetailState, RowSource,
+    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
+    RowDetailState, RowSource,
 };
 use crate::pending::PendingChanges;
 

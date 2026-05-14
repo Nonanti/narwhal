@@ -21,7 +21,7 @@ use narwhal_diagram::{
 use narwhal_pool::Pool;
 
 use super::AppCore;
-use super::state::result::{DiagramModalState, DiagramMode};
+use super::state::diagram_modal::{DiagramModalState, DiagramMode};
 use crate::commands::DiagramFormat;
 
 impl AppCore {
