@@ -11,6 +11,7 @@ description = "Pure domain models for narwhal: editor buffer, results, tabs, ses
 
 [dependencies]
 narwhal-core.workspace = true
+narwhal-vim.workspace = true
 serde.workspace = true
 # Required by `result::compare_values` for the `Value::Json` branch.
 # narwhal-core already pulls serde_json in transitively; we list it

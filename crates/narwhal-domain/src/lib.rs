@@ -19,7 +19,9 @@ pub use editor::{
 pub use motion::Motion;
 pub use relation::{Cardinality, LogicalRelation, QualifiedName};
 pub use result::{
-    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultView, SortDir, compare_values,
+    CellEdit, CellEditView, CellPopup, CompletionState, EditorSearchState, ExplainPlanLine,
+    JsonViewerState, MetaTab, ResultBundle, ResultSearch, ResultState, ResultView, RowDetailState,
+    RowSource, SortDir, compare_values,
 };
 
 pub mod completion;

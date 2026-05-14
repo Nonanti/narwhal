@@ -3322,6 +3322,7 @@ name = "narwhal-domain"
 version = "2.2.0"
 dependencies = [
  "narwhal-core",
+ "narwhal-vim",
  "serde",
  "serde_json",
 ]

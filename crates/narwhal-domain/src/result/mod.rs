@@ -14,6 +14,12 @@ use std::cmp::Ordering;
 
 use narwhal_core::{ColumnHeader, Row, Value};
 
+pub mod state;
+pub use state::{
+    CellEdit, CompletionState, EditorSearchState, JsonViewerState, ResultBundle, ResultSearch,
+    ResultState, RowDetailState, RowSource,
+};
+
 // ---------------------------------------------------------------------
 // MetaTab
 // ---------------------------------------------------------------------
