@@ -13,6 +13,7 @@ description = "Pure domain models for narwhal: editor buffer, results, tabs, ses
 narwhal-core.workspace = true
 narwhal-history.workspace = true
 narwhal-vim.workspace = true
+nucleo-matcher.workspace = true
 serde.workspace = true
 uuid.workspace = true
 # Required by `result::compare_values` for the `Value::Json` branch.

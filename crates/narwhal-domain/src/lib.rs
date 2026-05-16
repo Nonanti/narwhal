@@ -29,11 +29,17 @@ pub use completion::{Completion, CompletionKind};
 
 pub mod export;
 
+pub mod goto;
+pub use goto::{GotoEntry, GotoMatch, GotoModal};
+
 pub mod history;
 pub use history::HistoryState;
 
 pub mod sidebar;
 pub use sidebar::SidebarItem;
+
+pub mod snippets;
+pub use snippets::SnippetsModal;
 
 pub mod status;
 pub use status::{Notification, StatusBar};

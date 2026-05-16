@@ -3324,6 +3324,7 @@ dependencies = [
  "narwhal-core",
  "narwhal-history",
  "narwhal-vim",
+ "nucleo-matcher",
  "serde",
  "serde_json",
  "uuid",
