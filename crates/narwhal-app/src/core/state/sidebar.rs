@@ -1,23 +1,5 @@
-//! Sidebar item types surfaced by the schema browser.
+//! Sidebar item shim — type lives in `narwhal-domain` (Faz 1 Madde 3,
+//! Adım 5). Re-exported so existing
+//! `crate::core::state::sidebar::SidebarItem` imports keep working.
 
-use narwhal_core::TableKind;
-use uuid::Uuid;
-
-#[derive(Debug, Clone)]
-pub enum SidebarItem {
-    Connection {
-        #[allow(dead_code)]
-        id: Uuid,
-        name: String,
-        driver: String,
-        active: bool,
-    },
-    Schema {
-        name: String,
-    },
-    Table {
-        schema: String,
-        name: String,
-        kind: TableKind,
-    },
-}
+pub use narwhal_domain::sidebar::SidebarItem;

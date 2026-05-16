@@ -28,4 +28,13 @@ pub mod completion;
 pub use completion::{Completion, CompletionKind};
 
 pub mod export;
+
+pub mod history;
+pub use history::HistoryState;
+
+pub mod sidebar;
+pub use sidebar::SidebarItem;
+
+pub mod status;
+pub use status::{Notification, StatusBar};
 pub use schema::SchemaListing;

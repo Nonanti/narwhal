@@ -3322,9 +3322,11 @@ name = "narwhal-domain"
 version = "2.2.0"
 dependencies = [
  "narwhal-core",
+ "narwhal-history",
  "narwhal-vim",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
