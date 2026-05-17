@@ -19,6 +19,10 @@ chrono.workspace = true
 uuid.workspace = true
 serde_json.workspace = true
 bytes = "1.7"
+futures = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }

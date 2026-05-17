@@ -5,6 +5,7 @@ use crate::cancel::CancelHandle;
 use crate::capabilities::Capabilities;
 use crate::error::Result;
 use crate::schema::{QueryResult, Schema, Table, TableSchema};
+use crate::stream::RowStream;
 use crate::value::Value;
 
 /// Static metadata describing how to reach a database.
@@ -58,6 +59,12 @@ pub trait Connection: Send + Sync {
     /// Parameters are bound positionally. Drivers that do not implement
     /// server-side prepared statements emulate binding by escaping.
     async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult>;
+
+    /// Execute a single statement and return a row stream.
+    ///
+    /// Streams release server-side resources only when the returned
+    /// [`RowStream::close`] is called or the stream is dropped.
+    async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>>;
 
     /// Begin a transaction with the engine's default isolation level.
     async fn begin(&mut self) -> Result<()>;

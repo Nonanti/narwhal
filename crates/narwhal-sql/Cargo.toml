@@ -1,0 +1,13 @@
+[package]
+name = "narwhal-sql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SQL statement splitter and lightweight tokenisation"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true

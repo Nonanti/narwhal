@@ -16,11 +16,11 @@ use std::time::Instant;
 use async_trait::async_trait;
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, Schema, Table, TableKind,
-    TableSchema, Value,
+    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
+    TableKind, TableSchema, Value,
 };
 use rusqlite::params_from_iter;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task;
 use tracing::{debug, info};
 
@@ -180,6 +180,91 @@ impl Connection for SqliteConnection {
         self.run(sql, params).await
     }
 
+    async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
+        let inner = self.inner.clone();
+        let sql = sql.to_owned();
+        let bound: Vec<rusqlite::types::Value> = params.iter().map(value_to_sql).collect();
+        let (header_tx, header_rx) = oneshot::channel::<Result<Vec<ColumnHeader>>>();
+        let (row_tx, row_rx) = mpsc::channel::<Result<CoreRow>>(64);
+
+        task::spawn_blocking(move || {
+            let guard = inner.blocking_lock();
+            let mut statement = match guard.prepare(&sql) {
+                Ok(stmt) => stmt,
+                Err(error) => {
+                    let _ = header_tx.send(Err(Error::Query(error.to_string())));
+                    return;
+                }
+            };
+
+            let headers: Vec<ColumnHeader> = statement
+                .columns()
+                .into_iter()
+                .map(|c| ColumnHeader {
+                    name: c.name().to_owned(),
+                    data_type: c.decl_type().unwrap_or("").to_owned(),
+                })
+                .collect();
+            let column_count = headers.len();
+            if header_tx.send(Ok(headers)).is_err() {
+                return;
+            }
+            if column_count == 0 {
+                // Non-result-bearing statements never produce rows from a
+                // stream; running them via execute() is the supported path.
+                return;
+            }
+
+            let mut rows = match statement.query(params_from_iter(bound.iter())) {
+                Ok(rows) => rows,
+                Err(error) => {
+                    let _ = row_tx.blocking_send(Err(Error::Query(error.to_string())));
+                    return;
+                }
+            };
+
+            loop {
+                match rows.next() {
+                    Ok(Some(row)) => {
+                        let mut values = Vec::with_capacity(column_count);
+                        let mut failure: Option<Error> = None;
+                        for idx in 0..column_count {
+                            match row.get_ref(idx) {
+                                Ok(v) => values.push(value_from_ref(v)),
+                                Err(error) => {
+                                    failure = Some(Error::Query(error.to_string()));
+                                    break;
+                                }
+                            }
+                        }
+                        let payload = match failure {
+                            Some(err) => Err(err),
+                            None => Ok(CoreRow(values)),
+                        };
+                        if row_tx.blocking_send(payload).is_err() {
+                            // Consumer dropped the stream.
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = row_tx.blocking_send(Err(Error::Query(error.to_string())));
+                        break;
+                    }
+                }
+            }
+        });
+
+        let columns = header_rx
+            .await
+            .map_err(|_| Error::Other("sqlite stream cancelled".into()))??;
+
+        Ok(Box::new(SqliteRowStream {
+            columns,
+            rx: row_rx,
+        }))
+    }
+
     async fn begin(&mut self) -> Result<()> {
         self.execute_batch("BEGIN").await
     }
@@ -310,6 +395,30 @@ impl Connection for SqliteConnection {
     }
 }
 
+struct SqliteRowStream {
+    columns: Vec<ColumnHeader>,
+    rx: mpsc::Receiver<Result<CoreRow>>,
+}
+
+#[async_trait]
+impl RowStream for SqliteRowStream {
+    fn columns(&self) -> &[ColumnHeader] {
+        &self.columns
+    }
+
+    async fn next_row(&mut self) -> Result<Option<CoreRow>> {
+        match self.rx.recv().await {
+            Some(Ok(row)) => Ok(Some(row)),
+            Some(Err(error)) => Err(error),
+            None => Ok(None),
+        }
+    }
+
+    async fn close(self: Box<Self>) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +500,29 @@ mod tests {
         conn.rollback().await.unwrap();
         let result = conn.execute("SELECT count(*) FROM t", &[]).await.unwrap();
         assert_eq!(result.rows[0].get(0).map(Value::render), Some("0".into()));
+    }
+
+    #[tokio::test]
+    async fn stream_yields_rows_in_order() {
+        let mut conn = open().await;
+        conn.execute("CREATE TABLE nums (n INTEGER)", &[])
+            .await
+            .unwrap();
+        for i in 1..=5 {
+            conn.execute("INSERT INTO nums VALUES (?1)", &[Value::Int(i)])
+                .await
+                .unwrap();
+        }
+        let mut stream = conn
+            .stream("SELECT n FROM nums ORDER BY n", &[])
+            .await
+            .unwrap();
+        assert_eq!(stream.columns().len(), 1);
+        let mut collected = Vec::new();
+        while let Some(row) = stream.next_row().await.unwrap() {
+            collected.push(row.get(0).map(Value::render).unwrap_or_default());
+        }
+        assert_eq!(collected, vec!["1", "2", "3", "4", "5"]);
     }
 
     #[tokio::test]

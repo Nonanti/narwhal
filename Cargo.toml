@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/narwhal-core",
     "crates/narwhal-config",
+    "crates/narwhal-sql",
+    "crates/narwhal-pool",
     "crates/narwhal-driver-postgres",
     "crates/narwhal-driver-sqlite",
     "crates/narwhal-vim",
@@ -58,6 +60,8 @@ unicode-width = "0.2"
 # Internal crates
 narwhal-core = { path = "crates/narwhal-core" }
 narwhal-config = { path = "crates/narwhal-config" }
+narwhal-sql = { path = "crates/narwhal-sql" }
+narwhal-pool = { path = "crates/narwhal-pool" }
 narwhal-driver-postgres = { path = "crates/narwhal-driver-postgres" }
 narwhal-driver-sqlite = { path = "crates/narwhal-driver-sqlite" }
 narwhal-vim = { path = "crates/narwhal-vim" }
