@@ -11,6 +11,6 @@ pub use input::translate_key_event;
 pub use layout::{render_root, Pane, RootLayout};
 pub use theme::Theme;
 pub use widgets::{
-    render_editor, render_results, render_sidebar, EditorBuffer, ExplainPlanLine, ResultDisplay,
-    ResultView, SchemaListing, SidebarRow, SidebarRowKind, SidebarView,
+    render_editor, render_results, render_sidebar, CellPopup, EditorBuffer, ExplainPlanLine,
+    ResultDisplay, ResultView, SchemaListing, SidebarRow, SidebarRowKind, SidebarView,
 };

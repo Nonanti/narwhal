@@ -4,15 +4,29 @@ use narwhal_core::{ColumnHeader, ForeignKey, Index, Row, TableSchema, UniqueCons
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Wrap,
+};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
 #[derive(Debug, Default)]
 pub struct ResultView {
     pub state: TableState,
-    pub column_offset: usize,
+    pub column_index: usize,
+    pub popup: Option<CellPopup>,
+}
+
+/// Modal description of one cell, shown over the result grid when the user
+/// requests detail with Enter.
+#[derive(Debug, Clone)]
+pub struct CellPopup {
+    pub column_name: String,
+    pub column_type: String,
+    pub value_text: String,
+    pub row_index: usize,
 }
 
 impl ResultView {
@@ -36,9 +50,23 @@ impl ResultView {
         }
     }
 
+    pub fn move_left(&mut self) {
+        self.column_index = self.column_index.saturating_sub(1);
+    }
+
+    pub fn move_right(&mut self, total_cols: usize) {
+        if total_cols == 0 {
+            return;
+        }
+        if self.column_index + 1 < total_cols {
+            self.column_index += 1;
+        }
+    }
+
     pub fn reset(&mut self) {
         self.state.select(None);
-        self.column_offset = 0;
+        self.column_index = 0;
+        self.popup = None;
     }
 }
 
@@ -338,6 +366,69 @@ fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
 
+const MIN_COLUMN_WIDTH: usize = 6;
+const MAX_COLUMN_WIDTH: usize = 40;
+
+fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
+    columns
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let header_len = format!("{} ({})", c.name, c.data_type).width();
+            let body_len = rows
+                .iter()
+                .map(|r| r.0.get(i).map(|v| v.render().width()).unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            header_len
+                .max(body_len)
+                .clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH)
+        })
+        .collect()
+}
+
+fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: &Theme) {
+    let width = area.width.saturating_sub(8).min(80);
+    let height = area.height.saturating_sub(4).min(20);
+    if width < 20 || height < 5 {
+        return;
+    }
+    let popup_area = centred_rect(area, width, height);
+    frame.render_widget(Clear, popup_area);
+    let title = format!(
+        " cell · row {} · {} ({}) ",
+        popup.row_index + 1,
+        popup.column_name,
+        popup.column_type
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+    let paragraph = Paragraph::new(popup.value_text.as_str())
+        .style(Style::default().fg(theme.foreground))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+}
+
+fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    }
+}
+
 fn draw_explain(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -381,26 +472,37 @@ fn draw_table(
     theme: &Theme,
     view: &mut ResultView,
 ) {
+    let widths = compute_column_widths(columns, rows);
     let header_cells: Vec<Cell<'_>> = columns
         .iter()
-        .map(|c| {
+        .enumerate()
+        .map(|(i, c)| {
             let label = format!("{} ({})", c.name, c.data_type);
-            Cell::from(label).style(
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )
+            let mut style = Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD);
+            if i == view.column_index {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            Cell::from(label).style(style)
         })
         .collect();
     let header = TableRow::new(header_cells).bottom_margin(1);
-    let widths: Vec<Constraint> = columns.iter().map(|_| Constraint::Length(18)).collect();
+    let constraints: Vec<Constraint> = widths
+        .iter()
+        .map(|w| Constraint::Length(*w as u16))
+        .collect();
     let body_rows: Vec<TableRow<'_>> = rows
         .iter()
         .map(|row| TableRow::new(row.0.iter().map(|v| Cell::from(v.render()))))
         .collect();
-    let table = Table::new(body_rows, widths)
+    let table = Table::new(body_rows, constraints)
         .header(header)
         .highlight_style(Style::default().bg(theme.muted))
         .column_spacing(1);
     frame.render_stateful_widget(table, area, &mut view.state);
+
+    if let Some(popup) = view.popup.as_ref() {
+        draw_cell_popup(frame, area, popup, theme);
+    }
 }
