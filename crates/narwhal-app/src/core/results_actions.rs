@@ -4,7 +4,7 @@
 //! navigation, search, filtering, sort toggling, cell yank/edit, row
 //! detail modal, and the row-popup overlay.
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_tui::{CellEditView, CellPopup, SortDir};
+use narwhal_tui::{CellEditView, CellPopup};
 
 use super::{AppCore, CellEdit, JsonViewerState, ResultSearch, ResultState, RowDetailState};
 use crate::action::{Action, KeyGroup};
@@ -706,34 +706,8 @@ impl AppCore {
     }
 
     pub(super) async fn toggle_sort(&mut self) {
-        // Streaming guard.
-        if self.process.running {
-            self.ui.status.message = "sort/filter unavailable while streaming".into();
-            return;
-        }
-        if !matches!(
-            self.ui.tabs[self.ui.active_tab].results.active_state(),
-            ResultState::Rows { .. }
-        ) {
-            self.ui.status.message = "no result to sort".into();
-            return;
-        }
-        let col = self.ui.tabs[self.ui.active_tab]
-            .results
-            .active()
-            .column_index;
-        let view = self.ui.tabs[self.ui.active_tab].results.active_mut();
-        let next = match view.sort {
-            Some((c, SortDir::Asc)) if c == col => Some((col, SortDir::Desc)),
-            Some((c, SortDir::Desc)) if c == col => None,
-            _ => Some((col, SortDir::Asc)),
-        };
-        view.sort = next;
-        let msg = match view.sort {
-            Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
-            Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
-            None => "sort: cleared".into(),
-        };
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        let msg = narwhal_domain::result::actions::toggle_sort(bundle, self.process.running);
         self.ui.status.message = msg;
     }
 
@@ -741,34 +715,13 @@ impl AppCore {
     /// the active filter; `Some(expr)` sets it verbatim; `None`
     /// opens the inline prompt (same as the `f` keybind).
     pub(super) async fn apply_filter_command(&mut self, spec: Option<String>) {
-        if self.process.running {
-            self.ui.status.message = "sort/filter unavailable while streaming".into();
-            return;
-        }
-        if !matches!(
-            self.ui.tabs[self.ui.active_tab].results.active_state(),
-            ResultState::Rows { .. }
-        ) {
-            self.ui.status.message = "no result to filter".into();
-            return;
-        }
-        let rv = self.ui.tabs[self.ui.active_tab].results.active_mut();
-        match spec {
-            None => {
-                rv.filter_prompt_open = true;
-                self.ui.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
-            }
-            Some(expr) if expr.is_empty() => {
-                rv.filter.clear();
-                rv.filter_prompt_open = false;
-                self.ui.status.message = "filter: cleared".into();
-            }
-            Some(expr) => {
-                rv.filter = expr.clone();
-                rv.filter_prompt_open = false;
-                self.ui.status.message = format!("filter: {expr}");
-            }
-        }
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        let msg = narwhal_domain::result::actions::apply_filter_command(
+            bundle,
+            spec,
+            self.process.running,
+        );
+        self.ui.status.message = msg;
     }
 
     /// v1.2 #7: command-palette sort. `Column(n)` toggles asc → desc
@@ -776,59 +729,26 @@ impl AppCore {
     /// active sort regardless of which column was sorted.
     pub(super) async fn apply_sort_command(&mut self, arg: crate::commands::SortArg) {
         use crate::commands::SortArg;
-        use narwhal_tui::SortDir;
-        if self.process.running {
-            self.ui.status.message = "sort/filter unavailable while streaming".into();
-            return;
-        }
-        if !matches!(
-            self.ui.tabs[self.ui.active_tab].results.active_state(),
-            ResultState::Rows { .. }
-        ) {
-            self.ui.status.message = "no result to sort".into();
-            return;
-        }
-        let view = self.ui.tabs[self.ui.active_tab].results.active_mut();
-        match arg {
-            SortArg::Clear => {
-                view.sort = None;
-                self.ui.status.message = "sort: cleared".into();
-            }
-            SortArg::Column(n) => {
-                let col = n - 1; // 1-based to 0-based
-                let next = match view.sort {
-                    Some((c, SortDir::Asc)) if c == col => Some((col, SortDir::Desc)),
-                    Some((c, SortDir::Desc)) if c == col => None,
-                    _ => Some((col, SortDir::Asc)),
-                };
-                view.sort = next;
-                self.ui.status.message = match view.sort {
-                    Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
-                    Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
-                    None => "sort: cleared".into(),
-                };
-            }
-        }
+        let column_1based = match arg {
+            SortArg::Clear => None,
+            SortArg::Column(n) => Some(n),
+        };
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        let msg = narwhal_domain::result::actions::apply_sort_command(
+            bundle,
+            column_1based,
+            self.process.running,
+        );
+        self.ui.status.message = msg;
     }
 
     async fn open_filter_prompt(&mut self) {
-        // Streaming guard.
-        if self.process.running {
-            self.ui.status.message = "sort/filter unavailable while streaming".into();
-            return;
-        }
-        if !matches!(
-            self.ui.tabs[self.ui.active_tab].results.active_state(),
-            ResultState::Rows { .. }
-        ) {
-            self.ui.status.message = "no result to filter".into();
-            return;
-        }
-        self.ui.tabs[self.ui.active_tab]
-            .results
-            .active_mut()
-            .filter_prompt_open = true;
-        self.ui.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        let msg = narwhal_domain::result::actions::open_filter_prompt(
+            bundle,
+            self.process.running,
+        );
+        self.ui.status.message = msg;
     }
 
     async fn refresh_search_matches(&mut self) {
