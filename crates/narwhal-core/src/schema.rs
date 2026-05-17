@@ -37,6 +37,81 @@ pub struct Column {
 pub struct TableSchema {
     pub table: Table,
     pub columns: Vec<Column>,
+    #[serde(default)]
+    pub indexes: Vec<Index>,
+    #[serde(default)]
+    pub foreign_keys: Vec<ForeignKey>,
+    #[serde(default)]
+    pub unique_constraints: Vec<UniqueConstraint>,
+}
+
+/// Index defined on a table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Index {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+    /// `true` when the index is the implicit one created for the primary
+    /// key. Useful when generating DDL, where the index is implied by the
+    /// `PRIMARY KEY` declaration on the column instead.
+    pub primary: bool,
+}
+
+/// Single foreign-key constraint.
+///
+/// Composite foreign keys are represented by parallel entries in
+/// [`Self::columns`] and [`Self::referenced_columns`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignKey {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub referenced_schema: Option<String>,
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+    pub on_update: Option<ReferentialAction>,
+    pub on_delete: Option<ReferentialAction>,
+}
+
+/// Referential action declared on a foreign key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReferentialAction {
+    NoAction,
+    Restrict,
+    Cascade,
+    SetNull,
+    SetDefault,
+}
+
+impl ReferentialAction {
+    pub fn as_sql(self) -> &'static str {
+        match self {
+            Self::NoAction => "NO ACTION",
+            Self::Restrict => "RESTRICT",
+            Self::Cascade => "CASCADE",
+            Self::SetNull => "SET NULL",
+            Self::SetDefault => "SET DEFAULT",
+        }
+    }
+
+    pub fn from_engine_token(token: &str) -> Option<Self> {
+        match token.trim().to_ascii_uppercase().as_str() {
+            "NO ACTION" => Some(Self::NoAction),
+            "RESTRICT" => Some(Self::Restrict),
+            "CASCADE" => Some(Self::Cascade),
+            "SET NULL" => Some(Self::SetNull),
+            "SET DEFAULT" => Some(Self::SetDefault),
+            _ => None,
+        }
+    }
+}
+
+/// Multi-column unique constraint.
+///
+/// Single-column unique constraints are exposed through [`Index::unique`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniqueConstraint {
+    pub name: String,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

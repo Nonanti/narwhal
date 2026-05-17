@@ -17,8 +17,8 @@ use mysql_async::prelude::*;
 use mysql_async::{Conn, Opts, OptsBuilder, Params};
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
-    TableKind, TableSchema, Value,
+    Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
+    Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info};
@@ -114,6 +114,112 @@ pub struct MysqlConnection {
 }
 
 impl MysqlConnection {
+    async fn list_indexes(&mut self, schema: &str, table: &str) -> Result<Vec<Index>> {
+        let rows = self
+            .execute(
+                "SELECT index_name, non_unique, column_name \
+                 FROM information_schema.statistics \
+                 WHERE table_schema = ? AND table_name = ? \
+                 ORDER BY index_name, seq_in_index",
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(table.to_owned()),
+                ],
+            )
+            .await?;
+        let mut by_name: std::collections::BTreeMap<String, Index> =
+            std::collections::BTreeMap::new();
+        for row in rows.rows {
+            let name = match row.0.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let non_unique = match row.0.get(1) {
+                Some(Value::Int(i)) => *i != 0,
+                Some(Value::String(s)) => s != "0",
+                _ => true,
+            };
+            let column = match row.0.get(2) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let primary = name == "PRIMARY";
+            let entry = by_name.entry(name.clone()).or_insert(Index {
+                name,
+                columns: Vec::new(),
+                unique: !non_unique,
+                primary,
+            });
+            entry.columns.push(column);
+        }
+        Ok(by_name.into_values().collect())
+    }
+
+    async fn list_foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKey>> {
+        let rows = self
+            .execute(
+                "SELECT k.constraint_name, k.column_name, k.referenced_table_schema, \
+                        k.referenced_table_name, k.referenced_column_name, \
+                        r.update_rule, r.delete_rule \
+                 FROM information_schema.key_column_usage k \
+                 LEFT JOIN information_schema.referential_constraints r \
+                     ON r.constraint_schema = k.constraint_schema \
+                    AND r.constraint_name = k.constraint_name \
+                 WHERE k.table_schema = ? AND k.table_name = ? \
+                    AND k.referenced_table_name IS NOT NULL \
+                 ORDER BY k.constraint_name, k.ordinal_position",
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(table.to_owned()),
+                ],
+            )
+            .await?;
+        let mut by_name: std::collections::BTreeMap<String, ForeignKey> =
+            std::collections::BTreeMap::new();
+        for row in rows.rows {
+            let name = match row.0.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let column = match row.0.get(1) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let ref_schema = match row.0.get(2) {
+                Some(Value::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            let ref_table = match row.0.get(3) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let ref_column = match row.0.get(4) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let on_update = row.0.get(5).and_then(|v| match v {
+                Value::String(s) => ReferentialAction::from_engine_token(s),
+                _ => None,
+            });
+            let on_delete = row.0.get(6).and_then(|v| match v {
+                Value::String(s) => ReferentialAction::from_engine_token(s),
+                _ => None,
+            });
+            let entry = by_name.entry(name.clone()).or_insert(ForeignKey {
+                name,
+                columns: Vec::new(),
+                referenced_schema: ref_schema,
+                referenced_table: ref_table,
+                referenced_columns: Vec::new(),
+                on_update,
+                on_delete,
+            });
+            entry.columns.push(column);
+            entry.referenced_columns.push(ref_column);
+        }
+        Ok(by_name.into_values().collect())
+    }
+
     async fn with_conn<R, F>(&self, f: F) -> Result<R>
     where
         F: for<'a> FnOnce(
@@ -316,6 +422,20 @@ impl Connection for MysqlConnection {
             })
             .collect();
 
+        let indexes = self.list_indexes(schema, name).await.unwrap_or_default();
+        let foreign_keys = self
+            .list_foreign_keys(schema, name)
+            .await
+            .unwrap_or_default();
+        let unique_constraints = indexes
+            .iter()
+            .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+            .map(|i| UniqueConstraint {
+                name: i.name.clone(),
+                columns: i.columns.clone(),
+            })
+            .collect();
+
         Ok(TableSchema {
             table: Table {
                 schema: schema.to_owned(),
@@ -323,6 +443,9 @@ impl Connection for MysqlConnection {
                 kind: TableKind::Table,
             },
             columns,
+            indexes,
+            foreign_keys,
+            unique_constraints,
         })
     }
 

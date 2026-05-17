@@ -20,6 +20,9 @@ pub use capabilities::Capabilities;
 pub use connection::{Connection, ConnectionConfig, ConnectionParams, IsolationLevel};
 pub use driver::DatabaseDriver;
 pub use error::{Error, Result};
-pub use schema::{Column, ColumnHeader, QueryResult, Row, Schema, Table, TableKind, TableSchema};
+pub use schema::{
+    Column, ColumnHeader, ForeignKey, Index, QueryResult, ReferentialAction, Row, Schema, Table,
+    TableKind, TableSchema, UniqueConstraint,
+};
 pub use stream::RowStream;
 pub use value::Value;

@@ -16,8 +16,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig, DatabaseDriver,
-    Error, IsolationLevel, QueryResult, Result, Row as CoreRow, RowStream, Schema, Table,
-    TableKind, TableSchema, Value,
+    Error, ForeignKey, Index, IsolationLevel, QueryResult, ReferentialAction, Result,
+    Row as CoreRow, RowStream, Schema, Table, TableKind, TableSchema, UniqueConstraint, Value,
 };
 use rusqlite::params_from_iter;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -100,6 +100,93 @@ pub struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// Enumerate every index on `escaped_table_name` (which must already have
+    /// embedded quote characters doubled).
+    async fn list_indexes(&self, escaped_table_name: &str) -> Result<Vec<Index>> {
+        let list_sql = format!("PRAGMA index_list(\"{escaped_table_name}\")");
+        let list = self.run(&list_sql, &[]).await?;
+        let mut indexes = Vec::with_capacity(list.rows.len());
+        for row in list.rows {
+            let mut iter = row.0.into_iter();
+            let _seq = iter.next();
+            let name = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => continue,
+            };
+            let unique = matches!(iter.next(), Some(Value::Int(1)));
+            let origin = match iter.next() {
+                Some(Value::String(s)) => s,
+                _ => String::new(),
+            };
+            let escaped_idx = name.replace('"', "\"\"");
+            let info_sql = format!("PRAGMA index_info(\"{escaped_idx}\")");
+            let info = self.run(&info_sql, &[]).await?;
+            let columns: Vec<String> = info
+                .rows
+                .into_iter()
+                .filter_map(|r| match r.0.get(2) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect();
+            indexes.push(Index {
+                name,
+                columns,
+                unique,
+                primary: origin == "pk",
+            });
+        }
+        Ok(indexes)
+    }
+
+    async fn list_foreign_keys(&self, escaped_table_name: &str) -> Result<Vec<ForeignKey>> {
+        let sql = format!("PRAGMA foreign_key_list(\"{escaped_table_name}\")");
+        let result = self.run(&sql, &[]).await?;
+        // Rows are: id, seq, table, from, to, on_update, on_delete, match.
+        // Composite foreign keys share an `id`; we group them.
+        let mut by_id: std::collections::BTreeMap<i64, ForeignKey> =
+            std::collections::BTreeMap::new();
+        for row in result.rows {
+            let v = row.0;
+            let id = match v.first() {
+                Some(Value::Int(i)) => *i,
+                _ => continue,
+            };
+            let ref_table = match v.get(2) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let from = match v.get(3) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let to = match v.get(4) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let on_update = v.get(5).and_then(|x| match x {
+                Value::String(s) => ReferentialAction::from_engine_token(s),
+                _ => None,
+            });
+            let on_delete = v.get(6).and_then(|x| match x {
+                Value::String(s) => ReferentialAction::from_engine_token(s),
+                _ => None,
+            });
+            let entry = by_id.entry(id).or_insert_with(|| ForeignKey {
+                name: format!("fk_{id}"),
+                columns: Vec::new(),
+                referenced_schema: None,
+                referenced_table: ref_table.clone(),
+                referenced_columns: Vec::new(),
+                on_update,
+                on_delete,
+            });
+            entry.columns.push(from);
+            entry.referenced_columns.push(to);
+        }
+        Ok(by_id.into_values().collect())
+    }
+
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let inner = self.inner.clone();
         let sql = sql.to_owned();
@@ -348,14 +435,14 @@ impl Connection for SqliteConnection {
         // identifier so embedded special characters do not break the
         // statement.
         let escaped = name.replace('"', "\"\"");
-        let sql = format!("PRAGMA table_info(\"{escaped}\")");
-        let result = self.run(&sql, &[]).await?;
+        let info_sql = format!("PRAGMA table_info(\"{escaped}\")");
+        let info = self.run(&info_sql, &[]).await?;
 
-        if result.rows.is_empty() {
+        if info.rows.is_empty() {
             return Err(Error::Schema(format!("table {name} not found")));
         }
 
-        let columns = result
+        let columns: Vec<Column> = info
             .rows
             .into_iter()
             .filter_map(|row| {
@@ -387,6 +474,17 @@ impl Connection for SqliteConnection {
             })
             .collect();
 
+        let indexes = self.list_indexes(&escaped).await.unwrap_or_default();
+        let foreign_keys = self.list_foreign_keys(&escaped).await.unwrap_or_default();
+        let unique_constraints = indexes
+            .iter()
+            .filter(|i| i.unique && !i.primary && i.columns.len() > 1)
+            .map(|i| UniqueConstraint {
+                name: i.name.clone(),
+                columns: i.columns.clone(),
+            })
+            .collect();
+
         Ok(TableSchema {
             table: Table {
                 schema: "main".into(),
@@ -394,6 +492,9 @@ impl Connection for SqliteConnection {
                 kind: TableKind::Table,
             },
             columns,
+            indexes,
+            foreign_keys,
+            unique_constraints,
         })
     }
 
@@ -588,5 +689,61 @@ mod tests {
         assert_eq!(schema.columns[0].name, "id");
         assert!(schema.columns[0].primary_key);
         assert!(!schema.columns[1].nullable);
+    }
+
+    #[tokio::test]
+    async fn describe_table_reports_indexes_and_foreign_keys() {
+        let mut conn = open().await;
+        conn.execute(
+            "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE)",
+            &[],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                placed_at TEXT NOT NULL
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE INDEX idx_orders_placed_at ON orders(placed_at)",
+            &[],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_orders_unique ON orders(customer_id, placed_at)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let schema = conn.describe_table("main", "orders").await.unwrap();
+        assert!(schema
+            .indexes
+            .iter()
+            .any(|i| i.name == "idx_orders_placed_at" && !i.unique));
+        assert!(schema
+            .indexes
+            .iter()
+            .any(|i| i.name == "idx_orders_unique" && i.unique));
+
+        assert_eq!(schema.foreign_keys.len(), 1);
+        let fk = &schema.foreign_keys[0];
+        assert_eq!(fk.columns, vec!["customer_id"]);
+        assert_eq!(fk.referenced_table, "customers");
+        assert_eq!(fk.referenced_columns, vec!["id"]);
+        assert_eq!(fk.on_delete, Some(narwhal_core::ReferentialAction::Cascade));
+
+        // composite unique index appears as a multi-column unique constraint
+        assert!(schema
+            .unique_constraints
+            .iter()
+            .any(|u| u.columns == vec!["customer_id", "placed_at"]));
     }
 }
