@@ -6,6 +6,7 @@
 pub mod app;
 pub mod commands;
 pub mod core;
+pub mod ddl;
 pub mod explain;
 pub mod export;
 pub mod registry;

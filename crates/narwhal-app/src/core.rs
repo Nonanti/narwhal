@@ -22,7 +22,8 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::commands::{parse, Command};
+use crate::commands::{parse, Command, DumpTarget};
+use crate::ddl::{build_dump, build_table_ddl};
 use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
@@ -448,6 +449,7 @@ impl AppCore {
             }
             Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
+            Command::DumpSchema { target } => self.dump_schema(target),
             Command::Help => {
                 self.status_message =
                     "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
@@ -624,6 +626,84 @@ impl AppCore {
             RunMode::Stream => "streaming…".into(),
         };
         spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
+    }
+
+    fn dump_schema(&mut self, target: DumpTarget) {
+        let Some(session) = self.session.as_ref() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        let dialect = session.dialect();
+        let pool = session.pool.clone();
+        let schemas: Vec<(String, String)> = session
+            .schemas
+            .iter()
+            .flat_map(|(schema, tables)| {
+                tables
+                    .iter()
+                    .map(move |t| (schema.name.clone(), t.name.clone()))
+            })
+            .collect();
+
+        let names: Vec<(String, String)> = match target {
+            DumpTarget::Current => {
+                if let ResultState::TableDetail { schema } = &self.result {
+                    vec![(schema.table.schema.clone(), schema.table.name.clone())]
+                } else {
+                    self.status_message =
+                        "dump-schema: select a table in the sidebar or pass a name".into();
+                    return;
+                }
+            }
+            DumpTarget::All => schemas,
+            DumpTarget::Named(ref name) => {
+                if let Some(pair) = schemas.iter().find(|(_, t)| t == name).cloned() {
+                    vec![pair]
+                } else {
+                    self.status_message = format!("dump-schema: table not found: {name}");
+                    return;
+                }
+            }
+        };
+
+        if names.is_empty() {
+            self.status_message = "dump-schema: nothing to dump".into();
+            return;
+        }
+
+        let collected: std::result::Result<Vec<_>, narwhal_core::Error> =
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    let mut conn = pool
+                        .acquire()
+                        .await
+                        .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                    let mut out = Vec::with_capacity(names.len());
+                    for (schema, table) in names {
+                        out.push(conn.describe_table(&schema, &table).await?);
+                    }
+                    Ok(out)
+                })
+            });
+        match collected {
+            Ok(tables) => {
+                let ddl = if tables.len() == 1 {
+                    build_table_ddl(&tables[0], dialect)
+                } else {
+                    build_dump(&tables, dialect)
+                };
+                self.editor.clear();
+                self.editor.insert_str(&ddl);
+                self.status_message = format!(
+                    "dump-schema: wrote {} table(s) into the editor buffer",
+                    tables.len()
+                );
+                self.focus = Pane::Editor;
+            }
+            Err(error) => {
+                self.status_message = format!("dump-schema failed: {error}");
+            }
+        }
     }
 
     fn dispatch_explain(&mut self) {
