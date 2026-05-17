@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod commands;
+pub mod core;
 pub mod explain;
 pub mod export;
 pub mod registry;
@@ -13,6 +14,7 @@ pub mod session;
 pub mod terminal;
 
 pub use app::App;
+pub use core::{AppCore, ResultState};
 pub use registry::DriverRegistry;
 pub use session::Session;
 pub use terminal::TerminalGuard;
