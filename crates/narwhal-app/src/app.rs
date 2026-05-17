@@ -9,14 +9,15 @@ use narwhal_config::ConnectionsFile;
 use narwhal_core::{ColumnHeader, ConnectionConfig, Row};
 use narwhal_history::Journal;
 use narwhal_tui::{
-    render_root, translate_key_event, EditorBuffer, Pane, ResultDisplay, ResultView, RootLayout,
-    SidebarView, Theme,
+    render_root, translate_key_event, EditorBuffer, ExplainPlanLine, Pane, ResultDisplay,
+    ResultView, RootLayout, SidebarView, Theme,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
 
 use crate::commands::{parse, Command};
+use crate::explain::{parse as parse_plan, wrap_explain};
 use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
 use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunUpdate};
@@ -51,6 +52,11 @@ pub enum ResultState {
         streamed: bool,
         index: usize,
         total: usize,
+    },
+    Explain {
+        lines: Vec<ExplainPlanLine>,
+        planning_time_ms: Option<f64>,
+        execution_time_ms: Option<f64>,
     },
     Error {
         message: String,
@@ -324,10 +330,11 @@ impl App {
                 self.result_view.reset();
                 self.status_message = "buffer cleared".into();
             }
+            Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::Help => {
                 self.status_message =
-                    "open <name> · close · refresh · run · run-all · stream · stream-all · export <csv|json> <path> · cancel · quit"
+                    "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
                         .into();
             }
             Command::Empty => {}
@@ -468,6 +475,28 @@ impl App {
         spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
     }
 
+    fn dispatch_explain(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            self.status_message = "no active connection".into();
+            return;
+        };
+        if session.driver.name() != "postgres" {
+            self.status_message = "explain is only supported on postgres for now".into();
+            return;
+        }
+        let Some(sql) = self.editor.statement_at_cursor(session.dialect()) else {
+            self.status_message = "no statement under cursor".into();
+            return;
+        };
+        let trimmed = sql.trim().trim_end_matches(';').trim().to_owned();
+        if trimmed.is_empty() {
+            self.status_message = "no statement under cursor".into();
+            return;
+        }
+        self.dispatch_batch(vec![wrap_explain(&trimmed)], RunMode::Execute);
+        self.status_message = "explaining…".into();
+    }
+
     fn export_results(&mut self, format: &str, path: &str) {
         let Some(format) = ExportFormat::from_token(format) else {
             self.status_message = format!("unknown export format: {format} (csv|json)");
@@ -599,6 +628,32 @@ impl App {
                 index,
                 total,
             };
+        } else if is_explain_result(&columns) {
+            match extract_explain_plan(&rows) {
+                Ok(plan) => {
+                    self.result = ResultState::Explain {
+                        lines: plan
+                            .lines
+                            .into_iter()
+                            .map(|l| ExplainPlanLine {
+                                depth: l.depth,
+                                text: l.text,
+                            })
+                            .collect(),
+                        planning_time_ms: plan.planning_time_ms,
+                        execution_time_ms: plan.execution_time_ms,
+                    };
+                    self.status_message = format!("explain ok · {elapsed_ms} ms");
+                    return;
+                }
+                Err(error) => {
+                    self.result = ResultState::Error {
+                        message: format!("explain parse failed: {error}"),
+                        elapsed_ms,
+                    };
+                    return;
+                }
+            }
         } else {
             self.result = ResultState::Rows {
                 columns,
@@ -614,6 +669,26 @@ impl App {
             None => format!("ok {index}/{total} · {rows_returned} rows · {elapsed_ms} ms"),
         };
     }
+}
+
+fn is_explain_result(columns: &[ColumnHeader]) -> bool {
+    columns.len() == 1 && columns[0].name.eq_ignore_ascii_case("QUERY PLAN")
+}
+
+fn extract_explain_plan(rows: &[Row]) -> Result<crate::explain::ExplainPlan, String> {
+    let row = rows
+        .first()
+        .ok_or_else(|| "empty explain result".to_owned())?;
+    let value = row
+        .0
+        .first()
+        .ok_or_else(|| "explain row missing column".to_owned())?;
+    let json_text = match value {
+        narwhal_core::Value::Json(v) => v.to_string(),
+        narwhal_core::Value::String(s) | narwhal_core::Value::Unknown(s) => s.clone(),
+        other => other.render(),
+    };
+    parse_plan(&json_text)
 }
 
 fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
@@ -658,6 +733,15 @@ fn display_from_state(state: &ResultState) -> ResultDisplay<'_> {
             streamed: *streamed,
             index: *index,
             total: *total,
+        },
+        ResultState::Explain {
+            lines,
+            planning_time_ms,
+            execution_time_ms,
+        } => ResultDisplay::Explain {
+            lines,
+            planning_time_ms: *planning_time_ms,
+            execution_time_ms: *execution_time_ms,
         },
         ResultState::Error {
             message,

@@ -5,5 +5,5 @@ pub mod results;
 pub mod sidebar;
 
 pub use editor::{render_editor, EditorBuffer};
-pub use results::{render_results, ResultDisplay, ResultView};
+pub use results::{render_results, ExplainPlanLine, ResultDisplay, ResultView};
 pub use sidebar::{render_sidebar, SchemaListing, SidebarView};
