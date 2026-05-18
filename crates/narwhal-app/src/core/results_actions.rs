@@ -313,13 +313,7 @@ impl AppCore {
     /// back to the raw text on failure. Returns the rendered text and
     /// an optional parse-error string the modal surfaces in its footer.
     fn prettify_json(raw: &str) -> (String, Option<String>) {
-        match serde_json::from_str::<serde_json::Value>(raw) {
-            Ok(v) => match serde_json::to_string_pretty(&v) {
-                Ok(s) => (s, None),
-                Err(e) => (raw.to_owned(), Some(e.to_string())),
-            },
-            Err(e) => (raw.to_owned(), Some(e.to_string())),
-        }
+        narwhal_domain::result::actions::prettify_json(raw)
     }
 
     /// Open the JSON viewer over the cell currently focused in the
@@ -463,20 +457,10 @@ impl AppCore {
     }
 
     async fn handle_results_escape(&mut self) {
-        let had_search = self.ui.tabs[self.ui.active_tab].search.take().is_some();
-        let had_filter = !self.ui.tabs[self.ui.active_tab]
-            .results
-            .active()
-            .filter
-            .is_empty();
-        if had_search {
-            self.ui.status.message = "search cleared".into();
-        }
-        if had_filter {
-            let rv = self.ui.tabs[self.ui.active_tab].results.active_mut();
-            rv.filter.clear();
-            rv.filter_prompt_open = false;
-            self.ui.status.message = "filter cleared".into();
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
+        let msg = narwhal_domain::result::actions::handle_escape(&mut tab.search, &mut tab.results);
+        if !msg.is_empty() {
+            self.ui.status.message = msg.into();
         }
     }
 
@@ -484,13 +468,9 @@ impl AppCore {
     /// into the visible/rendered rows) to the original row index in
     /// the full result set. Returns `None` when there are no rows.
     async fn selected_original_row(&self) -> Option<usize> {
-        let tab = &self.ui.tabs[self.ui.active_tab];
-        let vis_selected = tab.results.active().selected()?;
-        tab.results
-            .active()
-            .visible_indices
-            .get(vis_selected)
-            .copied()
+        narwhal_domain::result::actions::selected_original_row(
+            &self.ui.tabs[self.ui.active_tab].results,
+        )
     }
 
     async fn yank_cell(&mut self) {
@@ -676,15 +656,9 @@ impl AppCore {
     // `narwhal_commands::pending::compile`.
 
     pub(super) async fn set_edit_error(&mut self, message: String) {
-        if let Some(view) = self.ui.tabs[self.ui.active_tab]
-            .results
-            .active_mut()
-            .edit
-            .as_mut()
-        {
-            view.error = Some(message.clone());
-        }
-        self.ui.status.message = format!("edit failed: {message}");
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        self.ui.status.message =
+            narwhal_domain::result::actions::set_edit_error(bundle, &message);
     }
 
     #[allow(dead_code)]
