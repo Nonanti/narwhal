@@ -4,12 +4,13 @@
 //! navigation, search, filtering, sort toggling, cell yank/edit, row
 //! detail modal, and the row-popup overlay.
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_tui::{CellEditView, CellPopup};
+use narwhal_tui::CellEditView;
 
-use super::{AppCore, CellEdit, JsonViewerState, ResultSearch, ResultState, RowDetailState};
+use super::{AppCore, CellEdit, JsonViewerState, ResultSearch, ResultState};
 use crate::action::{Action, KeyGroup};
 use crate::keymap::KeyChord;
 use narwhal_core::Value;
+use narwhal_domain::result::actions::RowDetailMotion;
 
 impl AppCore {
     pub(super) async fn handle_results_key(&mut self, key: KeyEvent) {
@@ -796,73 +797,22 @@ impl AppCore {
     }
 
     async fn open_cell_popup(&mut self) {
-        let Some(row_index) = self.selected_original_row().await else {
-            self.ui.status.message = "select a row first (j/k)".into();
-            return;
-        };
-        let col_index = self.ui.tabs[self.ui.active_tab]
-            .results
-            .active()
-            .column_index;
-        let (columns, rows) = match self.ui.tabs[self.ui.active_tab].results.active_state() {
-            ResultState::Rows { rows, columns, .. } => (columns, rows),
-            ResultState::Running { rows, columns, .. } => (columns, rows),
-            _ => return,
-        };
-        let Some(column) = columns.get(col_index) else {
-            return;
-        };
-        let Some(row) = rows.get(row_index) else {
-            return;
-        };
-        let Some(value) = row.0.get(col_index) else {
-            return;
-        };
-        self.ui.tabs[self.ui.active_tab].results.active_mut().popup = Some(CellPopup {
-            column_name: column.name.clone(),
-            column_type: column.data_type.clone(),
-            value_text: value.render(),
-            row_index,
-        });
+        let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
+        if let Some(msg) = narwhal_domain::result::actions::open_cell_popup(bundle) {
+            self.ui.status.message = msg;
+        }
     }
 
     async fn open_row_detail(&mut self) {
-        let tab = &self.ui.tabs[self.ui.active_tab];
-        // Don't open if another modal at the same layer is already open.
-        if tab.row_detail.is_some() || tab.results.active().popup.is_some() || tab.editing.is_some()
-        {
-            return;
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
+        let editing_is_open = tab.editing.is_some();
+        if let Some(msg) = narwhal_domain::result::actions::open_row_detail(
+            &tab.results,
+            &mut tab.row_detail,
+            editing_is_open,
+        ) {
+            self.ui.status.message = msg;
         }
-        // Compute visible rows to map selected index → original row index.
-        // This avoids depending on `visible_indices` being populated by
-        // a prior render pass.
-        let Some(vis_selected) = tab.results.active().selected() else {
-            self.ui.status.message = "no row selected".into();
-            return;
-        };
-        let (columns, rows) = match tab.results.active_state() {
-            ResultState::Rows { columns, rows, .. } => (columns.clone(), rows.clone()),
-            ResultState::Running { columns, rows, .. } => (columns.clone(), rows.clone()),
-            _ => {
-                self.ui.status.message = "no result to inspect".into();
-                return;
-            }
-        };
-        let visible = tab.results.active().visible_rows(&columns, &rows);
-        let Some(&row_idx) = visible.get(vis_selected) else {
-            self.ui.status.message = "no row selected".into();
-            return;
-        };
-        let Some(row) = rows.get(row_idx) else {
-            return;
-        };
-        self.ui.tabs[self.ui.active_tab].row_detail = Some(RowDetailState {
-            row_index: row_idx,
-            columns,
-            values: row.0.clone(),
-            selected_column: 0,
-            scroll_offset: 0,
-        });
     }
 
     async fn handle_row_detail_key(&mut self, key: KeyEvent) {
@@ -874,48 +824,30 @@ impl AppCore {
             self.open_json_viewer_from_row_detail().await;
             return;
         }
+        // Translate the key event to a domain motion verb. Anything
+        // not recognised here is silently dropped so the modal stays
+        // open and inert (same as the original handler's `_ => {}`).
+        let motion = match key.code {
+            CtKey::Up | CtKey::Char('k') => RowDetailMotion::Up,
+            CtKey::Down | CtKey::Char('j') => RowDetailMotion::Down,
+            CtKey::PageUp => RowDetailMotion::PageUp,
+            CtKey::PageDown => RowDetailMotion::PageDown,
+            CtKey::Char('g') => RowDetailMotion::Top,
+            CtKey::Char('G') => RowDetailMotion::Bottom,
+            CtKey::Esc | CtKey::Char('R') => RowDetailMotion::Close,
+            CtKey::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => RowDetailMotion::Close,
+            _ => return,
+        };
         let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_mut() else {
             return;
         };
-        let col_count = state.columns.len().saturating_sub(1);
-        match key.code {
-            CtKey::Up | CtKey::Char('k') => {
-                state.selected_column = state.selected_column.saturating_sub(1);
-                state.scroll_offset = 0;
-            }
-            CtKey::Down | CtKey::Char('j') => {
-                if state.selected_column < col_count {
-                    state.selected_column += 1;
-                }
-                state.scroll_offset = 0;
-            }
-            CtKey::PageUp => {
-                let page = 10usize; // approximate page size
-                state.selected_column = state.selected_column.saturating_sub(page);
-                state.scroll_offset = 0;
-            }
-            CtKey::PageDown => {
-                let page = 10usize;
-                state.selected_column = (state.selected_column + page).min(col_count);
-                state.scroll_offset = 0;
-            }
-            CtKey::Char('g') => {
-                state.selected_column = 0;
-                state.scroll_offset = 0;
-            }
-            CtKey::Char('G') => {
-                state.selected_column = col_count;
-                state.scroll_offset = 0;
-            }
-            CtKey::Esc | CtKey::Char('R') => {
-                self.ui.tabs[self.ui.active_tab].row_detail = None;
-                self.ui.status.message = "row detail closed".into();
-            }
-            CtKey::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.ui.tabs[self.ui.active_tab].row_detail = None;
-                self.ui.status.message = "row detail closed".into();
-            }
-            _ => {}
+        if let Some(close_msg) =
+            narwhal_domain::result::actions::apply_row_detail_motion(state, motion)
+        {
+            // Domain signalled the modal should close; drop the state
+            // and propagate the status text.
+            self.ui.tabs[self.ui.active_tab].row_detail = None;
+            self.ui.status.message = close_msg.into();
         }
     }
 }

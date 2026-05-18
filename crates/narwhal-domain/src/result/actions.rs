@@ -16,7 +16,7 @@
 //! (status / notification / silent), and so the unit tests in this
 //! crate can assert on the message verbatim.
 
-use super::{ResultBundle, ResultSearch, ResultState, SortDir};
+use super::{CellPopup, ResultBundle, ResultSearch, ResultState, RowDetailState, SortDir};
 
 const STREAMING_BLOCKED: &str = "sort/filter unavailable while streaming";
 
@@ -191,6 +191,243 @@ pub fn prettify_json(raw: &str) -> (String, Option<String>) {
         },
         Err(e) => (raw.to_owned(), Some(e.to_string())),
     }
+}
+
+// ---------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------
+
+/// `/` keybind: arm a fresh search prompt on the active tab. Returns
+/// the status text the host should display, or `None` when there is
+/// no result to search against.
+pub fn start_search(
+    tab_search: &mut Option<ResultSearch>,
+    bundle: &ResultBundle,
+) -> Option<String> {
+    if !matches!(
+        bundle.active_state(),
+        ResultState::Rows { .. } | ResultState::Running { .. }
+    ) {
+        return Some("no result to search".into());
+    }
+    *tab_search = Some(ResultSearch {
+        query: String::new(),
+        matches: Vec::new(),
+        current: None,
+        editing: true,
+    });
+    Some("search: ".into())
+}
+
+/// Recompute the visible-row matches for the active search query.
+/// Returns the status text the host should display, or `None` when
+/// no status update is appropriate (no search armed).
+///
+/// Pure modulo the search slot and the resulting status message.
+pub fn refresh_search_matches(
+    tab_search: &mut Option<ResultSearch>,
+    bundle: &ResultBundle,
+) -> Option<String> {
+    let needle = match tab_search.as_ref() {
+        Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
+        Some(_) => {
+            if let Some(s) = tab_search.as_mut() {
+                s.matches.clear();
+                s.current = None;
+            }
+            return Some("search: ".into());
+        }
+        None => return None,
+    };
+    let matches = match bundle.active_state() {
+        ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| {
+                row.0
+                    .iter()
+                    .any(|v| v.render().to_lowercase().contains(&needle))
+                    .then_some(i)
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let total = matches.len();
+    let search = tab_search.as_mut()?;
+    let query = search.query.clone();
+    search.matches = matches;
+    search.current = if total == 0 { None } else { Some(0) };
+    Some(if total == 0 {
+        format!("search: {query} \u{00b7} no matches")
+    } else {
+        format!("search: {query} \u{00b7} 1/{total}")
+    })
+}
+
+/// `n` / `N` keybinds: cycle through search matches by `delta`
+/// (positive forward, negative backward) and snap the result-pane
+/// selection to the new match. Wraps. Returns the status text, or
+/// `None` when there is no armed search / no matches.
+pub fn advance_search(
+    tab_search: &mut Option<ResultSearch>,
+    bundle: &mut ResultBundle,
+    delta: i32,
+) -> Option<String> {
+    let search = tab_search.as_mut()?;
+    if search.matches.is_empty() {
+        return None;
+    }
+    let len = search.matches.len() as i32;
+    let current = search.current.unwrap_or(0) as i32;
+    let next = (current + delta).rem_euclid(len) as usize;
+    search.current = Some(next);
+    let total = search.matches.len();
+    let query = search.query.clone();
+    let row_idx = search.matches.get(next).copied();
+    let msg = format!("search: {query} \u{00b7} {}/{}", next + 1, total);
+    if let Some(idx) = row_idx {
+        bundle.active_mut().select(Some(idx));
+    }
+    Some(msg)
+}
+
+/// Snap the result-pane selection to the search's current match,
+/// without changing the cursor inside `matches`. Used after
+/// `refresh_search_matches` finds the first hit.
+pub fn jump_to_current_match(tab_search: Option<&ResultSearch>, bundle: &mut ResultBundle) {
+    let Some(idx) = tab_search
+        .and_then(|s| s.current.and_then(|c| s.matches.get(c).copied()))
+    else {
+        return;
+    };
+    bundle.active_mut().select(Some(idx));
+}
+
+// ---------------------------------------------------------------------
+// Cell popup / Row detail
+// ---------------------------------------------------------------------
+
+/// `Enter` on a row in the result pane: open the read-only cell
+/// popup over the currently-focused cell. Returns the status text
+/// the host should display, or `None` on success.
+pub fn open_cell_popup(bundle: &mut ResultBundle) -> Option<String> {
+    let Some(row_index) = selected_original_row(bundle) else {
+        return Some("select a row first (j/k)".into());
+    };
+    let col_index = bundle.active().column_index;
+    let (columns, rows) = match bundle.active_state() {
+        ResultState::Rows { rows, columns, .. } | ResultState::Running { rows, columns, .. } => {
+            (columns, rows)
+        }
+        _ => return None,
+    };
+    let column = columns.get(col_index)?;
+    let row = rows.get(row_index)?;
+    let value = row.0.get(col_index)?;
+    let popup = CellPopup {
+        column_name: column.name.clone(),
+        column_type: column.data_type.clone(),
+        value_text: value.render(),
+        row_index,
+    };
+    bundle.active_mut().popup = Some(popup);
+    None
+}
+
+/// `R` / `Shift+Enter` on a row: open the row detail modal. Skips
+/// when another result-pane modal is already up (popup / cell edit /
+/// existing row detail). Returns the status text, or `None` when the
+/// modal opened successfully.
+pub fn open_row_detail(
+    bundle: &ResultBundle,
+    row_detail: &mut Option<RowDetailState>,
+    editing_is_open: bool,
+) -> Option<String> {
+    if row_detail.is_some() || bundle.active().popup.is_some() || editing_is_open {
+        return None;
+    }
+    let Some(vis_selected) = bundle.active().selected() else {
+        return Some("no row selected".into());
+    };
+    let (columns, rows) = match bundle.active_state() {
+        ResultState::Rows { columns, rows, .. } | ResultState::Running { columns, rows, .. } => {
+            (columns.clone(), rows.clone())
+        }
+        _ => return Some("no result to inspect".into()),
+    };
+    let visible = bundle.active().visible_rows(&columns, &rows);
+    let Some(&row_idx) = visible.get(vis_selected) else {
+        return Some("no row selected".into());
+    };
+    let row = rows.get(row_idx)?;
+    *row_detail = Some(RowDetailState {
+        row_index: row_idx,
+        columns,
+        values: row.0.clone(),
+        selected_column: 0,
+        scroll_offset: 0,
+    });
+    None
+}
+
+/// Navigation verbs accepted by the row-detail modal. The host
+/// translates keyboard events to this enum and the modal mutates
+/// itself accordingly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowDetailMotion {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Top,
+    Bottom,
+    /// `Esc` / `R` / `Shift+Enter`: close the modal.
+    Close,
+}
+
+/// Apply a navigation `motion` to an open row-detail modal.
+///
+/// Returns `Some(status_message)` when the modal should be **closed**
+/// (i.e. the motion was `Close`); the host is then expected to drop
+/// the `RowDetailState` and write the message to the status bar.
+/// Returns `None` for in-place navigation that leaves the modal open.
+pub fn apply_row_detail_motion(
+    state: &mut RowDetailState,
+    motion: RowDetailMotion,
+) -> Option<&'static str> {
+    let col_count = state.columns.len().saturating_sub(1);
+    match motion {
+        RowDetailMotion::Up => {
+            state.selected_column = state.selected_column.saturating_sub(1);
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::Down => {
+            if state.selected_column < col_count {
+                state.selected_column += 1;
+            }
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::PageUp => {
+            let page = 10usize;
+            state.selected_column = state.selected_column.saturating_sub(page);
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::PageDown => {
+            let page = 10usize;
+            state.selected_column = (state.selected_column + page).min(col_count);
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::Top => {
+            state.selected_column = 0;
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::Bottom => {
+            state.selected_column = col_count;
+            state.scroll_offset = 0;
+        }
+        RowDetailMotion::Close => return Some("row detail closed"),
+    }
+    None
 }
 
 #[cfg(test)]
@@ -377,5 +614,185 @@ mod tests {
         let (raw, err) = prettify_json("not json");
         assert_eq!(raw, "not json");
         assert!(err.is_some());
+    }
+
+    #[test]
+    fn start_search_arms_prompt() {
+        let b = rows_bundle(2, 3);
+        let mut search = None;
+        assert_eq!(start_search(&mut search, &b), Some("search: ".into()));
+        let s = search.unwrap();
+        assert!(s.editing);
+        assert!(s.query.is_empty());
+    }
+
+    #[test]
+    fn start_search_blocked_on_non_rows() {
+        let b = ResultBundle::default();
+        let mut search = None;
+        assert_eq!(start_search(&mut search, &b), Some("no result to search".into()));
+        assert!(search.is_none());
+    }
+
+    #[test]
+    fn refresh_search_finds_and_reports_total() {
+        use narwhal_core::Value;
+        // Build a bundle whose row 1 contains the substring "foo".
+        let mut b = rows_bundle(2, 0);
+        if let ResultState::Rows { rows, .. } = b.active_state_mut() {
+            rows.push(narwhal_core::Row(vec![
+                Value::String("alpha".into()),
+                Value::String("beta".into()),
+            ]));
+            rows.push(narwhal_core::Row(vec![
+                Value::String("foo".into()),
+                Value::String("bar".into()),
+            ]));
+            rows.push(narwhal_core::Row(vec![
+                Value::String("gamma".into()),
+                Value::String("foozzz".into()),
+            ]));
+        }
+        let mut search = Some(ResultSearch {
+            query: "foo".into(),
+            matches: Vec::new(),
+            current: None,
+            editing: false,
+        });
+        let msg = refresh_search_matches(&mut search, &b).unwrap();
+        assert!(msg.ends_with("1/2"), "got: {msg}");
+        let s = search.unwrap();
+        assert_eq!(s.matches, vec![1, 2]);
+        assert_eq!(s.current, Some(0));
+    }
+
+    #[test]
+    fn refresh_search_empty_query_clears_matches() {
+        let b = rows_bundle(2, 2);
+        let mut search = Some(ResultSearch {
+            query: String::new(),
+            matches: vec![0, 1],
+            current: Some(0),
+            editing: false,
+        });
+        assert_eq!(refresh_search_matches(&mut search, &b), Some("search: ".into()));
+        let s = search.unwrap();
+        assert!(s.matches.is_empty());
+        assert!(s.current.is_none());
+    }
+
+    #[test]
+    fn advance_search_wraps_and_snaps_selection() {
+        let mut b = rows_bundle(2, 5);
+        let mut search = Some(ResultSearch {
+            query: "x".into(),
+            matches: vec![1, 3, 4],
+            current: Some(0),
+            editing: false,
+        });
+        let msg = advance_search(&mut search, &mut b, 1).unwrap();
+        assert!(msg.ends_with("2/3"), "got: {msg}");
+        assert_eq!(b.active().selected(), Some(3));
+
+        // Wrap backwards from index 0
+        search.as_mut().unwrap().current = Some(0);
+        advance_search(&mut search, &mut b, -1);
+        assert_eq!(search.as_ref().unwrap().current, Some(2));
+        assert_eq!(b.active().selected(), Some(4));
+    }
+
+    #[test]
+    fn open_cell_popup_requires_selection() {
+        let mut b = rows_bundle(2, 3);
+        assert_eq!(
+            open_cell_popup(&mut b),
+            Some("select a row first (j/k)".into()),
+        );
+        assert!(b.active().popup.is_none());
+    }
+
+    #[test]
+    fn open_cell_popup_writes_popup() {
+        let mut b = rows_bundle(2, 3);
+        b.active_mut().select(Some(1));
+        b.active_mut().visible_indices = vec![0, 1, 2];
+        b.active_mut().column_index = 1;
+        assert!(open_cell_popup(&mut b).is_none());
+        let popup = b.active().popup.as_ref().unwrap();
+        assert_eq!(popup.column_name, "c1");
+        assert_eq!(popup.row_index, 1);
+    }
+
+    #[test]
+    fn open_row_detail_opens_when_clean() {
+        let mut b = rows_bundle(3, 4);
+        b.active_mut().select(Some(2));
+        let mut rd = None;
+        assert_eq!(open_row_detail(&b, &mut rd, false), None);
+        let s = rd.unwrap();
+        assert_eq!(s.row_index, 2);
+        assert_eq!(s.columns.len(), 3);
+        assert_eq!(s.selected_column, 0);
+    }
+
+    #[test]
+    fn open_row_detail_blocked_by_popup() {
+        let mut b = rows_bundle(3, 4);
+        b.active_mut().select(Some(0));
+        b.active_mut().popup = Some(CellPopup {
+            column_name: "x".into(),
+            column_type: "int".into(),
+            value_text: "1".into(),
+            row_index: 0,
+        });
+        let mut rd = None;
+        // popup is up → silently skip, no status, no state change
+        assert_eq!(open_row_detail(&b, &mut rd, false), None);
+        assert!(rd.is_none());
+    }
+
+    #[test]
+    fn apply_row_detail_motion_close_signals_drop() {
+        let mut s = RowDetailState {
+            row_index: 0,
+            columns: Vec::new(),
+            values: Vec::new(),
+            selected_column: 0,
+            scroll_offset: 0,
+        };
+        assert_eq!(
+            apply_row_detail_motion(&mut s, RowDetailMotion::Close),
+            Some("row detail closed"),
+        );
+    }
+
+    #[test]
+    fn apply_row_detail_motion_navigation_clamps_and_resets_scroll() {
+        let mut s = RowDetailState {
+            row_index: 0,
+            columns: vec![
+                narwhal_core::ColumnHeader { name: "a".into(), data_type: "int".into() },
+                narwhal_core::ColumnHeader { name: "b".into(), data_type: "int".into() },
+                narwhal_core::ColumnHeader { name: "c".into(), data_type: "int".into() },
+            ],
+            values: Vec::new(),
+            selected_column: 0,
+            scroll_offset: 7,
+        };
+        assert_eq!(apply_row_detail_motion(&mut s, RowDetailMotion::Down), None);
+        assert_eq!(s.selected_column, 1);
+        assert_eq!(s.scroll_offset, 0);
+
+        s.selected_column = 1;
+        s.scroll_offset = 4;
+        apply_row_detail_motion(&mut s, RowDetailMotion::Up);
+        assert_eq!(s.selected_column, 0);
+        assert_eq!(s.scroll_offset, 0);
+
+        apply_row_detail_motion(&mut s, RowDetailMotion::Bottom);
+        assert_eq!(s.selected_column, 2);
+
+        apply_row_detail_motion(&mut s, RowDetailMotion::Top);
+        assert_eq!(s.selected_column, 0);
     }
 }
