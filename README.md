@@ -128,6 +128,26 @@ Configuration lives under `~/.config/narwhal/`:
 - `config.toml` — preferences
 - `plugins/*.lua` — auto-loaded plugin scripts
 
+## Releases
+
+Every versioned tag (`v*`) triggers a GitHub Actions workflow that
+builds native binaries for **linux x86_64**, **macOS x86_64**, and
+**macOS aarch64** and attaches them as tarballs (with SHA256
+checksums) to the corresponding
+[GitHub Release](https://github.com/berkant/narwhal/releases).
+
+Download, extract, and put the binary on your `PATH`:
+
+```sh
+curl -LO https://github.com/berkant/narwhal/releases/latest/download/narwhal-<version>-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf narwhal-*-x86_64-unknown-linux-gnu.tar.gz
+mv narwhal-*/narwhal ~/.local/bin/
+```
+
+aarch64 Linux binaries are not yet published — build from source
+with `cargo install --path narwhal` until GitHub's arm-linux runners
+go GA.
+
 ## Architecture
 
 ```
