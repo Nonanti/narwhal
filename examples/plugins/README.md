@@ -65,3 +65,39 @@ Scripts run inside `tokio::task::spawn_blocking`, so a misbehaving
 plugin can hang its own dispatch but won't deadlock the TUI. SQL
 issued via `narwhal.sql_run` goes through the pool's normal queue —
 the same one statements typed into the editor use.
+
+### Constraints to keep in mind
+
+- **Reserved names**: you can't register a command that shadows a
+  built-in (`run`, `open`, `begin`, `commit`, `quit`, `help`, …).
+  The plugin will be rejected at load time with a clear message.
+- **No `sql_run` during `:begin`**: while a transaction is open the
+  executor refuses `narwhal.sql_run` because a fresh pool connection
+  wouldn't see the pinned transaction's writes. Plain commands and
+  transforms keep working; only the SQL bridge is gated.
+- **Whole-result-in-memory**: `narwhal.sql_run` materialises every
+  row before handing it back to Lua. Use `LIMIT` for scans — streaming
+  from Lua is a future addition.
+- **SQL injection is your problem**: anything you splice into a SQL
+  string from `arg` is unescaped user input. `row_count.lua` and
+  `query_snippet.lua` both show the whitelist-then-quote pattern;
+  copy it for any plugin that takes a table or column name.
+
+### Quick template
+
+```lua
+local function safe_ident(s)
+    if s == nil then return nil, "name required" end
+    if s:match("^[%a_][%w_]*$") == nil then
+        return nil, ("invalid name '%s'"):format(s)
+    end
+    return s
+end
+
+narwhal.register_command("mycmd", "what it does", function(arg)
+    local name, err = safe_ident(arg:match("^%s*(.-)%s*$"))
+    if name == nil then return "mycmd: " .. err end
+    -- …do something with `name`…
+    return "done"
+end)
+```
