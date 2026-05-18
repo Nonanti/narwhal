@@ -200,7 +200,7 @@ pub struct AppCore {
     connections_path: Option<std::path::PathBuf>,
     credentials: Arc<dyn CredentialStore>,
     clipboard: Arc<dyn Clipboard>,
-    plugins: PluginRegistry,
+    plugins: Arc<PluginRegistry>,
     /// Shared handle the plugin SQL executor reads on every
     /// `narwhal.sql_run` call. Updated whenever a session opens or
     /// closes so scripts always target the currently-active
@@ -312,7 +312,7 @@ impl AppCore {
             plugins: {
                 let mut reg = PluginRegistry::new();
                 reg.reserve_builtins(crate::commands::BUILTIN_COMMAND_NAMES.iter().copied());
-                reg
+                Arc::new(reg)
             },
             plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
             history,
@@ -1421,14 +1421,19 @@ impl AppCore {
     // ----- plugins -----
 
     /// Read-only handle to the plugin registry, useful for tests.
+    /// The `Arc` derefs transparently so callers can use `&PluginRegistry`
+    /// methods without caring about the indirection.
     pub fn plugins(&self) -> &PluginRegistry {
         &self.plugins
     }
 
     /// Mutable handle so callers (binary or tests) can register plugins
     /// without going through the `:plug-load` command path.
+    /// Uses `Arc::make_mut` so the clone-on-write only materialises when
+    /// the caller actually mutates — dispatch paths that merely read pay
+    /// a single ref-count bump.
     pub fn plugins_mut(&mut self) -> &mut PluginRegistry {
-        &mut self.plugins
+        Arc::make_mut(&mut self.plugins)
     }
 
     /// Register a freshly-built [`LuaPlugin`], wiring it into the SQL
@@ -1441,7 +1446,7 @@ impl AppCore {
             state: self.plugin_state.clone(),
         });
         plugin.install_executor(executor)?;
-        self.plugins.register(plugin)
+        Arc::make_mut(&mut self.plugins).register(plugin)
     }
 
     /// Scan `dir` for top-level `*.lua` files and register each as a
@@ -1543,7 +1548,7 @@ impl AppCore {
 
     fn dispatch_plugin(&mut self, command: &str, argument: &str) {
         let ctx = PluginCommandContext::new(argument);
-        let plugins = self.plugins.clone();
+        let plugins = Arc::clone(&self.plugins);
         let command_owned = command.to_owned();
         // Plugin dispatch is async by trait definition; bridge to the
         // synchronous command handler via block_in_place + the current
@@ -2432,7 +2437,7 @@ impl AppCore {
         if self.plugins.plugins().is_empty() {
             return (columns, rows);
         }
-        let plugins = self.plugins.clone();
+        let plugins = Arc::clone(&self.plugins);
         let mut qr = narwhal_core::QueryResult {
             columns,
             rows,
