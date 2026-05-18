@@ -13,6 +13,7 @@ pub mod registry;
 pub mod run;
 pub mod session;
 pub mod terminal;
+pub mod wizard;
 
 pub use app::App;
 pub use core::{AppCore, ResultState};

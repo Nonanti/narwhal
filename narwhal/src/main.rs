@@ -39,7 +39,8 @@ async fn main() -> Result<()> {
     };
 
     let registry = DriverRegistry::with_defaults();
-    let app = App::new(registry, connections, history);
+    let app =
+        App::new(registry, connections, history).with_connections_path(paths.connections_file());
 
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");

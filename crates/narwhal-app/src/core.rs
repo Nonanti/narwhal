@@ -12,9 +12,9 @@ use narwhal_config::ConnectionsFile;
 use narwhal_core::{ColumnHeader, ConnectionConfig, Row, TableKind, TableSchema};
 use narwhal_history::Journal;
 use narwhal_tui::{
-    render_root, translate_key_event, CellPopup, EditorBuffer, ExplainPlanLine, Pane,
-    ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
-    SidebarView, Theme,
+    render_root, render_wizard, translate_key_event, CellPopup, EditorBuffer, ExplainPlanLine,
+    Pane, ResultDisplay, ResultView, RootLayout, SearchHighlight, SidebarRow, SidebarRowKind,
+    SidebarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Vim};
 use ratatui::layout::Rect;
@@ -30,6 +30,7 @@ use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
 use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunUpdate};
 use crate::session::Session;
+use crate::wizard::{ConnectionWizard, DRIVERS};
 
 const RUN_CHANNEL_CAPACITY: usize = 128;
 
@@ -129,6 +130,7 @@ enum SidebarItem {
 pub struct AppCore {
     registry: DriverRegistry,
     connections: ConnectionsFile,
+    connections_path: Option<std::path::PathBuf>,
     history: Option<Arc<Journal>>,
     session: Option<Session>,
     tabs: Vec<Tab>,
@@ -143,6 +145,8 @@ pub struct AppCore {
     running: bool,
     cancel_slot: ActiveCancel,
     should_quit: bool,
+    wizard: Option<ConnectionWizard>,
+    wizard_error: Option<String>,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
 }
@@ -169,6 +173,7 @@ impl AppCore {
         Self {
             registry,
             connections,
+            connections_path: None,
             history,
             session: None,
             tabs: vec![Tab::new("untitled")],
@@ -183,9 +188,17 @@ impl AppCore {
             running: false,
             cancel_slot: Arc::new(Mutex::new(None)),
             should_quit: false,
+            wizard: None,
+            wizard_error: None,
             run_tx,
             run_rx,
         }
+    }
+
+    /// Inform the core where to persist new connections produced by the
+    /// `:add` wizard. Called by [`crate::app::App::new`].
+    pub fn set_connections_path(&mut self, path: std::path::PathBuf) {
+        self.connections_path = Some(path);
     }
 
     fn rebuild_sidebar(&mut self) {
@@ -345,11 +358,34 @@ impl AppCore {
             result: result_display,
         };
         render_root(frame, area, &mut layout);
+
+        if let Some(wizard) = self.wizard.as_ref() {
+            let view = WizardView {
+                drivers: DRIVERS,
+                driver_index: wizard.driver_index,
+                fields: wizard
+                    .fields
+                    .iter()
+                    .map(|f| WizardFieldView {
+                        label: f.label,
+                        value: &f.value,
+                        secret: f.secret,
+                    })
+                    .collect(),
+                focused: wizard.focused,
+                error: self.wizard_error.as_deref(),
+            };
+            render_wizard(frame, area, &view, &self.theme);
+        }
     }
 
     // ----- input -----
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.wizard.is_some() {
+            self.handle_wizard_key(key);
+            return;
+        }
         if self.handle_global_key(key) {
             return;
         }
@@ -719,6 +755,7 @@ impl AppCore {
             Command::Explain => self.dispatch_explain(),
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
+            Command::Add => self.start_wizard(),
             Command::NewTab => self.new_tab(),
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
@@ -904,6 +941,93 @@ impl AppCore {
             RunMode::Stream => "streaming…".into(),
         };
         spawn_run(ctx, request, self.cancel_slot.clone(), self.run_tx.clone());
+    }
+
+    fn start_wizard(&mut self) {
+        self.wizard = Some(ConnectionWizard::new());
+        self.wizard_error = None;
+        self.status_message = "add: Tab moves · ←/→ driver · Enter saves · Esc cancels".into();
+    }
+
+    fn cancel_wizard(&mut self) {
+        if self.wizard.take().is_some() {
+            self.wizard_error = None;
+            self.status_message = "add cancelled".into();
+        }
+    }
+
+    fn commit_wizard(&mut self) {
+        let Some(wizard) = self.wizard.as_ref() else {
+            return;
+        };
+        match wizard.build() {
+            Err(error) => {
+                self.wizard_error = Some(error);
+            }
+            Ok(built) => {
+                if self
+                    .connections
+                    .connections
+                    .iter()
+                    .any(|c| c.name == built.config.name)
+                {
+                    self.wizard_error = Some(format!(
+                        "a connection named '{}' already exists",
+                        built.config.name
+                    ));
+                    return;
+                }
+                self.connections.connections.push(built.config.clone());
+                if let Some(path) = self.connections_path.as_ref() {
+                    if let Err(error) = self.connections.save(path) {
+                        self.wizard_error = Some(format!("could not save: {error}"));
+                        // Roll back the in-memory entry so the on-disk file
+                        // remains the source of truth.
+                        self.connections.connections.pop();
+                        return;
+                    }
+                }
+                self.wizard = None;
+                self.wizard_error = None;
+                self.rebuild_sidebar();
+                let name = built.config.name.clone();
+                self.status_message = format!("connection '{name}' saved");
+                // Pre-select the new connection in the sidebar.
+                if let Some(idx) = self.sidebar_items.iter().position(|i| match i {
+                    SidebarItem::Connection { name: n, .. } => n == &name,
+                    _ => false,
+                }) {
+                    self.sidebar_index = idx;
+                }
+            }
+        }
+    }
+
+    fn handle_wizard_key(&mut self, key: KeyEvent) {
+        let Some(wizard) = self.wizard.as_mut() else {
+            return;
+        };
+        match key.code {
+            CtKey::Esc => self.cancel_wizard(),
+            CtKey::Tab | CtKey::Down => wizard.next_focus(),
+            CtKey::BackTab | CtKey::Up => wizard.prev_focus(),
+            CtKey::Left if wizard.focused == 0 => wizard.cycle_driver(-1),
+            CtKey::Right if wizard.focused == 0 => wizard.cycle_driver(1),
+            CtKey::Enter => self.commit_wizard(),
+            CtKey::Backspace => wizard.pop_char(),
+            CtKey::Char(c) => {
+                if wizard.focused == 0 {
+                    // Allow first-letter shortcuts on the driver row.
+                    if let Some(idx) = DRIVERS.iter().position(|d| d.starts_with(c)) {
+                        wizard.driver_index = idx;
+                        wizard.cycle_driver(0);
+                    }
+                } else {
+                    wizard.push_char(c);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn new_tab(&mut self) {
