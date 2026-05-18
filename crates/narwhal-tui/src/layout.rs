@@ -6,8 +6,8 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 use crate::widgets::{
-    render_editor, render_results, render_sidebar, EditorBuffer, ResultDisplay, ResultView,
-    SidebarView,
+    editor_cursor_anchor, render_completion_popup, render_editor, render_results, render_sidebar,
+    CompletionPopupView, EditorBuffer, ResultDisplay, ResultView, SidebarView,
 };
 
 /// Indicates which pane currently owns keyboard focus.
@@ -51,6 +51,9 @@ pub struct RootLayout<'a> {
     pub editor_title: &'a str,
     pub result_view: &'a mut ResultView,
     pub result: ResultDisplay<'a>,
+    /// When `Some`, an overlay completion popup is rendered above the
+    /// editor pane on top of the regular widgets.
+    pub completion: Option<CompletionPopupView<'a>>,
 }
 
 pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) {
@@ -71,9 +74,10 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(body[1]);
 
+    let editor_area = main[0];
     render_editor(
         frame,
-        main[0],
+        editor_area,
         view.editor,
         view.theme,
         view.focus == Pane::Editor,
@@ -90,6 +94,14 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
     );
 
     render_status_bar(frame, outer[1], view);
+
+    if let Some(popup) = view.completion.as_ref() {
+        let mut popup = *popup;
+        // Re-anchor the popup to the actual editor cursor coordinates so
+        // the host app doesn't need to mirror our layout maths.
+        popup.anchor = editor_cursor_anchor(editor_area, view.editor);
+        render_completion_popup(frame, area, &popup, view.theme);
+    }
 }
 
 fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
