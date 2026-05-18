@@ -1421,6 +1421,58 @@ impl AppCore {
         &mut self.plugins
     }
 
+    /// Scan `dir` for top-level `*.lua` files and register each as a
+    /// plugin. Returns the number of plugins that loaded successfully.
+    /// Failures are accumulated into the status bar so the user notices
+    /// at start-up; the rest of the directory keeps loading.
+    ///
+    /// Missing or unreadable directories are not an error — narwhal runs
+    /// fine without any plugins.
+    pub fn auto_load_plugins(&mut self, dir: &std::path::Path) -> usize {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(it) => it,
+            Err(_) => return 0,
+        };
+        let mut paths: Vec<std::path::PathBuf> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.is_file()
+                    && p.extension()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.eq_ignore_ascii_case("lua"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        // Deterministic order so the registry index is reproducible.
+        paths.sort();
+
+        let mut loaded = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+        for path in &paths {
+            match LuaPlugin::from_path(path) {
+                Ok(plugin) => match self.plugins.register(plugin) {
+                    Ok(_) => loaded += 1,
+                    Err(e) => failures.push(format!("{}: {e}", path.display())),
+                },
+                Err(e) => failures.push(format!("{}: {e}", path.display())),
+            }
+        }
+
+        if !failures.is_empty() {
+            // Surface failures via the plugin_warning slot so they survive
+            // the next status message rewrite.
+            self.plugin_warning = Some(format!(
+                "{} plugin(s) failed to load: {}",
+                failures.len(),
+                failures.join("; ")
+            ));
+        }
+        if loaded > 0 {
+            self.status_message = format!("auto-loaded {loaded} plugin(s) from {}", dir.display());
+        }
+        loaded
+    }
+
     fn load_plugin(&mut self, path: &str) {
         let plugin = match LuaPlugin::from_path(path) {
             Ok(p) => p,

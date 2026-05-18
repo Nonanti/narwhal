@@ -47,12 +47,20 @@ impl ConfigPaths {
         self.cache_dir.join("logs")
     }
 
+    /// Directory scanned at start-up for auto-loaded Lua plugins. Every
+    /// `*.lua` file at the top level of this directory is registered
+    /// before the TUI takes over the screen.
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.config_dir.join("plugins")
+    }
+
     /// Create every directory referenced by this struct.
     pub fn ensure(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config_dir)?;
         std::fs::create_dir_all(&self.data_dir)?;
         std::fs::create_dir_all(&self.cache_dir)?;
         std::fs::create_dir_all(self.log_dir())?;
+        std::fs::create_dir_all(self.plugins_dir())?;
         Ok(())
     }
 }

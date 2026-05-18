@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
     let credentials: Arc<dyn narwhal_config::CredentialStore> = Arc::new(KeyringStore::new());
     let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
     let app = App::with_services(registry, connections, history, credentials, clipboard)
-        .with_connections_path(paths.connections_file());
+        .with_connections_path(paths.connections_file())
+        .with_plugins_dir(&paths.plugins_dir());
 
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");
