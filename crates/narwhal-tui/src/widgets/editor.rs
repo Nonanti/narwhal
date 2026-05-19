@@ -282,7 +282,7 @@ impl EditorBuffer {
         &mut self.lines[self.cursor_row]
     }
 
-    fn cursor_byte_offset(&self) -> usize {
+    pub fn cursor_byte_offset(&self) -> usize {
         let mut offset = 0usize;
         for (i, line) in self.lines.iter().enumerate() {
             if i == self.cursor_row {

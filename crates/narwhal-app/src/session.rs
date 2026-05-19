@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use narwhal_core::{
-    ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema, Table,
+    ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result, Schema, Table,
 };
 use narwhal_pool::{Pool, PoolConfig, PooledConnection};
 use narwhal_sql::Dialect;
@@ -27,6 +28,10 @@ pub struct Session {
     pub pool: Pool,
     pub schemas: Vec<SchemaListing>,
     pub transaction: Option<TxnHandle>,
+    /// Lazily-populated column cache. Keys are lowercased table names;
+    /// values are `(schema_name, columns)` tuples. Populated when
+    /// `describe_table` is called (e.g. from sidebar preview).
+    pub column_cache: HashMap<String, (String, Vec<ColumnHeader>)>,
 }
 
 impl Session {
@@ -52,6 +57,7 @@ impl Session {
             pool,
             schemas: Vec::new(),
             transaction: None,
+            column_cache: HashMap::new(),
         })
     }
 
