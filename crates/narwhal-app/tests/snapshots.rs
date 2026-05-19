@@ -40,7 +40,11 @@ fn buffer_to_string(buffer: &Buffer) -> String {
 }
 
 fn snapshot_core(core: &mut AppCore) -> String {
-    let backend = TestBackend::new(COLS, ROWS);
+    snapshot_core_sized(core, COLS, ROWS)
+}
+
+fn snapshot_core_sized(core: &mut AppCore, cols: u16, rows: u16) -> String {
+    let backend = TestBackend::new(cols, rows);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
         .draw(|frame| core.render(frame, frame.area()))
@@ -117,4 +121,12 @@ fn mask_elapsed(s: String) -> String {
     // " · N ms"  ->  " · ? ms"
     let re = regex_lite::Regex::new(r"\b\d+ ms\b").unwrap();
     re.replace_all(&s, "? ms").into_owned()
+}
+
+#[test]
+fn snapshot_help_modal() {
+    let mut core = empty_state();
+    core.open_help();
+    assert!(core.help_open());
+    assert_snapshot!("help_modal", snapshot_core_sized(&mut core, 120, 50));
 }
