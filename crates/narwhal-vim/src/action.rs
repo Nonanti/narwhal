@@ -26,6 +26,9 @@ pub enum Action {
     /// The key was consumed but produced no observable effect (for example, a
     /// partially typed count or operator).
     Pending,
+    /// Tab was pressed in command mode; the host should attempt prompt
+    /// completion against the relevant universe.
+    PromptComplete,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
