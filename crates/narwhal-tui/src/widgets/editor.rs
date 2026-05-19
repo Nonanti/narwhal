@@ -17,6 +17,16 @@ use crate::theme::Theme;
 
 const GUTTER_WIDTH: usize = 6; // "NNN │ "
 
+/// Auto-pairable opener/closer pairs.
+const PAIRS: &[(char, char)] = &[
+    ('(', ')'),
+    ('[', ']'),
+    ('{', '}'),
+    ('\'', '\''),
+    ('"', '"'),
+    ('`', '`'),
+];
+
 /// One entry in [`CompletionPopupView::items`]. The host app builds these
 /// from [`narwhal_app::completion::Completion`] so the renderer stays
 /// allocation-free.
@@ -46,6 +56,7 @@ pub struct EditorBuffer {
     cursor_row: usize,
     cursor_col: usize,
     scroll: usize,
+    auto_pair_enabled: bool,
 }
 
 impl Default for EditorBuffer {
@@ -61,6 +72,7 @@ impl EditorBuffer {
             cursor_row: 0,
             cursor_col: 0,
             scroll: 0,
+            auto_pair_enabled: true,
         }
     }
 
@@ -88,6 +100,47 @@ impl EditorBuffer {
         self.scroll = 0;
     }
 
+    /// Insert a single character, applying auto-pair logic when enabled.
+    pub fn insert_char(&mut self, c: char) {
+        if !self.auto_pair_enabled {
+            self.raw_insert_char(c);
+            return;
+        }
+
+        // Skip-over: if the user types the closer and the cursor is already
+        // sitting on that same closer, just move right instead of inserting
+        // a duplicate.
+        if let Some((_, close)) = PAIRS.iter().find(|p| p.1 == c) {
+            if self.next_char() == Some(*close) {
+                self.move_right();
+                return;
+            }
+        }
+
+        // Auto-pair: if the character is an opener and auto-pairing is
+        // appropriate, insert both opener and closer.
+        if let Some((_open, close)) = PAIRS.iter().find(|p| p.0 == c) {
+            if self.should_auto_pair(c) {
+                self.raw_insert_char(c);
+                self.raw_insert_char(*close);
+                self.move_left();
+                return;
+            }
+        }
+
+        self.raw_insert_char(c);
+    }
+
+    /// Set whether auto-pair is enabled.
+    pub fn set_auto_pair_enabled(&mut self, on: bool) {
+        self.auto_pair_enabled = on;
+    }
+
+    /// Returns whether auto-pair is enabled.
+    pub fn auto_pair_enabled(&self) -> bool {
+        self.auto_pair_enabled
+    }
+
     pub fn insert_str(&mut self, text: &str) {
         for ch in text.chars() {
             if ch == '\n' {
@@ -105,22 +158,16 @@ impl EditorBuffer {
     }
 
     pub fn delete_char(&mut self) {
-        if self.cursor_col > 0 {
-            let cursor_col = self.cursor_col;
-            let line = self.current_line_mut();
-            // Walk back one char boundary to support UTF-8.
-            let mut new_col = cursor_col - 1;
-            while !line.is_char_boundary(new_col) && new_col > 0 {
-                new_col -= 1;
+        // Backspace-deletes-pair: when the cursor sits between an empty
+        // pair such as `(|)`, pressing backspace removes both characters.
+        if let (Some(prev), Some(next)) = (self.prev_char(), self.next_char()) {
+            if PAIRS.iter().any(|(o, c)| *o == prev && *c == next) {
+                self.delete_next_char();
+                self.delete_prev_char();
+                return;
             }
-            line.replace_range(new_col..cursor_col, "");
-            self.cursor_col = new_col;
-        } else if self.cursor_row > 0 {
-            let trailing = self.lines.remove(self.cursor_row);
-            self.cursor_row -= 1;
-            self.cursor_col = self.lines[self.cursor_row].len();
-            self.lines[self.cursor_row].push_str(&trailing);
         }
+        self.delete_prev_char();
     }
 
     pub fn apply_motion(&mut self, motion: Motion, count: usize) {
@@ -326,6 +373,123 @@ impl EditorBuffer {
             idx -= 1;
         }
         self.set_cursor_from_offset(idx);
+    }
+
+    fn raw_insert_char(&mut self, c: char) {
+        let col = self.cursor_col;
+        self.current_line_mut().insert(col, c);
+        self.cursor_col += c.len_utf8();
+    }
+
+    /// Returns the character immediately after the cursor, if any.
+    fn next_char(&self) -> Option<char> {
+        let line = self.current_line();
+        line[self.cursor_col..].chars().next()
+    }
+
+    /// Returns the character immediately before the cursor, if any.
+    fn prev_char(&self) -> Option<char> {
+        let line = self.current_line();
+        if self.cursor_col == 0 {
+            return None;
+        }
+        let mut idx = self.cursor_col;
+        while !line.is_char_boundary(idx) && idx > 0 {
+            idx -= 1;
+        }
+        line[..idx].chars().next_back()
+    }
+
+    /// Delete the character before the cursor (classic backspace).
+    fn delete_prev_char(&mut self) {
+        if self.cursor_col > 0 {
+            let cursor_col = self.cursor_col;
+            let line = self.current_line_mut();
+            let mut new_col = cursor_col - 1;
+            while !line.is_char_boundary(new_col) && new_col > 0 {
+                new_col -= 1;
+            }
+            line.replace_range(new_col..cursor_col, "");
+            self.cursor_col = new_col;
+        } else if self.cursor_row > 0 {
+            let trailing = self.lines.remove(self.cursor_row);
+            self.cursor_row -= 1;
+            self.cursor_col = self.lines[self.cursor_row].len();
+            self.lines[self.cursor_row].push_str(&trailing);
+        }
+    }
+
+    /// Delete the character after the cursor (delete key).
+    fn delete_next_char(&mut self) {
+        let line_len = self.current_line().len();
+        if self.cursor_col < line_len {
+            let cursor_col = self.cursor_col;
+            let line = self.current_line_mut();
+            let mut end = cursor_col + 1;
+            while !line.is_char_boundary(end) && end < line.len() {
+                end += 1;
+            }
+            line.replace_range(cursor_col..end, "");
+        }
+    }
+
+    /// Should we auto-pair this opener character?
+    fn should_auto_pair(&self, opener: char) -> bool {
+        // No auto-pair inside a string literal.
+        if self.cursor_inside_string_literal() {
+            return false;
+        }
+        // No auto-pair when the next character is itself an opener
+        // (prevents over-pairing like `((` → `(()) (`).
+        if let Some(next) = self.next_char() {
+            if PAIRS.iter().any(|(o, _)| *o == next) {
+                return false;
+            }
+        }
+        // For same-char pairs (' and ` and "), don't auto-pair if the
+        // character before the cursor is the same opener (prevents `''`
+        // turning into `''''`).
+        if (opener == '\'' || opener == '"' || opener == '`') && self.prev_char() == Some(opener) {
+            return false;
+        }
+        true
+    }
+
+    /// Detect whether the cursor sits inside a string literal on the
+    /// current line. A simple heuristic: walk from column 0 to the
+    /// cursor, toggling "inside `'`" and "inside `\"`" flags on each
+    /// unescaped quote. If either flag is set when we reach the cursor
+    /// column, we're inside a string.
+    fn cursor_inside_string_literal(&self) -> bool {
+        let line = self.current_line();
+        let target = self.cursor_col.min(line.len());
+
+        let mut inside_single = false;
+        let mut inside_double = false;
+        let mut prev_was_backslash = false;
+
+        for (i, ch) in line.char_indices() {
+            if i >= target {
+                break;
+            }
+            match ch {
+                '\\' => {
+                    prev_was_backslash = !prev_was_backslash;
+                }
+                '\'' if !prev_was_backslash && !inside_double => {
+                    inside_single = !inside_single;
+                    prev_was_backslash = false;
+                }
+                '"' if !prev_was_backslash && !inside_single => {
+                    inside_double = !inside_double;
+                    prev_was_backslash = false;
+                }
+                _ => {
+                    prev_was_backslash = false;
+                }
+            }
+        }
+        inside_single || inside_double
     }
 
     fn set_cursor_from_offset(&mut self, mut offset: usize) {
