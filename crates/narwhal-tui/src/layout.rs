@@ -27,6 +27,9 @@ pub struct LayoutRegions {
     pub result_headers: Vec<(Rect, usize)>,
     /// One `(Rect, row_index)` per rendered data row.
     pub result_rows: Vec<(Rect, usize)>,
+    /// One `(Rect, result_index)` per rendered result tab in the strip.
+    /// Empty when the bundle has only one result.
+    pub result_tabs: Vec<(Rect, usize)>,
     /// One `(Rect, item_index)` per visible completion item.
     pub completion_items: Vec<(Rect, usize)>,
 }
@@ -85,6 +88,10 @@ pub struct RootLayout<'a> {
     pub completion: Option<CompletionPopupView<'a>>,
     /// When `Some`, editor search matches are highlighted.
     pub editor_search: Option<EditorSearchHighlight<'a>>,
+    /// Number of results in the bundle. >1 means the tab strip renders.
+    pub result_count: usize,
+    /// Index of the active result (0-based).
+    pub active_result: usize,
 }
 
 pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) -> LayoutRegions {
@@ -123,6 +130,8 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.result_view,
         view.theme,
         view.focus == Pane::Results,
+        view.result_count,
+        view.active_result,
     );
 
     render_status_bar(frame, outer[1], view);
@@ -162,6 +171,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         sidebar_tables,
         result_headers: result_regions.headers,
         result_rows: result_regions.rows,
+        result_tabs: result_regions.tabs,
         completion_items: completion_regions
             .map(|(_, regions)| regions.items)
             .unwrap_or_default(),

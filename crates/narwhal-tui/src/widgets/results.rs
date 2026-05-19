@@ -281,8 +281,12 @@ pub struct ResultHitRegions {
     pub headers: Vec<(Rect, usize)>,
     /// One `(Rect, row_index)` per rendered data row.
     pub rows: Vec<(Rect, usize)>,
+    /// One `(Rect, result_index)` per rendered result tab in the strip.
+    /// Empty when there is only one result.
+    pub tabs: Vec<(Rect, usize)>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_results(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -290,6 +294,8 @@ pub fn render_results(
     view: &mut ResultView,
     theme: &Theme,
     focused: bool,
+    result_count: usize,
+    active_result: usize,
 ) -> ResultHitRegions {
     let border_style = if focused {
         Style::default().fg(theme.accent)
@@ -304,13 +310,60 @@ pub fn render_results(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let regions = match display {
+    // Render the result tab strip when there are multiple results.
+    let tab_rects = if result_count > 1 {
+        let strip_area = Rect { height: 1, ..inner };
+        let mut rects = Vec::with_capacity(result_count);
+        let mut x = strip_area.x;
+        for i in 0..result_count {
+            let label = format!(" result {}/{} ", i + 1, result_count);
+            let label_width = label.len() as u16;
+            let is_active = i == active_result;
+            let style = if is_active {
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.muted)
+            };
+            let tab_rect = Rect {
+                x,
+                y: strip_area.y,
+                width: label_width.min(strip_area.width.saturating_sub(x - strip_area.x)),
+                height: 1,
+            };
+            let span = Span::styled(label, style);
+            frame.render_widget(Paragraph::new(span), tab_rect);
+            if tab_rect.width > 0 {
+                rects.push((tab_rect, i));
+            }
+            x += label_width;
+            if x >= strip_area.x + strip_area.width {
+                break;
+            }
+        }
+        rects
+    } else {
+        Vec::new()
+    };
+
+    let content_area = if result_count > 1 {
+        Rect {
+            y: inner.y + 1,
+            height: inner.height.saturating_sub(1),
+            ..inner
+        }
+    } else {
+        inner
+    };
+
+    let mut regions = match display {
         ResultDisplay::Empty => {
             let p = Paragraph::new(Span::styled(
                 "  no results yet — F5 / Alt-Enter runs cursor statement, F6 runs whole buffer, Ctrl-Space completes",
                 Style::default().fg(theme.muted),
             ));
-            frame.render_widget(p, inner);
+            frame.render_widget(p, content_area);
             ResultHitRegions::default()
         }
         ResultDisplay::Running {
@@ -321,10 +374,10 @@ pub fn render_results(
                     format!("  ⏳ running: {sql}"),
                     Style::default().fg(theme.muted),
                 ))]);
-                frame.render_widget(p, inner);
+                frame.render_widget(p, content_area);
                 ResultHitRegions::default()
             } else {
-                draw_table(frame, inner, columns, rows, None, theme, view)
+                draw_table(frame, content_area, columns, rows, None, theme, view)
             }
         }
         ResultDisplay::Affected {
@@ -337,7 +390,7 @@ pub fn render_results(
                 elapsed_ms
             );
             let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme.foreground)));
-            frame.render_widget(p, inner);
+            frame.render_widget(p, content_area);
             ResultHitRegions::default()
         }
         ResultDisplay::Rows {
@@ -345,9 +398,9 @@ pub fn render_results(
             rows,
             search,
             ..
-        } => draw_table(frame, inner, columns, rows, *search, theme, view),
+        } => draw_table(frame, content_area, columns, rows, *search, theme, view),
         ResultDisplay::TableDetail { schema } => {
-            draw_table_detail(frame, inner, schema, theme);
+            draw_table_detail(frame, content_area, schema, theme);
             ResultHitRegions::default()
         }
         ResultDisplay::Explain {
@@ -357,7 +410,7 @@ pub fn render_results(
         } => {
             draw_explain(
                 frame,
-                inner,
+                content_area,
                 lines,
                 *planning_time_ms,
                 *execution_time_ms,
@@ -373,10 +426,11 @@ pub fn render_results(
                 format!("  error ({elapsed_ms} ms): {message}"),
                 Style::default().fg(theme.error),
             ))]);
-            frame.render_widget(p, inner);
+            frame.render_widget(p, content_area);
             ResultHitRegions::default()
         }
     };
+    regions.tabs = tab_rects;
     regions
 }
 
@@ -878,5 +932,6 @@ fn draw_table(
     ResultHitRegions {
         headers: header_rects,
         rows: row_rects,
+        tabs: Vec::new(),
     }
 }
