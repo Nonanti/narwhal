@@ -85,8 +85,27 @@ pub enum Command {
     /// Open the Ctrl+R history modal.
     History,
     Help(Option<String>),
+    /// Substitute command: `:s/old/new/[g][c]` or `:%s/old/new/[g][c]`.
+    Substitute {
+        range: SubstituteRange,
+        pattern: String,
+        replacement: String,
+        global: bool,
+        confirm: bool,
+    },
+    /// Clear search highlighting (`:nohlsearch`).
+    NoHlSearch,
     Unknown(String),
     Empty,
+}
+
+/// Scope of a substitute command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubstituteRange {
+    /// Replace on the current line only (`:s/…`).
+    CurrentLine,
+    /// Replace across the entire buffer (`:%s/…`).
+    WholeBuffer,
 }
 
 /// Every token the parser accepts as a built-in `:`-line command head.
@@ -157,6 +176,8 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "tabprevious",
     "help",
     "h",
+    "nohlsearch",
+    "noh",
 ];
 
 /// Short descriptions for built-in commands, looked up by `:help <name>`.
@@ -249,6 +270,10 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
         "help",
         "show help; :help <command> for details on a specific command",
     ),
+    (
+        "nohlsearch",
+        "clear search highlighting in the editor (also :noh)",
+    ),
 ];
 
 /// Map an alias token back to its primary command key so that `:help o`
@@ -277,6 +302,7 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "tn" => "tabnext",
         "tp" | "tabprevious" => "tabprev",
         "h" => "help",
+        "noh" => "nohlsearch",
         other => other,
     }
 }
@@ -383,7 +409,15 @@ pub fn parse(input: &str) -> Command {
                 Command::Help(Some(arg.to_owned()))
             }
         }
-        _ => Command::Unknown(trimmed.to_owned()),
+        "nohlsearch" | "noh" => Command::NoHlSearch,
+        _ => {
+            // Try substitute: s/pat/rep/[gc] or %s/pat/rep/[gc]
+            if let Some(cmd) = try_parse_substitute(trimmed) {
+                cmd
+            } else {
+                Command::Unknown(trimmed.to_owned())
+            }
+        }
     }
 }
 
@@ -412,6 +446,39 @@ fn parse_export(arg: &str) -> Command {
         format: format.to_owned(),
         path: path.to_owned(),
     }
+}
+
+/// Try to parse `:s/pat/rep/[gc]` or `:%s/pat/rep/[gc]`.
+/// Returns `None` if the input doesn't match the substitute pattern.
+fn try_parse_substitute(input: &str) -> Option<Command> {
+    let (range, rest) = if let Some(r) = input.strip_prefix("%s/") {
+        (SubstituteRange::WholeBuffer, r)
+    } else if let Some(r) = input.strip_prefix("s/") {
+        (SubstituteRange::CurrentLine, r)
+    } else {
+        return None;
+    };
+
+    // Split on `/` — we need at least pattern/replacement/
+    let mut slash_iter = rest.splitn(3, '/');
+    let pattern = slash_iter.next().unwrap_or("").to_owned();
+    let replacement = slash_iter.next().unwrap_or("").to_owned();
+    let flags = slash_iter.next().unwrap_or("");
+
+    if pattern.is_empty() {
+        return Some(Command::Unknown("substitute: empty pattern".into()));
+    }
+
+    let global = flags.contains('g');
+    let confirm = flags.contains('c');
+
+    Some(Command::Substitute {
+        range,
+        pattern,
+        replacement,
+        global,
+        confirm,
+    })
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@
 use narwhal_sql::{split_with, Dialect};
 use narwhal_vim::Motion;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -16,6 +16,17 @@ use ratatui::Frame;
 use crate::theme::Theme;
 
 const GUTTER_WIDTH: usize = 6; // "NNN │ "
+
+/// Search highlight information passed from the app to the editor renderer.
+#[derive(Debug, Clone, Default)]
+pub struct EditorSearchHighlight<'a> {
+    /// All match positions as `(line_idx, byte_col)` pairs.
+    pub matches: &'a [(usize, usize)],
+    /// Length of the needle (used to determine highlight span width).
+    pub needle_len: usize,
+    /// Index into `matches` for the current match (where the cursor sits).
+    pub current: Option<usize>,
+}
 
 /// Auto-pairable opener/closer pairs.
 const PAIRS: &[(char, char)] = &[
@@ -80,8 +91,38 @@ impl EditorBuffer {
         &self.lines
     }
 
+    /// Return the number of lines in the buffer.
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// Return the text of line at `idx`, or empty string if out of bounds.
+    pub fn get_line(&self, idx: usize) -> &str {
+        self.lines.get(idx).map(String::as_str).unwrap_or("")
+    }
+
+    /// Replace the contents of line `idx` with `new_text`.
+    /// Does nothing if `idx` is out of bounds.
+    pub fn replace_line(&mut self, idx: usize, new_text: &str) {
+        if idx < self.lines.len() {
+            self.lines[idx] = new_text.to_owned();
+        }
+    }
+
+    /// Return the current cursor row.
+    pub fn cursor_row(&self) -> usize {
+        self.cursor_row
+    }
+
     pub fn cursor(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
+    }
+
+    /// Set the cursor to the given (row, col) position, clamping
+    /// to valid bounds.
+    pub fn set_cursor(&mut self, row: usize, col: usize) {
+        self.cursor_row = row.min(self.lines.len().saturating_sub(1));
+        self.cursor_col = col.min(self.lines[self.cursor_row].len());
     }
 
     pub fn is_empty(&self) -> bool {
@@ -518,6 +559,7 @@ pub fn render_editor(
     theme: &Theme,
     focused: bool,
     title: &str,
+    search: Option<&EditorSearchHighlight<'_>>,
 ) {
     let border_style = if focused {
         Style::default().fg(theme.accent)
@@ -534,13 +576,65 @@ pub fn render_editor(
     let height = inner.height as usize;
     buffer.ensure_visible(height);
 
+    // Collect matches per line for highlight rendering.
+    let match_line_map: std::collections::HashMap<usize, Vec<(usize, bool)>> = search
+        .map(|s| {
+            let mut map: std::collections::HashMap<usize, Vec<(usize, bool)>> =
+                std::collections::HashMap::new();
+            for (i, &(line, col)) in s.matches.iter().enumerate() {
+                let is_current = s.current == Some(i);
+                map.entry(line).or_default().push((col, is_current));
+            }
+            // Sort matches within each line by column.
+            for v in map.values_mut() {
+                v.sort_by_key(|(col, _)| *col);
+            }
+            map
+        })
+        .unwrap_or_default();
+    let needle_len = search.map(|s| s.needle_len).unwrap_or(0);
+
     let end = (buffer.scroll + height).min(buffer.lines.len());
     let lines: Vec<Line<'_>> = (buffer.scroll..end)
         .map(|row| {
             let number = format!("{:>3} │ ", row + 1);
             let gutter = Span::styled(number, Style::default().fg(theme.muted));
-            let body = Span::raw(buffer.lines[row].clone());
-            Line::from(vec![gutter, body])
+
+            let line_text = &buffer.lines[row];
+
+            if let Some(matches_on_line) = match_line_map.get(&row) {
+                // Build spans with highlight overlays.
+                let mut spans = vec![gutter];
+                let mut pos = 0usize;
+                for &(col, is_current) in matches_on_line {
+                    if col > pos && col <= line_text.len() {
+                        spans.push(Span::raw(line_text[pos..col].to_owned()));
+                    }
+                    let hl_end = (col + needle_len).min(line_text.len());
+                    if col < line_text.len() && hl_end > col {
+                        let style = if is_current {
+                            Style::default()
+                                .fg(theme.background)
+                                .bg(theme.accent)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.foreground).bg(theme.muted)
+                        };
+                        spans.push(Span::styled(line_text[col..hl_end].to_owned(), style));
+                    }
+                    pos = hl_end.max(col + 1); // advance past the match
+                    if pos < col + 1 {
+                        pos = col + 1;
+                    }
+                }
+                if pos < line_text.len() {
+                    spans.push(Span::raw(line_text[pos..].to_owned()));
+                }
+                Line::from(spans)
+            } else {
+                let body = Span::raw(line_text.clone());
+                Line::from(vec![gutter, body])
+            }
         })
         .collect();
 

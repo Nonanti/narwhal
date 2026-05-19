@@ -6,7 +6,8 @@ use ratatui::Frame;
 use crate::theme::Theme;
 use crate::widgets::{
     editor_cursor_anchor, render_completion_popup, render_editor, render_results, render_sidebar,
-    CompletionPopupView, EditorBuffer, ResultDisplay, ResultView, SidebarView,
+    CompletionPopupView, EditorBuffer, EditorSearchHighlight, ResultDisplay, ResultView,
+    SidebarView,
 };
 
 /// Hit-test regions computed during the last render. Stored on `AppCore`
@@ -82,6 +83,8 @@ pub struct RootLayout<'a> {
     /// When `Some`, an overlay completion popup is rendered above the
     /// editor pane on top of the regular widgets.
     pub completion: Option<CompletionPopupView<'a>>,
+    /// When `Some`, editor search matches are highlighted.
+    pub editor_search: Option<EditorSearchHighlight<'a>>,
 }
 
 pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) -> LayoutRegions {
@@ -110,6 +113,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.theme,
         view.focus == Pane::Editor,
         view.editor_title,
+        view.editor_search.as_ref(),
     );
 
     let result_regions = render_results(

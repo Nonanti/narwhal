@@ -1,4 +1,4 @@
-use crate::action::{Action, Motion};
+use crate::action::{Action, Motion, SearchDirection};
 use crate::key::{Key, KeyCode};
 use crate::mode::Mode;
 
@@ -102,6 +102,10 @@ impl Vim {
                 self.mode = Mode::VisualLine;
                 Action::EnterMode(Mode::VisualLine)
             }
+            KeyCode::Char('/') => Action::OpenSearch(SearchDirection::Forward),
+            KeyCode::Char('?') => Action::OpenSearch(SearchDirection::Backward),
+            KeyCode::Char('n') => Action::RepeatSearch,
+            KeyCode::Char('N') => Action::RepeatSearchReverse,
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();

@@ -12,7 +12,7 @@ pub mod key;
 pub mod machine;
 pub mod mode;
 
-pub use action::{Action, Motion, Operator};
+pub use action::{Action, Motion, Operator, SearchDirection};
 pub use key::{Key, KeyCode, KeyMod};
 pub use machine::Vim;
 pub use mode::Mode;
