@@ -94,6 +94,11 @@ pub enum ResultState {
         /// `Some` when the rows came from a sidebar table preview, so we
         /// know the schema/table/PK columns to build an UPDATE.
         source: Option<RowSource>,
+        /// Best-effort table name extracted from the SQL (single-table
+        /// `SELECT * FROM x`). Used by `:export insert` to generate
+        /// INSERT statements. `None` for multi-table queries, computed
+        /// expressions, etc.
+        source_table: Option<crate::export::QualifiedName>,
     },
     Explain {
         lines: Vec<ExplainPlanLine>,
@@ -2638,7 +2643,7 @@ impl AppCore {
                 );
                 v
             }
-            "export" => vec!["csv".into(), "json".into()],
+            "export" => vec!["csv".into(), "json".into(), "insert".into()],
             _ => return,
         };
 
@@ -2725,7 +2730,7 @@ impl AppCore {
             Command::PrevTab => self.cycle_tab(-1),
             Command::Help(None) => {
                 self.status.message =
-                    "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json> <path> · cancel · quit"
+                    "open <name> · close · refresh · run · run-all · stream · stream-all · explain · export <csv|json|insert> <path> · cancel · quit"
                         .into();
             }
             Command::Help(Some(name)) => {
@@ -3694,26 +3699,46 @@ impl AppCore {
 
     fn export_results(&mut self, format: &str, path: &str) {
         let Some(format) = ExportFormat::from_token(format) else {
-            self.status.message = format!("unknown export format: {format} (csv|json)");
+            self.status.message = format!("unknown export format: {format} (csv|json|insert)");
             return;
         };
-        let (columns, rows) = match self.tabs[self.active_tab].results.active_state() {
-            ResultState::Rows { columns, rows, .. } => (columns.as_slice(), rows.as_slice()),
+        let (columns, rows, source_table) = match self.tabs[self.active_tab].results.active_state()
+        {
+            ResultState::Rows {
+                columns,
+                rows,
+                source_table,
+                ..
+            } => (columns.clone(), rows.clone(), source_table.clone()),
             ResultState::Running { columns, rows, .. } if !columns.is_empty() => {
-                (columns.as_slice(), rows.as_slice())
+                (columns.clone(), rows.clone(), None)
             }
             _ => {
                 self.status.message = "no tabular result to export".into();
                 return;
             }
         };
-        let path = std::path::PathBuf::from(path);
-        match export_rows(columns, rows, format, &path) {
+
+        // Respect active filter/sort: export only the visible rows.
+        let visible_indices = self.tabs[self.active_tab]
+            .results
+            .active()
+            .visible_rows(&columns, &rows);
+        let visible_rows: Vec<Row> = visible_indices.iter().map(|&i| rows[i].clone()).collect();
+
+        let path_buf = std::path::PathBuf::from(path);
+        match export_rows(
+            &columns,
+            &visible_rows,
+            format,
+            &path_buf,
+            source_table.as_ref(),
+        ) {
             Ok(()) => {
                 self.status.message = format!(
                     "exported {} rows to {} ({})",
-                    rows.len(),
-                    path.display(),
+                    visible_rows.len(),
+                    path_buf.display(),
                     format.default_extension()
                 );
             }
@@ -3911,15 +3936,16 @@ impl AppCore {
         rows_affected: Option<u64>,
         streamed: bool,
     ) {
-        let (columns, rows, index, total) =
+        let (columns, rows, index, total, sql) =
             match std::mem::take(self.tabs[self.active_tab].results.active_state_mut()) {
                 ResultState::Running {
                     columns,
                     rows,
                     index,
                     total,
+                    sql,
                     ..
-                } => (columns, rows, index, total),
+                } => (columns, rows, index, total, sql),
                 other => {
                     *self.tabs[self.active_tab].results.active_state_mut() = other;
                     return;
@@ -3963,6 +3989,7 @@ impl AppCore {
             // and attach it to the result so cell edits can target the
             // originating table.
             let source = self.tabs[self.active_tab].pending_source.take();
+            let source_table = crate::export::extract_source_table(&sql);
             let (columns, rows) = self.apply_plugin_transforms(columns, rows, elapsed_ms);
             *self.tabs[self.active_tab].results.active_state_mut() = ResultState::Rows {
                 columns,
@@ -3972,6 +3999,7 @@ impl AppCore {
                 index,
                 total,
                 source,
+                source_table,
             };
         }
         self.status.message = match rows_affected {
@@ -4040,6 +4068,7 @@ fn display_from_state<'a>(
             index,
             total,
             source: _,
+            source_table: _,
         } => ResultDisplay::Rows {
             columns,
             rows,

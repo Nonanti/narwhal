@@ -214,7 +214,7 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     (
         "export",
-        "export the current result to a file (:export csv|json <path>)",
+        "export the current result to a file (:export csv|json|insert <path>)",
     ),
     (
         "dump-schema",
@@ -434,7 +434,7 @@ fn parse_dump(arg: &str) -> Command {
 fn parse_export(arg: &str) -> Command {
     let mut parts = arg.split_whitespace();
     let Some(format) = parts.next() else {
-        return Command::Unknown("export: format required (csv|json)".into());
+        return Command::Unknown("export: format required (csv|json|insert)".into());
     };
     let Some(path) = parts.next() else {
         return Command::Unknown("export: path required".into());

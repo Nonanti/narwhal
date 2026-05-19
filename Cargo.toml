@@ -66,6 +66,7 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
 arboard = { version = "3.4", default-features = false }
+base64 = "0.22"
 
 # Internal crates
 narwhal-core = { path = "crates/narwhal-core" }
