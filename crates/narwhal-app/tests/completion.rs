@@ -56,14 +56,13 @@ async fn open_with_tables(tables: &[&str]) -> AppCore {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unique_match_auto_completes_inline() {
+async fn unique_match_tab_accepts_from_popup() {
     let mut core = open_with_tables(&["users"]).await;
-    // Enter insert mode and type a unique prefix.
+    // Insert mode + type a prefix that uniquely matches the `users` table.
+    // Auto-trigger opens the popup as soon as 2+ characters are typed.
     core.handle_key(key(KeyCode::Char('i')));
-    type_str(&mut core, "use");
-    // Tab → only one table matches "use" (the keyword USING also matches,
-    // so this is not actually unique; type more to make it so).
-    type_str(&mut core, "r");
+    type_str(&mut core, "user");
+    // Tab inside an open popup accepts the highlighted entry (IDE-style).
     core.handle_key(key(KeyCode::Tab));
     let text = core.editor().entire_text();
     assert!(
@@ -77,22 +76,21 @@ async fn multiple_matches_open_popup_and_enter_inserts() {
     let mut core = open_with_tables(&["orders", "order_items", "owners"]).await;
     core.handle_key(key(KeyCode::Char('i')));
     type_str(&mut core, "ord");
-    core.handle_key(key(KeyCode::Tab));
+    // Auto-trigger opens the popup silently — no status spam.
     assert!(
-        core.status_message().contains("cycles"),
-        "popup should have opened, got status: {}",
-        core.status_message()
+        core.editor_completion_is_open(),
+        "popup should be open after auto-trigger"
     );
 
-    // Cycle once with Tab to pick the second item.
-    core.handle_key(key(KeyCode::Tab));
+    // Down arrow moves the highlight to the second item.
+    core.handle_key(key(KeyCode::Down));
+    // Enter accepts.
     core.handle_key(key(KeyCode::Enter));
     let text = core.editor().entire_text();
-    // After cycling Tab once, the second item is selected. The exact
-    // ordering depends on lexicographic sort, so just assert the buffer
-    // grew beyond the original prefix.
+    // The exact ordering depends on lexicographic sort; assert the
+    // buffer grew beyond the original prefix and the popup is closed.
     assert!(text.len() > "ord".len(), "buffer: {text:?}");
-    assert!(!core.status_message().contains("cycles"));
+    assert!(!core.editor_completion_is_open());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -100,8 +98,10 @@ async fn esc_dismisses_popup_without_inserting() {
     let mut core = open_with_tables(&["orders", "order_items"]).await;
     core.handle_key(key(KeyCode::Char('i')));
     type_str(&mut core, "ord");
-    core.handle_key(key(KeyCode::Tab));
-    assert!(core.status_message().contains("cycles"));
+    assert!(
+        core.editor_completion_is_open(),
+        "popup should be open after auto-trigger"
+    );
     core.handle_key(key(KeyCode::Esc));
     assert!(core.status_message().contains("cancelled"));
     let text = core.editor().entire_text();
