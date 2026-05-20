@@ -32,7 +32,10 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(v) => Value::Int(v),
         ValueRef::Real(v) => Value::Float(v),
-        ValueRef::Text(bytes) => Value::String(String::from_utf8_lossy(bytes).into_owned()),
+        ValueRef::Text(bytes) => match std::str::from_utf8(bytes) {
+            Ok(s) => Value::String(s.to_owned()),
+            Err(_) => Value::Bytes(bytes.to_vec()),
+        },
         ValueRef::Blob(bytes) => Value::Bytes(bytes.to_vec()),
     }
 }
