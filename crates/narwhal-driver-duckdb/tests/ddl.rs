@@ -56,3 +56,29 @@ async fn fetch_ddl_nonexistent_table_returns_error() {
     let result = conn.fetch_ddl("main", "nonexistent").await;
     assert!(result.is_err(), "should fail for nonexistent table");
 }
+
+#[tokio::test]
+async fn fetch_ddl_view() {
+    let driver = DuckdbDriver::new();
+    let mut conn = driver
+        .connect(&memory_config(), None)
+        .await
+        .expect("open in-memory database");
+
+    conn.execute("CREATE TABLE t (id INTEGER, val VARCHAR)", &[])
+        .await
+        .expect("create table");
+    conn.execute("CREATE VIEW v AS SELECT id, val FROM t", &[])
+        .await
+        .expect("create view");
+
+    let ddl = conn
+        .fetch_ddl("main", "v")
+        .await
+        .expect("fetch_ddl for view");
+    assert!(
+        ddl.contains("CREATE VIEW"),
+        "DDL must contain CREATE VIEW: {ddl}"
+    );
+    assert!(ddl.contains("v"), "DDL must contain view name: {ddl}");
+}

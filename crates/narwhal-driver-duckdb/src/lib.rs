@@ -662,17 +662,14 @@ impl Connection for DuckdbConnection {
     }
 
     async fn fetch_ddl(&mut self, schema: &str, name: &str) -> Result<String> {
-        const SQL: &str =
-            "SELECT sql FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?";
-        let result = self
-            .run(
-                SQL,
-                &[
-                    Value::String(schema.to_owned()),
-                    Value::String(name.to_owned()),
-                ],
-            )
-            .await?;
+        // UNION tables + views; duckdb_views() uses `view_name`, not `table_name`.
+        const SQL: &str = "
+            SELECT sql FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?
+            UNION ALL
+            SELECT sql FROM duckdb_views()  WHERE schema_name = ? AND view_name  = ?";
+        let s = Value::String(schema.to_owned());
+        let n = Value::String(name.to_owned());
+        let result = self.run(SQL, &[s.clone(), n.clone(), s, n]).await?;
         match result
             .rows
             .into_iter()
@@ -680,9 +677,7 @@ impl Connection for DuckdbConnection {
             .and_then(|r| r.0.into_iter().next())
         {
             Some(Value::String(ddl)) => Ok(ddl),
-            _ => Err(Error::Schema(format!(
-                "DDL not found for table {schema}.{name}"
-            ))),
+            _ => Err(Error::Schema(format!("DDL not found for {schema}.{name}"))),
         }
     }
 
