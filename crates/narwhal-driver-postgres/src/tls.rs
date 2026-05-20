@@ -108,12 +108,8 @@ pub(crate) fn make_tls_connector(
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let config = match mode {
         InternalSslMode::Disable => unreachable!("disable path does not request a TLS connector"),
-        InternalSslMode::Prefer | InternalSslMode::Verify => {
-            verified_client_config(params)?
-        }
-        InternalSslMode::Require | InternalSslMode::VerifyCa => {
-            verify_ca_client_config(params)?
-        }
+        InternalSslMode::Prefer | InternalSslMode::Verify => verified_client_config(params)?,
+        InternalSslMode::Require | InternalSslMode::VerifyCa => verify_ca_client_config(params)?,
     };
     Ok(MakeRustlsConnect::new(config))
 }
@@ -232,10 +228,13 @@ impl ServerCertVerifier for VerifyCaNoHostname {
     ) -> std::result::Result<ServerCertVerified, rustls::Error> {
         // Delegate chain verification to the built-in verifier but ignore
         // hostname mismatch errors. Any other error is fatal.
-        match self
-            .inner
-            .verify_server_cert(end_entity, intermediates, _server_name, ocsp_response, now)
-        {
+        match self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            _server_name,
+            ocsp_response,
+            now,
+        ) {
             Ok(v) => Ok(v),
             Err(rustls::Error::InvalidCertificate(e)) => {
                 // Hostname mismatch is the only error we swallow.
