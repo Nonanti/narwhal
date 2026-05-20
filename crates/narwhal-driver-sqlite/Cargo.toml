@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "SQLite driver for narwhal"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
 
 [lints]
 workspace = true
