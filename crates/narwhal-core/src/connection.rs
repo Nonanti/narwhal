@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +9,21 @@ use crate::error::Result;
 use crate::schema::{QueryResult, Schema, Table, TableSchema};
 use crate::stream::RowStream;
 use crate::value::Value;
+
+/// TLS/SSL mode for a database connection.
+///
+/// Mirrors the standard libpq `sslmode` parameter. Serialises as
+/// kebab-case in TOML (`"verify-full"`, `"verify-ca"`, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SslMode {
+    Disable,
+    #[default]
+    Prefer,
+    Require,
+    VerifyCa,
+    VerifyFull,
+}
 
 /// Static metadata describing how to reach a database.
 ///
@@ -34,6 +51,19 @@ pub struct ConnectionParams {
     pub path: Option<String>,
     #[serde(default)]
     pub options: std::collections::BTreeMap<String, String>,
+    /// TLS/SSL mode. Defaults to [`SslMode::Prefer`] for network drivers
+    /// and [`SslMode::Disable`] for file-local drivers (sqlite, duckdb).
+    #[serde(default)]
+    pub ssl_mode: SslMode,
+    /// Path to the CA/root certificate bundle (PEM format).
+    #[serde(default)]
+    pub ssl_root_cert: Option<PathBuf>,
+    /// Path to the client certificate (PEM format).
+    #[serde(default)]
+    pub ssl_cert: Option<PathBuf>,
+    /// Path to the client private key (PEM format).
+    #[serde(default)]
+    pub ssl_key: Option<PathBuf>,
 }
 
 /// Standard ANSI transaction isolation levels.

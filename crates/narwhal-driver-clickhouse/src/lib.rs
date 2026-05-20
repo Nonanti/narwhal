@@ -56,7 +56,7 @@ use async_trait::async_trait;
 use narwhal_core::{
     CancelHandle, Capabilities, Column, ColumnHeader, Connection, ConnectionConfig,
     ConnectionParams, DatabaseDriver, Error, IsolationLevel, QueryResult, Result, Row as CoreRow,
-    RowStream, Schema, Table, TableKind, TableSchema, Value,
+    RowStream, Schema, SslMode, Table, TableKind, TableSchema, Value,
 };
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
@@ -135,8 +135,58 @@ impl DatabaseDriver for ClickhouseDriver {
         // not a session limit. TODO: surface as a config option once
         // narwhal-config grows a `request_timeout_seconds` field.
         const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
+        let mut client_builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
+
+        // When using HTTPS, add the CA root certificate if provided.
+        if config.params.ssl_mode != SslMode::Disable {
+            if let Some(path) = &config.params.ssl_root_cert {
+                let bytes = std::fs::read(path).map_err(|e| {
+                    Error::Config(format!(
+                        "failed to read ssl_root_cert '{}': {e}",
+                        path.display()
+                    ))
+                })?;
+                let cert = reqwest::Certificate::from_pem(&bytes)
+                    .map_err(|e| Error::Config(format!("failed to parse ssl_root_cert: {e}")))?;
+                client_builder = client_builder.add_root_certificate(cert);
+            }
+
+            // For prefer/require, accept invalid certs; for verify-ca/verify-full, enforce.
+            let accept_invalid = !matches!(
+                config.params.ssl_mode,
+                SslMode::VerifyCa | SslMode::VerifyFull
+            );
+            client_builder = client_builder.danger_accept_invalid_certs(accept_invalid);
+        }
+
+        // Client identity (mTLS) is not directly supported by reqwest's
+        // high-level API in the same way as mysql_async / rustls.
+        // If ssl_cert and ssl_key are both provided, we read them and
+        // configure identity via reqwest::Identity.
+        if let (Some(cert_path), Some(key_path)) = (&config.params.ssl_cert, &config.params.ssl_key)
+        {
+            let cert_bytes = std::fs::read(cert_path).map_err(|e| {
+                Error::Config(format!(
+                    "failed to read ssl_cert '{}': {e}",
+                    cert_path.display()
+                ))
+            })?;
+            let key_bytes = std::fs::read(key_path).map_err(|e| {
+                Error::Config(format!(
+                    "failed to read ssl_key '{}': {e}",
+                    key_path.display()
+                ))
+            })?;
+            // Combine cert + key into a single PEM blob for reqwest::Identity.
+            let mut pem = Vec::with_capacity(cert_bytes.len() + key_bytes.len());
+            pem.extend_from_slice(&cert_bytes);
+            pem.extend_from_slice(&key_bytes);
+            let identity = reqwest::Identity::from_pem(&pem)
+                .map_err(|e| Error::Config(format!("failed to parse client identity PEM: {e}")))?;
+            client_builder = client_builder.identity(identity);
+        }
+
+        let client = client_builder
             .build()
             .map_err(|e| Error::Connection(e.to_string()))?;
 
@@ -242,6 +292,7 @@ fn statement_returns_rows(sql: &str) -> bool {
 
 /// Build the base URL from connection parameters.
 ///
+/// Uses `https://` when `ssl_mode` is not `Disable`, otherwise `http://`.
 /// Default: `http://localhost:8123/`.
 fn build_base_url(params: &ConnectionParams) -> Result<Url> {
     let host = params
@@ -249,7 +300,12 @@ fn build_base_url(params: &ConnectionParams) -> Result<Url> {
         .as_deref()
         .ok_or_else(|| Error::Config("host is required".into()))?;
     let port = params.port.unwrap_or(8123);
-    Url::parse(&format!("http://{host}:{port}/"))
+    let scheme = if params.ssl_mode == SslMode::Disable {
+        "http"
+    } else {
+        "https"
+    };
+    Url::parse(&format!("{scheme}://{host}:{port}/"))
         .map_err(|e| Error::Config(format!("invalid URL: {e}")))
 }
 

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use narwhal_core::ConnectionConfig;
+use narwhal_core::{ConnectionConfig, SslMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Error)]
@@ -11,6 +11,8 @@ pub enum ConfigError {
     Toml(#[from] toml::de::Error),
     #[error("toml serialize: {0}")]
     TomlSer(#[from] toml::ser::Error),
+    #[error("validation: {0}")]
+    Validation(String),
 }
 
 use thiserror::Error;
@@ -96,7 +98,9 @@ impl ConnectionsFile {
             return Ok(Self::default());
         }
         let text = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&text)?)
+        let file: ConnectionsFile = toml::from_str(&text)?;
+        validate_connections(&file.connections)?;
+        Ok(file)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
@@ -107,4 +111,46 @@ impl ConnectionsFile {
         std::fs::write(path, text)?;
         Ok(())
     }
+
+    /// Parse a TOML string directly (useful for tests).
+    pub fn load_from_str(toml: &str) -> Result<Self, ConfigError> {
+        let file: ConnectionsFile = toml::from_str(toml)?;
+        validate_connections(&file.connections)?;
+        Ok(file)
+    }
+}
+
+/// Validate TLS-related constraints across all connections:
+///
+/// - `verify-ca` / `verify-full` requires `ssl_root_cert` to be set.
+/// - sqlite / duckdb drivers must use `ssl_mode = "disable"`.
+fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigError> {
+    for conn in connections {
+        let is_file_driver = matches!(conn.driver.as_str(), "sqlite" | "duckdb");
+
+        if is_file_driver && conn.params.ssl_mode != SslMode::Disable {
+            return Err(ConfigError::Validation(format!(
+                "connection '{}': ssl_mode must be 'disable' for the '{}' driver \
+                 (file-local databases do not support TLS)",
+                conn.name, conn.driver
+            )));
+        }
+
+        let needs_root_cert = matches!(
+            conn.params.ssl_mode,
+            SslMode::VerifyCa | SslMode::VerifyFull
+        );
+        if needs_root_cert && conn.params.ssl_root_cert.is_none() {
+            let mode_name = match conn.params.ssl_mode {
+                SslMode::VerifyCa => "verify-ca",
+                SslMode::VerifyFull => "verify-full",
+                _ => "unknown",
+            };
+            return Err(ConfigError::Validation(format!(
+                "connection '{}': ssl_mode='{}' requires ssl_root_cert to be set",
+                conn.name, mode_name
+            )));
+        }
+    }
+    Ok(())
 }

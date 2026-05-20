@@ -134,8 +134,8 @@ fn parse_server(driver: &'static str, rest: &str) -> Result<ParsedUrl, UrlError>
                 port,
                 database: Some(database),
                 username,
-                path: None,
                 options,
+                ..Default::default()
             },
         },
         password,

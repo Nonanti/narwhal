@@ -8,7 +8,7 @@
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use uuid::Uuid;
 
-pub const DRIVERS: &[&str] = &["sqlite", "postgres", "mysql"];
+pub const DRIVERS: &[&str] = &["sqlite", "postgres", "mysql", "clickhouse", "duckdb"];
 
 /// One input on the wizard form.
 #[derive(Debug, Clone)]
@@ -18,6 +18,8 @@ pub struct WizardField {
     pub kind: WizardFieldKind,
     /// `true` when [`WizardFieldKind::Password`] should be masked.
     pub secret: bool,
+    /// Placeholder/default text shown before user types.
+    pub placeholder: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +32,9 @@ pub enum WizardFieldKind {
     Password,
     Path,
     SslMode,
+    SslRootCert,
+    SslCert,
+    SslKey,
 }
 
 #[derive(Debug)]
@@ -96,7 +101,7 @@ impl ConnectionWizard {
     fn rebuild_fields(&mut self) {
         let mut fields = vec![text("name", WizardFieldKind::Name)];
         match self.driver() {
-            "sqlite" => fields.push(text("path", WizardFieldKind::Path)),
+            "sqlite" | "duckdb" => fields.push(text("path", WizardFieldKind::Path)),
             "postgres" => {
                 fields.extend([
                     text("host", WizardFieldKind::Host),
@@ -104,7 +109,15 @@ impl ConnectionWizard {
                     text("database", WizardFieldKind::Database),
                     text("username", WizardFieldKind::Username),
                     password("password"),
-                    text("sslmode", WizardFieldKind::SslMode).with_default("disable"),
+                    text("ssl_mode", WizardFieldKind::SslMode)
+                        .with_default("prefer")
+                        .with_placeholder("disable|prefer|require|verify-ca|verify-full"),
+                    text("ssl_root_cert", WizardFieldKind::SslRootCert)
+                        .with_placeholder("/path/to/ca.pem"),
+                    text("ssl_cert", WizardFieldKind::SslCert)
+                        .with_placeholder("/path/to/client-cert.pem"),
+                    text("ssl_key", WizardFieldKind::SslKey)
+                        .with_placeholder("/path/to/client-key.pem"),
                 ]);
             }
             "mysql" => {
@@ -114,6 +127,33 @@ impl ConnectionWizard {
                     text("database", WizardFieldKind::Database),
                     text("username", WizardFieldKind::Username),
                     password("password"),
+                    text("ssl_mode", WizardFieldKind::SslMode)
+                        .with_default("prefer")
+                        .with_placeholder("disable|prefer|require|verify-ca|verify-full"),
+                    text("ssl_root_cert", WizardFieldKind::SslRootCert)
+                        .with_placeholder("/path/to/ca.pem"),
+                    text("ssl_cert", WizardFieldKind::SslCert)
+                        .with_placeholder("/path/to/client-cert.pem"),
+                    text("ssl_key", WizardFieldKind::SslKey)
+                        .with_placeholder("/path/to/client-key.pem"),
+                ]);
+            }
+            "clickhouse" => {
+                fields.extend([
+                    text("host", WizardFieldKind::Host),
+                    text("port", WizardFieldKind::Port).with_default("8123"),
+                    text("database", WizardFieldKind::Database),
+                    text("username", WizardFieldKind::Username),
+                    password("password"),
+                    text("ssl_mode", WizardFieldKind::SslMode)
+                        .with_default("prefer")
+                        .with_placeholder("disable|prefer|require|verify-ca|verify-full"),
+                    text("ssl_root_cert", WizardFieldKind::SslRootCert)
+                        .with_placeholder("/path/to/ca.pem"),
+                    text("ssl_cert", WizardFieldKind::SslCert)
+                        .with_placeholder("/path/to/client-cert.pem"),
+                    text("ssl_key", WizardFieldKind::SslKey)
+                        .with_placeholder("/path/to/client-key.pem"),
                 ]);
             }
             _ => {}
@@ -181,8 +221,35 @@ impl ConnectionWizard {
                     params.path = Some(final_value);
                 }
                 WizardFieldKind::SslMode => {
-                    if !final_value.is_empty() && final_value != "disable" {
-                        params.options.insert("sslmode".into(), final_value);
+                    if !final_value.is_empty() {
+                        params.ssl_mode = match final_value.as_str() {
+                            "disable" => narwhal_core::SslMode::Disable,
+                            "prefer" => narwhal_core::SslMode::Prefer,
+                            "require" => narwhal_core::SslMode::Require,
+                            "verify-ca" => narwhal_core::SslMode::VerifyCa,
+                            "verify-full" => narwhal_core::SslMode::VerifyFull,
+                            other => {
+                                return Err(format!(
+                                    "invalid ssl_mode '{other}' \
+                                     (use disable|prefer|require|verify-ca|verify-full)"
+                                ));
+                            }
+                        };
+                    }
+                }
+                WizardFieldKind::SslRootCert => {
+                    if !final_value.is_empty() {
+                        params.ssl_root_cert = Some(final_value.into());
+                    }
+                }
+                WizardFieldKind::SslCert => {
+                    if !final_value.is_empty() {
+                        params.ssl_cert = Some(final_value.into());
+                    }
+                }
+                WizardFieldKind::SslKey => {
+                    if !final_value.is_empty() {
+                        params.ssl_key = Some(final_value.into());
                     }
                 }
             }
@@ -207,25 +274,28 @@ impl Default for ConnectionWizard {
 
 impl WizardField {
     fn default_value(&self) -> &str {
-        // Defaults are stored in `value` until the user types something; once
-        // the user wipes the field we still want to consult the default at
-        // build time. Encode them inside the label format so this method
-        // stays self-contained.
-        match (self.kind, self.label) {
-            (WizardFieldKind::Port, _) if self.value.is_empty() => "",
-            (WizardFieldKind::SslMode, _) if self.value.is_empty() => "",
-            _ => "",
-        }
+        // When the user clears the field, we still want to consult the
+        // originally-set default. The `value` field is seeded with the
+        // default in `with_default` so empty means the user cleared it;
+        // in that case return empty and let `build()` fall back to the
+        // struct defaults.
+        ""
     }
 }
 
 trait WithDefault {
     fn with_default(self, default: &str) -> Self;
+    fn with_placeholder(self, placeholder: &'static str) -> Self;
 }
 
 impl WithDefault for WizardField {
     fn with_default(mut self, default: &str) -> Self {
         self.value = default.to_owned();
+        self
+    }
+
+    fn with_placeholder(mut self, placeholder: &'static str) -> Self {
+        self.placeholder = placeholder;
         self
     }
 }
@@ -236,6 +306,7 @@ fn text(label: &'static str, kind: WizardFieldKind) -> WizardField {
         value: String::new(),
         kind,
         secret: false,
+        placeholder: "",
     }
 }
 
@@ -245,6 +316,7 @@ fn password(label: &'static str) -> WizardField {
         value: String::new(),
         kind: WizardFieldKind::Password,
         secret: true,
+        placeholder: "",
     }
 }
 
@@ -278,7 +350,7 @@ mod tests {
             .iter()
             .find(|f| f.kind == WizardFieldKind::SslMode)
             .unwrap();
-        assert_eq!(ssl.value, "disable");
+        assert_eq!(ssl.value, "prefer");
         let port = w
             .fields
             .iter()
