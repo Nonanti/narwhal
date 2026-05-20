@@ -5,6 +5,7 @@
 //! caller, and key events come in as parsed crossterm [`KeyEvent`]s, so the
 //! core is fully usable with `ratatui::backend::TestBackend` in tests.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -461,6 +462,14 @@ pub struct AppCore {
     last_layout: LayoutRegions,
     run_tx: mpsc::Sender<RunUpdate>,
     pub(crate) run_rx: mpsc::Receiver<RunUpdate>,
+    /// Handle to the in-flight debounced schema refresh task.
+    /// Aborting it cancels the pending timer; a new task replaces it
+    /// on every `schedule_schema_refresh` call.
+    refresh_task: Option<tokio::task::AbortHandle>,
+    /// Shared flag set by `schedule_schema_refresh` and consumed by
+    /// the debounce timer task to know whether a refresh is still
+    /// pending.
+    refresh_pending: Arc<AtomicBool>,
 }
 
 impl AppCore {
@@ -576,6 +585,8 @@ impl AppCore {
             last_layout: LayoutRegions::default(),
             run_tx,
             run_rx,
+            refresh_task: None,
+            refresh_pending: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -709,6 +720,14 @@ impl AppCore {
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    /// Whether a debounced schema-refresh timer is currently pending.
+    /// Useful in tests to verify that non-DDL statements don't schedule
+    /// a refresh.
+    #[doc(hidden)]
+    pub fn refresh_task(&self) -> Option<&tokio::task::AbortHandle> {
+        self.refresh_task.as_ref()
     }
 
     pub fn help_open(&self) -> bool {
@@ -3227,11 +3246,43 @@ impl AppCore {
         });
         match result {
             Ok(()) => {
-                self.status.message = "schema refreshed".into();
                 self.rebuild_sidebar();
+                let table_count = self.count_sidebar_tables();
+                self.status.message = format!("schema refreshed · {table_count} tables");
             }
             Err(error) => self.status.message = format!("refresh failed: {error}"),
         }
+    }
+
+    /// Count the number of tables currently shown in the sidebar.
+    fn count_sidebar_tables(&self) -> usize {
+        self.sidebar_items
+            .iter()
+            .filter(|item| matches!(item, SidebarItem::Table { .. }))
+            .count()
+    }
+
+    /// Schedule a debounced schema refresh. Each call resets the 200ms
+    /// timer; the refresh fires once the timer expires without being
+    /// rescheduled. A migration with 50 DDL statements fires exactly
+    /// one refresh.
+    fn schedule_schema_refresh(&mut self) {
+        self.refresh_pending.store(true, Ordering::Relaxed);
+        // Drop the previous task if any — aborting cancels its sleep.
+        if let Some(handle) = self.refresh_task.take() {
+            handle.abort();
+        }
+        let tx = self.run_tx.clone();
+        let pending = self.refresh_pending.clone();
+        self.refresh_task = Some(
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                if pending.swap(false, Ordering::Relaxed) {
+                    let _ = tx.send(RunUpdate::SchemaRefresh).await;
+                }
+            })
+            .abort_handle(),
+        );
     }
 
     // ----- dispatch -----
@@ -4036,6 +4087,7 @@ impl AppCore {
             RunUpdate::AllDone {
                 successes,
                 failures,
+                ddl,
             } => {
                 self.running = false;
 
@@ -4075,6 +4127,15 @@ impl AppCore {
                     Some(warning) => format!("{base} · {warning}"),
                     None => base,
                 };
+
+                // If any successful statement was DDL, schedule a
+                // debounced schema refresh so the sidebar stays in sync.
+                if ddl {
+                    self.schedule_schema_refresh();
+                }
+            }
+            RunUpdate::SchemaRefresh => {
+                self.refresh_schema();
             }
         }
     }
@@ -4086,6 +4147,22 @@ impl AppCore {
             match self.recv_run_update().await {
                 Some(update) => self.handle_run_update(update),
                 None => break,
+            }
+        }
+    }
+
+    /// Like [`Self::drain_run_updates`] but also waits for any pending
+    /// debounced schema refresh to fire. Useful in tests that need to
+    /// observe the auto-refresh side-effect of a DDL statement.
+    pub async fn drain_run_updates_and_refresh(&mut self) {
+        self.drain_run_updates().await;
+        // Wait for the debounce timer to fire (200ms + small slack).
+        if self.refresh_task.is_some() {
+            tokio::time::sleep(Duration::from_millis(350)).await;
+            // The debounce task sends SchemaRefresh through run_rx;
+            // consume it.
+            while let Ok(update) = self.run_rx.try_recv() {
+                self.handle_run_update(update);
             }
         }
     }
