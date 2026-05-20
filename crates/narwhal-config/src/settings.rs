@@ -123,12 +123,22 @@ impl ConnectionsFile {
 /// Validate TLS-related constraints across all connections:
 ///
 /// - `verify-ca` / `verify-full` requires `ssl_root_cert` to be set.
-/// - sqlite / duckdb drivers must use `ssl_mode = "disable"`.
+/// - sqlite / duckdb drivers reject *explicit* TLS modes that imply an
+///   actual handshake (`require`, `verify-ca`, `verify-full`).  The
+///   defaults (`prefer`) and the explicit `disable` both pass — file-local
+///   drivers ignore the field at the wire layer, and rejecting the
+///   default `prefer` would break every pre-existing sqlite/duckdb
+///   config that landed before TLS fields existed.
 fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigError> {
     for conn in connections {
         let is_file_driver = matches!(conn.driver.as_str(), "sqlite" | "duckdb");
 
-        if is_file_driver && conn.params.ssl_mode != SslMode::Disable {
+        if is_file_driver
+            && matches!(
+                conn.params.ssl_mode,
+                SslMode::Require | SslMode::VerifyCa | SslMode::VerifyFull
+            )
+        {
             return Err(ConfigError::Validation(format!(
                 "connection '{}': ssl_mode must be 'disable' for the '{}' driver \
                  (file-local databases do not support TLS)",
