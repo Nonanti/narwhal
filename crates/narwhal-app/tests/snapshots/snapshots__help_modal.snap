@@ -30,7 +30,7 @@ expression: "snapshot_core_sized(&mut core, 120, 50)"
 │                           │                                                              │                           │
 │                           │ Sidebar                                                      │───────────────────────────┘
 │                           │  j / k / ↑ / ↓               navigate                        │───────────────────────────┐
-│                           │  Enter                       describe table                  │F6 runs whole buffer, Ctrl-│
+│                           │  Enter                       describe table                  │F6 runs whole buffer,      │
 │                           │  o                           preview table data              │                           │
 │                           │  d                           inject DDL into editor          │                           │
 │                           │                                                              │                           │
