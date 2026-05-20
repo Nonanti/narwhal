@@ -74,3 +74,29 @@ In Progress
 - O3: `unwrap()` in `refresh_search_matches` at core.rs:2799 (AGENTS.md violation)
 - O4: `extract_source_table` doesn't handle quoted identifiers `"schema"."table"` → None (export.rs:432)
 - O5: `]r` on single-result silently no-ops — no user feedback (core.rs:4022)
+
+## Alan D Review — TUI / Interaction (Plan 06, DataGrip parity)
+**Status:** ✅ Complete  
+**Output:** /tmp/review-d-tui.md  
+**Verdict:** ⚠️ Changes Requested
+
+### Yüksek (5):
+- Y1: Help panel scroll yok — 24-row terminalde ~25 satır clip (Sidebar/Results/Snippets görünmez)
+- Y2: `?` help key Mode::Normal guard kısıtıyor — Insert mode'da Results/Sidebar'dan help açılmıyor
+- Y3: Auto-pair `--` comment satırında tetikleniyor — comment context check eksik
+- Y4: `:s/old/new/g` literal string match (regex değil), `:s/.*/x/g` sessiz başarısız
+- Y5: `:s` pattern'de `/` escape edilemiyor — `:s/a\/b/c/` yanlış parse
+
+### Orta (5):
+- O1: `yank_cell`/`start_cell_edit` stale `visible_indices` kullanıyor (`open_row_detail` inline recompute'u var, tutarsızlık)
+- O2: Dotted completion alias çözülmüyor (`c.` → `customers` kolonu gelmez)
+- O3: `cursor_inside_string_literal` SQL `''` escape değil `\` backslash kullanıyor
+- O4: `column_cache()` multi-schema key collision, session.column_cache her zaman üstüne yazıyor
+- O5: History modal `selected` OOB'da sessiz modal kapanma
+
+### Nit (5):
+- N1: `unwrap()` AGENTS.md ihlali core.rs:2799
+- N2: Status bar double-space (mode_label formatı)
+- N3: `:export <path>` path completion yok
+- N4: Cheatsheet `? / F1` yanıltıcı (? koşullu)
+- N5: Prompt tab-complete Shift-Tab reverse yok
