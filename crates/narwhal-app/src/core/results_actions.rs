@@ -4,13 +4,11 @@
 //! navigation, search, filtering, sort toggling, cell yank/edit, row
 //! detail modal, and the row-popup overlay.
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
-use narwhal_tui::CellEditView;
-
-use super::{AppCore, CellEdit, JsonViewerState, ResultSearch, ResultState};
+use super::{AppCore, JsonViewerState, ResultSearch, ResultState};
 use crate::action::{Action, KeyGroup};
 use crate::keymap::KeyChord;
 use narwhal_core::Value;
-use narwhal_domain::result::actions::RowDetailMotion;
+use narwhal_domain::result::actions::{CellEditMotion, CellEditOutcome, RowDetailMotion};
 
 impl AppCore {
     pub(super) async fn handle_results_key(&mut self, key: KeyEvent) {
@@ -475,179 +473,77 @@ impl AppCore {
     }
 
     async fn yank_cell(&mut self) {
-        let tab = &self.ui.tabs[self.ui.active_tab];
-        let (rows, _columns) = match tab.results.active_state() {
-            ResultState::Rows { rows, columns, .. }
-            | ResultState::Running { rows, columns, .. } => (rows, columns),
-            _ => {
-                self.ui.status.message = "no cell to yank".into();
+        let row_idx = self.selected_original_row().await;
+        let bundle = &self.ui.tabs[self.ui.active_tab].results;
+        let text = match narwhal_domain::result::actions::prepare_yank_cell(bundle, row_idx) {
+            Ok(t) => t,
+            Err(msg) => {
+                self.ui.status.message = msg.into();
                 return;
             }
         };
-        let row_idx = self.selected_original_row().await.unwrap_or(0);
-        let col_idx = tab.results.active().column_index;
-        let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
-            self.ui.status.message = "no cell selected".into();
-            return;
+        self.ui.status.message = match self.deps.clipboard.set_text(&text) {
+            Ok(()) => format!("yanked {} char(s) to clipboard", text.len()),
+            Err(error) => format!("yank failed: {error}"),
         };
-        let text = match value {
-            narwhal_core::Value::Null => String::new(),
-            other => other.render(),
-        };
-        match self.deps.clipboard.set_text(&text) {
-            Ok(()) => {
-                self.ui.status.message = format!("yanked {} char(s) to clipboard", text.len());
-            }
-            Err(error) => {
-                self.ui.status.message = format!("yank failed: {error}");
-            }
-        }
     }
 
     async fn yank_row(&mut self) {
-        let tab = &self.ui.tabs[self.ui.active_tab];
-        let rows = match tab.results.active_state() {
-            ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
-            _ => {
-                self.ui.status.message = "no row to yank".into();
-                return;
-            }
+        let row_idx = self.selected_original_row().await;
+        let bundle = &self.ui.tabs[self.ui.active_tab].results;
+        let (text, cells) =
+            match narwhal_domain::result::actions::prepare_yank_row(bundle, row_idx) {
+                Ok(pair) => pair,
+                Err(msg) => {
+                    self.ui.status.message = msg.into();
+                    return;
+                }
+            };
+        self.ui.status.message = match self.deps.clipboard.set_text(&text) {
+            Ok(()) => format!("yanked row ({cells} cell(s)) to clipboard"),
+            Err(error) => format!("yank failed: {error}"),
         };
-        let row_idx = self.selected_original_row().await.unwrap_or(0);
-        let Some(row) = rows.get(row_idx) else {
-            self.ui.status.message = "no row selected".into();
-            return;
-        };
-        let text = row
-            .0
-            .iter()
-            .map(|v| match v {
-                narwhal_core::Value::Null => String::new(),
-                other => other.render(),
-            })
-            .collect::<Vec<_>>()
-            .join("\t");
-        match self.deps.clipboard.set_text(&text) {
-            Ok(()) => {
-                self.ui.status.message =
-                    format!("yanked row ({} cell(s)) to clipboard", row.0.len());
-            }
-            Err(error) => {
-                self.ui.status.message = format!("yank failed: {error}");
-            }
-        }
     }
 
     async fn start_cell_edit(&mut self) {
-        // Gather the data we need by value first, then mutate.
-        let prepared = {
-            let tab = &self.ui.tabs[self.ui.active_tab];
-            let (columns, rows, source) = match tab.results.active_state() {
-                ResultState::Rows {
-                    columns,
-                    rows,
-                    source: Some(source),
-                    ..
-                } => (columns, rows, source),
-                ResultState::Rows { source: None, .. } => {
-                    self.ui.status.message =
-                        "this result is read-only (no row source); preview a table to edit".into();
-                    return;
-                }
-                _ => {
-                    self.ui.status.message = "no editable cell here".into();
-                    return;
-                }
-            };
-            if columns.is_empty() || rows.is_empty() {
-                self.ui.status.message = "no rows to edit".into();
-                return;
+        let row_idx = self.selected_original_row().await;
+        let bundle = &self.ui.tabs[self.ui.active_tab].results;
+        match narwhal_domain::result::actions::start_cell_edit(bundle, row_idx) {
+            Ok((edit, view)) => {
+                let tab = &mut self.ui.tabs[self.ui.active_tab];
+                tab.editing = Some(edit);
+                tab.results.active_mut().edit = Some(view);
+                self.ui.status.message = "edit: Enter saves · Esc cancels".into();
             }
-            if !source.columns.iter().any(|c| c.primary_key) {
-                self.ui.status.message =
-                    format!("{}: no primary key, cell edits are disabled", source.table);
-                return;
+            Err(msg) => {
+                self.ui.status.message = msg;
             }
-            let row_index = self.selected_original_row().await.unwrap_or(0);
-            let col_index = tab.results.active().column_index;
-            let Some(row) = rows.get(row_index) else {
-                self.ui.status.message = "select a row first (j/k)".into();
-                return;
-            };
-            let Some(column) = columns.get(col_index) else {
-                self.ui.status.message = "select a column first (h/l)".into();
-                return;
-            };
-            let cell = row.0.get(col_index);
-            let original = cell.map(narwhal_core::Value::render).unwrap_or_default();
-            let buffer = if matches!(cell, Some(narwhal_core::Value::Null) | None) {
-                String::new()
-            } else {
-                original.clone()
-            };
-            (
-                column.name.clone(),
-                column.data_type.clone(),
-                row_index,
-                col_index,
-                original,
-                buffer,
-            )
-        };
-        let (column_name, column_type, row_index, column_index, original, buffer) = prepared;
-        let tab = &mut self.ui.tabs[self.ui.active_tab];
-        tab.editing = Some(CellEdit {
-            column_name: column_name.clone(),
-            column_type: column_type.clone(),
-            row_index,
-            column_index,
-            original,
-            buffer: buffer.clone(),
-        });
-        tab.results.active_mut().edit = Some(CellEditView {
-            column_name,
-            column_type,
-            row_index,
-            buffer,
-            error: None,
-        });
-        self.ui.status.message = "edit: Enter saves · Esc cancels".into();
-    }
-
-    async fn handle_cell_edit_key(&mut self, key: KeyEvent) {
-        let Some(edit) = self.ui.tabs[self.ui.active_tab].editing.as_mut() else {
-            return;
-        };
-        match key.code {
-            CtKey::Esc => {
-                self.ui.tabs[self.ui.active_tab].editing = None;
-                self.ui.tabs[self.ui.active_tab].results.active_mut().edit = None;
-                self.ui.status.message = "edit cancelled".into();
-            }
-            // L36: cell edit no longer touches the database directly.
-            // The Enter key queues the change so the user can review it
-            // alongside any insert/delete in the pending preview before
-            // committing with Ctrl-S.
-            CtKey::Enter => self.queue_cell_edit_commit().await,
-            CtKey::Backspace => {
-                edit.buffer.pop();
-                self.sync_edit_view().await;
-            }
-            CtKey::Char(c) => {
-                edit.buffer.push(c);
-                self.sync_edit_view().await;
-            }
-            _ => {}
         }
     }
 
-    async fn sync_edit_view(&mut self) {
+    async fn handle_cell_edit_key(&mut self, key: KeyEvent) {
+        // `Enter` queues the change asynchronously; the domain motion
+        // enum deliberately doesn't model it because the commit is IO.
+        if matches!(key.code, CtKey::Enter) {
+            if self.ui.tabs[self.ui.active_tab].editing.is_some() {
+                self.queue_cell_edit_commit().await;
+            }
+            return;
+        }
+        let motion = match key.code {
+            CtKey::Esc => CellEditMotion::Cancel,
+            CtKey::Backspace => CellEditMotion::Backspace,
+            CtKey::Char(c) => CellEditMotion::Insert(c),
+            _ => return,
+        };
         let tab = &mut self.ui.tabs[self.ui.active_tab];
-        if let (Some(edit), Some(view)) =
-            (tab.editing.as_ref(), tab.results.active_mut().edit.as_mut())
-        {
-            view.buffer = edit.buffer.clone();
-            view.error = None;
+        let outcome = narwhal_domain::result::actions::apply_cell_edit_motion(
+            &mut tab.editing,
+            &mut tab.results.active_mut().edit,
+            motion,
+        );
+        if let CellEditOutcome::Cancelled { status } = outcome {
+            self.ui.status.message = status.into();
         }
     }
 

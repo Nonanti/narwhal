@@ -16,7 +16,12 @@
 //! (status / notification / silent), and so the unit tests in this
 //! crate can assert on the message verbatim.
 
-use super::{CellPopup, ResultBundle, ResultSearch, ResultState, RowDetailState, SortDir};
+use narwhal_core::Value;
+
+use super::{
+    CellEdit, CellEditView, CellPopup, ResultBundle, ResultSearch, ResultState, RowDetailState,
+    SortDir,
+};
 
 const STREAMING_BLOCKED: &str = "sort/filter unavailable while streaming";
 
@@ -383,6 +388,202 @@ pub enum RowDetailMotion {
     Bottom,
     /// `Esc` / `R` / `Shift+Enter`: close the modal.
     Close,
+}
+
+// ---------------------------------------------------------------------
+// Yank (clipboard text construction — IO stays in the host)
+// ---------------------------------------------------------------------
+
+/// Build the cell text the `y` keybind should write to the
+/// clipboard. The host calls this, hands the returned string to its
+/// clipboard implementation, then writes the status message itself.
+///
+/// `selected_row` is the original-row index from
+/// [`selected_original_row`]; pass `Some(0)` if no row is highlighted
+/// so the historical "first row" fallback survives.
+pub fn prepare_yank_cell(
+    bundle: &ResultBundle,
+    selected_row: Option<usize>,
+) -> Result<String, &'static str> {
+    let view = bundle.active();
+    let (rows, _columns) = match bundle.active_state() {
+        ResultState::Rows { rows, columns, .. } | ResultState::Running { rows, columns, .. } => {
+            (rows, columns)
+        }
+        _ => return Err("no cell to yank"),
+    };
+    let row_idx = selected_row.unwrap_or(0);
+    let col_idx = view.column_index;
+    let value = rows
+        .get(row_idx)
+        .and_then(|r| r.0.get(col_idx))
+        .ok_or("no cell selected")?;
+    Ok(render_cell_for_yank(value))
+}
+
+/// Build the row text the `Y` keybind should write to the clipboard,
+/// plus the cell count for the status message. Cells are TAB-joined;
+/// nulls render as empty strings (matching the historical handler).
+pub fn prepare_yank_row(
+    bundle: &ResultBundle,
+    selected_row: Option<usize>,
+) -> Result<(String, usize), &'static str> {
+    let rows = match bundle.active_state() {
+        ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
+        _ => return Err("no row to yank"),
+    };
+    let row_idx = selected_row.unwrap_or(0);
+    let row = rows.get(row_idx).ok_or("no row selected")?;
+    let cells = row.0.len();
+    let text = row
+        .0
+        .iter()
+        .map(render_cell_for_yank)
+        .collect::<Vec<_>>()
+        .join("\t");
+    Ok((text, cells))
+}
+
+fn render_cell_for_yank(v: &Value) -> String {
+    match v {
+        Value::Null => String::new(),
+        other => other.render(),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Cell edit
+// ---------------------------------------------------------------------
+
+/// Build the [`CellEdit`] + [`CellEditView`] pair the editor overlay
+/// should mount, after walking every precondition (rows + columns are
+/// non-empty, the source has a primary key, a row and column are
+/// selected). The host installs the returned slot pair and writes the
+/// "edit: Enter saves \u{00b7} Esc cancels" status itself.
+///
+/// The error variant carries the status text to display when one of
+/// the preconditions fails, matching the historical handler verbatim.
+#[allow(clippy::result_large_err)]
+pub fn start_cell_edit(
+    bundle: &ResultBundle,
+    selected_row: Option<usize>,
+) -> Result<(CellEdit, CellEditView), String> {
+    let view = bundle.active();
+    let (columns, rows, source) = match bundle.active_state() {
+        ResultState::Rows {
+            columns,
+            rows,
+            source: Some(source),
+            ..
+        } => (columns, rows, source),
+        ResultState::Rows { source: None, .. } => {
+            return Err(
+                "this result is read-only (no row source); preview a table to edit".into(),
+            );
+        }
+        _ => return Err("no editable cell here".into()),
+    };
+    if columns.is_empty() || rows.is_empty() {
+        return Err("no rows to edit".into());
+    }
+    if !source.columns.iter().any(|c| c.primary_key) {
+        return Err(format!(
+            "{}: no primary key, cell edits are disabled",
+            source.table
+        ));
+    }
+    let row_index = selected_row.unwrap_or(0);
+    let col_index = view.column_index;
+    let row = rows.get(row_index).ok_or("select a row first (j/k)")?;
+    let column = columns.get(col_index).ok_or("select a column first (h/l)")?;
+    let cell = row.0.get(col_index);
+    let original = cell.map(Value::render).unwrap_or_default();
+    let buffer = if matches!(cell, Some(Value::Null) | None) {
+        String::new()
+    } else {
+        original.clone()
+    };
+    let edit = CellEdit {
+        column_name: column.name.clone(),
+        column_type: column.data_type.clone(),
+        row_index,
+        column_index: col_index,
+        original,
+        buffer: buffer.clone(),
+    };
+    let view_overlay = CellEditView {
+        column_name: edit.column_name.clone(),
+        column_type: edit.column_type.clone(),
+        row_index: edit.row_index,
+        buffer: edit.buffer.clone(),
+        error: None,
+    };
+    Ok((edit, view_overlay))
+}
+
+/// Motion verbs the cell editor accepts. The host translates
+/// keyboard events to this enum and the editor mutates itself
+/// accordingly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CellEditMotion {
+    /// `Esc`: drop both edit slots.
+    Cancel,
+    /// `Backspace`: pop one char from the buffer.
+    Backspace,
+    /// Any printable char: append to the buffer.
+    Insert(char),
+}
+
+/// Outcome of [`apply_cell_edit_motion`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CellEditOutcome {
+    /// Host should leave both slots in place and skip the status bar.
+    Continue,
+    /// Host should clear both edit slots and post `status`.
+    Cancelled { status: &'static str },
+}
+
+/// Apply a non-commit motion to the open cell editor. The `Enter`
+/// (commit) verb stays in the host because it dispatches an async
+/// queue write — it is not modelled here.
+pub fn apply_cell_edit_motion(
+    editing: &mut Option<CellEdit>,
+    view: &mut Option<CellEditView>,
+    motion: CellEditMotion,
+) -> CellEditOutcome {
+    let Some(edit) = editing.as_mut() else {
+        return CellEditOutcome::Continue;
+    };
+    match motion {
+        CellEditMotion::Cancel => {
+            *editing = None;
+            *view = None;
+            CellEditOutcome::Cancelled {
+                status: "edit cancelled",
+            }
+        }
+        CellEditMotion::Backspace => {
+            edit.buffer.pop();
+            sync_edit_view(editing.as_ref(), view);
+            CellEditOutcome::Continue
+        }
+        CellEditMotion::Insert(c) => {
+            edit.buffer.push(c);
+            sync_edit_view(editing.as_ref(), view);
+            CellEditOutcome::Continue
+        }
+    }
+}
+
+/// Copy the in-flight buffer from the canonical [`CellEdit`] state
+/// onto the [`CellEditView`] overlay and clear any previous error.
+/// Called after every keystroke to keep the rendered overlay in sync
+/// with the buffer the host is committing on Enter.
+pub fn sync_edit_view(editing: Option<&CellEdit>, view: &mut Option<CellEditView>) {
+    if let (Some(edit), Some(overlay)) = (editing, view.as_mut()) {
+        overlay.buffer = edit.buffer.clone();
+        overlay.error = None;
+    }
 }
 
 /// Apply a navigation `motion` to an open row-detail modal.
@@ -764,6 +965,200 @@ mod tests {
             apply_row_detail_motion(&mut s, RowDetailMotion::Close),
             Some("row detail closed"),
         );
+    }
+
+    #[test]
+    fn yank_cell_renders_null_as_empty_and_other_via_render() {
+        let mut b = rows_bundle(2, 0);
+        if let ResultState::Rows { rows, .. } = b.active_state_mut() {
+            rows.push(narwhal_core::Row(vec![
+                Value::Null,
+                Value::String("x".into()),
+            ]));
+        }
+        b.active_mut().column_index = 0;
+        assert_eq!(prepare_yank_cell(&b, Some(0)), Ok(String::new()));
+        b.active_mut().column_index = 1;
+        assert_eq!(prepare_yank_cell(&b, Some(0)), Ok("x".to_string()));
+    }
+
+    #[test]
+    fn yank_cell_no_state_errors() {
+        let b = ResultBundle::default();
+        assert_eq!(prepare_yank_cell(&b, Some(0)), Err("no cell to yank"));
+    }
+
+    #[test]
+    fn yank_row_tab_joins_and_counts() {
+        let mut b = rows_bundle(3, 0);
+        if let ResultState::Rows { rows, .. } = b.active_state_mut() {
+            rows.push(narwhal_core::Row(vec![
+                Value::Int(1),
+                Value::Null,
+                Value::String("hello".into()),
+            ]));
+        }
+        let (text, cells) = prepare_yank_row(&b, Some(0)).unwrap();
+        assert_eq!(cells, 3);
+        assert_eq!(text, "1\t\thello");
+    }
+
+    #[test]
+    fn start_cell_edit_needs_row_source_and_pk() {
+        let mut b = rows_bundle(2, 1);
+        // `rows_bundle` builds a `Rows` with `source: None`.
+        assert!(start_cell_edit(&b, Some(0))
+            .is_err_and(|e| e.contains("read-only")));
+
+        // Patch in a row source without a primary key column.
+        if let ResultState::Rows { source, .. } = b.active_state_mut() {
+            *source = Some(crate::result::RowSource {
+                schema: "main".into(),
+                table: "users".into(),
+                columns: vec![narwhal_core::Column {
+                    name: "id".into(),
+                    data_type: "int".into(),
+                    primary_key: false,
+                    nullable: true,
+                    default: None,
+                }],
+                offset: 0,
+                limit: 100,
+            });
+        }
+        assert!(start_cell_edit(&b, Some(0))
+            .is_err_and(|e| e.contains("no primary key")));
+    }
+
+    #[test]
+    fn start_cell_edit_happy_path_clones_original_into_buffer() {
+        let mut b = rows_bundle(2, 1);
+        if let ResultState::Rows { source, rows, .. } = b.active_state_mut() {
+            *source = Some(crate::result::RowSource {
+                schema: "main".into(),
+                table: "t".into(),
+                columns: vec![narwhal_core::Column {
+                    name: "id".into(),
+                    data_type: "int".into(),
+                    primary_key: true,
+                    nullable: false,
+                    default: None,
+                }],
+                offset: 0,
+                limit: 100,
+            });
+            rows[0] = narwhal_core::Row(vec![Value::Int(42), Value::String("alpha".into())]);
+        }
+        b.active_mut().column_index = 1;
+        let (edit, view) = start_cell_edit(&b, Some(0)).expect("ok");
+        assert_eq!(edit.original, "alpha");
+        assert_eq!(edit.buffer, "alpha");
+        assert_eq!(edit.column_index, 1);
+        assert_eq!(view.buffer, "alpha");
+        assert!(view.error.is_none());
+    }
+
+    #[test]
+    fn start_cell_edit_null_cell_starts_with_empty_buffer() {
+        let mut b = rows_bundle(1, 1);
+        if let ResultState::Rows { source, rows, .. } = b.active_state_mut() {
+            *source = Some(crate::result::RowSource {
+                schema: "main".into(),
+                table: "t".into(),
+                columns: vec![narwhal_core::Column {
+                    name: "x".into(),
+                    data_type: "int".into(),
+                    primary_key: true,
+                    nullable: true,
+                    default: None,
+                }],
+                offset: 0,
+                limit: 1,
+            });
+            rows[0] = narwhal_core::Row(vec![Value::Null]);
+        }
+        let (edit, _view) = start_cell_edit(&b, Some(0)).expect("ok");
+        // `Value::Null.render()` returns the literal `"NULL"`; the
+        // historical handler stores that verbatim as the snapshot for
+        // the cancel path — the buffer is forced to empty so the user
+        // doesn't have to delete the placeholder before typing.
+        assert_eq!(edit.original, "NULL");
+        assert_eq!(edit.buffer, "");
+    }
+
+    #[test]
+    fn apply_cell_edit_motion_cancel_clears_slots() {
+        let mut editing = Some(CellEdit {
+            column_name: "c".into(),
+            column_type: "int".into(),
+            row_index: 0,
+            column_index: 0,
+            original: "1".into(),
+            buffer: "2".into(),
+        });
+        let mut view = Some(CellEditView {
+            column_name: "c".into(),
+            column_type: "int".into(),
+            row_index: 0,
+            buffer: "2".into(),
+            error: None,
+        });
+        assert_eq!(
+            apply_cell_edit_motion(&mut editing, &mut view, CellEditMotion::Cancel),
+            CellEditOutcome::Cancelled { status: "edit cancelled" },
+        );
+        assert!(editing.is_none());
+        assert!(view.is_none());
+    }
+
+    #[test]
+    fn apply_cell_edit_motion_insert_then_backspace_round_trip() {
+        let mut editing = Some(CellEdit {
+            column_name: "c".into(),
+            column_type: "text".into(),
+            row_index: 0,
+            column_index: 0,
+            original: "abc".into(),
+            buffer: "abc".into(),
+        });
+        let mut view = Some(CellEditView {
+            column_name: "c".into(),
+            column_type: "text".into(),
+            row_index: 0,
+            buffer: "abc".into(),
+            error: None,
+        });
+        // Insert 'd' → buffer = "abcd", view mirrors.
+        apply_cell_edit_motion(&mut editing, &mut view, CellEditMotion::Insert('d'));
+        assert_eq!(editing.as_ref().unwrap().buffer, "abcd");
+        assert_eq!(view.as_ref().unwrap().buffer, "abcd");
+        // Backspace → buffer = "abc", view mirrors.
+        apply_cell_edit_motion(&mut editing, &mut view, CellEditMotion::Backspace);
+        assert_eq!(editing.as_ref().unwrap().buffer, "abc");
+        assert_eq!(view.as_ref().unwrap().buffer, "abc");
+    }
+
+    #[test]
+    fn sync_edit_view_clears_error_and_copies_buffer() {
+        let editing = Some(CellEdit {
+            column_name: "c".into(),
+            column_type: "text".into(),
+            row_index: 0,
+            column_index: 0,
+            original: "x".into(),
+            buffer: "y".into(),
+        });
+        let mut view = Some(CellEditView {
+            column_name: "c".into(),
+            column_type: "text".into(),
+            row_index: 0,
+            buffer: "stale".into(),
+            error: Some("previous error".into()),
+        });
+        sync_edit_view(editing.as_ref(), &mut view);
+        let v = view.as_ref().unwrap();
+        assert_eq!(v.buffer, "y");
+        assert!(v.error.is_none());
     }
 
     #[test]
