@@ -763,6 +763,31 @@ impl Connection for ClickhouseConnection {
         })
     }
 
+    async fn fetch_ddl(&mut self, schema: &str, name: &str) -> Result<String> {
+        let escaped_schema = quote_ident(schema);
+        let escaped_name = quote_ident(name);
+        let sql = format!("SHOW CREATE TABLE {escaped_schema}.{escaped_name}");
+        let result = self.query_tsv(&sql, &[]).await?;
+        // SHOW CREATE TABLE returns: name, create_table_query, ...
+        // The DDL is in column index 1 (or sometimes the last column).
+        match result.rows.into_iter().next() {
+            Some(row) => {
+                // ClickHouse SHOW CREATE TABLE returns a single column with the statement.
+                // Try the last column first (engine-dependent), fall back to index 1.
+                let ddl = row.0.last().cloned().or_else(|| row.0.into_iter().nth(1));
+                match ddl {
+                    Some(Value::String(s)) => Ok(s),
+                    _ => Err(Error::Schema(format!(
+                        "DDL not found for table {schema}.{name}"
+                    ))),
+                }
+            }
+            None => Err(Error::Schema(format!(
+                "DDL not found for table {schema}.{name}"
+            ))),
+        }
+    }
+
     async fn ping(&mut self) -> Result<()> {
         self.http_query("SELECT 1", None).await.map(|_| ())
     }

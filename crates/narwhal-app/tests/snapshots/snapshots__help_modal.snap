@@ -28,21 +28,21 @@ expression: "snapshot_core_sized(&mut core, 120, 50)"
 │                           │  0 / $                       line start / end                │                           │
 │                           │  v / V                       visual / visual-line mode       │                           │
 │                           │                                                              │                           │
-│                           │ Results                                                      │───────────────────────────┘
-│                           │  h j k l / arrows            move selection                  │───────────────────────────┐
-│                           │  Enter                       open cell popup                 │F6 runs whole buffer, Ctrl-│
+│                           │ Sidebar                                                      │───────────────────────────┘
+│                           │  j / k / ↑ / ↓               navigate                        │───────────────────────────┐
+│                           │  Enter                       describe table                  │F6 runs whole buffer, Ctrl-│
+│                           │  o                           preview table data              │                           │
+│                           │  d                           inject DDL into editor          │                           │
+│                           │                                                              │                           │
+│                           │ Results                                                      │                           │
+│                           │  h j k l / arrows            move selection                  │                           │
+│                           │  Enter                       open cell popup                 │                           │
 │                           │  e                           edit cell value                 │                           │
 │                           │  y / Y                       yank cell / row to clipboard    │                           │
 │                           │  /                           filter rows                     │                           │
 │                           │  n / N                       next / prev search match        │                           │
 │                           │  g / G                       jump to first / last row        │                           │
 │                           │  :next / :prev               page through results            │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
-│                           │                                                              │                           │
 │                           │                                                              │                           │
 │                           │                                                              │                           │
 │                           │                                                              │                           │

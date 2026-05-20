@@ -661,6 +661,31 @@ impl Connection for DuckdbConnection {
         })
     }
 
+    async fn fetch_ddl(&mut self, schema: &str, name: &str) -> Result<String> {
+        const SQL: &str =
+            "SELECT sql FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?";
+        let result = self
+            .run(
+                SQL,
+                &[
+                    Value::String(schema.to_owned()),
+                    Value::String(name.to_owned()),
+                ],
+            )
+            .await?;
+        match result
+            .rows
+            .into_iter()
+            .next()
+            .and_then(|r| r.0.into_iter().next())
+        {
+            Some(Value::String(ddl)) => Ok(ddl),
+            _ => Err(Error::Schema(format!(
+                "DDL not found for table {schema}.{name}"
+            ))),
+        }
+    }
+
     async fn ping(&mut self) -> Result<()> {
         self.execute_batch("SELECT 1").await
     }

@@ -120,6 +120,14 @@ pub trait Connection: Send + Sync {
     /// Static capability descriptor for this driver.
     fn capabilities(&self) -> Capabilities;
 
+    /// Fetch the DDL (CREATE statement) for the given table.
+    ///
+    /// The default implementation returns [`Error::Unsupported`];
+    /// drivers override this to return engine-native DDL.
+    async fn fetch_ddl(&mut self, _schema: &str, _table: &str) -> Result<String> {
+        Err(crate::Error::unsupported("fetch_ddl"))
+    }
+
     /// Tear down the underlying connection.
     async fn close(self: Box<Self>) -> Result<()>;
 }
