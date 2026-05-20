@@ -5,8 +5,9 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore, SecretString};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
+use secrecy::ExposeSecret;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -66,7 +67,15 @@ async fn wizard_persists_password_to_credentials() {
     let id = saved.connections[0].id;
     assert_eq!(saved.connections[0].name, "prod");
     assert_eq!(saved.connections[0].driver, "postgres");
-    assert_eq!(store.get(id).unwrap().as_deref(), Some("s3cret"));
+    assert_eq!(
+        store
+            .get(id)
+            .await
+            .unwrap()
+            .as_ref()
+            .map(|s| s.expose_secret() as &str),
+        Some("s3cret")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -85,7 +94,10 @@ async fn forget_clears_keyring_but_keeps_connection() {
         }],
     };
     connections.save(&connections_path).unwrap();
-    store.set(id, "oldpw").unwrap();
+    store
+        .set(id, SecretString::new("oldpw".into()))
+        .await
+        .unwrap();
 
     let registry = DriverRegistry::with_defaults();
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
@@ -93,7 +105,7 @@ async fn forget_clears_keyring_but_keeps_connection() {
 
     core.execute_command("forget stage");
     assert!(core.status_message().contains("forgot password"));
-    assert!(store.get(id).unwrap().is_none());
+    assert!(store.get(id).await.unwrap().is_none());
 
     let still_there = ConnectionsFile::load(&connections_path).unwrap();
     assert_eq!(still_there.connections.len(), 1);
@@ -115,7 +127,7 @@ async fn remove_drops_connection_and_secret() {
         }],
     };
     connections.save(&connections_path).unwrap();
-    store.set(id, "pw").unwrap();
+    store.set(id, SecretString::new("pw".into())).await.unwrap();
 
     let registry = DriverRegistry::with_defaults();
     let mut core = AppCore::with_credentials(registry, connections, None, store.clone());
@@ -123,7 +135,7 @@ async fn remove_drops_connection_and_secret() {
 
     core.execute_command("remove dev");
     assert!(core.status_message().contains("removed"));
-    assert!(store.get(id).unwrap().is_none());
+    assert!(store.get(id).await.unwrap().is_none());
     let on_disk = ConnectionsFile::load(&connections_path).unwrap();
     assert!(on_disk.connections.is_empty());
 }
@@ -139,7 +151,10 @@ async fn open_pulls_password_from_credentials() {
 
     let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
     let id = Uuid::new_v4();
-    store.set(id, "ignored-by-sqlite").unwrap();
+    store
+        .set(id, SecretString::new("ignored-by-sqlite".into()))
+        .await
+        .unwrap();
 
     let connections = ConnectionsFile {
         connections: vec![ConnectionConfig {
@@ -158,5 +173,13 @@ async fn open_pulls_password_from_credentials() {
     core.execute_command("open local");
     assert!(core.session().is_some(), "session must open");
     // Secret remains in the store after open.
-    assert_eq!(store.get(id).unwrap().as_deref(), Some("ignored-by-sqlite"));
+    assert_eq!(
+        store
+            .get(id)
+            .await
+            .unwrap()
+            .as_ref()
+            .map(|s| s.expose_secret() as &str),
+        Some("ignored-by-sqlite")
+    );
 }

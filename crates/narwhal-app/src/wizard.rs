@@ -4,22 +4,121 @@
 //! It exposes a focused field cursor (driver selector + per-driver input
 //! fields) plus accumulated values, and emits a [`ConnectionConfig`] when
 //! the form is committed.
+//!
+//! # Secret handling (H13)
+//!
+//! Password fields store their value as [`secrecy::SecretString`] so that
+//! the secret material is zeroized on drop. The `Debug` impl for
+//! [`WizardField`] redacts secret values. The only place the password is
+//! exposed is in [`ConnectionWizard::build`], where it is transferred into
+//! the [`Built`] struct — still wrapped as `Option<SecretString>`. Callers
+//! (e.g. `commit_wizard`) pass the `SecretString` directly to the async
+//! [`CredentialStore::set`] method, which exposes the secret *only* inside
+//! the keyring call.
+
+use std::fmt;
 
 use narwhal_core::{ConnectionConfig, ConnectionParams};
+use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 pub const DRIVERS: &[&str] = &["sqlite", "postgres", "mysql", "clickhouse", "duckdb"];
 
 /// One input on the wizard form.
-#[derive(Debug, Clone)]
 pub struct WizardField {
     pub label: &'static str,
-    pub value: String,
+    pub value: WizardFieldValue,
     pub kind: WizardFieldKind,
     /// `true` when [`WizardFieldKind::Password`] should be masked.
     pub secret: bool,
     /// Placeholder/default text shown before user types.
     pub placeholder: &'static str,
+}
+
+impl fmt::Debug for WizardField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never leak the secret value in debug output.
+        let value_display = match &self.value {
+            WizardFieldValue::Public(s) => s.as_str(),
+            WizardFieldValue::Secret(_) => "***",
+        };
+        f.debug_struct("WizardField")
+            .field("label", &self.label)
+            .field("value", &value_display)
+            .field("kind", &self.kind)
+            .field("secret", &self.secret)
+            .field("placeholder", &self.placeholder)
+            .finish()
+    }
+}
+
+/// Value stored in a wizard field. Public fields use plain `String`;
+/// secret fields (passwords) use [`SecretString`] which is zeroized on drop.
+pub enum WizardFieldValue {
+    Public(String),
+    Secret(SecretString),
+}
+
+impl WizardFieldValue {
+    /// Returns the visible/display length of the value (for cursor
+    /// positioning). For secret fields, this is the actual character count.
+    pub fn len(&self) -> usize {
+        match self {
+            WizardFieldValue::Public(s) => s.len(),
+            WizardFieldValue::Secret(s) => s.expose_secret().len(),
+        }
+    }
+
+    /// Returns `true` if the value is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Append a character. For secret fields, the character is placed inside
+    /// the `SecretString`.
+    pub fn push(&mut self, ch: char) {
+        match self {
+            WizardFieldValue::Public(s) => s.push(ch),
+            WizardFieldValue::Secret(s) => {
+                let mut plain = s.expose_secret().to_owned();
+                plain.push(ch);
+                // The old SecretString is dropped (its inner Box<str>
+                // will be zeroized by SecretString's Drop impl).
+                // We reconstruct from the new plain value.
+                *s = SecretString::new(plain.into_boxed_str());
+                // Note: `plain` was consumed by `into_boxed_str()`,
+                // so there's no lingering String to zeroize.
+            }
+        }
+    }
+
+    /// Remove the last character.
+    pub fn pop(&mut self) {
+        match self {
+            WizardFieldValue::Public(s) => {
+                s.pop();
+            }
+            WizardFieldValue::Secret(s) => {
+                let mut plain = s.expose_secret().to_owned();
+                plain.pop();
+                *s = SecretString::new(plain.into_boxed_str());
+            }
+        }
+    }
+
+    /// Returns the trimmed value as a plain `&str` for public fields,
+    /// or exposes the secret for password fields.
+    ///
+    /// # Security
+    /// For `Secret` variants, this exposes the secret material. Callers
+    /// must not store or clone the returned reference beyond the
+    /// immediate operation.
+    pub fn expose(&self) -> &str {
+        match self {
+            WizardFieldValue::Public(s) => s,
+            WizardFieldValue::Secret(s) => s.expose_secret(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,9 +267,9 @@ impl ConnectionWizard {
     pub fn build(&self) -> Result<Built, String> {
         let mut params = ConnectionParams::default();
         let mut name = String::new();
-        let mut password = None;
+        let mut password: Option<SecretString> = None;
         for field in &self.fields {
-            let value = field.value.trim();
+            let value = field.value.expose().trim();
             let final_value = if value.is_empty() {
                 field.default_value().to_owned()
             } else {
@@ -210,8 +309,18 @@ impl ConnectionWizard {
                     params.username = Some(final_value);
                 }
                 WizardFieldKind::Password => {
-                    if !final_value.is_empty() {
-                        password = Some(final_value);
+                    if !field.value.is_empty() {
+                        // Clone the SecretString — the only copy beyond the
+                        // field itself, and it will be consumed by
+                        // `commit_wizard` → `credentials.set`.
+                        password = Some(match &field.value {
+                            WizardFieldValue::Public(_) => {
+                                unreachable!("password field is always Secret")
+                            }
+                            WizardFieldValue::Secret(s) => {
+                                SecretString::new(s.expose_secret().to_owned().into_boxed_str())
+                            }
+                        });
                     }
                 }
                 WizardFieldKind::Path => {
@@ -290,7 +399,7 @@ trait WithDefault {
 
 impl WithDefault for WizardField {
     fn with_default(mut self, default: &str) -> Self {
-        self.value = default.to_owned();
+        self.value = WizardFieldValue::Public(default.to_owned());
         self
     }
 
@@ -303,7 +412,7 @@ impl WithDefault for WizardField {
 fn text(label: &'static str, kind: WizardFieldKind) -> WizardField {
     WizardField {
         label,
-        value: String::new(),
+        value: WizardFieldValue::Public(String::new()),
         kind,
         secret: false,
         placeholder: "",
@@ -313,7 +422,7 @@ fn text(label: &'static str, kind: WizardFieldKind) -> WizardField {
 fn password(label: &'static str) -> WizardField {
     WizardField {
         label,
-        value: String::new(),
+        value: WizardFieldValue::Secret(SecretString::new(String::new().into_boxed_str())),
         kind: WizardFieldKind::Password,
         secret: true,
         placeholder: "",
@@ -321,10 +430,24 @@ fn password(label: &'static str) -> WizardField {
 }
 
 /// Output of [`ConnectionWizard::build`].
-#[derive(Debug)]
+///
+/// The password, if present, is wrapped in [`SecretString`] so that it is
+/// zeroized when this struct is dropped. Callers should pass the secret
+/// directly to [`narwhal_config::CredentialStore::set`] which accepts
+/// `SecretString`.
 pub struct Built {
     pub config: ConnectionConfig,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
+}
+
+impl fmt::Debug for Built {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Built")
+            .field("config", &self.config)
+            // Never include the password in debug output.
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -350,13 +473,13 @@ mod tests {
             .iter()
             .find(|f| f.kind == WizardFieldKind::SslMode)
             .unwrap();
-        assert_eq!(ssl.value, "prefer");
+        assert_eq!(ssl.value.expose(), "prefer");
         let port = w
             .fields
             .iter()
             .find(|f| f.kind == WizardFieldKind::Port)
             .unwrap();
-        assert_eq!(port.value, "5432");
+        assert_eq!(port.value.expose(), "5432");
     }
 
     #[test]
@@ -365,11 +488,11 @@ mod tests {
         let err = w.build().unwrap_err();
         assert!(err.contains("name"));
 
-        w.fields[0].value = "local".into();
+        w.fields[0].value = WizardFieldValue::Public("local".into());
         let err = w.build().unwrap_err();
         assert!(err.contains("path"));
 
-        w.fields[1].value = "/tmp/x.db".into();
+        w.fields[1].value = WizardFieldValue::Public("/tmp/x.db".into());
         let built = w.build().unwrap();
         assert_eq!(built.config.name, "local");
         assert_eq!(built.config.driver, "sqlite");
@@ -380,27 +503,102 @@ mod tests {
     fn build_round_trips_postgres_form() {
         let mut w = ConnectionWizard::new();
         w.cycle_driver(1);
-        w.fields[0].value = "prod".into();
-        w.fields[1].value = "db.example.com".into();
-        w.fields[3].value = "inventory".into();
-        w.fields[4].value = "admin".into();
-        w.fields[5].value = "s3cret".into();
+        w.fields[0].value = WizardFieldValue::Public("prod".into());
+        w.fields[1].value = WizardFieldValue::Public("db.example.com".into());
+        w.fields[3].value = WizardFieldValue::Public("inventory".into());
+        w.fields[4].value = WizardFieldValue::Public("admin".into());
+        w.fields[5].value =
+            WizardFieldValue::Secret(SecretString::new("s3cret".to_owned().into_boxed_str()));
         let built = w.build().unwrap();
         assert_eq!(built.config.driver, "postgres");
         assert_eq!(built.config.params.port, Some(5432));
-        assert_eq!(built.password.as_deref(), Some("s3cret"));
+        assert_eq!(
+            built.password.as_ref().map(|s| s.expose_secret() as &str),
+            Some("s3cret")
+        );
     }
 
     #[test]
     fn build_rejects_invalid_port() {
         let mut w = ConnectionWizard::new();
         w.cycle_driver(1);
-        w.fields[0].value = "x".into();
-        w.fields[1].value = "h".into();
-        w.fields[2].value = "99999".into();
-        w.fields[3].value = "d".into();
-        w.fields[4].value = "u".into();
+        w.fields[0].value = WizardFieldValue::Public("x".into());
+        w.fields[1].value = WizardFieldValue::Public("h".into());
+        w.fields[2].value = WizardFieldValue::Public("99999".into());
+        w.fields[3].value = WizardFieldValue::Public("d".into());
+        w.fields[4].value = WizardFieldValue::Public("u".into());
         let err = w.build().unwrap_err();
         assert!(err.contains("port"));
+    }
+
+    /// H13 regression: password field values are SecretString, not plain String.
+    #[test]
+    fn password_field_is_secret_variant() {
+        let w = ConnectionWizard::new();
+        let pw_field = w
+            .fields
+            .iter()
+            .find(|f| f.kind == WizardFieldKind::Password);
+        // sqlite has no password field
+        assert!(pw_field.is_none());
+
+        let mut w = ConnectionWizard::new();
+        w.cycle_driver(1); // postgres
+        let pw_field = w
+            .fields
+            .iter()
+            .find(|f| f.kind == WizardFieldKind::Password)
+            .unwrap();
+        assert!(pw_field.secret);
+        assert!(matches!(pw_field.value, WizardFieldValue::Secret(_)));
+    }
+
+    /// H13 regression: Debug output never leaks the password.
+    #[test]
+    fn debug_does_not_leak_password() {
+        let mut w = ConnectionWizard::new();
+        w.cycle_driver(1);
+        w.fields[5].value =
+            WizardFieldValue::Secret(SecretString::new("hunter2".to_owned().into_boxed_str()));
+        let debug_output = format!("{w:?}");
+        assert!(!debug_output.contains("hunter2"));
+        assert!(debug_output.contains("***"));
+    }
+
+    /// H13 regression: Built Debug output never leaks the password.
+    #[test]
+    fn built_debug_does_not_leak_password() {
+        let mut w = ConnectionWizard::new();
+        w.cycle_driver(1);
+        w.fields[0].value = WizardFieldValue::Public("prod".into());
+        w.fields[1].value = WizardFieldValue::Public("db.example.com".into());
+        w.fields[3].value = WizardFieldValue::Public("inventory".into());
+        w.fields[4].value = WizardFieldValue::Public("admin".into());
+        w.fields[5].value =
+            WizardFieldValue::Secret(SecretString::new("topsecret".to_owned().into_boxed_str()));
+        let built = w.build().unwrap();
+        let debug_output = format!("{built:?}");
+        assert!(!debug_output.contains("topsecret"));
+        assert!(debug_output.contains("***"));
+    }
+
+    /// H13 regression: push_char and pop_char work on Secret fields.
+    #[test]
+    fn secret_field_push_pop() {
+        let mut w = ConnectionWizard::new();
+        w.cycle_driver(1); // postgres
+        let pw_idx = w
+            .fields
+            .iter()
+            .position(|f| f.kind == WizardFieldKind::Password)
+            .unwrap();
+        // Focus the password field (focused 0 = driver, 1+ = field index).
+        w.focused = pw_idx + 1;
+        w.push_char('a');
+        w.push_char('b');
+        w.push_char('c');
+        assert_eq!(w.fields[pw_idx].value.expose(), "abc");
+        w.pop_char();
+        assert_eq!(w.fields[pw_idx].value.expose(), "ab");
     }
 }
