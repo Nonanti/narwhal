@@ -89,3 +89,139 @@ async fn fetch_ddl_returns_create_table() {
         .await
         .ok();
 }
+
+#[tokio::test]
+async fn ddl_generated_identity_column() {
+    let Some(config) = pg_config() else {
+        eprintln!("skipping — set NARWHAL_TEST_PG_HOST/DB/USER to run");
+        return;
+    };
+
+    let password = std::env::var("NARWHAL_TEST_PG_PASSWORD").ok();
+    let driver = PostgresDriver::new();
+    let mut conn = driver
+        .connect(&config, password.as_deref())
+        .await
+        .expect("connect to postgres");
+
+    conn.execute("DROP SCHEMA IF EXISTS narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+    conn.execute("CREATE SCHEMA narwhal_ddl_test", &[])
+        .await
+        .expect("create schema");
+    conn.execute(
+        "CREATE TABLE narwhal_ddl_test.orders (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, label TEXT)",
+        &[],
+    )
+    .await
+    .expect("create table with identity");
+
+    let ddl = conn
+        .fetch_ddl("narwhal_ddl_test", "orders")
+        .await
+        .expect("fetch_ddl");
+
+    assert!(
+        ddl.contains("GENERATED ALWAYS AS IDENTITY"),
+        "DDL must preserve GENERATED ALWAYS AS IDENTITY: {ddl}"
+    );
+    // Must NOT contain nextval (that is the wrong reconstruction).
+    assert!(
+        !ddl.contains("nextval"),
+        "DDL must not expose raw nextval for identity column: {ddl}"
+    );
+
+    conn.execute("DROP SCHEMA narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+}
+
+#[tokio::test]
+async fn ddl_generated_stored_column() {
+    let Some(config) = pg_config() else {
+        eprintln!("skipping — set NARWHAL_TEST_PG_HOST/DB/USER to run");
+        return;
+    };
+
+    let password = std::env::var("NARWHAL_TEST_PG_PASSWORD").ok();
+    let driver = PostgresDriver::new();
+    let mut conn = driver
+        .connect(&config, password.as_deref())
+        .await
+        .expect("connect to postgres");
+
+    conn.execute("DROP SCHEMA IF EXISTS narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+    conn.execute("CREATE SCHEMA narwhal_ddl_test", &[])
+        .await
+        .expect("create schema");
+    conn.execute(
+        "CREATE TABLE narwhal_ddl_test.products (\
+         price numeric NOT NULL, \
+         quantity integer NOT NULL, \
+         total numeric GENERATED ALWAYS AS (price * quantity) STORED)",
+        &[],
+    )
+    .await
+    .expect("create table with stored generated");
+
+    let ddl = conn
+        .fetch_ddl("narwhal_ddl_test", "products")
+        .await
+        .expect("fetch_ddl");
+
+    assert!(
+        ddl.contains("GENERATED ALWAYS AS") && ddl.contains("STORED"),
+        "DDL must preserve GENERATED ALWAYS AS (...) STORED: {ddl}"
+    );
+
+    conn.execute("DROP SCHEMA narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+}
+
+#[tokio::test]
+async fn ddl_default_now() {
+    let Some(config) = pg_config() else {
+        eprintln!("skipping — set NARWHAL_TEST_PG_HOST/DB/USER to run");
+        return;
+    };
+
+    let password = std::env::var("NARWHAL_TEST_PG_PASSWORD").ok();
+    let driver = PostgresDriver::new();
+    let mut conn = driver
+        .connect(&config, password.as_deref())
+        .await
+        .expect("connect to postgres");
+
+    conn.execute("DROP SCHEMA IF EXISTS narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+    conn.execute("CREATE SCHEMA narwhal_ddl_test", &[])
+        .await
+        .expect("create schema");
+    conn.execute(
+        "CREATE TABLE narwhal_ddl_test.events (\
+         id SERIAL PRIMARY KEY, \
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        &[],
+    )
+    .await
+    .expect("create table with default now()");
+
+    let ddl = conn
+        .fetch_ddl("narwhal_ddl_test", "events")
+        .await
+        .expect("fetch_ddl");
+
+    assert!(
+        ddl.contains("now()"),
+        "DDL must preserve DEFAULT now(): {ddl}"
+    );
+
+    conn.execute("DROP SCHEMA narwhal_ddl_test CASCADE", &[])
+        .await
+        .ok();
+}
