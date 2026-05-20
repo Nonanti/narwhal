@@ -176,6 +176,27 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
             },
         ],
     },
+    CheatsheetSection {
+        title: "Snippets",
+        entries: &[
+            CheatsheetEntry {
+                keys: ":save <name>",
+                description: "save editor buffer as a named snippet",
+            },
+            CheatsheetEntry {
+                keys: ":load <name>",
+                description: "load a snippet into a new tab",
+            },
+            CheatsheetEntry {
+                keys: ":rm-snippet <name>",
+                description: "delete a saved snippet",
+            },
+            CheatsheetEntry {
+                keys: ":snippets",
+                description: "browse saved snippets",
+            },
+        ],
+    },
 ];
 
 /// Render the help modal on top of the current frame.

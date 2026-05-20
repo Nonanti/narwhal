@@ -16,12 +16,12 @@ use narwhal_core::{
 };
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_tui::{
-    render_help_modal, render_history_modal, render_root, render_row_detail, render_wizard,
-    translate_key_event, CellEditView, CellPopup, CompletionItemView, CompletionPopupView,
-    EditorBuffer, EditorSearchHighlight, ExplainPlanLine, HistoryModalState, HistoryRow,
-    LayoutRegions, Pane, ResultDisplay, ResultView, RootLayout, RowDetailView, SearchHighlight,
-    SidebarRow, SidebarRowKind, SidebarView, SortDir, StatusBarView, Theme, WizardFieldView,
-    WizardView,
+    render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
+    render_wizard, translate_key_event, CellEditView, CellPopup, CompletionItemView,
+    CompletionPopupView, EditorBuffer, EditorSearchHighlight, ExplainPlanLine, HistoryModalState,
+    HistoryRow, LayoutRegions, Pane, ResultDisplay, ResultView, RootLayout, RowDetailView,
+    SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, SnippetsModalState, SortDir,
+    StatusBarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, SearchDirection, Vim};
 use ratatui::layout::Rect;
@@ -39,6 +39,7 @@ use crate::export::{export_rows, ExportFormat};
 use crate::registry::DriverRegistry;
 use crate::run::{spawn_run, ActiveCancel, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
+use crate::snippets::SnippetStore;
 use crate::wizard::{ConnectionWizard, DRIVERS};
 use narwhal_plugin::{
     CommandContext as PluginCommandContext, CommandOutcome as PluginCommandOutcome, Plugin,
@@ -415,6 +416,15 @@ impl HistoryState {
     }
 }
 
+/// State for the `:snippets` modal.
+#[derive(Debug, Clone)]
+pub struct SnippetsModal {
+    /// Sorted list of snippet names.
+    pub entries: Vec<String>,
+    /// Index of the currently selected entry.
+    pub selected: usize,
+}
+
 /// Pure, IO-free application state and behaviour.
 pub struct AppCore {
     registry: DriverRegistry,
@@ -431,6 +441,10 @@ pub struct AppCore {
     history_journal: Option<Arc<Journal>>,
     /// When `Some`, the Ctrl+R history modal is open.
     history_state: Option<HistoryState>,
+    /// Persistent snippet store.
+    snippet_store: SnippetStore,
+    /// When `Some`, the `:snippets` modal is open.
+    snippets_modal: Option<SnippetsModal>,
     session: Option<Session>,
     tabs: Vec<Tab>,
     active_tab: usize,
@@ -559,6 +573,8 @@ impl AppCore {
             plugin_state: Arc::new(std::sync::Mutex::new(PluginConnectionState::default())),
             history_journal: history,
             history_state: None,
+            snippet_store: SnippetStore::new(SnippetStore::default_root()),
+            snippets_modal: None,
             session: None,
             tabs: vec![Tab::new("untitled")],
             active_tab: 0,
@@ -594,6 +610,13 @@ impl AppCore {
     /// `:add` wizard. Called by [`crate::app::App::new`].
     pub fn set_connections_path(&mut self, path: std::path::PathBuf) {
         self.connections_path = Some(path);
+    }
+
+    /// Override the snippet store root directory. Used by tests to
+    /// avoid polluting the user's real config.
+    #[doc(hidden)]
+    pub fn set_snippet_store_root(&mut self, root: std::path::PathBuf) {
+        self.snippet_store = SnippetStore::new(root);
     }
 
     fn rebuild_sidebar(&mut self) {
@@ -752,6 +775,24 @@ impl AppCore {
         self.tabs[self.active_tab].row_detail.is_some()
     }
 
+    /// Whether the snippets modal is currently open.
+    #[doc(hidden)]
+    pub fn snippets_modal_is_open(&self) -> bool {
+        self.snippets_modal.is_some()
+    }
+
+    /// Read-only accessor for the snippets modal state (for tests).
+    #[doc(hidden)]
+    pub fn snippets_modal(&self) -> Option<&SnippetsModal> {
+        self.snippets_modal.as_ref()
+    }
+
+    /// Read-only accessor for the snippet store (for tests).
+    #[doc(hidden)]
+    pub fn snippet_store(&self) -> &SnippetStore {
+        &self.snippet_store
+    }
+
     /// Read-only accessor for the row detail modal state (for tests).
     #[doc(hidden)]
     pub fn row_detail_state(&self) -> Option<&RowDetailState> {
@@ -861,6 +902,114 @@ impl AppCore {
                 state.selected = 0;
             }
             _ => {}
+        }
+    }
+
+    // ----- snippets modal -----
+
+    /// Open the `:snippets` modal. Reads the snippet list from the store.
+    fn open_snippets_modal(&mut self) {
+        match self.snippet_store.list() {
+            Ok(entries) => {
+                if entries.is_empty() {
+                    self.status.message = "no saved snippets; use :save <name> first".into();
+                    return;
+                }
+                self.snippets_modal = Some(SnippetsModal {
+                    entries,
+                    selected: 0,
+                });
+                self.status.message = "snippets: ↑↓/jk navigate · Enter load · Esc close".into();
+            }
+            Err(error) => {
+                self.status.message = format!("snippets: could not list: {error}");
+            }
+        }
+    }
+
+    fn close_snippets_modal(&mut self) {
+        self.snippets_modal = None;
+    }
+
+    /// Handle key events while the snippets modal is open.
+    fn handle_snippets_key(&mut self, key: KeyEvent) {
+        let Some(modal) = self.snippets_modal.as_mut() else {
+            return;
+        };
+        match key.code {
+            CtKey::Esc => {
+                self.close_snippets_modal();
+                self.status.message = "snippets closed".into();
+            }
+            CtKey::Up | CtKey::Char('k')
+                if (key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL))
+                    && !modal.entries.is_empty() =>
+            {
+                modal.selected = (modal.selected + modal.entries.len() - 1) % modal.entries.len();
+            }
+            CtKey::Down | CtKey::Char('j')
+                if (key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::CONTROL))
+                    && !modal.entries.is_empty() =>
+            {
+                modal.selected = (modal.selected + 1) % modal.entries.len();
+            }
+            CtKey::Enter => {
+                let name = self
+                    .snippets_modal
+                    .as_ref()
+                    .and_then(|m| m.entries.get(m.selected).cloned());
+                self.close_snippets_modal();
+                if let Some(name) = name {
+                    self.load_snippet_by_name(&name);
+                } else {
+                    self.status.message = "snippets closed".into();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Load a snippet by name into a new editor tab.
+    fn load_snippet_by_name(&mut self, name: &str) {
+        match self.snippet_store.load(name) {
+            Ok(sql) => {
+                self.new_tab();
+                self.tabs[self.active_tab].editor.insert_str(&sql);
+                self.tabs[self.active_tab].name = name.to_owned();
+                self.status.message = format!("loaded snippet '{name}' ({} char(s))", sql.len());
+            }
+            Err(error) => {
+                self.status.message = format!("load failed: {error}");
+            }
+        }
+    }
+
+    /// Save the current editor buffer as a named snippet.
+    fn save_snippet(&mut self, name: &str) {
+        let sql = self.tabs[self.active_tab].editor.entire_text();
+        if sql.trim().is_empty() {
+            self.status.message = "editor is empty; nothing to save".into();
+            return;
+        }
+        match self.snippet_store.save(name, &sql) {
+            Ok(()) => {
+                self.status.message = format!("saved snippet '{name}'");
+            }
+            Err(error) => {
+                self.status.message = format!("save failed: {error}");
+            }
+        }
+    }
+
+    /// Remove a named snippet.
+    fn remove_snippet(&mut self, name: &str) {
+        match self.snippet_store.remove(name) {
+            Ok(()) => {
+                self.status.message = format!("removed snippet '{name}'");
+            }
+            Err(error) => {
+                self.status.message = format!("rm-snippet failed: {error}");
+            }
         }
     }
 
@@ -1024,6 +1173,15 @@ impl AppCore {
             render_history_modal(frame, area, &modal_state, &self.theme);
         }
 
+        // Snippets modal.
+        if let Some(modal) = self.snippets_modal.as_ref() {
+            let modal_state = SnippetsModalState {
+                entries: modal.entries.iter().map(String::as_str).collect(),
+                selected: modal.selected,
+            };
+            render_snippets_modal(frame, area, &modal_state, &self.theme);
+        }
+
         // Row detail modal — same layer as cell popup, rendered on
         // top of the result pane.
         if let Some(state) = self.tabs[self.active_tab].row_detail.as_ref() {
@@ -1065,6 +1223,11 @@ impl AppCore {
         // When the history modal is open, it intercepts all keys.
         if self.history_state.is_some() {
             self.handle_history_key(key);
+            return;
+        }
+        // When the snippets modal is open, it intercepts all keys.
+        if self.snippets_modal.is_some() {
+            self.handle_snippets_key(key);
             return;
         }
         if self.handle_global_key(key) {
@@ -2864,6 +3027,9 @@ impl AppCore {
                 v
             }
             "export" => vec!["csv".into(), "json".into(), "insert".into()],
+            "save" | "load" | "rm-snippet" | "rmsnippet" => {
+                self.snippet_store.list().unwrap_or_default()
+            }
             _ => return,
         };
 
@@ -2991,6 +3157,10 @@ impl AppCore {
                 self.tabs[self.active_tab].editor_search.current = None;
                 self.status.message = "search highlight cleared".into();
             }
+            Command::SaveSnippet { name } => self.save_snippet(&name),
+            Command::LoadSnippet { name } => self.load_snippet_by_name(&name),
+            Command::RemoveSnippet { name } => self.remove_snippet(&name),
+            Command::ListSnippets => self.open_snippets_modal(),
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the
