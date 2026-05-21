@@ -2791,6 +2791,7 @@ dependencies = [
  "chrono",
  "once_cell",
  "regex",
+ "rev_lines",
  "serde",
  "serde_json",
  "tempfile",
@@ -2834,6 +2835,7 @@ dependencies = [
  "async-trait",
  "narwhal-core",
  "narwhal-driver-sqlite",
+ "parking_lot",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3729,6 +3731,15 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "webpki-roots 1.0.7",
+]
+
+[[package]]
+name = "rev_lines"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed62916ac7a5ccbf13fa5e1d303029ff015600fee841756dfc134a1ac62bf05f"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]

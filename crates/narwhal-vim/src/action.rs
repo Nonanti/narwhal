@@ -57,6 +57,8 @@ pub enum Motion {
     LineEnd,
     FileStart,
     FileEnd,
+    /// The current line (used by dd, yy, cc).
+    CurrentLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

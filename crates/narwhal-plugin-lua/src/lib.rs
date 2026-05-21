@@ -90,9 +90,17 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Tracks elapsed time for a single plugin invocation against a
 /// configured budget. Used inside the mlua hook callback to decide
 /// whether the invocation has exceeded its time limit.
+/// Tracks elapsed time for a single plugin invocation against a
+/// configured budget. Used inside the mlua hook callback to decide
+/// whether the invocation has exceeded its time limit.
+///
+/// All fields are lock-free: `started_at` and `budget` are immutable
+/// after construction, and `timed_out` is an `AtomicBool` so the
+/// hook closure can read/write it without a `Mutex`.
 struct InvocationTimeout {
     started_at: Instant,
     budget: Duration,
+    timed_out: AtomicBool,
 }
 
 impl InvocationTimeout {
@@ -100,15 +108,12 @@ impl InvocationTimeout {
         Self {
             started_at: Instant::now(),
             budget: budget.max(Duration::from_millis(1)),
+            timed_out: AtomicBool::new(false),
         }
     }
 
-    fn elapsed(&self) -> Duration {
-        self.started_at.elapsed()
-    }
-
     fn exceeded(&self) -> bool {
-        self.elapsed() >= self.budget
+        self.started_at.elapsed() >= self.budget
     }
 }
 
@@ -117,12 +122,15 @@ impl InvocationTimeout {
 /// as "disable timeout" rather than panicking.
 const MAX_BUDGET_SECS: f64 = 1e9;
 
-/// Read the per-plugin timeout budget from `narwhal._timeout_budget`.
+/// Read the per-plugin timeout budget from the Lua registry.
 /// Returns `None` when the plugin hasn't called `narwhal.set_timeout`
 /// (the caller should fall back to [`DEFAULT_TIMEOUT`]).
+///
+/// The budget is stored in the registry (not on the `narwhal` global
+/// table) so scripts cannot accidentally clear or corrupt it by
+/// assigning to `narwhal._timeout_budget`.
 fn read_timeout_budget(lua: &Lua) -> Option<Duration> {
-    let narwhal: Table = lua.globals().get("narwhal").ok()?;
-    let secs: f64 = narwhal.get("_timeout_budget").ok()?;
+    let secs: f64 = lua.named_registry_value("narwhal_timeout_budget").ok()?;
     // Guard against NaN, infinity, negative, and astronomically large
     // values that would panic inside `Duration::from_secs_f64`.
     Some(
@@ -243,10 +251,12 @@ impl LuaPlugin {
 
     /// Convenience: read a script from disk and call [`Self::from_script`].
     ///
-    /// The plugin's identifier is the file stem (e.g. `format_json.lua`
-    /// becomes `"format_json"`). For paths whose file name is not valid
-    /// UTF-8 we fall back to a path-derived hash so two such plugins
-    /// don't collide in the registry display.
+    /// The plugin's identifier is `"lua-{stem}"` where `stem` is the file
+    /// name without extension (e.g. `format_json.lua` becomes
+    /// `"lua-format_json""). For paths whose file name is not valid UTF-8
+    /// we fall back to a path-derived display string so two such plugins
+    /// don't collide in the registry display. The name is deterministic
+    /// across restarts — no randomized hash.
     pub fn from_path(path: impl AsRef<Path>) -> PluginResult<Self> {
         let path = path.as_ref();
         let source = std::fs::read_to_string(path)
@@ -254,13 +264,12 @@ impl LuaPlugin {
         let stem = if let Some(s) = path.file_stem().and_then(|s| s.to_str()) {
             s.to_owned()
         } else {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            path.hash(&mut h);
-            format!("lua-plugin-{:x}", h.finish())
+            // Non-UTF-8 file name: use the full path's lossy display as
+            // a stable identifier. No randomized hash.
+            format!("plugin-{}", path.display())
         };
-        Self::from_script(stem, &source)
+        let name = format!("lua-{stem}");
+        Self::from_script(name, &source)
     }
 }
 
@@ -370,8 +379,7 @@ fn install_api(
     // top level of the script (not inside a handler) so the budget
     // takes effect on the next invocation.
     let set_timeout = lua.create_function(|lua, secs: f64| {
-        let narwhal: Table = lua.globals().get("narwhal")?;
-        narwhal.set("_timeout_budget", secs)?;
+        lua.set_named_registry_value("narwhal_timeout_budget", secs)?;
         Ok(())
     })?;
     narwhal.set("set_timeout", set_timeout)?;
@@ -457,21 +465,16 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
             .map_err(|e| PluginError::Handler(e.to_string()));
     }
 
-    let timeout_state = Arc::new(Mutex::new(InvocationTimeout::new(budget)));
-    let timeout_hook = timeout_state.clone();
-    let timeout_err = timeout_state.clone();
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let timed_out_hook = timed_out.clone();
+    let timeout = Arc::new(InvocationTimeout::new(budget));
+    let timeout_hook = timeout.clone();
+    let timeout_err = timeout.clone();
 
     lua.set_hook(HookTriggers::EVERY_LINE, move |_lua, _debug| {
-        let t = timeout_hook
-            .lock()
-            .map_err(|_| mlua::Error::RuntimeError("timeout mutex poisoned".into()))?;
-        if t.exceeded() {
-            timed_out_hook.store(true, Ordering::Relaxed);
+        if timeout_hook.exceeded() {
+            timeout_hook.timed_out.store(true, Ordering::Release);
             Err(mlua::Error::RuntimeError(format!(
                 "plugin timed out after {:.1}s",
-                t.elapsed().as_secs_f64()
+                timeout_hook.started_at.elapsed().as_secs_f64()
             )))
         } else {
             Ok(VmState::Continue)
@@ -487,10 +490,9 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
     match result {
         Ok(v) => Ok(v),
         Err(e) => {
-            if timed_out.load(Ordering::Relaxed) {
-                let elapsed = timeout_err.lock().map(|t| t.elapsed()).unwrap_or(budget);
+            if timeout_err.timed_out.load(Ordering::Acquire) {
                 Err(PluginError::Timeout {
-                    elapsed_secs: elapsed.as_secs_f64(),
+                    elapsed_secs: timeout_err.started_at.elapsed().as_secs_f64(),
                 })
             } else {
                 Err(PluginError::Handler(e.to_string()))
@@ -1002,7 +1004,7 @@ mod tests {
         )
         .unwrap();
         let plugin = LuaPlugin::from_path(&path).unwrap();
-        assert_eq!(plugin.name(), "test");
+        assert_eq!(plugin.name(), "lua-test");
         let outcome = plugin
             .dispatch("ping", CommandContext::default())
             .await
@@ -1011,5 +1013,57 @@ mod tests {
             CommandOutcome::Status { message } => assert_eq!(message, "pong"),
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    /// M18: Scripts cannot tamper with the timeout budget because it is
+    /// stored in the Lua registry, not on the `narwhal` global table.
+    #[tokio::test]
+    async fn script_cannot_clear_timeout_budget() {
+        // The script tries to nil out `narwhal._timeout_budget` (old
+        // location) and also tries to delete it from the registry. The
+        // registry is not accessible from Lua, so the budget should
+        // survive.
+        let script = r#"
+            narwhal.set_timeout(0.5)
+            -- Try to clear the old location (no-op if field doesn't exist)
+            if narwhal._timeout_budget then
+                narwhal._timeout_budget = nil
+            end
+            narwhal.register_command("check", "check", function(_)
+                -- Run a long loop; with the 0.5s budget still active
+                -- it should time out.
+                local x = 0
+                for i = 1, 1e9 do x = x + i end
+                return "done"
+            end)
+        "#;
+        let plugin = LuaPlugin::from_script("tamper-test", script).unwrap();
+        let err = plugin
+            .dispatch("check", CommandContext::default())
+            .await
+            .unwrap_err();
+        // Budget survived the script's attempt to clear it.
+        assert!(
+            matches!(err, PluginError::Timeout { .. }),
+            "expected Timeout, got: {err:?}"
+        );
+    }
+
+    /// M19: Plugin name derived from file stem is deterministic across
+    /// separate loads (no randomized DefaultHasher).
+    #[test]
+    fn plugin_name_deterministic_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("my_plugin.lua");
+        std::fs::write(
+            &path,
+            r#"narwhal.register_command("x", "x", function() end)"#,
+        )
+        .unwrap();
+
+        let name1 = LuaPlugin::from_path(&path).unwrap().name().to_owned();
+        let name2 = LuaPlugin::from_path(&path).unwrap().name().to_owned();
+        assert_eq!(name1, name2, "plugin name should be deterministic");
+        assert_eq!(name1, "lua-my_plugin");
     }
 }

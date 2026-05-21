@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::action::Operator;
+
 /// Modal editor states.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -12,6 +14,8 @@ pub enum Mode {
     VisualLine,
     /// Command-line entered via `:`.
     Command,
+    /// Waiting for a motion after an operator (d, y, c).
+    OperatorPending(Operator),
 }
 
 impl Mode {
@@ -22,6 +26,9 @@ impl Mode {
             Self::Visual => "VIS",
             Self::VisualLine => "V-L",
             Self::Command => "CMD",
+            Self::OperatorPending(Operator::Delete) => "O-D",
+            Self::OperatorPending(Operator::Yank) => "O-Y",
+            Self::OperatorPending(Operator::Change) => "O-C",
         }
     }
 }
