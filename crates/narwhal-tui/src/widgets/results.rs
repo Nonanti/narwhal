@@ -690,27 +690,85 @@ fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
 /// Single-line projection used in the result grid. Cell popup still shows
 /// the raw value through a `Paragraph` widget so the user can read the
 /// real text on demand — this just keeps grid rows one row tall.
+///
+/// Also sanitises dangerous Unicode glyphs (BIDI overrides, zero-width
+/// characters, control chars) that could be used for visual spoofing
+/// (Trojan Source attacks). Such characters are replaced with `·`.
 fn render_for_grid(s: &str) -> String {
-    if !s.contains(['\n', '\r', '\t']) {
+    let mut needs_sanitize = false;
+    let mut needs_newline_replace = false;
+    for ch in s.chars() {
+        if is_dangerous_glyph(ch) {
+            needs_sanitize = true;
+            break;
+        }
+        if matches!(ch, '\n' | '\r' | '\t') {
+            needs_newline_replace = true;
+        }
+    }
+    if !needs_sanitize && !needs_newline_replace {
         return s.to_owned();
     }
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
-        match c {
-            '\r' => {
-                // Collapse CRLF into one glyph.
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
+        if is_dangerous_glyph(c) {
+            out.push('·');
+        } else {
+            match c {
+                '\r' => {
+                    // Collapse CRLF into one glyph.
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    out.push('⏎');
                 }
-                out.push('⏎');
+                '\n' => out.push('⏎'),
+                '\t' => out.push('→'),
+                other => out.push(other),
             }
-            '\n' => out.push('⏎'),
-            '\t' => out.push('→'),
-            other => out.push(other),
         }
     }
     out
+}
+
+/// Returns true for Unicode characters that are dangerous to render
+/// in a terminal grid: BIDI override controls, zero-width / directional
+/// marks, and C0/C1 control characters (except \t, \n, \r which are
+/// handled separately by `render_for_grid`).
+fn is_dangerous_glyph(c: char) -> bool {
+    matches!(
+        c,
+        '\u{202A}'..='\u{202E}'  // BIDI override
+        | '\u{2066}'..='\u{2069}' // BIDI isolate
+        | '\u{200B}'..='\u{200F}' // zero-width, LRM/RLM
+        | '\u{0000}'..='\u{0008}' // C0 controls (except TAB at 0x09)
+        | '\u{000B}'..='\u{000C}' // VT, FF
+        | '\u{000E}'..='\u{001F}' // SO..US, C1 range start
+        | '\u{007F}'               // DEL
+    )
+}
+
+/// Sanitise a string for display in any TUI context (cell popup,
+/// row detail, history, sidebar, status). Replaces BIDI override
+/// characters, zero-width / directional marks, and C0/C1 control
+/// characters with `·`. Unlike `render_for_grid`, this does **not**
+/// replace newlines / tabs — callers that need single-line projection
+/// should use `render_for_grid` instead.
+pub fn sanitize_for_display(s: &str) -> std::borrow::Cow<'_, str> {
+    let needs = s.chars().any(is_dangerous_glyph);
+    if !needs {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if is_dangerous_glyph(ch) {
+            out.push('·');
+        } else {
+            out.push(ch);
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
@@ -789,7 +847,8 @@ fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: 
         ));
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
-    let paragraph = Paragraph::new(popup.value_text.as_str())
+    let sanitized_value = sanitize_for_display(&popup.value_text);
+    let paragraph = Paragraph::new(sanitized_value.as_ref())
         .style(Style::default().fg(theme.foreground))
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);
@@ -1040,5 +1099,35 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_secs(60)), "01:00");
         assert_eq!(format_elapsed(Duration::from_secs(125)), "02:05");
         assert_eq!(format_elapsed(Duration::from_secs(3661)), "61:01");
+    }
+
+    #[test]
+    fn sanitize_replaces_bidi_override() {
+        // U+202E RIGHT-TO-LEFT OVERRIDE — Trojan Source attack vector.
+        let input = "SELECT \u{202E}1;";
+        let output = render_for_grid(input);
+        assert_eq!(output, "SELECT ·1;");
+    }
+
+    #[test]
+    fn sanitize_replaces_control_chars() {
+        // NULL, BEL, BS, VT, FF, DEL
+        let input = "a\u{0000}b\u{0007}c\u{0008}d\u{000B}e\u{000C}f\u{007F}g";
+        let output = render_for_grid(input);
+        assert_eq!(output, "a·b·c·d·e·f·g");
+    }
+
+    #[test]
+    fn sanitize_preserves_normal_unicode() {
+        let input = "Türkçe 中文 🦄";
+        let output = render_for_grid(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn sanitize_handles_newline_and_bidi_combined() {
+        let input = "a\n\u{202E}b";
+        let output = render_for_grid(input);
+        assert_eq!(output, "a⏎·b");
     }
 }

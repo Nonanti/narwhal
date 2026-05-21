@@ -12,6 +12,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::theme::Theme;
+use crate::widgets::results::sanitize_for_display;
 
 /// View model passed to [`render_row_detail`] each frame.
 pub struct RowDetailView<'a> {
@@ -94,11 +95,12 @@ pub fn render_row_detail(
         ]));
 
         // Value line
-        let value_text = match value {
+        let raw_value_text = match value {
             Some(Value::Null) => "<null>".to_owned(),
             Some(v) => v.render(),
             None => String::new(),
         };
+        let value_text = sanitize_for_display(&raw_value_text);
         let value_style = match value {
             Some(Value::Null) => Style::default().fg(theme.muted).patch(highlight_bg),
             _ if is_selected => Style::default().fg(theme.foreground).patch(highlight_bg),
