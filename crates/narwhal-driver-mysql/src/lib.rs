@@ -334,15 +334,29 @@ impl Connection for MysqlConnection {
                 // administrative statements (SAVEPOINT, SET TRANSACTION,
                 // USE, ...). When no parameters are bound, fall back to the
                 // text protocol so those statements still work.
-                if bound.is_empty() {
+                if bound.is_empty() && uses_text_protocol(sql.as_str()) {
+                    // Statements that MySQL refuses to prepare stay on
+                    // the text protocol; their result columns are
+                    // ignored anyway (transaction control, USE, ...).
                     let result = conn
                         .query_iter(sql.as_str())
                         .await
                         .map_err(|e| Error::Query(e.to_string()))?;
                     collect_text(result, started).await
                 } else {
+                    // Everything else goes through the binary protocol
+                    // so column type information is preserved (bug H4).
+                    // Parameterless calls use `Params::Empty` rather
+                    // than `Params::Positional(vec![])` because the
+                    // server treats them differently for some
+                    // statements.
+                    let params = if bound.is_empty() {
+                        Params::Empty
+                    } else {
+                        Params::Positional(bound)
+                    };
                     let result = conn
-                        .exec_iter(sql.as_str(), Params::Positional(bound))
+                        .exec_iter(sql.as_str(), params)
                         .await
                         .map_err(|e| Error::Query(e.to_string()))?;
                     collect_binary(result, started).await
@@ -648,20 +662,87 @@ async fn collect_binary(
     })
 }
 
+/// Statements whose leading keyword forces them onto MySQL's text
+/// protocol. The server refuses to prepare these — transaction
+/// control, session state, catalogue introspection, lock management,
+/// bulk load — so `exec_iter` would fail with a protocol error.
+const TEXT_PROTOCOL_KEYWORDS: &[&str] = &[
+    "SAVEPOINT",
+    "RELEASE",
+    "ROLLBACK",
+    "START",
+    "BEGIN",
+    "COMMIT",
+    "USE",
+    "SET",
+    "SHOW",
+    "DESCRIBE",
+    "DESC",
+    "EXPLAIN",
+    "LOCK",
+    "UNLOCK",
+    "FLUSH",
+    "RESET",
+    "KILL",
+    "PURGE",
+    "LOAD",
+    "HANDLER",
+];
+
 /// Decides whether an SQL statement must travel over MySQL's *text*
 /// protocol rather than the binary prepared-statement protocol.
 ///
-/// MySQL refuses to prepare a handful of administrative statements
-/// (transaction control, session state, catalogue queries, lock
-/// management, bulk load). Without this guard those statements would
-/// have to be sent without parameters via `exec_iter`, which the
-/// server then rejects with a protocol-level error. Returning `true`
-/// keeps `query_iter` (text protocol) for those leading keywords.
-///
-/// NOTE: until H4 is fixed, this helper always returns `true` so the
-/// existing "no params → text protocol" behaviour is preserved.
-fn uses_text_protocol(_sql: &str) -> bool {
-    true
+/// The leading keyword (after skipping ASCII whitespace and a single
+/// run of `--` / `/* ... */` comments) is matched case-insensitively
+/// against [`TEXT_PROTOCOL_KEYWORDS`]. Anything else — including the
+/// empty input — routes through the binary protocol so column types
+/// survive intact (see bug H4).
+fn uses_text_protocol(sql: &str) -> bool {
+    let Some(keyword) = leading_keyword(sql) else {
+        return false;
+    };
+    TEXT_PROTOCOL_KEYWORDS
+        .iter()
+        .any(|kw| keyword.eq_ignore_ascii_case(kw))
+}
+
+/// Returns the first SQL keyword in `sql`, skipping ASCII whitespace
+/// and any leading run of `--` line comments and `/* ... */` block
+/// comments. Returns `None` when the input is empty or comment-only.
+fn leading_keyword(sql: &str) -> Option<&str> {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            // Skip the closing `*/` (or stop at EOF).
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        break;
+    }
+    let start = i;
+    while i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        i += 1;
+    }
+    if start == i {
+        None
+    } else {
+        Some(&sql[start..i])
+    }
 }
 
 /// Maps the `information_schema.tables.TABLE_TYPE` string into
