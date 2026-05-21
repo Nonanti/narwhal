@@ -255,13 +255,4 @@ pub fn render_help_modal(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-pub(crate) fn centred(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
-}
+pub(crate) use super::centred_rect as centred;

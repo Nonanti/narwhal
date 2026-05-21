@@ -41,9 +41,6 @@ pub const RESULT_MIN_COLUMN_WIDTH: usize = 6;
 /// Maximum width (in cells) a result-grid column may auto-expand to.
 pub const RESULT_MAX_COLUMN_WIDTH: usize = 40;
 
-/// Width (in cells) of the line-number gutter in the editor pane.
-/// Matches the formatter `"NNN \u2502 "`.
-pub const EDITOR_GUTTER_WIDTH: usize = 6;
 
 /// Render throttle for streaming queries — collapses bursty
 /// `RowsAppended` updates into one frame redraw per interval.

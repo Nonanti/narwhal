@@ -94,7 +94,12 @@ impl AppCore {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 CtKey::Char('w') => {
-                    self.focus = self.focus.cycle();
+                    // Shift+Ctrl+W cycles backwards (L27).
+                    self.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        self.focus.cycle_back()
+                    } else {
+                        self.focus.cycle()
+                    };
                     self.status.message = format!("focus → {}", self.focus.label());
                     return true;
                 }

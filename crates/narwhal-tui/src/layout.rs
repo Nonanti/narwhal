@@ -46,10 +46,22 @@ pub enum Pane {
 
 impl Pane {
     pub fn cycle(self) -> Self {
+        // Same-crate enum is exhaustively matched; the `#[non_exhaustive]`
+        // attribute only forces wildcards on downstream consumers.
         match self {
             Pane::Sidebar => Pane::Editor,
             Pane::Editor => Pane::Results,
             Pane::Results => Pane::Sidebar,
+        }
+    }
+
+    /// Reverse-cycle counterpart to [`Pane::cycle`] (L27). Used by
+    /// `Shift-Ctrl+W` to walk the focus chain backwards.
+    pub fn cycle_back(self) -> Self {
+        match self {
+            Pane::Sidebar => Pane::Results,
+            Pane::Editor => Pane::Sidebar,
+            Pane::Results => Pane::Editor,
         }
     }
 

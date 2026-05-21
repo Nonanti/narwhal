@@ -1,5 +1,20 @@
 //! Reusable widgets.
 
+use ratatui::layout::Rect;
+
+/// Centre `(width × height)` inside `area`. Used by every modal that
+/// renders as a centred popup. Lived in four widget files before L25.
+pub(crate) fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    }
+}
+
 pub mod editor;
 pub mod help;
 pub mod history;

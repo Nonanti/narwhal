@@ -60,7 +60,9 @@ pub(crate) fn find_all(buffer: &str, needle: &str) -> Vec<(usize, usize)> {
         let mut start = 0;
         while let Some(pos) = line[start..].find(needle) {
             out.push((line_idx, start + pos));
-            start += pos + needle.len().max(1);
+            // L32: the empty-needle case returns early above, so
+            // `needle.len()` is always >= 1; the old `.max(1)` was dead.
+            start += pos + needle.len();
         }
     }
     out
