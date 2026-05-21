@@ -8,7 +8,14 @@
 //! Submodules under `core/` host pure helpers extracted from this file as
 //! part of the L21 split. They never touch [`AppCore`] state directly.
 
+mod plugin_executor;
+mod render_helpers;
 mod text_utils;
+use plugin_executor::{AppPluginExecutor, PluginConnectionState};
+use render_helpers::{
+    display_from_state, extract_explain_plan, is_explain_result, sidebar_depth, sidebar_kind,
+    sidebar_label,
+};
 use text_utils::{
     find_all, longest_common_prefix, replace_all, replace_first, row_col_to_offset,
     split_head_arg, truncate,
@@ -28,8 +35,8 @@ use narwhal_tui::{
     render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
     render_wizard, translate_key_event, CellEditView, CellPopup, CompletionItemView,
     CompletionPopupView, EditorBuffer, EditorSearchHighlight, ExplainPlanLine, HistoryModalState,
-    HistoryRow, LayoutRegions, Pane, ResultDisplay, ResultView, RootLayout, RowDetailView,
-    SearchHighlight, SidebarRow, SidebarRowKind, SidebarView, SnippetsModalState, SortDir,
+    HistoryRow, LayoutRegions, Pane, ResultView, RootLayout, RowDetailView,
+    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, SortDir,
     StatusBarView, Theme, WizardFieldView, WizardView,
 };
 use narwhal_vim::{Action, Mode, Operator, SearchDirection, Vim};
@@ -45,7 +52,7 @@ use crate::commands::{parse, Command, DumpTarget, IsolationArg};
 use crate::completion::{detect_context, gather as gather_completions, Completion, CompletionKind};
 use crate::ddl::{build_dump, build_table_ddl};
 use crate::editor::{all_statements, statement_at_cursor};
-use crate::explain::{parse as parse_plan, wrap_explain};
+use crate::explain::wrap_explain;
 use crate::export::{export_rows, ExportFormat};
 use crate::meta::{spawn_meta_request, MetaRequest, MetaUpdate};
 use crate::registry::DriverRegistry;
@@ -385,7 +392,7 @@ impl Tab {
 
 /// Internal entry in the rendered sidebar list.
 #[derive(Debug, Clone)]
-enum SidebarItem {
+pub(super) enum SidebarItem {
     Connection {
         #[allow(dead_code)]
         id: Uuid,
@@ -4725,137 +4732,9 @@ impl AppCore {
     }
 }
 
-fn is_explain_result(columns: &[ColumnHeader]) -> bool {
-    columns.len() == 1 && columns[0].name.eq_ignore_ascii_case("QUERY PLAN")
-}
-
-fn extract_explain_plan(rows: &[Row]) -> Result<crate::explain::ExplainPlan, String> {
-    let row = rows
-        .first()
-        .ok_or_else(|| "empty explain result".to_owned())?;
-    let value = row
-        .0
-        .first()
-        .ok_or_else(|| "explain row missing column".to_owned())?;
-    let json_text = match value {
-        narwhal_core::Value::Json(v) => v.to_string(),
-        narwhal_core::Value::String(s) | narwhal_core::Value::Unknown(s) => s.clone(),
-        other => other.render(),
-    };
-    parse_plan(&json_text)
-}
-
-fn display_from_state<'a>(
-    state: &'a ResultState,
-    search: Option<&'a SearchHighlight<'a>>,
-) -> ResultDisplay<'a> {
-    match state {
-        ResultState::Empty => ResultDisplay::Empty,
-        ResultState::Running {
-            sql,
-            index,
-            total,
-            columns,
-            rows,
-            streaming,
-            started_at,
-            ..
-        } => ResultDisplay::Running {
-            sql,
-            index: *index,
-            total: *total,
-            columns,
-            rows,
-            streaming: *streaming,
-            started_at: *started_at,
-        },
-        ResultState::Affected {
-            rows,
-            elapsed_ms,
-            index,
-            total,
-        } => ResultDisplay::Affected {
-            rows: *rows,
-            elapsed_ms: *elapsed_ms,
-            index: *index,
-            total: *total,
-        },
-        ResultState::Rows {
-            columns,
-            rows,
-            elapsed_ms,
-            streamed,
-            index,
-            total,
-            source: _,
-            source_table: _,
-        } => ResultDisplay::Rows {
-            columns,
-            rows,
-            elapsed_ms: *elapsed_ms,
-            streamed: *streamed,
-            index: *index,
-            total: *total,
-            search,
-        },
-        ResultState::Explain {
-            lines,
-            planning_time_ms,
-            execution_time_ms,
-        } => ResultDisplay::Explain {
-            lines,
-            planning_time_ms: *planning_time_ms,
-            execution_time_ms: *execution_time_ms,
-        },
-        ResultState::TableDetail { schema } => ResultDisplay::TableDetail { schema },
-        ResultState::Cancelled {
-            rows_so_far,
-            elapsed_ms,
-        } => ResultDisplay::Cancelled {
-            rows_so_far: *rows_so_far,
-            elapsed_ms: *elapsed_ms,
-        },
-        ResultState::Error {
-            message,
-            elapsed_ms,
-        } => ResultDisplay::Error {
-            message,
-            elapsed_ms: *elapsed_ms,
-        },
-    }
-}
-
-fn sidebar_label(item: &SidebarItem) -> String {
-    match item {
-        SidebarItem::Connection { name, driver, .. } => format!("{name} ({driver})"),
-        SidebarItem::Schema { name } => name.clone(),
-        SidebarItem::Table { name, .. } => name.clone(),
-    }
-}
-
-fn sidebar_depth(item: &SidebarItem) -> u8 {
-    match item {
-        SidebarItem::Connection { .. } => 0,
-        SidebarItem::Schema { .. } => 1,
-        SidebarItem::Table { .. } => 2,
-    }
-}
-
-fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
-    match item {
-        SidebarItem::Connection { active: true, .. } => SidebarRowKind::ActiveConnection,
-        SidebarItem::Connection { .. } => SidebarRowKind::Connection,
-        SidebarItem::Schema { .. } => SidebarRowKind::Schema,
-        SidebarItem::Table { kind, .. } => match kind {
-            TableKind::Table => SidebarRowKind::Table,
-            TableKind::View => SidebarRowKind::View,
-            TableKind::MaterializedView => SidebarRowKind::MaterializedView,
-            TableKind::SystemTable => SidebarRowKind::SystemTable,
-            // Future TableKind variants: classify as a regular table.
-            _ => SidebarRowKind::Table,
-        },
-    }
-}
+// `is_explain_result`, `extract_explain_plan`, `display_from_state`,
+// `sidebar_label`, `sidebar_depth`, and `sidebar_kind` moved to
+// `core::render_helpers` (L21).
 
 fn map_isolation(arg: IsolationArg) -> IsolationLevel {
     // IsolationArg is `#[non_exhaustive]` but lives in the same crate, so a
@@ -4879,68 +4758,8 @@ fn isolation_label(level: IsolationLevel) -> &'static str {
     }
 }
 
-/// Shared state read by every plugin SQL executor on every
-/// `narwhal.sql_run` call. Owned by [`AppCore`] inside an
-/// `Arc<std::sync::Mutex<_>>` so:
-///
-/// * opening/closing a session can retarget plugin SQL transparently
-///   without rebuilding plugin objects;
-/// * `:begin`/`:commit`/`:rollback` can flip the in-transaction flag so
-///   the executor refuses to run during a pinned transaction (a fresh
-///   pool connection wouldn't see uncommitted state — silent
-///   correctness bug otherwise);
-/// * the plain `std::sync::Mutex` is fine because every access is short
-///   (clone the pool out, drop the guard) and never spans an `.await`.
-#[derive(Default)]
-pub(crate) struct PluginConnectionState {
-    pub(crate) pool: Option<narwhal_pool::Pool>,
-    pub(crate) in_transaction: bool,
-}
-
-/// SQL executor injected into every Lua plugin loaded by AppCore.
-///
-/// Reads [`PluginConnectionState`] on every call so the script always
-/// targets the *currently active* connection. Refuses to run while a
-/// `:begin` transaction is open — see the doc-comment on
-/// [`PluginConnectionState`] for why.
-///
-/// ### Memory footprint
-///
-/// `narwhal.sql_run` materialises the whole result set in memory before
-/// returning to Lua. Scripts that query unbounded tables can OOM the
-/// process; recommend `LIMIT` in the user-facing docs. Streaming
-/// support is a future addition.
-struct AppPluginExecutor {
-    state: Arc<std::sync::Mutex<PluginConnectionState>>,
-}
-
-#[async_trait::async_trait]
-impl SqlExecutor for AppPluginExecutor {
-    async fn run(&self, sql: &str) -> PluginResult<narwhal_core::QueryResult> {
-        // Grab a snapshot of the state and drop the guard *before* we
-        // touch any async API.
-        let (pool, in_tx) = {
-            let guard = self
-                .state
-                .lock()
-                .map_err(|e| PluginError::Runtime(format!("plugin state poisoned: {e}")))?;
-            (guard.pool.clone(), guard.in_transaction)
-        };
-        if in_tx {
-            return Err(PluginError::Runtime(
-                "narwhal.sql_run is unavailable while a :begin transaction is open".into(),
-            ));
-        }
-        let pool = pool.ok_or_else(|| PluginError::Runtime("no active connection".into()))?;
-        let mut conn = pool
-            .acquire()
-            .await
-            .map_err(|e| PluginError::Runtime(format!("could not acquire connection: {e}")))?;
-        conn.execute(sql, &[])
-            .await
-            .map_err(|e| PluginError::Runtime(format!("execute: {e}")))
-    }
-}
+// `PluginConnectionState` and `AppPluginExecutor` moved to
+// `core::plugin_executor` (L21).
 
 // Tiny text helpers moved to `text_utils.rs` (see top-of-file `mod text_utils;`).
 // The original `split_head_arg` doc and a handful of pure helpers now live
