@@ -90,9 +90,17 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Tracks elapsed time for a single plugin invocation against a
 /// configured budget. Used inside the mlua hook callback to decide
 /// whether the invocation has exceeded its time limit.
+/// Tracks elapsed time for a single plugin invocation against a
+/// configured budget. Used inside the mlua hook callback to decide
+/// whether the invocation has exceeded its time limit.
+///
+/// All fields are lock-free: `started_at` and `budget` are immutable
+/// after construction, and `timed_out` is an `AtomicBool` so the
+/// hook closure can read/write it without a `Mutex`.
 struct InvocationTimeout {
     started_at: Instant,
     budget: Duration,
+    timed_out: AtomicBool,
 }
 
 impl InvocationTimeout {
@@ -100,15 +108,12 @@ impl InvocationTimeout {
         Self {
             started_at: Instant::now(),
             budget: budget.max(Duration::from_millis(1)),
+            timed_out: AtomicBool::new(false),
         }
     }
 
-    fn elapsed(&self) -> Duration {
-        self.started_at.elapsed()
-    }
-
     fn exceeded(&self) -> bool {
-        self.elapsed() >= self.budget
+        self.started_at.elapsed() >= self.budget
     }
 }
 
@@ -457,21 +462,16 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
             .map_err(|e| PluginError::Handler(e.to_string()));
     }
 
-    let timeout_state = Arc::new(Mutex::new(InvocationTimeout::new(budget)));
-    let timeout_hook = timeout_state.clone();
-    let timeout_err = timeout_state.clone();
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let timed_out_hook = timed_out.clone();
+    let timeout = Arc::new(InvocationTimeout::new(budget));
+    let timeout_hook = timeout.clone();
+    let timeout_err = timeout.clone();
 
     lua.set_hook(HookTriggers::EVERY_LINE, move |_lua, _debug| {
-        let t = timeout_hook
-            .lock()
-            .map_err(|_| mlua::Error::RuntimeError("timeout mutex poisoned".into()))?;
-        if t.exceeded() {
-            timed_out_hook.store(true, Ordering::Relaxed);
+        if timeout_hook.exceeded() {
+            timeout_hook.timed_out.store(true, Ordering::Release);
             Err(mlua::Error::RuntimeError(format!(
                 "plugin timed out after {:.1}s",
-                t.elapsed().as_secs_f64()
+                timeout_hook.started_at.elapsed().as_secs_f64()
             )))
         } else {
             Ok(VmState::Continue)
@@ -487,10 +487,9 @@ fn call_handler_with_timeout<A: mlua::IntoLuaMulti>(
     match result {
         Ok(v) => Ok(v),
         Err(e) => {
-            if timed_out.load(Ordering::Relaxed) {
-                let elapsed = timeout_err.lock().map(|t| t.elapsed()).unwrap_or(budget);
+            if timeout_err.timed_out.load(Ordering::Acquire) {
                 Err(PluginError::Timeout {
-                    elapsed_secs: elapsed.as_secs_f64(),
+                    elapsed_secs: timeout_err.started_at.elapsed().as_secs_f64(),
                 })
             } else {
                 Err(PluginError::Handler(e.to_string()))
