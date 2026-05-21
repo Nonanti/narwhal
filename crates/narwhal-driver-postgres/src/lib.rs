@@ -126,6 +126,11 @@ impl DatabaseDriver for PostgresDriver {
             client: Arc::new(client),
             tls_mode: sslmode,
             params: Arc::new(config.params.clone()),
+            prepared_cache: std::sync::Mutex::new(
+                lru::LruCache::new(
+                    std::num::NonZeroUsize::new(64).expect("64 is nonzero")
+                )
+            ),
         }))
     }
 }
@@ -220,6 +225,9 @@ pub struct PostgresConnection {
     /// so it can use the same TLS configuration.
     tls_mode: InternalSslMode,
     params: Arc<ConnectionParams>,
+    /// Prepared statement cache (M9). Avoids a prepare round-trip
+    /// for repeated admin/schema queries.
+    prepared_cache: std::sync::Mutex<lru::LruCache<String, tokio_postgres::Statement>>,
 }
 
 fn map_pg_error(error: tokio_postgres::Error) -> Error {
@@ -426,11 +434,30 @@ fn extract_csv(value: Option<&Value>) -> Vec<String> {
 }
 
 impl PostgresConnection {
+    /// Prepare the statement, using the LRU cache when possible to
+    /// avoid repeated prepare round-trips (M9).
+    async fn prepare_cached(&self, sql: &str) -> Result<tokio_postgres::Statement> {
+        // Check cache first (sync lock, very brief).
+        {
+            let mut cache = self.prepared_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(stmt) = cache.get(sql) {
+                return Ok(stmt.clone());
+            }
+        }
+        // Not cached — prepare on the server.
+        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        {
+            let mut cache = self.prepared_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.put(sql.to_owned(), statement.clone());
+        }
+        Ok(statement)
+    }
+
     /// Prepare the statement, then route to `query` or `execute` based on
     /// whether the statement returns rows.
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let started = Instant::now();
-        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        let statement = self.prepare_cached(sql).await?;
 
         let bindings: Vec<Param<'_>> = params.iter().map(Param).collect();
         let param_refs: Vec<&(dyn ToSql + Sync)> =
@@ -490,7 +517,7 @@ impl Connection for PostgresConnection {
     }
 
     async fn stream(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn RowStream>> {
-        let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
+        let statement = self.prepare_cached(sql).await?;
 
         let columns: Vec<ColumnHeader> = statement
             .columns()
