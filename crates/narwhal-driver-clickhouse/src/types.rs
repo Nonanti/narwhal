@@ -564,6 +564,24 @@ mod tests {
     }
 
     #[test]
+    fn sql_literal_float_nan_renders_as_function() {
+        let result = value_to_sql_literal(&Value::Float(f64::NAN));
+        assert_eq!(result, "nan()");
+    }
+
+    #[test]
+    fn sql_literal_float_inf_renders_as_function() {
+        let result = value_to_sql_literal(&Value::Float(f64::INFINITY));
+        assert_eq!(result, "inf()");
+    }
+
+    #[test]
+    fn sql_literal_float_neg_inf_renders_with_sign() {
+        let result = value_to_sql_literal(&Value::Float(f64::NEG_INFINITY));
+        assert_eq!(result, "-inf()");
+    }
+
+    #[test]
     fn sql_literal_bytes_hex() {
         let result = value_to_sql_literal(&Value::Bytes(vec![0xDE, 0xAD]));
         assert!(result.starts_with("unhex('"));
