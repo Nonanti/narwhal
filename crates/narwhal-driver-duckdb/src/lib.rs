@@ -130,6 +130,25 @@ pub struct DuckdbConnection {
 }
 
 impl DuckdbConnection {
+    /// Look up the table kind (Table/View) from duckdb_views and duckdb_tables.
+    async fn lookup_table_kind(&self, schema: &str, name: &str) -> Result<TableKind> {
+        const SQL: &str = "
+            SELECT 'view' AS kind FROM duckdb_views() WHERE schema_name = ? AND view_name = ?
+            UNION ALL
+            SELECT 'table' AS kind FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?
+            LIMIT 1";
+        let s = Value::String(schema.to_owned());
+        let n = Value::String(name.to_owned());
+        let result = self.run(SQL, &[s.clone(), n.clone(), s, n]).await?;
+        match result.rows.into_iter().next() {
+            Some(row) => match row.0.first() {
+                Some(Value::String(k)) if k.eq_ignore_ascii_case("view") => Ok(TableKind::View),
+                _ => Ok(TableKind::Table),
+            },
+            None => Ok(TableKind::Table),
+        }
+    }
+
     async fn run(&self, sql: &str, params: &[Value]) -> Result<QueryResult> {
         let inner = self.inner.clone();
         let sql = sql.to_owned();
@@ -629,6 +648,9 @@ impl Connection for DuckdbConnection {
             })
             .collect();
 
+        // Look up the table kind from duckdb_views + duckdb_tables (M11).
+        let kind = self.lookup_table_kind(schema, name).await?;
+
         let indexes = match describe_indexes(self, schema, name).await {
             Ok(v) => v,
             Err(error) => {
@@ -664,7 +686,7 @@ impl Connection for DuckdbConnection {
             table: Table {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
-                kind: TableKind::Table,
+                kind,
             },
             columns,
             indexes,
