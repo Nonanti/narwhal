@@ -3322,6 +3322,14 @@ impl AppCore {
     fn dispatch_plugin(&mut self, command: &str, argument: &str) {
         let editor_text = self.tabs[self.active_tab].editor.entire_text();
         let ctx = PluginCommandContext::new(argument).with_editor_text(&editor_text);
+        // Resolve the owning plugin name *before* dispatch so the timeout
+        // handler reports the correct plugin even if two plugins share
+        // the same command head (H20).
+        let plugin_name = self
+            .plugins
+            .plugin_for(command)
+            .map(|p| p.name().to_owned())
+            .unwrap_or_else(|| command.to_owned());
         let plugins = Arc::clone(&self.plugins);
         let command_owned = command.to_owned();
         // Plugin dispatch is async by trait definition; bridge to the
@@ -3347,13 +3355,10 @@ impl AppCore {
                 self.status.message = format!("unknown command: {name}");
             }
             Err(PluginError::Timeout { elapsed_secs }) => {
-                let plugin_name = self
-                    .plugins
-                    .plugin_for(command)
-                    .map(|p| p.name().to_owned())
-                    .unwrap_or_else(|| command.to_owned());
-                self.status.message =
-                    format!("plugin {plugin_name}: timed out after {elapsed_secs:.1}s");
+                self.status.message = format!(
+                    "plugin `{plugin_name}` exceeded execution timeout ({elapsed_secs:.1}s); \
+                     adjust with `narwhal.set_timeout(secs)` in the plugin script"
+                );
             }
             Err(error) => {
                 self.status.message = format!("plugin error: {error}");
