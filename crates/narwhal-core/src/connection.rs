@@ -136,6 +136,29 @@ pub trait Connection: Send + Sync {
     /// List tables and views inside `schema`.
     async fn list_tables(&mut self, schema: &str) -> Result<Vec<Table>>;
 
+    /// List every table/view across every visible schema in a single
+    /// round trip when the driver can express it cheaply.
+    ///
+    /// The default implementation falls back to
+    /// [`list_schemas`](Connection::list_schemas) followed by one
+    /// [`list_tables`](Connection::list_tables) per schema, which is
+    /// the historical N+1 path. Drivers that expose a catalogue
+    /// (`information_schema.tables`, `sqlite_master`, `system.tables`)
+    /// override this to issue a single query.
+    ///
+    /// Returned schemas preserve the order produced by `list_schemas`;
+    /// tables inside each schema preserve the order produced by
+    /// `list_tables`.
+    async fn list_all_tables(&mut self) -> Result<Vec<(Schema, Vec<Table>)>> {
+        let schemas = self.list_schemas().await?;
+        let mut out = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let tables = self.list_tables(&schema.name).await?;
+            out.push((schema, tables));
+        }
+        Ok(out)
+    }
+
     /// Describe the columns, defaults and constraints of `schema.name`.
     async fn describe_table(&mut self, schema: &str, name: &str) -> Result<TableSchema>;
 
