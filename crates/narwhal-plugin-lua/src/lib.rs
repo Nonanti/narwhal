@@ -650,6 +650,9 @@ fn value_to_lua(lua: &Lua, value: &Value) -> LuaResult<LuaValue> {
         | Value::Uuid(_)
         | Value::Json(_)
         | Value::Unknown(_) => LuaValue::String(lua.create_string(value.render())?),
+        // Forward-compatible fallback for future `Value` variants — surface the
+        // canonical rendered form so Lua sees a string.
+        _ => LuaValue::String(lua.create_string(value.render())?),
     })
 }
 

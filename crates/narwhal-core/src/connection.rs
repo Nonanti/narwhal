@@ -16,6 +16,7 @@ use crate::value::Value;
 /// kebab-case in TOML (`"verify-full"`, `"verify-ca"`, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum SslMode {
     Disable,
     #[default]
@@ -71,6 +72,7 @@ pub struct ConnectionParams {
 /// Drivers map this to the engine's native syntax; unsupported levels yield
 /// [`crate::Error::Unsupported`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum IsolationLevel {
     ReadUncommitted,
     ReadCommitted,

@@ -37,6 +37,7 @@ pub struct LayoutRegions {
 
 /// Indicates which pane currently owns keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Pane {
     Sidebar,
     Editor,
@@ -173,6 +174,8 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         Mode::Command | Mode::Visual | Mode::VisualLine => view.theme.mode_command(),
         Mode::OperatorPending(_) => view.theme.mode_command(),
         Mode::Normal => view.theme.mode_normal(),
+        // Future vim modes fall back to the normal style until styled explicitly.
+        _ => view.theme.mode_normal(),
     };
 
     let mode_label = format!(" {} ", view.mode.short_label());

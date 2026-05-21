@@ -7,6 +7,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CredentialError {
     #[error("credential not found")]
     NotFound,

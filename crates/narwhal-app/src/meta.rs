@@ -18,6 +18,7 @@ use narwhal_tui::SchemaListing;
 
 /// A request to perform a metadata operation in the background.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MetaRequest {
     /// Fetch DDL for every table in the current session's schema listing.
     DumpSchemaAll {
@@ -38,6 +39,7 @@ pub enum MetaRequest {
 /// The result of a background metadata operation, delivered back to
 /// the event loop via the meta channel.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MetaUpdate {
     /// Response to [`MetaRequest::DumpSchemaAll`].
     DumpSchemaReady {

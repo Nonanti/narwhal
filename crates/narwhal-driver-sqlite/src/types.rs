@@ -22,6 +22,9 @@ pub(crate) fn value_to_sql(value: &Value) -> SqlValue {
         Value::Uuid(v) => SqlValue::Text(v.to_string()),
         Value::Json(v) => SqlValue::Text(v.to_string()),
         Value::Unknown(v) => SqlValue::Text(v.clone()),
+        // Future Value variants: forward as canonical Debug repr so SQLite stays
+        // forward-compatible until a typed conversion lands.
+        other => SqlValue::Text(format!("{other:?}")),
     }
 }
 

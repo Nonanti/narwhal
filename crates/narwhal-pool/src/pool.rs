@@ -8,6 +8,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PoolError {
     #[error("pool is closed")]
     Closed,

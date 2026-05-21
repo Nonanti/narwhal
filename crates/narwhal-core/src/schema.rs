@@ -9,6 +9,7 @@ pub struct Schema {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum TableKind {
     Table,
     View,
@@ -74,6 +75,7 @@ pub struct ForeignKey {
 
 /// Referential action declared on a foreign key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ReferentialAction {
     NoAction,
     Restrict,

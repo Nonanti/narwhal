@@ -72,6 +72,7 @@ pub struct StatusBar {
 
 /// What the result pane is currently showing.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub enum ResultState {
     #[default]
     Empty,
@@ -1254,6 +1255,8 @@ impl AppCore {
             Pane::Editor => self.handle_editor_key(key),
             Pane::Sidebar => self.handle_sidebar_key(key),
             Pane::Results => self.handle_results_key(key),
+            // Future panes fall through to the editor handler until wired.
+            _ => self.handle_editor_key(key),
         }
     }
 
@@ -1650,6 +1653,8 @@ impl AppCore {
         let prompt_char = match direction {
             SearchDirection::Forward => '/',
             SearchDirection::Backward => '?',
+            // Future search directions: default to forward prompt.
+            _ => '/',
         };
         self.status.message = format!("{prompt_char}");
     }
@@ -1696,6 +1701,8 @@ impl AppCore {
                 let prompt_char = match self.tabs[self.active_tab].editor_search.direction {
                     SearchDirection::Forward => '/',
                     SearchDirection::Backward => '?',
+                    // Future search directions: default to forward prompt.
+                    _ => '/',
                 };
                 self.status.message = format!("{prompt_char}{needle}");
             }
@@ -1707,6 +1714,8 @@ impl AppCore {
                 let prompt_char = match self.tabs[self.active_tab].editor_search.direction {
                     SearchDirection::Forward => '/',
                     SearchDirection::Backward => '?',
+                    // Future search directions: default to forward prompt.
+                    _ => '/',
                 };
                 self.status.message = format!("{prompt_char}{needle}");
             }
@@ -1779,6 +1788,20 @@ impl AppCore {
                     }
                 })
             }
+            // Future search directions: treat as forward.
+            _ => tab
+                .editor_search
+                .matches
+                .iter()
+                .position(|&(l, c)| {
+                    let m_byte = row_col_to_offset(&tab.editor, l, c);
+                    m_byte > cursor_byte
+                })
+                .or(if tab.editor_search.matches.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                }),
         };
 
         if let Some(i) = idx {
@@ -1828,6 +1851,9 @@ impl AppCore {
             (SearchDirection::Forward, true) => false,
             (SearchDirection::Backward, false) => false,
             (SearchDirection::Backward, true) => true,
+            // Future directions default to forward.
+            (_, false) => true,
+            (_, true) => false,
         };
 
         let count = tab.editor_search.matches.len();
@@ -2735,6 +2761,8 @@ impl AppCore {
             Some((c, SortDir::Asc)) => format!("sort: column {} ascending", c + 1),
             Some((c, SortDir::Desc)) => format!("sort: column {} descending", c + 1),
             None => "sort: cleared".into(),
+            // Future SortDir variants: fall back to ascending wording.
+            Some((c, _)) => format!("sort: column {} (custom)", c + 1),
         };
         self.status.message = msg;
     }
@@ -2969,21 +2997,26 @@ impl AppCore {
                             Operator::Delete => "OPERATOR DELETE",
                             Operator::Yank => "OPERATOR YANK",
                             Operator::Change => "OPERATOR CHANGE",
+                            // Future operators surface as a generic label.
+                            _ => "OPERATOR",
                         }
                     ),
+                    // Future modes default to a generic status line.
+                    _ => "ready".into(),
                 };
             }
             Action::SubmitCommand(cmd) => self.execute_command(&cmd),
-            Action::Pending => {
-                if self.vim.mode() == Mode::Command {
-                    self.status.message = format!(":{}", self.vim.command_buffer());
-                }
+            Action::Pending if self.vim.mode() == Mode::Command => {
+                self.status.message = format!(":{}", self.vim.command_buffer());
             }
+            Action::Pending => {}
             Action::PromptComplete => self.complete_prompt(),
             Action::OpenSearch(dir) => self.open_editor_search(dir),
             Action::RepeatSearch => self.repeat_editor_search(false),
             Action::RepeatSearchReverse => self.repeat_editor_search(true),
             Action::Operate { .. } => {}
+            // Future Action variants are silently ignored until wired.
+            _ => {}
         }
     }
 
@@ -3347,6 +3380,8 @@ impl AppCore {
             Err(error) => {
                 self.status.message = format!("plugin error: {error}");
             }
+            // Future PluginCommandOutcome variants: silent fallback.
+            Ok(_) => {}
         }
     }
 
@@ -4805,11 +4840,15 @@ fn sidebar_kind(item: &SidebarItem) -> SidebarRowKind {
             TableKind::View => SidebarRowKind::View,
             TableKind::MaterializedView => SidebarRowKind::MaterializedView,
             TableKind::SystemTable => SidebarRowKind::SystemTable,
+            // Future TableKind variants: classify as a regular table.
+            _ => SidebarRowKind::Table,
         },
     }
 }
 
 fn map_isolation(arg: IsolationArg) -> IsolationLevel {
+    // IsolationArg is `#[non_exhaustive]` but lives in the same crate, so a
+    // wildcard arm would be reported as unreachable. Match all variants.
     match arg {
         IsolationArg::ReadUncommitted => IsolationLevel::ReadUncommitted,
         IsolationArg::ReadCommitted => IsolationLevel::ReadCommitted,
@@ -4824,6 +4863,8 @@ fn isolation_label(level: IsolationLevel) -> &'static str {
         IsolationLevel::ReadCommitted => "read-committed",
         IsolationLevel::RepeatableRead => "repeatable-read",
         IsolationLevel::Serializable => "serializable",
+        // Future IsolationLevel variants surface as a generic label.
+        _ => "isolation",
     }
 }
 

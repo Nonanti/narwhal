@@ -52,6 +52,7 @@ fn redact_secrets(sql: &str) -> Cow<'_, str> {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HistoryError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -62,6 +63,7 @@ pub enum HistoryError {
 /// Outcome of a recorded statement execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Outcome {
     Success,
     Cancelled,

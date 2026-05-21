@@ -35,6 +35,7 @@ impl Key {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum KeyCode {
     Char(char),
     Enter,

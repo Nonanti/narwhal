@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// expressed in one of the structured variants are preserved in
 /// [`Value::Unknown`] as their textual rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Value {
     Null,
     Bool(bool),

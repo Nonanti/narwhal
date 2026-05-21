@@ -29,6 +29,8 @@ pub(crate) fn value_to_sql(value: &Value) -> DuckValue {
         Value::Uuid(v) => DuckValue::Text(v.to_string()),
         Value::Json(v) => DuckValue::Text(v.to_string()),
         Value::Unknown(v) => DuckValue::Text(v.clone()),
+        // Forward-compatible: render any future variant as its Debug form.
+        other => DuckValue::Text(format!("{other:?}")),
     }
 }
 

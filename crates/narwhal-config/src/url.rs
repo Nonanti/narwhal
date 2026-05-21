@@ -29,6 +29,7 @@ pub struct ParsedUrl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UrlError {
     MissingScheme,
     UnsupportedScheme(String),
