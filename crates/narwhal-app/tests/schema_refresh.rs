@@ -1,12 +1,13 @@
 //! Integration tests for the `:refresh` command and auto-refresh on DDL.
 //!
-//! Six tests:
+//! Seven tests:
 //! 1. `manual_refresh_repopulates_sidebar`
 //! 2. `create_table_triggers_auto_refresh`
 //! 3. `drop_table_triggers_auto_refresh`
 //! 4. `non_ddl_no_refresh`
 //! 5. `batched_ddl_debounces`
 //! 6. `schema_refresh_skipped_when_session_changed` (bug C5)
+//! 7. `refresh_uses_list_all_tables` (H12 — single query path)
 
 use std::path::PathBuf;
 
@@ -291,5 +292,49 @@ async fn schema_refresh_skipped_when_session_changed() {
         "expected no \"schema refreshed\" status; was: {} (before: {})",
         core.status_message(),
         status_before
+    );
+}
+
+/// 7. (H12) `Session::refresh_schemas` now uses `Connection::list_all_tables`
+///    instead of the N+1 `list_schemas` + per-schema `list_tables` pattern.
+///    Verify end-to-end by opening a connection with multiple tables
+///    and ensuring refresh still works correctly (the default impl of
+///    `list_all_tables` falls back to N+1, but the call path is
+///    through `list_all_tables`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refresh_uses_list_all_tables() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("h12.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE one (id INTEGER PRIMARY KEY);
+             CREATE TABLE two (id INTEGER PRIMARY KEY);
+             CREATE TABLE three (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+    }
+
+    let (registry, connections) = fixture(db_path);
+    let mut core = AppCore::new(registry, connections, None);
+    core.execute_command("open headless");
+
+    // Initial refresh should see all 3 tables.
+    assert_eq!(table_count(&core), 3);
+
+    // Add a table externally.
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("h12.db")).unwrap();
+        conn.execute_batch("CREATE TABLE four (id INTEGER PRIMARY KEY)")
+            .unwrap();
+    }
+
+    // Manual refresh via the new list_all_tables path.
+    core.execute_command("refresh");
+    assert_eq!(table_count(&core), 4);
+    assert!(
+        core.status_message().contains("schema refreshed · 4 tables"),
+        "expected table count in status, got: {}",
+        core.status_message()
     );
 }
