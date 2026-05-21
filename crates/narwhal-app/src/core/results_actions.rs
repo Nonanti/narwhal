@@ -385,7 +385,13 @@ impl AppCore {
             self.status.message = "row went away under the editor".into();
             return;
         };
-        let new_value = crate::edit::parse_input(&edit.buffer);
+        // L34: prefer the typed parser so editing a `TEXT` column with
+        // the value `"true"` stays a string instead of becoming a bool.
+        let hint = columns
+            .iter()
+            .find(|c| c.name == edit.column_name)
+            .map(|c| c.data_type.as_str());
+        let new_value = crate::edit::parse_input_typed(&edit.buffer, hint);
         let column_order: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let dialect = session.dialect();
         let compiled = match crate::edit::build_update(

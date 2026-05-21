@@ -85,13 +85,32 @@ impl DatabaseDriver for SqliteDriver {
             .to_owned();
         let path_buf = PathBuf::from(&path);
 
-        debug!(target: "narwhal::sqlite", path = %path, "opening database");
+        // L11: log the absolute, canonicalised path when possible so a
+        // mistyped relative path or symlink mismatch is obvious from the
+        // log. We still pass the original `path_buf` to rusqlite so the
+        // user's exact spelling is what hits sqlite3_open (canonicalize
+        // would fail for in-memory `:memory:` and for not-yet-existing
+        // files we intend to create).
+        let canonical = std::fs::canonicalize(&path_buf)
+            .ok()
+            .map(|p| p.display().to_string());
+        debug!(
+            target: "narwhal::sqlite",
+            path = %path,
+            canonical = canonical.as_deref().unwrap_or("<unresolved>"),
+            "opening database"
+        );
         let conn = task::spawn_blocking(move || rusqlite::Connection::open(path_buf))
             .await
             .map_err(|e| Error::Other(e.to_string()))?
             .map_err(|e| Error::Connection(e.to_string()))?;
 
-        info!(target: "narwhal::sqlite", path = %path, "database opened");
+        info!(
+            target: "narwhal::sqlite",
+            path = %path,
+            canonical = canonical.as_deref().unwrap_or("<unresolved>"),
+            "database opened"
+        );
         Ok(Box::new(SqliteConnection {
             inner: Arc::new(Mutex::new(conn)),
         }))

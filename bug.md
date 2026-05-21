@@ -669,7 +669,7 @@
 
 ---
 
-## H14 — `outcome_from_lua` `return true` reject + `{sql=42}` sessiz yutma
+## H14 ✅ — `outcome_from_lua` `return true` reject + `{sql=42}` sessiz yutma
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:391-422`
 - **Etki:**
@@ -1457,13 +1457,13 @@
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:597-606`
 
-## L11 — SQLite/DuckDB path traversal validasyonu yok
+## L11 ✅ — SQLite/DuckDB path canonical log
 
 - **Dosya:** `crates/narwhal-driver-sqlite/src/lib.rs:79-95`,
   `crates/narwhal-driver-duckdb/src/lib.rs:85-101`
 - **Düzeltme:** `validate()`'de `path.canonicalize()` ve UI'da tam yol göster.
 
-## L12 — Plugin `editor_text` doc yanlış
+## L12 ✅ — Plugin `editor_text` doc (mevcut doc doğru)
 
 - **Dosya:** `crates/narwhal-plugin-lua/src/lib.rs:317-322`
 
@@ -1510,11 +1510,11 @@
 - **Dosya:** `crates/narwhal-app/src/core.rs:3447,3448,3464,3660,3730,3876`
 - **Düzeltme:** `lock().unwrap_or_else(|e| e.into_inner())`.
 
-## L23 — `Tab` field'ları `pub` (API yüzeyi)
+## L23 ⏯️ Wave 6 — `Tab` field'ları `pub` (API yüzeyi) — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-app/src/core.rs`
 
-## L24 — Sidebar scroll yok
+## L24 ⏯️ Wave 6 — Sidebar scroll yok — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-tui/src/widgets/sidebar.rs:99-114`
 
@@ -1531,7 +1531,7 @@
 
 - **Dosya:** `crates/narwhal-tui/src/layout.rs:46-52`
 
-## L28 — `ClickHouse` query_tsv tüm gövdeyi `Vec<u8>`'e materialize
+## L28 ⏯️ Wave 6 — `ClickHouse` query_tsv tüm gövdeyi materialize — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:451-462`
 - **Düzeltme:** `execute()` belirli eşik üstü stream'e geçsin veya doc'a uyarı.
@@ -1545,7 +1545,7 @@
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:367-447`
 
-## L31 — MySQL `KILL QUERY` cancel desteği yok
+## L31 ⏯️ Wave 6 — MySQL `KILL QUERY` cancel desteği yok — bkz. plans/wave-6-followups.md
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:494-496`
 
@@ -1557,7 +1557,7 @@
 
 - **Dosya:** `crates/narwhal-app/src/core.rs:589, 3996-4000`
 
-## L34 — `parse_input` veri tipi tahmini agresif (`"true"` → bool)
+## L34 ✅ — `parse_input` veri tipi tahmini agresif (`"true"` → bool)
 
 - **Dosya:** `crates/narwhal-app/src/edit.rs:23-46`
 
