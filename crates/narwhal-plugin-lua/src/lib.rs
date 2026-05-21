@@ -251,10 +251,12 @@ impl LuaPlugin {
 
     /// Convenience: read a script from disk and call [`Self::from_script`].
     ///
-    /// The plugin's identifier is the file stem (e.g. `format_json.lua`
-    /// becomes `"format_json"`). For paths whose file name is not valid
-    /// UTF-8 we fall back to a path-derived hash so two such plugins
-    /// don't collide in the registry display.
+    /// The plugin's identifier is `"lua-{stem}"` where `stem` is the file
+    /// name without extension (e.g. `format_json.lua` becomes
+    /// `"lua-format_json""). For paths whose file name is not valid UTF-8
+    /// we fall back to a path-derived display string so two such plugins
+    /// don't collide in the registry display. The name is deterministic
+    /// across restarts — no randomized hash.
     pub fn from_path(path: impl AsRef<Path>) -> PluginResult<Self> {
         let path = path.as_ref();
         let source = std::fs::read_to_string(path)
@@ -262,13 +264,12 @@ impl LuaPlugin {
         let stem = if let Some(s) = path.file_stem().and_then(|s| s.to_str()) {
             s.to_owned()
         } else {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            path.hash(&mut h);
-            format!("lua-plugin-{:x}", h.finish())
+            // Non-UTF-8 file name: use the full path's lossy display as
+            // a stable identifier. No randomized hash.
+            format!("plugin-{}", path.display())
         };
-        Self::from_script(stem, &source)
+        let name = format!("lua-{stem}");
+        Self::from_script(name, &source)
     }
 }
 
@@ -1003,7 +1004,7 @@ mod tests {
         )
         .unwrap();
         let plugin = LuaPlugin::from_path(&path).unwrap();
-        assert_eq!(plugin.name(), "test");
+        assert_eq!(plugin.name(), "lua-test");
         let outcome = plugin
             .dispatch("ping", CommandContext::default())
             .await
@@ -1046,5 +1047,23 @@ mod tests {
             matches!(err, PluginError::Timeout { .. }),
             "expected Timeout, got: {err:?}"
         );
+    }
+
+    /// M19: Plugin name derived from file stem is deterministic across
+    /// separate loads (no randomized DefaultHasher).
+    #[test]
+    fn plugin_name_deterministic_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("my_plugin.lua");
+        std::fs::write(
+            &path,
+            r#"narwhal.register_command("x", "x", function() end)"#,
+        )
+        .unwrap();
+
+        let name1 = LuaPlugin::from_path(&path).unwrap().name().to_owned();
+        let name2 = LuaPlugin::from_path(&path).unwrap().name().to_owned();
+        assert_eq!(name1, name2, "plugin name should be deterministic");
+        assert_eq!(name1, "lua-my_plugin");
     }
 }
