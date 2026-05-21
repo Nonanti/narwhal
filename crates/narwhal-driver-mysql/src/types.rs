@@ -73,7 +73,7 @@ fn year_to_u16(year: i32) -> Result<u16, Error> {
         .map_err(|_| Error::Other(format!("year out of MySQL range (0..=65535): {year}")))
 }
 
-pub(crate) fn value_from_my(value: &MyValue) -> Value {
+pub(crate) fn value_from_my(value: &MyValue, _ty: ColumnType) -> Value {
     match value {
         MyValue::NULL => Value::Null,
         MyValue::Int(v) => Value::Int(*v),
