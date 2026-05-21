@@ -359,7 +359,7 @@
 
 ---
 
-## H4 — MySQL paramsız sorgu text protocol → INT kolonlar `Value::String`
+## H4 ✅ — MySQL paramsız sorgu text protocol → INT kolonlar `Value::String`
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:264-284`
 - **Mevcut:**
@@ -388,7 +388,7 @@
 
 ---
 
-## H5 — MySQL `stream()` aslında full buffer (kontratı yalan söylüyor)
+## H5 ✅ — MySQL `stream()` aslında full buffer (kontratı yalan söylüyor)
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:288-300`
 - **Mevcut:**
@@ -546,7 +546,7 @@
 
 ---
 
-## H10 — MySQL splitter `\'` backslash escape tanımıyor
+## H10 ✅ — MySQL splitter `\'` backslash escape tanımıyor
 
 - **Dosya:** `crates/narwhal-sql/src/splitter.rs:216-225`
 - **Etki:**
@@ -1083,7 +1083,7 @@
 
 ---
 
-## M10 — MySQL tek-kolonlu UNIQUE constraint'ler `len()>1` filtresiyle yutuluyor
+## M10 ✅ — MySQL tek-kolonlu UNIQUE constraint'ler `len()>1` filtresiyle yutuluyor
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:425-431`
 - **Etki:** `describe_table` UNIQUE constraint listesinde tek-kolon UNIQUE'ler
@@ -1536,12 +1536,12 @@
 - **Dosya:** `crates/narwhal-driver-clickhouse/src/lib.rs:451-462`
 - **Düzeltme:** `execute()` belirli eşik üstü stream'e geçsin veya doc'a uyarı.
 
-## L29 — `value_from_my` Bytes her zaman UTF-8 dener (BLOB → String)
+## L29 ✅ — `value_from_my` Bytes her zaman UTF-8 dener (BLOB → String)
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/types.rs:55-62`
 - **Düzeltme:** `column.column_type()` BLOB/VARBINARY ise zorla `Value::Bytes`.
 
-## L30 — MySQL view tipi `describe_table`'da işaretlenmiyor (M11'in MySQL eşi)
+## L30 ✅ — MySQL view tipi `describe_table`'da işaretlenmiyor (M11'in MySQL eşi)
 
 - **Dosya:** `crates/narwhal-driver-mysql/src/lib.rs:367-447`
 
