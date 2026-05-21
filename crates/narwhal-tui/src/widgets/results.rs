@@ -700,7 +700,9 @@ fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
 
-use crate::constants::{RESULT_MAX_COLUMN_WIDTH as MAX_COLUMN_WIDTH, RESULT_MIN_COLUMN_WIDTH as MIN_COLUMN_WIDTH};
+use crate::constants::{
+    RESULT_MAX_COLUMN_WIDTH as MAX_COLUMN_WIDTH, RESULT_MIN_COLUMN_WIDTH as MIN_COLUMN_WIDTH,
+};
 
 fn compute_column_widths(columns: &[ColumnHeader], rows: &[Row]) -> Vec<usize> {
     columns
@@ -809,7 +811,10 @@ pub fn sanitize_for_display(s: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(crate::constants::CELL_POPUP_MAX_WIDTH);
+    let width = area
+        .width
+        .saturating_sub(8)
+        .min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(12);
     if width < 20 || height < 5 {
         return;
@@ -860,7 +865,10 @@ fn draw_cell_edit(frame: &mut Frame<'_>, area: Rect, edit: &CellEditView, theme:
 }
 
 fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPopup, theme: &Theme) {
-    let width = area.width.saturating_sub(8).min(crate::constants::CELL_POPUP_MAX_WIDTH);
+    let width = area
+        .width
+        .saturating_sub(8)
+        .min(crate::constants::CELL_POPUP_MAX_WIDTH);
     let height = area.height.saturating_sub(4).min(20);
     if width < 20 || height < 5 {
         return;

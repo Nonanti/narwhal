@@ -12,8 +12,8 @@ use secrecy::ExposeSecret;
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::editor::{all_statements, statement_at_cursor};
 use super::{AppCore, ResultBundle, ResultState, ResultView, SidebarItem};
+use crate::editor::{all_statements, statement_at_cursor};
 use crate::meta::MetaRequest;
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
@@ -187,10 +187,8 @@ impl AppCore {
             self.status.message = "no active connection".into();
             return;
         };
-        let Some(sql) = statement_at_cursor(
-            &self.tabs[self.active_tab].editor,
-            session.dialect(),
-        ) else {
+        let Some(sql) = statement_at_cursor(&self.tabs[self.active_tab].editor, session.dialect())
+        else {
             self.status.message = "no statement under cursor".into();
             return;
         };
@@ -207,10 +205,7 @@ impl AppCore {
             self.status.message = "no active connection".into();
             return;
         };
-        let statements = all_statements(
-            &self.tabs[self.active_tab].editor,
-            session.dialect(),
-        );
+        let statements = all_statements(&self.tabs[self.active_tab].editor, session.dialect());
         if statements.is_empty() {
             self.status.message = "buffer contains no statements".into();
             return;
@@ -328,5 +323,4 @@ impl AppCore {
             }
         }
     }
-
 }

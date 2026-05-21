@@ -74,4 +74,3 @@ impl SqlExecutor for AppPluginExecutor {
             .map_err(|e| PluginError::Runtime(format!("execute: {e}")))
     }
 }
-

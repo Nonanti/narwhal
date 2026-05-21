@@ -1131,13 +1131,7 @@ struct ClickhouseCancel {
 #[async_trait]
 impl CancelHandle for ClickhouseCancel {
     async fn cancel(&self) -> Result<()> {
-        let query_ids: Vec<String> = self
-            .state
-            .active_queries
-            .lock()
-            .iter()
-            .cloned()
-            .collect();
+        let query_ids: Vec<String> = self.state.active_queries.lock().iter().cloned().collect();
 
         if query_ids.is_empty() {
             // No active queries — nothing to cancel.

@@ -1022,5 +1022,4 @@ impl AppCore {
             }
         }
     }
-
 }

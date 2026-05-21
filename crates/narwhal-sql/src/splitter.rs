@@ -163,8 +163,7 @@ impl<'a> Splitter<'a> {
     fn find_dollar_close(&self, tag_len: usize) -> Option<usize> {
         let tag = &self.bytes[self.pos..self.pos + tag_len];
         let haystack = &self.bytes[self.pos + tag_len..];
-        memchr::memmem::find(haystack, tag)
-            .map(|offset| self.pos + tag_len + offset + tag_len)
+        memchr::memmem::find(haystack, tag).map(|offset| self.pos + tag_len + offset + tag_len)
     }
 
     fn emit(&mut self, end: usize) -> Option<Statement<'a>> {
