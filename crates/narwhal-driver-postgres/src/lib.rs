@@ -126,11 +126,9 @@ impl DatabaseDriver for PostgresDriver {
             client: Arc::new(client),
             tls_mode: sslmode,
             params: Arc::new(config.params.clone()),
-            prepared_cache: std::sync::Mutex::new(
-                lru::LruCache::new(
-                    std::num::NonZeroUsize::new(64).expect("64 is nonzero")
-                )
-            ),
+            prepared_cache: std::sync::Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(64).expect("64 is nonzero"),
+            )),
         }))
     }
 }
@@ -439,7 +437,10 @@ impl PostgresConnection {
     async fn prepare_cached(&self, sql: &str) -> Result<tokio_postgres::Statement> {
         // Check cache first (sync lock, very brief).
         {
-            let mut cache = self.prepared_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self
+                .prepared_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(stmt) = cache.get(sql) {
                 return Ok(stmt.clone());
             }
@@ -447,7 +448,10 @@ impl PostgresConnection {
         // Not cached — prepare on the server.
         let statement = self.client.prepare(sql).await.map_err(map_pg_error)?;
         {
-            let mut cache = self.prepared_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self
+                .prepared_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             cache.put(sql.to_owned(), statement.clone());
         }
         Ok(statement)
@@ -685,13 +689,11 @@ impl Connection for PostgresConnection {
                 },
                 _ => TableKind::Table,
             };
-            map.entry(schema.clone())
-                .or_default()
-                .push(Table {
-                    schema: schema.clone(),
-                    name,
-                    kind,
-                });
+            map.entry(schema.clone()).or_default().push(Table {
+                schema: schema.clone(),
+                name,
+                kind,
+            });
         }
 
         // Preserve the order of schemas from list_schemas.

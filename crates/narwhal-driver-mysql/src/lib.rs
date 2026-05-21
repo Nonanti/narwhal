@@ -501,13 +501,11 @@ impl Connection for MysqlConnection {
                 Some(Value::String(s)) => map_table_kind(Some(s.as_str())),
                 _ => map_table_kind(None),
             };
-            map.entry(schema.clone())
-                .or_default()
-                .push(Table {
-                    schema: schema.clone(),
-                    name,
-                    kind,
-                });
+            map.entry(schema.clone()).or_default().push(Table {
+                schema: schema.clone(),
+                name,
+                kind,
+            });
         }
 
         // Preserve the order of schemas from list_schemas.

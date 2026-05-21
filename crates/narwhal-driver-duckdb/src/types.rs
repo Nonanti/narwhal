@@ -77,7 +77,7 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
         }
         ValueRef::Timestamp(unit, ticks) => {
             let ns = scaled_ns(unit, ticks);
-            let secs = (ns / 1_000_000_000) as i64;
+            let secs = ns / 1_000_000_000;
             let sub_ns = (ns % 1_000_000_000) as u32;
             chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns)
                 .map(Value::Timestamp)
@@ -119,7 +119,7 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
                 if seconds != 0 || sub_ns != 0 {
                     s.push_str(&format!("{seconds}"));
                     if sub_ns != 0 {
-                        s.push_str(&format!(".{:09}", sub_ns).trim_end_matches('0'));
+                        s.push_str(format!(".{:09}", sub_ns).trim_end_matches('0'));
                     }
                     s.push('S');
                 }
