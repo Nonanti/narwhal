@@ -13,6 +13,7 @@ pub mod draw_scheduler;
 pub mod edit;
 pub mod explain;
 pub mod export;
+pub mod meta;
 pub mod registry;
 pub mod run;
 pub mod session;
