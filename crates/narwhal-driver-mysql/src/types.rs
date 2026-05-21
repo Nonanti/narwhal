@@ -73,13 +73,28 @@ fn year_to_u16(year: i32) -> Result<u16, Error> {
         .map_err(|_| Error::Other(format!("year out of MySQL range (0..=65535): {year}")))
 }
 
-pub(crate) fn value_from_my(value: &MyValue, _ty: ColumnType) -> Value {
+/// Returns true when the column carries binary content that must not be
+/// re-interpreted as UTF-8 text, even if the bytes happen to be valid
+/// UTF-8 (e.g. an ASCII-only BLOB).
+fn is_binary_column(ty: ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB
+            | ColumnType::MYSQL_TYPE_GEOMETRY
+    )
+}
+
+pub(crate) fn value_from_my(value: &MyValue, ty: ColumnType) -> Value {
     match value {
         MyValue::NULL => Value::Null,
         MyValue::Int(v) => Value::Int(*v),
         MyValue::UInt(v) => Value::Int(*v as i64),
         MyValue::Float(v) => Value::Float(f64::from(*v)),
         MyValue::Double(v) => Value::Float(*v),
+        MyValue::Bytes(bytes) if is_binary_column(ty) => Value::Bytes(bytes.clone()),
         MyValue::Bytes(bytes) => match std::str::from_utf8(bytes) {
             Ok(text) => Value::String(text.to_owned()),
             Err(_) => Value::Bytes(bytes.clone()),
