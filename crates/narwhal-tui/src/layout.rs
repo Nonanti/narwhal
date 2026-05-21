@@ -104,14 +104,20 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(34), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(crate::constants::SIDEBAR_WIDTH),
+            Constraint::Min(1),
+        ])
         .split(outer[0]);
 
     let sidebar_table_indices = render_sidebar(frame, body[0], &view.sidebar, view.theme);
 
     let main = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([
+            Constraint::Percentage(crate::constants::EDITOR_RESULTS_SPLIT_PCT.0),
+            Constraint::Percentage(crate::constants::EDITOR_RESULTS_SPLIT_PCT.1),
+        ])
         .split(body[1]);
 
     let editor_area = main[0];

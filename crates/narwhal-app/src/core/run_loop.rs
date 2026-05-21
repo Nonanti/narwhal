@@ -103,7 +103,7 @@ impl AppCore {
                 {
                     rows.extend(new_rows);
                     let now = Instant::now();
-                    if now.duration_since(*last_render) >= Duration::from_millis(100) {
+                    if now.duration_since(*last_render) >= narwhal_tui::constants::STREAM_RENDER_THROTTLE {
                         *last_render = now;
                     }
                 } else if let ResultState::Running { rows, .. } =

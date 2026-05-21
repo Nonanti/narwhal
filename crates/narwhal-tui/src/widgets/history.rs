@@ -51,8 +51,7 @@ pub fn render_history_modal(
     state: &HistoryModalState<'_>,
     theme: &Theme,
 ) {
-    let max_width: u16 = 80;
-    let max_height: u16 = 24;
+    let (max_width, max_height) = crate::constants::HISTORY_MODAL_MAX;
     let width = (area.width * 6 / 10).min(max_width);
     let height = (area.height * 7 / 10).min(max_height);
     if width < 30 || height < 6 {
