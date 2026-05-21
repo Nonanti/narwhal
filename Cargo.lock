@@ -96,7 +96,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
  "x11rb",
 ]
 
@@ -2646,12 +2646,14 @@ dependencies = [
  "ratatui",
  "regex-lite",
  "rusqlite",
+ "secrecy",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2672,11 +2674,14 @@ dependencies = [
 name = "narwhal-config"
 version = "1.0.0"
 dependencies = [
+ "async-trait",
  "directories",
  "keyring",
  "narwhal-core",
+ "secrecy",
  "serde",
  "thiserror 1.0.69",
+ "tokio",
  "toml",
  "tracing",
  "uuid",
@@ -3456,7 +3461,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.3",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3952,6 +3957,15 @@ name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
+
+[[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
 
 [[package]]
 name = "secret-service"

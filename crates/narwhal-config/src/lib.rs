@@ -9,6 +9,7 @@ pub mod url;
 
 pub use credentials::{CredentialError, CredentialStore, InMemoryStore, KeyringStore};
 pub use paths::{ConfigPaths, PathsError};
+pub use secrecy::SecretString;
 pub use settings::{
     ConfigError, ConnectionsFile, EditorSettings, KeybindingSettings, Settings, Theme,
 };

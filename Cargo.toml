@@ -81,6 +81,10 @@ unicode-width = "0.2"
 arboard = { version = "3.4", default-features = false }
 base64 = "0.22"
 
+# Secret handling
+zeroize = { version = "1", features = ["derive"] }
+secrecy = "0.10"
+
 # Internal crates
 narwhal-core = { path = "crates/narwhal-core" }
 narwhal-config = { path = "crates/narwhal-config" }
