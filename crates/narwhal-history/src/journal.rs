@@ -216,18 +216,49 @@ impl Journal {
         Ok(())
     }
 
-    /// Return up to `n` most-recent entries, newest first.
+    /// Return up to `n` most-recent entries in chronological order
+    /// (oldest entry first, newest last).
     ///
-    /// Reads the JSONL file from disk (synchronous I/O) and returns the
-    /// last `n` lines in reverse order so the most recent entry comes
-    /// first. Malformed lines are silently skipped.
-    pub fn recent(&self, n: usize) -> Result<Vec<HistoryEntry>, HistoryError> {
-        let reader = JournalReader::open(&self.path)?;
-        let all: Vec<HistoryEntry> = reader.filter_map(|r| r.ok()).collect();
-        let start = all.len().saturating_sub(n);
-        let mut slice = all[start..].to_vec();
-        slice.reverse();
-        Ok(slice)
+    /// Uses `rev_lines` to read from the end of the file (avoiding a
+    /// full-file parse) and `spawn_blocking` to keep the async runtime
+    /// responsive. Corrupt lines are logged with `tracing::warn` rather
+    /// than silently swallowed.
+    pub async fn recent(&self, n: usize) -> Result<Vec<HistoryEntry>, HistoryError> {
+        let path = self.path.clone();
+        tokio::task::spawn_blocking(move || {
+            let file = File::open(&path)?;
+            let reader = BufReader::new(file);
+            let mut rev = rev_lines::RevLines::new(reader);
+            let mut out = Vec::with_capacity(n);
+            for line in rev.by_ref() {
+                if out.len() >= n {
+                    break;
+                }
+                let line = line.map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                })?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<HistoryEntry>(trimmed) {
+                    Ok(e) => out.push(e),
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            line = %trimmed,
+                            "journal parse failed"
+                        );
+                    }
+                }
+            }
+            // rev_lines reads newest-first; reverse to get chronological
+            // order (oldest of the batch first, newest last).
+            out.reverse();
+            Ok(out)
+        })
+        .await
+        .map_err(|e| HistoryError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
     }
 }
 
@@ -348,7 +379,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_returns_newest_first() {
+    async fn recent_returns_last_n_in_chronological_order() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("history.jsonl");
         let journal = Journal::open(&path).await.unwrap();
@@ -359,11 +390,12 @@ mod tests {
                 .unwrap();
         }
 
-        let recent = journal.recent(3).unwrap();
+        let recent = journal.recent(3).await.unwrap();
         assert_eq!(recent.len(), 3);
-        assert_eq!(recent[0].sql, "SELECT 4");
+        // Chronological: oldest of the batch first
+        assert_eq!(recent[0].sql, "SELECT 2");
         assert_eq!(recent[1].sql, "SELECT 3");
-        assert_eq!(recent[2].sql, "SELECT 2");
+        assert_eq!(recent[2].sql, "SELECT 4");
     }
 
     #[tokio::test]
@@ -376,7 +408,7 @@ mod tests {
             .await
             .unwrap();
 
-        let recent = journal.recent(200).unwrap();
+        let recent = journal.recent(200).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].sql, "SELECT 1");
     }
@@ -428,5 +460,32 @@ mod tests {
         let sql = "SELECT 1";
         let result = redact_secrets(sql);
         assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    /// M13: `recent` warns on corrupt lines rather than silently swallowing.
+    #[tokio::test]
+    async fn recent_warns_on_corrupt_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("history.jsonl");
+
+        // Write one valid and one corrupt entry directly to the file.
+        let valid = HistoryEntry::success("SELECT 1");
+        let mut line = serde_json::to_vec(&valid).unwrap();
+        line.push(b'\n');
+        std::fs::write(&path, &line).unwrap();
+
+        // Append a corrupt line
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"THIS IS NOT JSON\n").unwrap();
+        f.write_all(b"\n").unwrap(); // blank line
+        drop(f);
+
+        let journal = Journal::open(&path).await.unwrap();
+        let recent = journal.recent(10).await.unwrap();
+        // Only the valid entry should be returned; the corrupt line is
+        // logged as a warning and skipped.
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].sql, "SELECT 1");
     }
 }
