@@ -20,7 +20,7 @@ pub struct Capabilities {
     pub savepoints: bool,
     /// Driver can report row counts for `UPDATE`/`DELETE` statements.
     pub rows_affected: bool,
-    /// Driver returns rows progressively from [`Connection::stream`] —
+    /// Driver returns rows progressively from [`crate::Connection::stream`] —
     /// i.e. the stream yields rows as the server produces them, without
     /// materialising the entire result set in memory first.
     ///

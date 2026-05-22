@@ -70,7 +70,7 @@ pub enum CommandOutcome {
     /// Update the status bar with `message`.
     Status { message: String },
     /// Inject `sql` into the editor (replacing or appending — the host
-    /// decides based on the [`append`] flag).
+    /// decides based on the `append` flag).
     InsertSql { sql: String, append: bool },
     /// Quietly succeed without surfacing anything.
     Silent,
@@ -108,7 +108,7 @@ impl CommandContext {
 /// Bridge that lets a plugin run SQL against narwhal's active
 /// connection. The host implements this on top of its connection pool
 /// and injects an `Arc<dyn SqlExecutor>` into each plugin runtime that
-/// supports user-driven SQL execution (today only [`narwhal-plugin-lua`]).
+/// supports user-driven SQL execution (today only `narwhal-plugin-lua`).
 ///
 /// The trait is async because the underlying driver API is async. Plugin
 /// runtimes that need a sync surface (e.g. Lua) bridge the call with
@@ -137,8 +137,8 @@ pub trait Plugin: Send + Sync {
     }
 
     /// Dispatch a command by name. The default implementation reports
-    /// the name as unknown; plugins that override [`commands`] also
-    /// override this.
+    /// the name as unknown; plugins that override [`Self::commands`]
+    /// also override this.
     async fn dispatch(&self, name: &str, ctx: CommandContext) -> PluginResult<CommandOutcome> {
         let _ = ctx;
         Err(PluginError::Unknown(name.to_owned()))
@@ -163,9 +163,9 @@ pub trait Plugin: Send + Sync {
 ///
 /// **Reserved names**: the host can list built-in command tokens (e.g.
 /// `"run"`, `"open"`, `"begin"`) that plugins must not shadow. A plugin
-/// that tries to register one of those is rejected at [`register`] time
-/// rather than silently never being dispatched (the parser would otherwise
-/// always match the built-in first).
+/// that tries to register one of those is rejected at
+/// [`PluginRegistry::register`] time rather than silently never being
+/// dispatched (the parser would otherwise always match the built-in first).
 #[derive(Default, Clone)]
 pub struct PluginRegistry {
     plugins: Vec<Arc<dyn Plugin>>,

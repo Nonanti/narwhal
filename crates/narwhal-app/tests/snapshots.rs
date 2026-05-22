@@ -128,5 +128,5 @@ fn snapshot_help_modal() {
     let mut core = empty_state();
     core.open_help();
     assert!(core.help_open());
-    assert_snapshot!("help_modal", snapshot_core_sized(&mut core, 120, 50));
+    assert_snapshot!("help_modal", snapshot_core_sized(&mut core, 130, 66));
 }

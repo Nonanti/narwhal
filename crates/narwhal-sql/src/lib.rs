@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod formatter;
 pub mod splitter;
 
+pub use formatter::{format, format_for_driver};
 pub use splitter::{split, split_with, Dialect, Statement};

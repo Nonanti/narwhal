@@ -217,16 +217,22 @@ impl AppCore {
         let Some(wizard) = self.wizard.as_ref() else {
             return;
         };
+        // Capture the editing-id once so the rest of the routine can rely
+        // on it without re-borrowing `self.wizard`.
+        let existing_id = wizard.existing_id;
         match wizard.build() {
             Err(error) => {
                 self.wizard_error = Some(error);
             }
             Ok(built) => {
+                // Name-collision check: skip when the candidate is the
+                // very entry being edited; reject when any *other* entry
+                // already owns the chosen name.
                 if self
                     .connections
                     .connections
                     .iter()
-                    .any(|c| c.name == built.config.name)
+                    .any(|c| c.name == built.config.name && Some(c.id) != existing_id)
                 {
                     self.wizard_error = Some(format!(
                         "a connection named '{}' already exists",
@@ -236,13 +242,38 @@ impl AppCore {
                 }
                 let connection_id = built.config.id;
                 let secret = built.password.clone();
-                self.connections.connections.push(built.config.clone());
+                // Keep the previous entry around so we can restore it if
+                // the on-disk save fails mid-flight.
+                let previous = if let Some(id) = existing_id {
+                    if let Some(pos) = self.connections.connections.iter().position(|c| c.id == id)
+                    {
+                        let prev = self.connections.connections.remove(pos);
+                        self.connections
+                            .connections
+                            .insert(pos, built.config.clone());
+                        Some((pos, prev))
+                    } else {
+                        self.connections.connections.push(built.config.clone());
+                        None
+                    }
+                } else {
+                    self.connections.connections.push(built.config.clone());
+                    None
+                };
                 if let Some(path) = self.connections_path.as_ref() {
                     if let Err(error) = self.connections.save(path) {
                         self.wizard_error = Some(format!("could not save: {error}"));
-                        // Roll back the in-memory entry so the on-disk file
+                        // Roll back the in-memory mutation so the on-disk file
                         // remains the source of truth.
-                        self.connections.connections.pop();
+                        match previous {
+                            Some((pos, prev)) => {
+                                self.connections.connections.remove(pos);
+                                self.connections.connections.insert(pos, prev);
+                            }
+                            None => {
+                                self.connections.connections.pop();
+                            }
+                        }
                         return;
                     }
                 }
@@ -262,7 +293,11 @@ impl AppCore {
                 self.wizard_error = None;
                 self.rebuild_sidebar();
                 let name = built.config.name.clone();
-                self.status.message = format!("connection '{name}' saved");
+                self.status.message = if existing_id.is_some() {
+                    format!("connection '{name}' updated")
+                } else {
+                    format!("connection '{name}' saved")
+                };
                 // Pre-select the new connection in the sidebar.
                 if let Some(idx) = self.sidebar_items.iter().position(|i| match i {
                     SidebarItem::Connection { name: n, .. } => n == &name,
@@ -278,6 +313,25 @@ impl AppCore {
         let Some(wizard) = self.wizard.as_mut() else {
             return;
         };
+        // Path-style fields hijack Tab for filesystem completion;
+        // Shift-Tab / arrows still walk between fields so users aren't
+        // trapped once they have what they wanted.
+        if matches!(key.code, CtKey::Tab) && wizard.focused_is_path() {
+            let outcome = wizard.complete_focused_path();
+            self.status.message = match outcome {
+                crate::wizard::PathCompletion::NoMatch => "no match".into(),
+                crate::wizard::PathCompletion::Single => "completed".into(),
+                crate::wizard::PathCompletion::Multiple { count, samples } => {
+                    let preview = samples.join("  ");
+                    if count > samples.len() {
+                        format!("{count} matches: {preview}  …")
+                    } else {
+                        format!("{count} matches: {preview}")
+                    }
+                }
+            };
+            return;
+        }
         match key.code {
             CtKey::Esc => self.cancel_wizard(),
             CtKey::Tab | CtKey::Down => wizard.next_focus(),

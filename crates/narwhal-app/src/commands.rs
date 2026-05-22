@@ -63,6 +63,25 @@ pub enum Command {
     NextTab,
     PrevTab,
     Add,
+    /// Pretty-print the SQL statement under the cursor in place. Uses
+    /// the active session's dialect when one is open, otherwise the
+    /// generic profile.
+    Format,
+    /// Pretty-print every statement in the editor buffer.
+    FormatAll,
+    /// Pre-fill the connection wizard from a connection URL
+    /// (`:url postgres://user:pass@host/db`). The user can still tweak
+    /// the form before saving.
+    Url(String),
+    /// Test connectivity. With no argument, pings the active session;
+    /// with an argument, opens a transient session (looking the name up
+    /// in `connections.toml` or parsing the argument as a URL) and
+    /// closes it immediately.
+    Test(Option<String>),
+    /// Open the connection wizard pre-filled from an existing saved
+    /// connection (`:edit <name>`). Committing the wizard updates the
+    /// entry in place and rewrites its keyring secret.
+    Edit(String),
     Begin(Option<IsolationArg>),
     /// Re-run the most recent table preview with the next page of rows.
     NextPage,
@@ -155,6 +174,13 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "dump-schema",
     "dumpschema",
     "add",
+    "format",
+    "fmt",
+    "format-all",
+    "fmtall",
+    "url",
+    "test",
+    "edit",
     "next",
     "next-page",
     "npage",
@@ -245,6 +271,26 @@ pub const BUILTIN_COMMAND_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     ("add", "open the connection wizard to save a new connection"),
     (
+        "format",
+        "pretty-print the SQL under the cursor (also :fmt)",
+    ),
+    (
+        "format-all",
+        "pretty-print every statement in the buffer (also :fmtall)",
+    ),
+    (
+        "url",
+        "open the wizard pre-filled from a DSN (:url postgres://user:pw@host/db)",
+    ),
+    (
+        "test",
+        "test connectivity (:test [name|url]); no arg pings the active session",
+    ),
+    (
+        "edit",
+        "edit a saved connection in the wizard (:edit <name>)",
+    ),
+    (
         "next-page",
         "show the next page of the current table preview (also :next)",
     ),
@@ -330,6 +376,8 @@ pub fn resolve_builtin_alias(token: &str) -> &str {
         "sp" => "savepoint",
         "rollbackto" => "rollback-to",
         "rm" => "remove",
+        "fmt" => "format",
+        "fmtall" => "format-all",
         "plugload" | "plug" => "plug-load",
         "pluglist" | "plugins" => "plug-list",
         "history" => "history",
@@ -367,6 +415,29 @@ pub fn parse(input: &str) -> Command {
         "export" => parse_export(arg),
         "dump-schema" | "dumpschema" => parse_dump(arg),
         "add" => Command::Add,
+        "format" | "fmt" => Command::Format,
+        "format-all" | "fmtall" => Command::FormatAll,
+        "url" => {
+            if arg.is_empty() {
+                Command::Unknown("url: dsn required (e.g. :url postgres://user@host/db)".into())
+            } else {
+                Command::Url(arg.to_owned())
+            }
+        }
+        "test" => {
+            if arg.is_empty() {
+                Command::Test(None)
+            } else {
+                Command::Test(Some(arg.to_owned()))
+            }
+        }
+        "edit" => {
+            if arg.is_empty() {
+                Command::Unknown("edit: connection name required".into())
+            } else {
+                Command::Edit(arg.to_owned())
+            }
+        }
         "next" | "next-page" | "npage" => Command::NextPage,
         "prev" | "prev-page" | "ppage" => Command::PrevPage,
         "page-size" | "pagesize" => match arg.parse::<usize>() {
@@ -497,15 +568,21 @@ fn parse_dump(arg: &str) -> Command {
 }
 
 fn parse_export(arg: &str) -> Command {
-    let mut parts = arg.split_whitespace();
-    let Some(format) = parts.next() else {
+    // Split into `format` + remainder so paths containing spaces stay
+    // intact. The split_whitespace + take(2) shape that used to live
+    // here rejected `:export csv /tmp/my data.csv` with a confusing
+    // "too many arguments" error.
+    let trimmed = arg.trim_start();
+    let (format, rest) = match trimmed.split_once(char::is_whitespace) {
+        Some((f, r)) => (f, r.trim_start()),
+        None => (trimmed, ""),
+    };
+    if format.is_empty() {
         return Command::Unknown("export: format required (csv|json|insert)".into());
-    };
-    let Some(path) = parts.next() else {
+    }
+    let path = rest.trim_end();
+    if path.is_empty() {
         return Command::Unknown("export: path required".into());
-    };
-    if parts.next().is_some() {
-        return Command::Unknown("export: too many arguments".into());
     }
     Command::Export {
         format: format.to_owned(),
@@ -629,6 +706,23 @@ mod tests {
             Command::Unknown(msg) => assert!(msg.contains("format required")),
             other => panic!("expected Unknown, got {other:?}"),
         }
+        // Round 2 bugfix: paths with spaces used to be rejected with
+        // a confusing "too many arguments" error.
+        assert_eq!(
+            parse("export csv /tmp/my data.csv"),
+            Command::Export {
+                format: "csv".into(),
+                path: "/tmp/my data.csv".into(),
+            }
+        );
+        // Trailing whitespace gets trimmed but interior spaces survive.
+        assert_eq!(
+            parse("export json   /tmp/two words.json   "),
+            Command::Export {
+                format: "json".into(),
+                path: "/tmp/two words.json".into(),
+            }
+        );
     }
 
     #[test]

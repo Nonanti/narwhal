@@ -28,3 +28,8 @@ rev_lines = "0.3"
 [dev-dependencies]
 tempfile = "3.13"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true, features = ["async_tokio"] }
+
+[[bench]]
+name = "append"
+harness = false

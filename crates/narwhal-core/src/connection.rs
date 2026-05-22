@@ -65,6 +65,51 @@ pub struct ConnectionParams {
     /// Path to the client private key (PEM format).
     #[serde(default)]
     pub ssl_key: Option<PathBuf>,
+    /// Optional SSH tunnel. When `Some`, [`crate::ssh::SshTunnel::spawn`]
+    /// brings up a local-port-forward before the driver connects and
+    /// rewrites `host`/`port` to the loopback side of the tunnel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshConfig>,
+}
+
+/// SSH tunnel parameters. Only the host + user are required; everything
+/// else falls back to the OpenSSH client defaults (`~/.ssh/config`,
+/// the ssh agent, port 22) so a one-line `ssh_host=jump.example.com`
+/// suffices for the common case.
+///
+/// Passwords are deliberately absent: production environments are
+/// expected to authenticate via key files or the ssh-agent, both of
+/// which the underlying `ssh` subprocess picks up for free.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SshConfig {
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub user: String,
+    /// Path to the private key. When `None`, the ssh subprocess
+    /// consults `~/.ssh/config` and the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<PathBuf>,
+    /// Optional jump host (`-J user@host`). Useful for bastion
+    /// topologies where the actual database host is only reachable
+    /// from inside the bastion's network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+}
+
+impl SshConfig {
+    /// Construct a minimal tunnel spec from the two required fields.
+    /// Tests use this; production code goes through serde.
+    pub fn new(host: impl Into<String>, user: impl Into<String>) -> Self {
+        Self {
+            host: host.into(),
+            port: None,
+            user: user.into(),
+            key_path: None,
+            jump_host: None,
+        }
+    }
 }
 
 /// Standard ANSI transaction isolation levels.
@@ -177,7 +222,7 @@ pub trait Connection: Send + Sync {
 
     /// Fetch the DDL (CREATE statement) for the given table.
     ///
-    /// The default implementation returns [`Error::Unsupported`];
+    /// The default implementation returns [`crate::Error::Unsupported`];
     /// drivers override this to return engine-native DDL.
     async fn fetch_ddl(&mut self, _schema: &str, _table: &str) -> Result<String> {
         Err(crate::Error::unsupported("fetch_ddl"))

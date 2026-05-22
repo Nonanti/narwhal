@@ -44,6 +44,13 @@ impl ConfigPaths {
         self.data_dir.join("history.jsonl")
     }
 
+    /// Per-connection last-used timestamp store. Lives in the *data*
+    /// directory rather than the cache dir so distro-managed cache
+    /// wipes don't lose recently-touched-first ordering across reboots.
+    pub fn last_used_file(&self) -> PathBuf {
+        self.data_dir.join("last_used.toml")
+    }
+
     pub fn log_dir(&self) -> PathBuf {
         self.cache_dir.join("logs")
     }

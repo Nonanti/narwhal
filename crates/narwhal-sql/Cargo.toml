@@ -16,3 +16,14 @@ workspace = true
 [dependencies]
 memchr = "2"
 serde.workspace = true
+# Pretty-printer used by `:format`. Pure Rust, dialect-aware enough
+# for the four engines we ship (the postgres profile also covers
+# clickhouse/duckdb adequately).
+sqlformat = "0.3"
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "splitter"
+harness = false

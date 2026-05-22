@@ -25,15 +25,18 @@ use uuid::Uuid;
 /// users should delete or manually redact old files if they contain
 /// sensitive data.
 static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    // Inner literal alternation `(?:[^']|'')*` matches the SQL standard
+    // doubled-single-quote escape so passwords containing `'` aren't
+    // cut short mid-string (which would leak the tail). Tested below.
     vec![
         // CREATE/ALTER USER ... PASSWORD '...'
-        Regex::new(r"(?i)(\bpassword\s+)'[^']*'").unwrap(),
+        Regex::new(r"(?i)(\bpassword\s+)'(?:[^']|'')*'").unwrap(),
         // CREATE USER ... IDENTIFIED BY '...'
-        Regex::new(r"(?i)(\bidentified\s+by\s+)'[^']*'").unwrap(),
+        Regex::new(r"(?i)(\bidentified\s+by\s+)'(?:[^']|'')*'").unwrap(),
         // COPY ... CREDENTIALS '...'
-        Regex::new(r"(?i)(\bcredentials\s+)'[^']*'").unwrap(),
+        Regex::new(r"(?i)(\bcredentials\s+)'(?:[^']|'')*'").unwrap(),
         // SET PASSWORD = '...'
-        Regex::new(r"(?i)(\bset\s+password\s*=\s+)'[^']*'").unwrap(),
+        Regex::new(r"(?i)(\bset\s+password\s*=\s+)'(?:[^']|'')*'").unwrap(),
     ]
 });
 
@@ -41,11 +44,18 @@ static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 ///
 /// Returns `Cow::Borrowed` when no patterns match (avoiding allocation),
 /// or `Cow::Owned` with all secret values replaced by `'***'`.
+///
+/// `Regex::replace_all` already returns `Cow::Borrowed` when there's no
+/// match, so chaining `replace_all` directly avoids the double scan a
+/// separate `is_match` would do — the regex engine only walks the
+/// string once per pattern in the common (no-secret) path.
 fn redact_secrets(sql: &str) -> Cow<'_, str> {
-    let mut result = Cow::Borrowed(sql);
+    let mut result: Cow<'_, str> = Cow::Borrowed(sql);
     for re in REDACT_PATTERNS.iter() {
-        if re.is_match(&result) {
-            result = Cow::Owned(re.replace_all(&result, "${1}'***'").to_string());
+        match re.replace_all(&result, "${1}'***'") {
+            // No replacement — keep the existing Cow (borrowed or owned).
+            Cow::Borrowed(_) => {}
+            Cow::Owned(s) => result = Cow::Owned(s),
         }
     }
     result
@@ -68,6 +78,45 @@ pub enum Outcome {
     Success,
     Cancelled,
     Failed,
+}
+
+/// Borrowed serialisation view of [`HistoryEntry`] with an overridden
+/// `sql` field. Used by [`Journal::append`] to write a redacted /
+/// truncated entry without cloning the original — every other field
+/// is passed by reference and serde renders them in place.
+///
+/// The struct field order must mirror [`HistoryEntry`] so the JSON
+/// output is byte-for-byte compatible with the legacy clone-based
+/// path.
+#[derive(Serialize)]
+struct HistoryEntryView<'a> {
+    timestamp: &'a DateTime<Utc>,
+    connection_id: &'a Option<Uuid>,
+    connection_name: &'a Option<String>,
+    driver: &'a Option<String>,
+    sql: &'a str,
+    elapsed_ms: u64,
+    rows_affected: &'a Option<u64>,
+    rows_returned: &'a Option<u64>,
+    outcome: &'a Outcome,
+    error: &'a Option<String>,
+}
+
+impl<'a> HistoryEntryView<'a> {
+    fn from(entry: &'a HistoryEntry, sql: &'a str) -> Self {
+        Self {
+            timestamp: &entry.timestamp,
+            connection_id: &entry.connection_id,
+            connection_name: &entry.connection_name,
+            driver: &entry.driver,
+            sql,
+            elapsed_ms: entry.elapsed_ms,
+            rows_affected: &entry.rows_affected,
+            rows_returned: &entry.rows_returned,
+            outcome: &entry.outcome,
+            error: &entry.error,
+        }
+    }
 }
 
 /// One record in the history journal.
@@ -199,38 +248,45 @@ impl Journal {
     /// before writing. Only *newly appended* entries are redacted;
     /// pre-existing entries in the history file are left untouched.
     pub async fn append(&self, entry: &HistoryEntry) -> Result<(), HistoryError> {
-        // Redact secrets before serialising. Clone only if redaction
-        // changes the string (Cow::Owned); otherwise borrow the original.
-        let redacted_sql = redact_secrets(&entry.sql);
-        let entry = if matches!(redacted_sql, Cow::Owned(_)) {
-            let mut e = entry.clone();
-            e.sql = redacted_sql.into_owned();
-            e
-        } else {
-            entry.clone()
-        };
-
-        // L38: cap SQL at 64 KiB so a giant migration dump can't bloat
-        // the journal indefinitely. The truncated suffix is replaced by
-        // a `… (truncated N bytes)` marker so callers can tell the
-        // entry was clipped.
+        // Path A (hot): no secrets and no truncation. Serialize the
+        // borrowed entry as-is — zero allocation beyond the final JSON
+        // line buffer.
+        //
+        // Path B (cold): redaction or truncation applied. Build a
+        // borrowed view (`HistoryEntryView`) with a substituted `sql`
+        // field so we never clone the entire `HistoryEntry` (the
+        // timestamp/uuid/string fields used to be cloned twice).
         const SQL_MAX_BYTES: usize = 64 * 1024;
-        let entry = if entry.sql.len() > SQL_MAX_BYTES {
-            let mut e = entry;
+
+        let redacted_sql = redact_secrets(&entry.sql);
+        // Apply truncation on top of the redaction result. Both are
+        // expressed as a single owned `String` when either fires; we
+        // pay one allocation, not two.
+        let final_sql: Cow<'_, str> = if redacted_sql.len() > SQL_MAX_BYTES {
+            let mut owned = redacted_sql.into_owned();
             let mut end = SQL_MAX_BYTES;
-            while end > 0 && !e.sql.is_char_boundary(end) {
+            while end > 0 && !owned.is_char_boundary(end) {
                 end -= 1;
             }
-            let dropped = e.sql.len() - end;
-            e.sql.truncate(end);
-            e.sql.push_str(&format!("… (truncated {dropped} bytes)"));
-            e
+            let dropped = owned.len() - end;
+            owned.truncate(end);
+            // Avoid the intermediate `format!` allocation — push the
+            // marker pieces straight onto the existing buffer.
+            owned.push_str("… (truncated ");
+            owned.push_str(&dropped.to_string());
+            owned.push_str(" bytes)");
+            Cow::Owned(owned)
         } else {
-            entry
+            redacted_sql
         };
 
-        let mut line = serde_json::to_vec(&entry)?;
+        let mut line = if matches!(final_sql, Cow::Borrowed(_)) {
+            serde_json::to_vec(entry)?
+        } else {
+            serde_json::to_vec(&HistoryEntryView::from(entry, &final_sql))?
+        };
         line.push(b'\n');
+
         let mut guard = self.file.lock().await;
         guard.write_all(&line).await?;
         guard.flush().await?;
@@ -479,6 +535,18 @@ mod tests {
         let sql = "SELECT 1";
         let result = redact_secrets(sql);
         assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    /// Round 1 bugfix: the old pattern `'[^']*'` matched only up to
+    /// the first `'`, so a password containing the standard SQL
+    /// double-single-quote escape would be cut and its tail leaked
+    /// into the journal.
+    #[test]
+    fn redact_password_with_escaped_single_quote() {
+        let redacted = redact_secrets("ALTER USER x PASSWORD 'it''s s3cret'");
+        assert_eq!(redacted, "ALTER USER x PASSWORD '***'");
+        // The leaky tail must not survive anywhere in the output.
+        assert!(!redacted.contains("s3cret"));
     }
 
     /// M13: `recent` warns on corrupt lines rather than silently swallowing.

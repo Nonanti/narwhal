@@ -10,6 +10,7 @@
 
 mod dump_export;
 mod editor_handlers;
+mod format;
 mod modals;
 mod plugin_executor;
 mod plugins;
@@ -165,8 +166,8 @@ pub struct CompletionState {
     pub items: Vec<Completion>,
     /// Currently highlighted index.
     pub selected: usize,
-    /// The prefix that produced [`items`]. Used to detect when the user
-    /// keeps typing and the popup needs to refilter.
+    /// The prefix that produced [`Self::items`]. Used to detect when
+    /// the user keeps typing and the popup needs to refilter.
     pub prefix: String,
 }
 
@@ -428,8 +429,13 @@ impl Tab {
 }
 
 /// Internal entry in the rendered sidebar list.
+///
+/// Pub-exported (but `#[non_exhaustive]`) so integration tests can
+/// inspect the materialised sidebar via
+/// [`AppCore::sidebar_items_for_test`].
 #[derive(Debug, Clone)]
-pub(super) enum SidebarItem {
+#[non_exhaustive]
+pub enum SidebarItem {
     Connection {
         #[allow(dead_code)]
         id: Uuid,
@@ -487,6 +493,11 @@ pub struct AppCore {
     pub(super) registry: DriverRegistry,
     pub(super) connections: ConnectionsFile,
     pub(super) connections_path: Option<std::path::PathBuf>,
+    /// Recency cache feeding the sidebar ordering. Populated from
+    /// `paths.last_used_file()` on start-up (via [`Self::set_last_used_path`])
+    /// and bumped on every successful `:open`.
+    pub(super) last_used: narwhal_config::LastUsedStore,
+    pub(super) last_used_path: Option<std::path::PathBuf>,
     pub(super) credentials: Arc<dyn CredentialStore>,
     pub(super) clipboard: Arc<dyn Clipboard>,
     pub(super) plugins: Arc<PluginRegistry>,
@@ -638,6 +649,8 @@ impl AppCore {
             registry,
             connections,
             connections_path: None,
+            last_used: narwhal_config::LastUsedStore::new(),
+            last_used_path: None,
             credentials,
             clipboard,
             plugins: {
@@ -691,6 +704,30 @@ impl AppCore {
         self.connections_path = Some(path);
     }
 
+    /// Wire the recency cache into the on-disk file produced by
+    /// `ConfigPaths::last_used_file()`. Existing entries are loaded
+    /// immediately so the very first sidebar render reflects the
+    /// previous session's ordering.
+    pub fn set_last_used_path(&mut self, path: std::path::PathBuf) {
+        if let Ok(loaded) = narwhal_config::LastUsedStore::load(&path) {
+            self.last_used = loaded;
+        }
+        self.last_used_path = Some(path);
+        self.rebuild_sidebar();
+    }
+
+    /// Record that `id` was just opened: bumps the in-memory cache and
+    /// best-effort writes it to disk. Failures are logged at debug and
+    /// not surfaced — ordering is a UX nicety, not load-bearing.
+    pub(super) fn touch_last_used(&mut self, id: uuid::Uuid) {
+        self.last_used.touch(id);
+        if let Some(path) = self.last_used_path.as_ref() {
+            if let Err(error) = self.last_used.save(path) {
+                tracing::debug!(target: "narwhal::app", error = %error, "last-used save failed");
+            }
+        }
+    }
+
     /// Override the snippet store root directory. Used by tests to
     /// avoid polluting the user's real config.
     #[doc(hidden)]
@@ -698,10 +735,39 @@ impl AppCore {
         self.snippet_store = SnippetStore::new(root);
     }
 
+    /// Apply a user-supplied [`narwhal_config::Settings`] payload.
+    ///
+    /// Currently honoured: [`narwhal_config::Theme`] is mapped onto the
+    /// renderer's [`Theme`] palette. The `editor` / `keybindings`
+    /// sections are accepted for forward compatibility but do not yet
+    /// influence runtime behaviour — the load-then-warn surface alone
+    /// catches malformed `config.toml` files at start-up so we never
+    /// fall back to defaults blindly.
+    pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
+        self.theme = match settings.theme {
+            narwhal_config::Theme::Dark => Theme::DARK,
+            narwhal_config::Theme::Light => Theme::LIGHT,
+            narwhal_config::Theme::HighContrast => Theme::HIGH_CONTRAST,
+            // `narwhal_config::Theme` is `#[non_exhaustive]`; future
+            // variants fall back to DARK rather than refusing to start.
+            _ => Theme::DARK,
+        };
+    }
+
     fn rebuild_sidebar(&mut self) {
         let mut items = Vec::new();
         let active_id = self.session.as_ref().map(|s| s.config.id);
-        for conn in &self.connections.connections {
+        // Show most-recently-opened connections first; ties (or
+        // never-opened entries) fall back to alphabetical order so the
+        // list is stable across reboots.
+        let mut ordered: Vec<&narwhal_core::ConnectionConfig> =
+            self.connections.connections.iter().collect();
+        ordered.sort_by(|a, b| {
+            let ta = self.last_used.get(a.id).unwrap_or(0);
+            let tb = self.last_used.get(b.id).unwrap_or(0);
+            tb.cmp(&ta).then_with(|| a.name.cmp(&b.name))
+        });
+        for conn in ordered {
             let active = Some(conn.id) == active_id;
             items.push(SidebarItem::Connection {
                 id: conn.id,
@@ -813,6 +879,29 @@ impl AppCore {
 
     pub fn mode(&self) -> Mode {
         self.vim.mode()
+    }
+
+    /// Read-only accessor for the connection wizard. Tests use this to
+    /// assert that `:add` / `:url` / `:edit` open the wizard and that
+    /// it carries the expected pre-filled state.
+    #[doc(hidden)]
+    pub fn wizard(&self) -> Option<&crate::wizard::ConnectionWizard> {
+        self.wizard.as_ref()
+    }
+
+    /// Read-only accessor for the saved-connections list (the
+    /// in-memory mirror of `connections.toml`).
+    #[doc(hidden)]
+    pub fn connections(&self) -> &[narwhal_core::ConnectionConfig] {
+        &self.connections.connections
+    }
+
+    /// Read-only accessor for the materialised sidebar items in their
+    /// current display order. Tests use this to assert recency-first
+    /// ordering without a real terminal render.
+    #[doc(hidden)]
+    pub fn sidebar_items_for_test(&self) -> &[SidebarItem] {
+        &self.sidebar_items
     }
 
     /// Read-only accessor for the vim command buffer. Used by tests to
@@ -942,6 +1031,7 @@ impl AppCore {
                             CompletionKind::Keyword => "K",
                             CompletionKind::Table => "T",
                             CompletionKind::Column => "C",
+                            CompletionKind::Function => "ƒ",
                         },
                         detail: c.detail.as_deref(),
                     })
@@ -1116,7 +1206,7 @@ impl AppCore {
         }
     }
 
-    /// Route a crossterm [`MouseEvent`] through the same handlers the
+    /// Route a crossterm `MouseEvent` through the same handlers the
     /// keyboard path uses. `LayoutRegions` from the most recent render
     /// provides the hit-test rects.
     pub fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
@@ -1285,6 +1375,11 @@ impl AppCore {
             Command::Export { format, path } => self.export_results(&format, &path),
             Command::DumpSchema { target } => self.dump_schema(target),
             Command::Add => self.start_wizard(),
+            Command::Format => self.format_current_statement(),
+            Command::FormatAll => self.format_all_statements(),
+            Command::Url(dsn) => self.start_wizard_from_url(&dsn),
+            Command::Test(target) => self.test_connection(target.as_deref()),
+            Command::Edit(name) => self.start_wizard_edit(&name),
             Command::NextPage => self.next_page(),
             Command::PrevPage => self.prev_page(),
             Command::PageSize(n) => self.set_page_size(n),

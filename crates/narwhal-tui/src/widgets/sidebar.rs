@@ -105,17 +105,28 @@ pub fn render_sidebar(
     frame.render_widget(block, area);
 
     if view.items.is_empty() {
+        let accent = Style::default().fg(theme.accent);
+        let muted = Style::default().fg(theme.muted);
         let p = Paragraph::new(vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "  no connections",
-                Style::default().fg(theme.muted),
-            )),
+            Line::from(Span::styled("  no connections yet", muted)),
             Line::from(""),
-            Line::from(Span::styled(
-                "  add one to connections.toml",
-                Style::default().fg(theme.muted),
-            )),
+            Line::from(vec![
+                Span::styled("  press ", muted),
+                Span::styled(":add", accent),
+                Span::styled(" to create one", muted),
+            ]),
+            Line::from(vec![
+                Span::styled("  or  ", muted),
+                Span::styled(":url <dsn>", accent),
+                Span::styled(" to paste a URL", muted),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  press ", muted),
+                Span::styled("?", accent),
+                Span::styled(" for help", muted),
+            ]),
         ]);
         frame.render_widget(p, inner);
         return Vec::new();

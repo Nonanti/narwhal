@@ -129,12 +129,26 @@ impl Pool {
                     error = %error,
                     "discarding unhealthy connection"
                 );
-                // Drop the bad connection and create a fresh one.
-                connection = self
-                    .inner
-                    .driver
-                    .connect(&self.inner.config, self.inner.password.as_deref())
-                    .await?;
+                // Move the bad connection out so we can `.close()` it
+                // (which is async and consumes `Box<Self>`); dropping it
+                // implicitly would leak any pinned server-side state on
+                // drivers that don't have a sync teardown path.
+                let bad = std::mem::replace(
+                    &mut connection,
+                    self.inner
+                        .driver
+                        .connect(&self.inner.config, self.inner.password.as_deref())
+                        .await?,
+                );
+                tokio::spawn(async move {
+                    if let Err(error) = bad.close().await {
+                        warn!(
+                            target: "narwhal::pool",
+                            error = %error,
+                            "unhealthy connection close failed"
+                        );
+                    }
+                });
             }
         }
 

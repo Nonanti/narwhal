@@ -14,7 +14,7 @@ use super::text_utils::{
     find_all, longest_common_prefix, replace_all, replace_first, row_col_to_offset,
 };
 use super::{AppCore, CompletionState, ResultState, RowSource, SidebarItem};
-use crate::completion::{detect_context, gather as gather_completions};
+use crate::completion::{detect_context_with_schemas, gather as gather_completions};
 use crate::run::RunMode;
 
 impl AppCore {
@@ -163,6 +163,16 @@ impl AppCore {
             self.toggle_help();
             return true;
         }
+        // `:` opens the command palette from any non-editor pane.
+        // Without this, users focused on the sidebar/results would have to
+        // press Ctrl-W back to the editor before being able to type
+        // `:open <conn>`. We snap focus to the editor and forward the
+        // keystroke so the vim layer enters Command mode normally.
+        if key.code == CtKey::Char(':') && key.modifiers.is_empty() && self.focus != Pane::Editor {
+            self.focus = Pane::Editor;
+            self.handle_editor_key(key);
+            return true;
+        }
         false
     }
 
@@ -245,9 +255,10 @@ impl AppCore {
             .as_ref()
             .map(|s| s.schemas.as_slice())
             .unwrap_or(&[]);
+        let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();
         let buffer_text = self.tabs[self.active_tab].editor.entire_text();
         let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
-        let context = detect_context(&buffer_text, offset);
+        let context = detect_context_with_schemas(&buffer_text, offset, &known_schemas);
         let columns = self.column_cache();
         let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
@@ -575,9 +586,10 @@ impl AppCore {
             .as_ref()
             .map(|s| s.schemas.as_slice())
             .unwrap_or(&[]);
+        let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();
         let buffer_text = self.tabs[self.active_tab].editor.entire_text();
         let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
-        let context = detect_context(&buffer_text, offset);
+        let context = detect_context_with_schemas(&buffer_text, offset, &known_schemas);
         let columns = self.column_cache();
         let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {

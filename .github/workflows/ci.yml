@@ -90,3 +90,17 @@ jobs:
           echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
+
+  audit:
+    name: cargo-deny (advisories + licences)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The `check` action installs cargo-deny once per runner image
+      # and applies the rules in `deny.toml` at the repository root.
+      # `advisories`, `bans`, `licenses` and `sources` all run; any
+      # match fails the job.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features

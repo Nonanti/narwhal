@@ -1,5 +1,10 @@
 # narwhal
 
+[![CI](https://github.com/berkant/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/berkant/narwhal/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](./rust-toolchain.toml)
+
 > A TUI database client that doesn't feel like the 90s.
 
 ![hero](./docs/img/hero.gif)
@@ -7,16 +12,15 @@
 ## Why narwhal
 
 - **One TUI, five databases** — Postgres, MySQL, SQLite, DuckDB, ClickHouse. No driver-juggling, no context-switching between `psql`, `mysql`, and DataGrip.
-- **Vim editing + auto-pair + completion** — modal input (Normal / Insert / Visual), schema-aware tab-completion, and a proper `:` command palette. It doesn't feel like the 90s.
+- **Vim editing + auto-pair + completion** — modal input (Normal / Insert / Visual), schema-aware tab-completion, alias-resolved column hints, and a proper `:` command palette.
 - **Lua plugin runtime** — the bits that should be yours, stay yours. Write a `.lua` file, drop it in `~/.config/narwhal/plugins/`, and it's live.
+- **SSH tunnels, `~/.pgpass`, OS keyring** — the auth ergonomics you already configured for `psql` work here too. Set `ssh_host=jump.example.com` and the connect path forwards a loopback port for you.
 
 ## Install
 
 ```
-cargo install narwhal-cli
+cargo install narwhal
 ```
-
-> **Note** — the crate name will be finalised in an upcoming release; `narwhal-cli` is a placeholder.
 
 ### Nix
 
@@ -52,13 +56,14 @@ mv narwhal-*/narwhal ~/.local/bin/
 
 ### AUR / Homebrew
 
-Coming after the crate name is finalised — see the release notes.
+Planned for the v1.0 release window — track [packaging issues](https://github.com/berkant/narwhal/labels/packaging) for status.
 
 ## Quick start
 
 1. **Run `narwhal`** — the TUI opens with an empty editor and a sidebar.
-2. **Hit `:open`** — the connection wizard appears. Pick a driver, fill in host + database (or use a saved name from `~/.config/narwhal/connections.toml`).
-3. **F6 to run** — the whole buffer executes; results appear in the lower pane. Press **F1** any time for the full keymap reference.
+2. **Hit `:add`** — the connection wizard appears. Pick a driver, fill in host + database (or use `:url postgres://user:pass@host/db` to skip the form).
+3. **`:open <name>`** — the saved entry connects; the sidebar fills with schemas and tables.
+4. **F6 to run** — the whole buffer executes; results appear in the lower pane. Press **F1** any time for the full keymap reference.
 
 ![wizard](./docs/img/wizard.png)
 
@@ -100,6 +105,56 @@ so pre-TLS configs still load; the wire layer ignores it.  Network
 drivers (`postgres`, `mysql`, `clickhouse`) accept any of the five
 `ssl_mode` values plus optional `ssl_root_cert`, `ssl_cert`, `ssl_key`
 paths for mutual TLS.
+
+### `config.toml` (settings)
+
+A `~/.config/narwhal/config.toml` lets you override the renderer
+theme and a few editor toggles. Missing fields fall back to their
+defaults so a one-line file is enough.
+
+```toml
+theme = "dark"           # "dark" (default) | "light" | "high-contrast"
+
+[editor]
+tab_width    = 4         # reserved — v1.1 will honour this
+use_spaces   = true      # reserved — v1.1 will honour this
+line_numbers = true      # reserved — v1.1 will honour this
+
+[keybindings]
+vim_mode = true          # reserved — v1.1 will allow opt-out
+```
+
+v1.0 wires only the `theme` field; the rest are persisted and
+load-validated so the file stays stable across upgrades. The renderer
+warns at start-up if the file is malformed instead of silently
+falling back to defaults.
+
+### SSH tunnels
+
+Any network connection can prepend an SSH local-port-forward by
+adding `ssh` fields to the params block. The forward is opened
+implicitly on `:open` and torn down when the session closes.
+
+```toml
+[connection.params]
+host     = "db.internal"     # resolved on the bastion side
+port     = 5432
+username = "alice"
+database = "prod"
+
+[connection.params.ssh]
+host      = "bastion.example.com"
+user      = "alice"
+port      = 22               # optional — defaults to 22
+# key_path  = "~/.ssh/id_ed25519"  # optional — defaults to ssh-agent / ~/.ssh/config
+# jump_host = "jump.example.com"   # optional — maps to `ssh -J`
+```
+
+The spawned `ssh` subprocess inherits `~/.ssh/config`, the agent,
+`Match` blocks, `IdentityAgent`, and FIDO2 keys for free — narwhal
+deliberately shells out to OpenSSH rather than embedding its own
+client. URL form: `?ssh_host=bastion&ssh_user=alice` on a
+`:url postgres://...` invocation.
 
 ### TLS defaults changed (v0.2)
 
@@ -320,11 +375,35 @@ plus the usual native build deps for DuckDB (cmake, a C++17 compiler).
 cargo build --release
 ```
 
-## Status
+### Benchmarks
 
-![CI](https://github.com/berkant/narwhal/actions/workflows/ci.yml/badge.svg)
-![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange)
+Criterion harnesses live under `crates/*/benches/`. Run them all with
+`cargo bench --workspace` or one at a time:
+
+```sh
+cargo bench -p narwhal-sql --bench splitter
+cargo bench -p narwhal-tui --bench sort
+cargo bench -p narwhal-tui --bench editor_motion
+cargo bench -p narwhal-history --bench append
+```
+
+The pre/post-optimisation numbers are recorded in
+[`docs/perf-after-phase-2.md`](./docs/perf-after-phase-2.md); current
+headline numbers on a Linux box are ~900 MiB/s for the statement
+splitter, ~38 µs for a 5 000-line `w` motion, and ~1.15 ms to sort
+2 000 JSON cells.
+
+## Contributing
+
+A few ground rules so PRs land smoothly:
+
+- `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace`, and `RUSTDOCFLAGS="-D warnings" cargo doc
+  --workspace --no-deps` all pass in CI; please run them locally too.
+- New behaviour ships with a regression test under the relevant
+  crate's `tests/` directory.
+- Commit messages follow Conventional Commits
+  (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`).
 
 ## Licence
 
@@ -334,4 +413,5 @@ the same terms.
 
 ---
 
-> Screenshots/GIF will be generated at release time; see [docs/RELEASING.md](./docs/RELEASING.md).
+See [`docs/RELEASING.md`](./docs/RELEASING.md) for the release
+checklist and [`CHANGELOG.md`](./CHANGELOG.md) for the version history.

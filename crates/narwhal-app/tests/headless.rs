@@ -162,6 +162,52 @@ async fn sidebar_enter_opens_table_detail() {
     }
 }
 
+/// Pressing `:` from the sidebar (or any non-editor pane) should snap
+/// focus back to the editor and enter vim command mode, so the user can
+/// type `:open <conn>` without first cycling panes with Ctrl-W.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn colon_from_sidebar_focuses_editor_and_enters_command_mode() {
+    use narwhal_vim::Mode;
+
+    let (registry, connections) = fixture(PathBuf::from(":memory:"));
+    let mut core = AppCore::new(registry, connections, None);
+
+    // Cycle focus to the sidebar.
+    let ctrl_w = KeyEvent {
+        code: KeyCode::Char('w'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    while core.focus() != Pane::Sidebar {
+        core.handle_key(ctrl_w);
+    }
+    assert_eq!(core.focus(), Pane::Sidebar);
+
+    // Type `:` — should jump focus to the editor and arm command mode.
+    let colon = KeyEvent {
+        code: KeyCode::Char(':'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    core.handle_key(colon);
+    assert_eq!(core.focus(), Pane::Editor);
+    assert_eq!(core.mode(), Mode::Command);
+    assert_eq!(core.command_buffer(), "");
+
+    // Subsequent letters accumulate in the command buffer.
+    for c in "open".chars() {
+        core.handle_key(KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+    }
+    assert_eq!(core.command_buffer(), "open");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn run_without_session_emits_status_only() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));

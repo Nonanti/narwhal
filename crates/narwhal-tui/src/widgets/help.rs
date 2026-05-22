@@ -56,6 +56,10 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
                 description: "cycle pane focus",
             },
             CheatsheetEntry {
+                keys: ":",
+                description: "command palette (any pane)",
+            },
+            CheatsheetEntry {
                 keys: "Ctrl-T",
                 description: "new editor tab",
             },
@@ -74,6 +78,14 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
             CheatsheetEntry {
                 keys: ":refresh",
                 description: "re-fetch schema tree for active connection",
+            },
+            CheatsheetEntry {
+                keys: ":format / :fmt",
+                description: "pretty-print the statement under the cursor",
+            },
+            CheatsheetEntry {
+                keys: ":format-all / :fmtall",
+                description: "pretty-print every statement in the buffer",
             },
         ],
     },
@@ -173,6 +185,47 @@ pub const CHEATSHEET: &[CheatsheetSection] = &[
             CheatsheetEntry {
                 keys: ":next / :prev",
                 description: "page through results",
+            },
+        ],
+    },
+    CheatsheetSection {
+        title: "Connections",
+        entries: &[
+            CheatsheetEntry {
+                keys: ":add",
+                description: "open the connection wizard (empty form)",
+            },
+            CheatsheetEntry {
+                keys: ":url <dsn>",
+                description: "prefill the wizard from a connection URL",
+            },
+            CheatsheetEntry {
+                keys: ":test [name|url]",
+                description: "dry-run a connection without opening a session",
+            },
+            CheatsheetEntry {
+                keys: ":edit <name>",
+                description: "edit a saved connection in the wizard",
+            },
+            CheatsheetEntry {
+                keys: ":open <name|url>",
+                description: "connect to a saved entry or an ad-hoc URL",
+            },
+            CheatsheetEntry {
+                keys: ":remove <name>",
+                description: "delete a saved connection (also :rm)",
+            },
+            CheatsheetEntry {
+                keys: "ssh tunnel",
+                description: "fill ssh_host + ssh_user in :add (or ?ssh_host=… in :url)",
+            },
+            CheatsheetEntry {
+                keys: "pgpass / env",
+                description: "PGPASSWORD / MYSQL_PWD / ~/.pgpass picked up automatically",
+            },
+            CheatsheetEntry {
+                keys: "Tab on path field",
+                description: "filesystem completion in the wizard",
             },
         ],
     },

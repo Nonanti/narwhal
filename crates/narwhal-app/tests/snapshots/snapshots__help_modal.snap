@@ -1,54 +1,70 @@
 ---
 source: crates/narwhal-app/tests/snapshots.rs
-expression: "snapshot_core_sized(&mut core, 120, 50)"
+expression: "snapshot_core_sized(&mut core, 130, 66)"
 ---
-┌ narwhal ───────────────────────┐┌ editor ────────────────────────────────────────────────────────────────────────────┐
-│                                ││  1 │                                                                               │
-│  no connections           ┌ help · esc closes ───────────────────────────────────────────┐                           │
-│                           │ Global                                                       │                           │
-│  add one to connections.to│  F5 / Alt-Enter / Ctrl-;     run statement under cursor      │                           │
-│                           │  F6                          run whole buffer                │                           │
-│                           │  F7                          stream cursor statement         │                           │
-│                           │  F4 / Ctrl-C                 cancel running query            │                           │
-│                           │  Ctrl-W                      cycle pane focus                │                           │
-│                           │  Ctrl-T                      new editor tab                  │                           │
-│                           │  Ctrl-Tab / Ctrl-Shift-Tab   cycle tabs                      │                           │
-│                           │  ? / F1                      this help                       │                           │
-│                           │  :q                          quit                            │                           │
-│                           │  :refresh                    re-fetch schema tree for active │                           │
-│                           │                                                              │                           │
-│                           │ Editor                                                       │                           │
-│                           │  i / a                       enter insert mode               │                           │
-│                           │  Esc                         back to normal mode             │                           │
-│                           │  Tab / Ctrl-Space            completion                      │                           │
-│                           │  ↑ ↓ / Shift-Tab             cycle popup items               │                           │
-│                           │  Enter / Tab (in popup)      accept completion               │                           │
-│                           │  h j k l / arrows            move cursor                     │                           │
-│                           │  w / b                       word forward / backward         │                           │
-│                           │  0 / $                       line start / end                │                           │
-│                           │  v / V                       visual / visual-line mode       │                           │
-│                           │                                                              │                           │
-│                           │ Sidebar                                                      │───────────────────────────┘
-│                           │  j / k / ↑ / ↓               navigate                        │───────────────────────────┐
-│                           │  Enter                       describe table                  │F6 runs whole buffer,      │
-│                           │  o                           preview table data              │                           │
-│                           │  d                           inject DDL into editor          │                           │
-│                           │                                                              │                           │
-│                           │ Results                                                      │                           │
-│                           │  h j k l / arrows            move selection                  │                           │
-│                           │  Enter                       open cell popup                 │                           │
-│                           │  e                           edit cell value                 │                           │
-│                           │  y / Y                       yank cell / row to clipboard    │                           │
-│                           │  /                           filter rows                     │                           │
-│                           │  n / N                       next / prev search match        │                           │
-│                           │  g / G                       jump to first / last row        │                           │
-│                           │  :next / :prev               page through results            │                           │
-│                           │                                                              │                           │
-│                           │ Snippets                                                     │                           │
-│                           │  :save <name>                save editor buffer as a named sn│                           │
-│                           │  :load <name>                load a snippet into a new tab   │                           │
-│                           │  :rm-snippet <name>          delete a saved snippet          │                           │
-│                           └──────────────────────────────────────────────────────────────┘                           │
-│                                ││                                                                                    │
-└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
+┌ narwhal ───────────────────────┐┌ editor ──────────────────────────────────────────────────────────────────────────────────────┐
+│                                ││  1 │                                                                                         │
+│  no connections yet            ││                                                                                              │
+│                            ┌ help · esc closes ───────────────────────────────────────────────────┐                            │
+│  press :add to create one  │ Global                                                               │                            │
+│  or  :url <dsn> to paste a │  F5 / Alt-Enter / Ctrl-;     run statement under cursor              │                            │
+│                            │  F6                          run whole buffer                        │                            │
+│  press ? for help          │  F7                          stream cursor statement                 │                            │
+│                            │  F4 / Ctrl-C                 cancel running query                    │                            │
+│                            │  Ctrl-W                      cycle pane focus                        │                            │
+│                            │  :                           command palette (any pane)              │                            │
+│                            │  Ctrl-T                      new editor tab                          │                            │
+│                            │  Ctrl-Tab / Ctrl-Shift-Tab   cycle tabs                              │                            │
+│                            │  ? / F1                      this help                               │                            │
+│                            │  :q                          quit                                    │                            │
+│                            │  :refresh                    re-fetch schema tree for active connecti│                            │
+│                            │  :format / :fmt              pretty-print the statement under the cur│                            │
+│                            │  :format-all / :fmtall       pretty-print every statement in the buff│                            │
+│                            │                                                                      │                            │
+│                            │ Editor                                                               │                            │
+│                            │  i / a                       enter insert mode                       │                            │
+│                            │  Esc                         back to normal mode                     │                            │
+│                            │  Tab / Ctrl-Space            completion                              │                            │
+│                            │  ↑ ↓ / Shift-Tab             cycle popup items                       │                            │
+│                            │  Enter / Tab (in popup)      accept completion                       │                            │
+│                            │  h j k l / arrows            move cursor                             │                            │
+│                            │  w / b                       word forward / backward                 │                            │
+│                            │  0 / $                       line start / end                        │                            │
+│                            │  v / V                       visual / visual-line mode               │                            │
+│                            │                                                                      │                            │
+│                            │ Sidebar                                                              │                            │
+│                            │  j / k / ↑ / ↓               navigate                                │                            │
+│                            │  Enter                       describe table                          │                            │
+│                            │  o                           preview table data                      │                            │
+│                            │  d                           inject DDL into editor                  │                            │
+│                            │                                                                      │────────────────────────────┘
+│                            │ Results                                                              │────────────────────────────┐
+│                            │  h j k l / arrows            move selection                          │hole buffer, Ctrl-Space     │
+│                            │  Enter                       open cell popup                         │                            │
+│                            │  e                           edit cell value                         │                            │
+│                            │  y / Y                       yank cell / row to clipboard            │                            │
+│                            │  /                           filter rows                             │                            │
+│                            │  n / N                       next / prev search match                │                            │
+│                            │  g / G                       jump to first / last row                │                            │
+│                            │  :next / :prev               page through results                    │                            │
+│                            │                                                                      │                            │
+│                            │ Connections                                                          │                            │
+│                            │  :add                        open the connection wizard (empty form) │                            │
+│                            │  :url <dsn>                  prefill the wizard from a connection URL│                            │
+│                            │  :test [name|url]            dry-run a connection without opening a s│                            │
+│                            │  :edit <name>                edit a saved connection in the wizard   │                            │
+│                            │  :open <name|url>            connect to a saved entry or an ad-hoc UR│                            │
+│                            │  :remove <name>              delete a saved connection (also :rm)    │                            │
+│                            │  ssh tunnel                  fill ssh_host + ssh_user in :add (or ?ss│                            │
+│                            │  pgpass / env                PGPASSWORD / MYSQL_PWD / ~/.pgpass picke│                            │
+│                            │  Tab on path field           filesystem completion in the wizard     │                            │
+│                            │                                                                      │                            │
+│                            │ Snippets                                                             │                            │
+│                            │  :save <name>                save editor buffer as a named snippet   │                            │
+│                            │  :load <name>                load a snippet into a new tab           │                            │
+│                            │  :rm-snippet <name>          delete a saved snippet                  │                            │
+│                            └──────────────────────────────────────────────────────────────────────┘                            │
+│                                ││                                                                                              │
+│                                ││                                                                                              │
+└────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────┘
   NOR editor  (no connection)  ready

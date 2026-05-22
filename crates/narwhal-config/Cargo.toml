@@ -25,3 +25,6 @@ uuid.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 secrecy = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"

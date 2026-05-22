@@ -87,6 +87,10 @@ base64 = "0.22"
 zeroize = { version = "1", features = ["derive"] }
 secrecy = "0.10"
 
+# Benchmarking (dev-only). HTML reports are disabled to keep the
+# default-features footprint small and avoid pulling in `plotters`.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
 # Internal crates
 narwhal-core = { path = "crates/narwhal-core" }
 narwhal-config = { path = "crates/narwhal-config" }
