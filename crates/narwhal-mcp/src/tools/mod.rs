@@ -12,10 +12,14 @@ use crate::error::McpError;
 use crate::protocol::ToolDescriptor;
 
 mod describe_schema;
+mod describe_table;
+mod explain_query;
 mod list_connections;
 mod run_query;
 
 pub use describe_schema::DescribeSchemaTool;
+pub use describe_table::DescribeTableTool;
+pub use explain_query::ExplainQueryTool;
 pub use list_connections::ListConnectionsTool;
 pub use run_query::RunQueryTool;
 
@@ -88,7 +92,9 @@ impl ToolRegistry {
             tools: vec![
                 Box::new(ListConnectionsTool),
                 Box::new(DescribeSchemaTool),
+                Box::new(DescribeTableTool),
                 Box::new(RunQueryTool),
+                Box::new(ExplainQueryTool),
             ],
         }
     }
