@@ -50,9 +50,11 @@ impl Tool for ListConnectionsTool {
     }
 
     async fn call(&self, ctx: &ServerContext, _arguments: Value) -> Result<ToolOutput, McpError> {
-        let connections = ctx.connections();
-        let view: Vec<ConnectionView> = connections
-            .connections
+        // `visible_connections` already applies the workspace ACL when one
+        // is attached. Without a workspace this returns every connection,
+        // preserving the historical behaviour.
+        let visible = ctx.visible_connections();
+        let view: Vec<ConnectionView> = visible
             .iter()
             .map(|c| ConnectionView {
                 name: c.name.clone(),

@@ -53,8 +53,10 @@ pub mod protocol;
 pub mod registry;
 pub mod server;
 pub mod tools;
+pub mod workspace;
 
 pub use context::ServerContext;
 pub use error::McpError;
 pub use registry::DriverRegistry;
 pub use server::McpServer;
+pub use workspace::{Workspace, WorkspaceError, WorkspaceFile};
