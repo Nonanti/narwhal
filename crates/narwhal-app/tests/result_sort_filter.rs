@@ -87,7 +87,7 @@ fn compute_visible(columns: &[ColumnHeader], rows: &[Row], view: &ResultView) ->
 
 /// Get the active tab's result columns and rows.
 fn get_rows(core: &AppCore) -> (Vec<ColumnHeader>, Vec<Row>) {
-    match core.tabs()[core.active_tab()].results.active_state() {
+    match core.tabs()[core.active_tab()].results().active_state() {
         ResultState::Rows { columns, rows, .. } => (columns.clone(), rows.clone()),
         _ => panic!("expected Rows"),
     }
@@ -95,7 +95,7 @@ fn get_rows(core: &AppCore) -> (Vec<ColumnHeader>, Vec<Row>) {
 
 /// Get a reference to the active tab's ResultView.
 fn result_view(core: &AppCore) -> &ResultView {
-    core.tabs()[core.active_tab()].results.active()
+    core.tabs()[core.active_tab()].results().active()
 }
 
 /// Extract integer ids from visible row indices.
@@ -383,7 +383,7 @@ async fn escape_clears_filter_and_closes_prompt() {
     core.handle_key(key(KeyCode::Char('/')));
     assert!(
         core.tabs()[core.active_tab()]
-            .results
+            .results()
             .active()
             .filter_prompt_open
     );
@@ -391,20 +391,20 @@ async fn escape_clears_filter_and_closes_prompt() {
         core.handle_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active().filter,
+        core.tabs()[core.active_tab()].results().active().filter,
         "abc"
     );
 
     // Press Esc — should clear filter and close prompt
     core.handle_key(key(KeyCode::Esc));
     assert!(core.tabs()[core.active_tab()]
-        .results
+        .results()
         .active()
         .filter
         .is_empty());
     assert!(
         !core.tabs()[core.active_tab()]
-            .results
+            .results()
             .active()
             .filter_prompt_open
     );

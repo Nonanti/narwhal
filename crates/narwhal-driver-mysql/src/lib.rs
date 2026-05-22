@@ -112,12 +112,27 @@ impl DatabaseDriver for MysqlDriver {
     ) -> Result<Box<dyn Connection>> {
         let opts = build_opts(config, password)?;
         debug!(target: "narwhal::mysql", "establishing connection");
-        let conn = Conn::new(opts)
+        let mut conn = Conn::new(opts.clone())
             .await
             .map_err(|e| Error::Connection(e.to_string()))?;
-        info!(target: "narwhal::mysql", "connection established");
+
+        // L31: capture CONNECTION_ID() so the cancel handle can target
+        // the right thread via KILL QUERY on a second connection.
+        let connection_id: u64 = conn
+            .query_first("SELECT CONNECTION_ID()")
+            .await
+            .map_err(|e| Error::Connection(e.to_string()))?
+            .unwrap_or(0);
+
+        info!(
+            target: "narwhal::mysql",
+            connection_id,
+            "connection established"
+        );
         Ok(Box::new(MysqlConnection {
             inner: Arc::new(Mutex::new(Some(conn))),
+            connection_id,
+            opts,
         }))
     }
 }
@@ -177,6 +192,45 @@ fn build_opts(config: &ConnectionConfig, password: Option<&str>) -> Result<Opts>
 
 pub struct MysqlConnection {
     inner: Arc<Mutex<Option<Conn>>>,
+    /// MySQL server-assigned thread id, captured at connect time. Used
+    /// by [`MysqlCancelHandle`] to target the right session with
+    /// `KILL QUERY` (L31).
+    connection_id: u64,
+    /// Cached connection options so the cancel handle can open a second
+    /// connection to issue `KILL QUERY` against `connection_id`.
+    opts: Opts,
+}
+
+/// L31: cancel handle that fires `KILL QUERY <thread_id>` on a fresh
+/// connection. Best-effort: if opening the secondary connection fails
+/// (e.g. server is at max_connections) we surface the error rather than
+/// pretending the cancel succeeded.
+struct MysqlCancelHandle {
+    connection_id: u64,
+    opts: Opts,
+}
+
+#[async_trait]
+impl CancelHandle for MysqlCancelHandle {
+    async fn cancel(&self) -> Result<()> {
+        let mut killer = Conn::new(self.opts.clone())
+            .await
+            .map_err(|e| Error::Connection(format!("cancel: open killer conn: {e}")))?;
+        let sql = format!("KILL QUERY {}", self.connection_id);
+        debug!(
+            target: "narwhal::mysql",
+            connection_id = self.connection_id,
+            "sending KILL QUERY"
+        );
+        killer
+            .query_drop(&sql)
+            .await
+            .map_err(|e| Error::Query(format!("KILL QUERY {}: {e}", self.connection_id)))?;
+        // Best-effort disconnect; ignore errors because the kill
+        // already landed if we got here.
+        let _ = killer.disconnect().await;
+        Ok(())
+    }
 }
 
 impl MysqlConnection {
@@ -631,7 +685,17 @@ impl Connection for MysqlConnection {
     }
 
     fn cancel_handle(&self) -> Option<Box<dyn CancelHandle>> {
-        None
+        // L31: opens a *second* connection to issue KILL QUERY against
+        // our thread id. This is the same shape PostgreSQL's cancel
+        // request takes: out-of-band signal, independent of the main
+        // socket so a hung query can still be interrupted.
+        if self.connection_id == 0 {
+            return None;
+        }
+        Some(Box::new(MysqlCancelHandle {
+            connection_id: self.connection_id,
+            opts: self.opts.clone(),
+        }))
     }
 
     fn capabilities(&self) -> Capabilities {

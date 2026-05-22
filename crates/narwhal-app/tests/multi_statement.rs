@@ -78,7 +78,7 @@ async fn single_result_no_strip() {
     core.execute_command("run");
     core.drain_run_updates().await;
 
-    let bundle = &core.tabs()[core.active_tab()].results;
+    let bundle = core.tabs()[core.active_tab()].results();
     assert_eq!(bundle.len(), 1, "single result should have bundle length 1");
     assert!(!bundle.is_multi(), "single result should not be multi");
     assert!(matches!(bundle.active_state(), ResultState::Rows { .. }));
@@ -108,7 +108,7 @@ async fn three_statements_three_results() {
     core.execute_command("run-all");
     core.drain_run_updates().await;
 
-    let bundle = &core.tabs()[core.active_tab()].results;
+    let bundle = core.tabs()[core.active_tab()].results();
     assert_eq!(
         bundle.len(),
         3,
@@ -142,7 +142,7 @@ async fn bracket_r_advances_active() {
     core.handle_key(key(KeyCode::Char(']')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         0,
         "]r should wrap to result 0"
     );
@@ -151,7 +151,7 @@ async fn bracket_r_advances_active() {
     core.handle_key(key(KeyCode::Char(']')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         1,
         "]r should advance to result 1"
     );
@@ -160,7 +160,7 @@ async fn bracket_r_advances_active() {
     core.handle_key(key(KeyCode::Char(']')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         2,
         "]r should advance to result 2"
     );
@@ -190,7 +190,7 @@ async fn bracket_l_bracket_r_wraps_backward() {
     core.handle_key(key(KeyCode::Char('[')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         1,
         "[r should go to result 1"
     );
@@ -199,7 +199,7 @@ async fn bracket_l_bracket_r_wraps_backward() {
     core.handle_key(key(KeyCode::Char('[')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         0,
         "[r should go to result 0"
     );
@@ -208,7 +208,7 @@ async fn bracket_l_bracket_r_wraps_backward() {
     core.handle_key(key(KeyCode::Char('[')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         2,
         "[r should wrap backward to result 2"
     );
@@ -245,7 +245,7 @@ async fn state_preserved_across_tab_switch() {
     core.handle_key(key(KeyCode::Char('[')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         0,
         "should be on result 0"
     );
@@ -254,7 +254,7 @@ async fn state_preserved_across_tab_switch() {
     core.handle_key(key(KeyCode::Char('j')));
     core.handle_key(key(KeyCode::Char('j')));
     core.handle_key(key(KeyCode::Char('j')));
-    let first_result_selected = core.tabs()[core.active_tab()].results.active().selected();
+    let first_result_selected = core.tabs()[core.active_tab()].results().active().selected();
     assert_eq!(
         first_result_selected,
         Some(2),
@@ -265,7 +265,7 @@ async fn state_preserved_across_tab_switch() {
     core.handle_key(key(KeyCode::Char(']')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         1,
         "should be on result 1"
     );
@@ -274,13 +274,13 @@ async fn state_preserved_across_tab_switch() {
     core.handle_key(key(KeyCode::Char('[')));
     core.handle_key(key(KeyCode::Char('r')));
     assert_eq!(
-        core.tabs()[core.active_tab()].results.active,
+        core.tabs()[core.active_tab()].results().active,
         0,
         "should be back on result 0"
     );
 
     // Verify scroll state was preserved
-    let restored_selected = core.tabs()[core.active_tab()].results.active().selected();
+    let restored_selected = core.tabs()[core.active_tab()].results().active().selected();
     assert_eq!(
         restored_selected,
         Some(2),

@@ -30,9 +30,9 @@ fn forward_search_finds_first_match() {
 
     // Press / to open forward search prompt.
     core.handle_key(key(KeyCode::Char('/')));
-    assert!(core.tabs()[core.active_tab()].editor_search.prompt_open);
+    assert!(core.tabs()[core.active_tab()].editor_search().prompt_open);
     assert_eq!(
-        core.tabs()[core.active_tab()].editor_search.direction,
+        core.tabs()[core.active_tab()].editor_search().direction,
         SearchDirection::Forward
     );
 
@@ -48,7 +48,7 @@ fn forward_search_finds_first_match() {
     assert_eq!(row, 0);
     assert_eq!(col, 7, "cursor should be at start of first 'users' match");
     // Highlighting should be active.
-    assert!(core.tabs()[core.active_tab()].editor_search.highlight);
+    assert!(core.tabs()[core.active_tab()].editor_search().highlight);
 }
 
 #[test]
@@ -61,9 +61,9 @@ fn backward_search_finds_first_match() {
 
     // Press ? to open backward search prompt.
     core.handle_key(key(KeyCode::Char('?')));
-    assert!(core.tabs()[core.active_tab()].editor_search.prompt_open);
+    assert!(core.tabs()[core.active_tab()].editor_search().prompt_open);
     assert_eq!(
-        core.tabs()[core.active_tab()].editor_search.direction,
+        core.tabs()[core.active_tab()].editor_search().direction,
         SearchDirection::Backward
     );
 
@@ -158,10 +158,10 @@ fn esc_during_prompt_restores_cursor() {
         "Esc should restore cursor to pre-search position"
     );
     // Search should be cleared.
-    assert!(!core.tabs()[core.active_tab()].editor_search.prompt_open);
-    assert!(!core.tabs()[core.active_tab()].editor_search.highlight);
+    assert!(!core.tabs()[core.active_tab()].editor_search().prompt_open);
+    assert!(!core.tabs()[core.active_tab()].editor_search().highlight);
     assert!(core.tabs()[core.active_tab()]
-        .editor_search
+        .editor_search()
         .needle
         .is_empty());
 }
@@ -178,11 +178,14 @@ fn enter_during_prompt_keeps_match_highlighted() {
     core.handle_key(key(KeyCode::Enter));
 
     // Prompt should be closed but highlights should remain.
-    assert!(!core.tabs()[core.active_tab()].editor_search.prompt_open);
-    assert!(core.tabs()[core.active_tab()].editor_search.highlight);
-    assert_eq!(core.tabs()[core.active_tab()].editor_search.needle, "this");
+    assert!(!core.tabs()[core.active_tab()].editor_search().prompt_open);
+    assert!(core.tabs()[core.active_tab()].editor_search().highlight);
+    assert_eq!(
+        core.tabs()[core.active_tab()].editor_search().needle,
+        "this"
+    );
     assert!(!core.tabs()[core.active_tab()]
-        .editor_search
+        .editor_search()
         .matches
         .is_empty());
 }

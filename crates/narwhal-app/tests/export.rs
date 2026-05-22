@@ -47,7 +47,7 @@ async fn seed_and_query(core: &mut AppCore, db_path: PathBuf, sql: &str) {
 }
 
 fn get_rows(core: &AppCore) -> Vec<Row> {
-    match &core.tabs()[core.active_tab()].results.active_state() {
+    match &core.tabs()[core.active_tab()].results().active_state() {
         ResultState::Rows { rows, .. } => rows.clone(),
         _ => panic!("expected Rows result"),
     }
@@ -202,7 +202,7 @@ async fn insert_single_table_round_trip() {
     seed_and_query(&mut core, db_path, "SELECT * FROM users ORDER BY id").await;
 
     // Verify source_table was detected
-    match &core.tabs()[core.active_tab()].results.active_state() {
+    match &core.tabs()[core.active_tab()].results().active_state() {
         ResultState::Rows { source_table, .. } => {
             assert!(
                 source_table.is_some(),
@@ -258,7 +258,7 @@ async fn insert_without_source_table_errors() {
     seed_and_query(&mut core, db_path, "SELECT 1+1 AS result").await;
 
     // Verify source_table is None
-    match &core.tabs()[core.active_tab()].results.active_state() {
+    match &core.tabs()[core.active_tab()].results().active_state() {
         ResultState::Rows { source_table, .. } => {
             assert!(
                 source_table.is_none(),
