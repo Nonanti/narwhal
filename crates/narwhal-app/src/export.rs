@@ -6,12 +6,24 @@ use std::path::Path;
 
 use narwhal_core::{ColumnHeader, Row, Value};
 
-/// Wire format produced by [`export_rows`].
+/// Wire format produced by [`export_rows`] and [`write_format`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExportFormat {
+    /// RFC 4180 CSV with CRLF line endings, header row, fields quoted
+    /// when they contain delimiters/quotes.
     Csv,
+    /// Array-of-objects JSON, one object per row, column names as keys.
     Json,
+    /// Tab-separated values — no quoting, tabs / newlines in cells
+    /// replaced with spaces. Pragmatic for shell pipelines, not a
+    /// formal standard.
+    Tsv,
+    /// Human-readable ASCII grid for terminal output. Variable-width
+    /// columns; not intended for machine consumption.
+    Table,
+    /// `INSERT INTO ... VALUES (...)` statements, requires a known
+    /// source table.
     Insert,
 }
 
@@ -20,7 +32,9 @@ impl ExportFormat {
         match token.to_ascii_lowercase().as_str() {
             "csv" => Some(Self::Csv),
             "json" => Some(Self::Json),
-            "insert" => Some(Self::Insert),
+            "tsv" => Some(Self::Tsv),
+            "table" | "tbl" => Some(Self::Table),
+            "insert" | "sql" => Some(Self::Insert),
             _ => None,
         }
     }
@@ -29,6 +43,8 @@ impl ExportFormat {
         match self {
             Self::Csv => "csv",
             Self::Json => "json",
+            Self::Tsv => "tsv",
+            Self::Table => "txt",
             Self::Insert => "sql",
         }
     }
@@ -100,10 +116,34 @@ pub fn export_rows(
     match format {
         ExportFormat::Csv => write_csv(&mut writer, columns, rows)?,
         ExportFormat::Json => write_json(&mut writer, columns, rows)?,
+        ExportFormat::Tsv => write_tsv(&mut writer, columns, rows)?,
+        ExportFormat::Table => write_table(&mut writer, columns, rows)?,
         ExportFormat::Insert => unreachable!(),
     }
     writer.flush()?;
     Ok(())
+}
+
+/// Write `rows` to an arbitrary [`Write`] sink — the streaming sibling
+/// of [`export_rows`].
+///
+/// The headless CLI (`narwhal exec ...`) uses this to dump query
+/// results to stdout without going through a temp file. `Insert` is
+/// rejected here because it requires a source-table argument the caller
+/// must provide via [`export_rows`] instead.
+pub fn write_format<W: Write>(
+    writer: &mut W,
+    format: ExportFormat,
+    columns: &[ColumnHeader],
+    rows: &[Row],
+) -> Result<(), ExportError> {
+    match format {
+        ExportFormat::Csv => write_csv(writer, columns, rows),
+        ExportFormat::Json => write_json(writer, columns, rows),
+        ExportFormat::Tsv => write_tsv(writer, columns, rows),
+        ExportFormat::Table => write_table(writer, columns, rows),
+        ExportFormat::Insert => Err(ExportError::NoSourceTable),
+    }
 }
 
 fn write_csv<W: Write>(
@@ -259,6 +299,141 @@ fn write_json_value<W: Write>(writer: &mut W, value: &Value) -> Result<(), Expor
             write_json_string(writer, &value.render())?;
         }
     }
+    Ok(())
+}
+
+/// Tab-separated values — lightweight CSV alternative for shell pipes.
+///
+/// No quoting (tabs / newlines / CRs in cells are replaced with spaces).
+/// Header row is included; `NULL` values render as an empty field, the
+/// same convention as CSV.
+fn write_tsv<W: Write>(
+    writer: &mut W,
+    columns: &[ColumnHeader],
+    rows: &[Row],
+) -> Result<(), ExportError> {
+    let mut first = true;
+    for column in columns {
+        if !first {
+            writer.write_all(b"\t")?;
+        }
+        write_tsv_field(writer, &column.name)?;
+        first = false;
+    }
+    writer.write_all(b"\n")?;
+
+    for row in rows {
+        let mut first = true;
+        for value in &row.0 {
+            if !first {
+                writer.write_all(b"\t")?;
+            }
+            match value {
+                Value::Null => {}
+                other => write_tsv_field(writer, &other.render())?,
+            }
+            first = false;
+        }
+        writer.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+fn write_tsv_field<W: Write>(writer: &mut W, field: &str) -> Result<(), ExportError> {
+    // Replace the three characters that would corrupt TSV framing. Any
+    // other Unicode passes through verbatim — TSV is bytes-in, bytes-out.
+    for ch in field.chars() {
+        let safe = match ch {
+            '\t' | '\n' | '\r' => ' ',
+            other => other,
+        };
+        let mut buf = [0u8; 4];
+        writer.write_all(safe.encode_utf8(&mut buf).as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Human-readable ASCII grid.
+///
+/// Two passes: first widths-of-everything, then write the formatted
+/// grid. Variable column widths so the longest cell sets the column.
+/// The renderer is deliberately allocation-light (one `Vec<String>` per
+/// row in pass 1, no per-cell `String`s reused in pass 2) so it stays
+/// usable on result sets in the millions of cells.
+fn write_table<W: Write>(
+    writer: &mut W,
+    columns: &[ColumnHeader],
+    rows: &[Row],
+) -> Result<(), ExportError> {
+    if columns.is_empty() {
+        return Ok(());
+    }
+
+    // Pre-render every cell once so we can compute the max width per
+    // column without paying the `Display` cost twice. Memory cost is
+    // (cells × average string width); for million-cell sets the user
+    // should choose CSV/JSON/TSV instead.
+    let mut rendered: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+    let mut widths: Vec<usize> = columns.iter().map(|c| c.name.chars().count()).collect();
+    for row in rows {
+        let mut cells = Vec::with_capacity(columns.len());
+        for (i, value) in row.0.iter().enumerate() {
+            let s = match value {
+                Value::Null => String::new(),
+                other => other.render(),
+            };
+            if i < widths.len() {
+                widths[i] = widths[i].max(s.chars().count());
+            }
+            cells.push(s);
+        }
+        rendered.push(cells);
+    }
+
+    // Top border
+    write_table_border(writer, &widths)?;
+    // Header
+    write_table_row(writer, &widths, columns.iter().map(|c| c.name.as_str()))?;
+    // Header/data separator
+    write_table_border(writer, &widths)?;
+    // Data rows
+    for cells in &rendered {
+        write_table_row(writer, &widths, cells.iter().map(String::as_str))?;
+    }
+    // Bottom border
+    write_table_border(writer, &widths)?;
+    Ok(())
+}
+
+fn write_table_border<W: Write>(writer: &mut W, widths: &[usize]) -> Result<(), ExportError> {
+    writer.write_all(b"+")?;
+    for &w in widths {
+        for _ in 0..(w + 2) {
+            writer.write_all(b"-")?;
+        }
+        writer.write_all(b"+")?;
+    }
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn write_table_row<'a, W, I>(writer: &mut W, widths: &[usize], cells: I) -> Result<(), ExportError>
+where
+    W: Write,
+    I: IntoIterator<Item = &'a str>,
+{
+    writer.write_all(b"|")?;
+    for (i, cell) in cells.into_iter().enumerate() {
+        let target = widths.get(i).copied().unwrap_or(0);
+        let width = cell.chars().count();
+        writer.write_all(b" ")?;
+        writer.write_all(cell.as_bytes())?;
+        for _ in width..target {
+            writer.write_all(b" ")?;
+        }
+        writer.write_all(b" |")?;
+    }
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -1024,5 +1199,137 @@ mod tests {
             body.contains("\"a\tb\""),
             "tab should trigger quoting, got: {body}"
         );
+    }
+
+    // ----- write_format (headless exec mode) -----
+
+    fn sample_columns_and_rows() -> (Vec<ColumnHeader>, Vec<Row>) {
+        let columns = vec![
+            ColumnHeader {
+                name: "id".into(),
+                data_type: "INTEGER".into(),
+            },
+            ColumnHeader {
+                name: "name".into(),
+                data_type: "TEXT".into(),
+            },
+        ];
+        let rows = vec![
+            Row(vec![Value::Int(1), Value::String("alice".into())]),
+            Row(vec![Value::Int(2), Value::String("bob".into())]),
+            Row(vec![Value::Int(3), Value::Null]),
+        ];
+        (columns, rows)
+    }
+
+    #[test]
+    fn write_format_csv_round_trips_through_memory() {
+        let (columns, rows) = sample_columns_and_rows();
+        let mut buf = Vec::new();
+        write_format(&mut buf, ExportFormat::Csv, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        // RFC 4180 line endings + header row
+        assert!(body.starts_with("id,name\r\n"));
+        assert!(body.contains("1,alice\r\n"));
+        assert!(body.contains("2,bob\r\n"));
+        // NULL field renders as empty
+        assert!(body.trim_end().ends_with("3,"));
+    }
+
+    #[test]
+    fn write_format_json_is_array_of_objects() {
+        let (columns, rows) = sample_columns_and_rows();
+        let mut buf = Vec::new();
+        write_format(&mut buf, ExportFormat::Json, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        // Parse to confirm valid JSON and the expected shape.
+        let value: serde_json::Value = serde_json::from_str(body.trim()).unwrap();
+        let arr = value.as_array().expect("top-level is array");
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["id"], 1);
+        assert_eq!(arr[0]["name"], "alice");
+        assert!(arr[2]["name"].is_null(), "NULL must serialise as JSON null");
+    }
+
+    #[test]
+    fn write_format_tsv_uses_tabs_and_replaces_embedded_separators() {
+        let columns = vec![ColumnHeader {
+            name: "val".into(),
+            data_type: "TEXT".into(),
+        }];
+        let rows = vec![
+            Row(vec![Value::String("a\tb".into())]),
+            Row(vec![Value::String("line1\nline2".into())]),
+        ];
+        let mut buf = Vec::new();
+        write_format(&mut buf, ExportFormat::Tsv, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        // Header
+        assert_eq!(body.lines().next().unwrap(), "val");
+        // Embedded tab/newline are replaced by spaces so TSV framing
+        // stays intact: shell pipes break otherwise.
+        assert!(body.contains("a b\n"), "tab must be replaced: {body:?}");
+        assert!(
+            body.contains("line1 line2\n"),
+            "newline must be replaced: {body:?}"
+        );
+    }
+
+    #[test]
+    fn write_format_table_has_aligned_columns_and_borders() {
+        let (columns, rows) = sample_columns_and_rows();
+        let mut buf = Vec::new();
+        write_format(&mut buf, ExportFormat::Table, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = body.lines().collect();
+        // 1 top border + 1 header + 1 header/data border + 3 rows + 1 bottom border = 7 lines
+        assert_eq!(lines.len(), 7, "got body: {body}");
+        // Every line starts and ends with `+` (borders) or `|` (rows).
+        for line in &lines {
+            let starts = line.starts_with('+') || line.starts_with('|');
+            let ends = line.ends_with('+') || line.ends_with('|');
+            assert!(starts && ends, "malformed line: {line:?}");
+        }
+        // The widest cell in the `name` column is "alice" (5 chars) so
+        // the column body cells must be at least 7 wide (5 + 2 padding).
+        assert!(lines[1].contains(" name"));
+    }
+
+    #[test]
+    fn write_format_table_handles_empty_result() {
+        // Schemaful empty result: header + borders, no data rows. This
+        // is the `SELECT * FROM t WHERE 0=1` case the exec CLI hits all
+        // the time and must not panic on.
+        let columns = vec![ColumnHeader {
+            name: "id".into(),
+            data_type: "INTEGER".into(),
+        }];
+        let rows: Vec<Row> = Vec::new();
+        let mut buf = Vec::new();
+        write_format(&mut buf, ExportFormat::Table, &columns, &rows).unwrap();
+        let body = String::from_utf8(buf).unwrap();
+        // top border + header + middle border + bottom border = 4 lines
+        assert_eq!(body.lines().count(), 4);
+    }
+
+    #[test]
+    fn write_format_insert_is_rejected_without_source_table() {
+        let (columns, rows) = sample_columns_and_rows();
+        let mut buf = Vec::new();
+        let err = write_format(&mut buf, ExportFormat::Insert, &columns, &rows).unwrap_err();
+        assert!(
+            matches!(err, ExportError::NoSourceTable),
+            "insert without table must surface NoSourceTable, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn export_format_from_token_recognises_new_formats() {
+        assert_eq!(ExportFormat::from_token("tsv"), Some(ExportFormat::Tsv));
+        assert_eq!(ExportFormat::from_token("TSV"), Some(ExportFormat::Tsv));
+        assert_eq!(ExportFormat::from_token("table"), Some(ExportFormat::Table));
+        assert_eq!(ExportFormat::from_token("tbl"), Some(ExportFormat::Table));
+        assert_eq!(ExportFormat::from_token("sql"), Some(ExportFormat::Insert));
+        assert_eq!(ExportFormat::from_token("unknown"), None);
     }
 }
