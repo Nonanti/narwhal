@@ -2809,11 +2809,7 @@ dependencies = [
  "insta",
  "narwhal-config",
  "narwhal-core",
- "narwhal-driver-clickhouse",
- "narwhal-driver-duckdb",
- "narwhal-driver-mysql",
- "narwhal-driver-postgres",
- "narwhal-driver-sqlite",
+ "narwhal-driver-registry",
  "narwhal-history",
  "narwhal-plugin",
  "narwhal-plugin-lua",
@@ -2938,6 +2934,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "narwhal-driver-registry"
+version = "1.1.0"
+dependencies = [
+ "narwhal-core",
+ "narwhal-driver-clickhouse",
+ "narwhal-driver-duckdb",
+ "narwhal-driver-mysql",
+ "narwhal-driver-postgres",
+ "narwhal-driver-sqlite",
+]
+
+[[package]]
 name = "narwhal-driver-sqlite"
 version = "1.1.0"
 dependencies = [
@@ -2977,11 +2985,7 @@ dependencies = [
  "chrono",
  "narwhal-config",
  "narwhal-core",
- "narwhal-driver-clickhouse",
- "narwhal-driver-duckdb",
- "narwhal-driver-mysql",
- "narwhal-driver-postgres",
- "narwhal-driver-sqlite",
+ "narwhal-driver-registry",
  "narwhal-history",
  "rusqlite",
  "secrecy",
