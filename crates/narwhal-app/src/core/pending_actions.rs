@@ -40,29 +40,46 @@ type FocusedRowSnapshot = (
 );
 
 impl AppCore {
+    /// Reason a row-level DML attempt was refused. `None` means the
+    /// guard let the action through.
+    ///
+    /// L36 #m1: split out of the old `dml_supported(&mut self)` so the
+    /// check is pure — callers (and tests) can ask "can I mutate?"
+    /// without smearing `status.message` as a side effect. The
+    /// twin [`Self::dml_supported`] helper still exists for the
+    /// common case where the caller wants both the boolean and the
+    /// status update.
+    fn dml_block_reason(&self) -> Option<String> {
+        if self.read_only {
+            return Some(
+                "read-only mode: row-level DML disabled (relaunch without --read-only)".into(),
+            );
+        }
+        let Some(session) = self.session.as_ref() else {
+            return Some("no active connection".into());
+        };
+        if !session.capabilities.row_level_dml {
+            return Some(format!(
+                "{}: driver does not support row-level DML; use the SQL editor with engine-specific syntax",
+                session.config.driver,
+            ));
+        }
+        None
+    }
+
     /// Guard: every row-CRUD entry point bails early when either the
     /// process was launched with `--read-only` (L36 #11) or the active
     /// driver does not expose row-level DML. The two checks are kept
     /// distinct in the status message so the user can tell why an
     /// action was refused.
     fn dml_supported(&mut self) -> bool {
-        if self.read_only {
-            self.status.message =
-                "read-only mode: row-level DML disabled (relaunch without --read-only)".into();
-            return false;
+        match self.dml_block_reason() {
+            Some(reason) => {
+                self.status.message = reason;
+                false
+            }
+            None => true,
         }
-        let Some(session) = self.session.as_ref() else {
-            self.status.message = "no active connection".into();
-            return false;
-        };
-        if !session.capabilities.row_level_dml {
-            self.status.message = format!(
-                "{}: driver does not support row-level DML; use the SQL editor with engine-specific syntax",
-                session.config.driver,
-            );
-            return false;
-        }
-        true
     }
 
     /// Snapshot the row currently focused in the result pane along with
@@ -440,9 +457,16 @@ impl AppCore {
             Some(txn) => RunTarget::Pinned(txn.conn.clone()),
             None => RunTarget::Pool(session.pool.clone()),
         };
+        // L36 #m3: wrap once in an Arc so the executor and the audit
+        // path share storage. SQL strings + parameter Vecs can be
+        // sizeable on wide tables; cloning the Vec previously
+        // duplicated every byte just to hand the same data to the
+        // journal write.
+        let compiled = std::sync::Arc::new(compiled);
         let started = std::time::Instant::now();
+        let exec_compiled = std::sync::Arc::clone(&compiled);
         let outcome = tokio::task::block_in_place(|| {
-            Handle::current().block_on(execute_batch(target, compiled.clone()))
+            Handle::current().block_on(execute_batch(target, exec_compiled))
         });
         // L36: audit log — every committed mutation is journalled as
         // a separate HistoryEntry tagged with `source = "pending"` so
@@ -475,6 +499,14 @@ impl AppCore {
     /// transaction which one tripped the rollback, so we conservatively
     /// flag them all and let the auditor disambiguate from the error
     /// message.
+    ///
+    /// L36 #M1: timing was previously averaged across the batch which
+    /// hid slow individual statements (one 9-second step + two 1ms
+    /// steps each looked like 3s). We now attribute the *total*
+    /// batch wall-clock to the **first** entry and leave the rest at
+    /// 0; the auditor can sum a `source = "pending"` window to
+    /// recover the batch duration without us pretending to measure
+    /// per-statement timings we never collected.
     fn record_pending_audit(
         &self,
         compiled: &[CompiledMutation],
@@ -491,14 +523,18 @@ impl AppCore {
         let conn_name = session.config.name.clone();
         let driver = session.config.driver.clone();
         let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-        let per_step_ms = elapsed_ms / (compiled.len().max(1) as u64);
         let entries: Vec<narwhal_history::HistoryEntry> = compiled
             .iter()
-            .map(|m| {
+            .enumerate()
+            .map(|(idx, m)| {
+                // Total wall-clock lands on the first statement only;
+                // subsequent statements record 0 so summing the batch
+                // matches the actual elapsed time.
+                let timing = if idx == 0 { elapsed_ms } else { 0 };
                 let mut entry = narwhal_history::HistoryEntry::success(m.sql.clone())
                     .with_connection(conn_id, conn_name.clone())
                     .with_driver(driver.clone())
-                    .with_timing(per_step_ms)
+                    .with_timing(timing)
                     .with_source("pending");
                 if let Err(err) = outcome {
                     entry = entry.with_failure(err.clone());
@@ -543,7 +579,13 @@ impl AppCore {
 /// Execute every compiled mutation in declaration order inside a single
 /// transaction (or savepoint, when called from inside an existing
 /// transaction). Returns the *total* rows affected across the batch.
-async fn execute_batch(target: RunTarget, compiled: Vec<CompiledMutation>) -> Result<u64, String> {
+///
+/// `compiled` is wrapped in an `Arc` so the caller can also hand the
+/// same buffer to the audit log without paying for a second copy.
+async fn execute_batch(
+    target: RunTarget,
+    compiled: std::sync::Arc<Vec<CompiledMutation>>,
+) -> Result<u64, String> {
     match target {
         RunTarget::Pool(pool) => {
             let mut conn = pool.acquire().await.map_err(|e| format!("acquire: {e}"))?;
@@ -555,8 +597,20 @@ async fn execute_batch(target: RunTarget, compiled: Vec<CompiledMutation>) -> Re
                 }
                 Err(e) => {
                     // Best-effort rollback; we still return the original
-                    // error to the user.
-                    let _ = conn.rollback().await;
+                    // error to the user. L36 #M2: log the rollback
+                    // failure (if any) so an auditor can see that the
+                    // pool connection may have been returned with the
+                    // transaction still open — the pool's reset hook
+                    // will catch this on next acquire, but a warning
+                    // here gives an earlier signal.
+                    if let Err(rb) = conn.rollback().await {
+                        tracing::warn!(
+                            target: "narwhal::pending",
+                            error = %rb,
+                            original = %e,
+                            "rollback after failed batch also failed; pool will reset"
+                        );
+                    }
                     Err(e)
                 }
             }
@@ -580,9 +634,41 @@ async fn execute_batch(target: RunTarget, compiled: Vec<CompiledMutation>) -> Re
                     Ok(n)
                 }
                 Err(e) => {
-                    let _ = guard.rollback_to_savepoint(sp).await;
-                    let _ = guard.release_savepoint(sp).await;
-                    Err(e)
+                    // L36 #M2: previously both errors were silently
+                    // swallowed via `let _`, leaving the outer
+                    // transaction in an undefined state without any
+                    // breadcrumb in the logs. We now warn on each
+                    // cleanup failure and — critically — escalate the
+                    // error message returned to the caller so the
+                    // user sees "savepoint cleanup also failed"
+                    // instead of just the original mutation error.
+                    let mut cleanup_errors: Vec<String> = Vec::new();
+                    if let Err(rb) = guard.rollback_to_savepoint(sp).await {
+                        tracing::warn!(
+                            target: "narwhal::pending",
+                            savepoint = sp,
+                            error = %rb,
+                            "rollback to savepoint failed inside outer transaction"
+                        );
+                        cleanup_errors.push(format!("rollback-to-savepoint: {rb}"));
+                    }
+                    if let Err(rl) = guard.release_savepoint(sp).await {
+                        tracing::warn!(
+                            target: "narwhal::pending",
+                            savepoint = sp,
+                            error = %rl,
+                            "release of savepoint failed inside outer transaction"
+                        );
+                        cleanup_errors.push(format!("release-savepoint: {rl}"));
+                    }
+                    if cleanup_errors.is_empty() {
+                        Err(e)
+                    } else {
+                        Err(format!(
+                            "{e}; outer transaction may be inconsistent ({})",
+                            cleanup_errors.join(", "),
+                        ))
+                    }
                 }
             }
         }

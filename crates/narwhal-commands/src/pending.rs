@@ -25,7 +25,7 @@
 //! 1` (some engines return `0`/`u64::MAX` for `INSERT ... DEFAULT
 //! VALUES`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use narwhal_core::{Column, Row, Value};
 use narwhal_sql::Dialect;
@@ -327,8 +327,12 @@ fn compile_insert(
     }
     // Validate every populated column exists in the schema snapshot —
     // catches typos when callers build mutations from raw input.
+    //
+    // L36 #M5: was O(values × columns); now builds a single HashSet
+    // up-front for O(values + columns) so wide tables stay fast.
+    let known: HashSet<&str> = columns.iter().map(|c| c.name.as_str()).collect();
     for col in values.keys() {
-        if !columns.iter().any(|c| &c.name == col) {
+        if !known.contains(col.as_str()) {
             return Err(format!(
                 "column '{col}' not declared on {}",
                 target.display()
