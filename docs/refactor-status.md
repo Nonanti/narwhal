@@ -129,9 +129,12 @@ Deferred items resolved in a follow-up pass:
 - **`wizard.rs`** (930 LOC) split into a directory: `mod.rs`,
   `fields.rs`, `state.rs`, `logic.rs`, `path.rs`.
 
-Still outstanding (lint hygiene, not architecture):
-- ~300 `pedantic` / `nursery` warnings, mostly mechanical and
-  collected per-file as code is touched in follow-up work.
+Lint hygiene also closed:
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo fmt --all --check`: clean.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps`: clean.
+- 692 tests pass across all feature combinations
+  (default / sqlite-only / all-drivers).
 
 ### Phase 7 outcome
 
