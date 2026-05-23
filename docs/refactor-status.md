@@ -6,7 +6,7 @@ Live progress tracker. Updated after every commit.
 |-------|-------|-----|
 | 0 — Standards baseline | done | `refactor-phase-0-done` |
 | 1 — Feature flags + driver registry | done | `refactor-phase-1-done` |
-| 2 — Rename collisions | not started | — |
+| 2 — Rename collisions | done | `refactor-phase-2-done` |
 | 3 — Extract narwhal-domain | not started | — |
 | 4 — Extract narwhal-commands | not started | — |
 | 5 — Plugin isolation | not started | — |
@@ -45,3 +45,15 @@ Live progress tracker. Updated after every commit.
   with `default = ["driver-postgres", "driver-sqlite"]`.
 - Build matrix verified: default features, `--no-default-features
   --features driver-sqlite`, and `--features all-drivers` all compile.
+
+### Phase 2 outcome
+
+- `narwhal-app/src/edit.rs`  -> `cell_edit.rs` (inline cell editing).
+- `narwhal-app/src/editor.rs` -> `statements.rs` (SQL statement
+  extraction over the editor buffer — the original name lied about
+  the responsibility).
+- `narwhal-app/src/core/editor_handlers.rs` ->
+  `core/editor_dispatch.rs` (will be split between domain and
+  commands in Phases 3-4).
+- The TUI `widgets/editor.rs` keeps the editor name (genuine editor
+  widget). `rg editor_handlers` returns nothing.
