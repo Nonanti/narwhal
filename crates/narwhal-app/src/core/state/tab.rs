@@ -1,0 +1,88 @@
+//! One editor tab: name, buffer, run state, results.
+
+use narwhal_tui::EditorBuffer;
+use narwhal_vim::SearchDirection;
+
+use super::result::{
+    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch, ResultState,
+    RowDetailState, RowSource,
+};
+
+pub struct Tab {
+    pub(crate) name: String,
+    pub(crate) editor: EditorBuffer,
+    pub(crate) results: ResultBundle,
+    pub(crate) search: Option<ResultSearch>,
+    pub(crate) editing: Option<CellEdit>,
+    pub(crate) completion: Option<CompletionState>,
+    /// Per-tab editor search state (separate from result pane search).
+    pub(crate) editor_search: EditorSearchState,
+    /// Page size used by the next sidebar preview. Stored per-tab so a
+    /// user paging through one table doesn't disturb another tab.
+    pub(crate) page_size: usize,
+    /// Pending row source to attach to the next `Rows` result. Populated
+    /// by `preview_sidebar_selection` and consumed in `finish_run`.
+    pub(crate) pending_source: Option<RowSource>,
+    /// When `Some`, the row detail modal is open on the result pane.
+    /// Sits at the same layer as the cell popup; only one of them
+    /// should be open at a time.
+    pub(crate) row_detail: Option<RowDetailState>,
+}
+
+impl Tab {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            editor: EditorBuffer::new(),
+            results: ResultBundle::default(),
+            search: None,
+            editing: None,
+            completion: None,
+            editor_search: EditorSearchState::default(),
+            page_size: 100,
+            pending_source: None,
+            row_detail: None,
+        }
+    }
+
+    /// Tab display name shown in the tab bar.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Editor buffer attached to this tab.
+    pub const fn editor(&self) -> &EditorBuffer {
+        &self.editor
+    }
+
+    /// Mutable editor buffer for tests and host-side compositors.
+    pub fn editor_mut(&mut self) -> &mut EditorBuffer {
+        &mut self.editor
+    }
+
+    /// Most-recent result bundle produced by this tab.
+    pub const fn results(&self) -> &ResultBundle {
+        &self.results
+    }
+
+    /// Mutable access to the result bundle.
+    pub fn results_mut(&mut self) -> &mut ResultBundle {
+        &mut self.results
+    }
+
+    /// Per-tab editor search state (separate from the result pane search).
+    pub const fn editor_search(&self) -> &EditorSearchState {
+        &self.editor_search
+    }
+
+    /// Page size used by the next sidebar preview.
+    pub const fn page_size(&self) -> usize {
+        self.page_size
+    }
+
+    /// Active completion popup, if any.
+    pub const fn completion(&self) -> Option<&CompletionState> {
+        self.completion.as_ref()
+    }
+}
+

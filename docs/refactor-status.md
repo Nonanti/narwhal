@@ -11,7 +11,7 @@ Live progress tracker. Updated after every commit.
 | 4 — Extract narwhal-commands | done | `refactor-phase-4-done` |
 | 5 — Plugin isolation | done | `refactor-phase-5-done` |
 | 6 — Binary slimming + final pass | done | `refactor-phase-6-done` |
-| 7 — Docs + CHANGELOG rewrite | not started | — |
+| 7 — Docs + CHANGELOG rewrite | done | `refactor-phase-7-done` |
 
 ## Open notes
 
@@ -124,3 +124,17 @@ Deferred (scope kept to one session):
 - `editor_dispatch.rs` (1066 LOC) split.
 - `wizard.rs` (930 LOC) split.
 - Tail of `pedantic`/`nursery` warnings (307 left).
+
+### Phase 7 outcome
+
+- README architecture section rewritten to match the new layered
+  map (domain / commands / app / driver-registry).
+- Per-crate `README.md` added to every workspace member (19 files,
+  ~30 lines each).
+- `CHANGELOG.md` rewritten from scratch as Berkant requested. New
+  `[Unreleased]` entry documents the refactor in full; the legacy
+  entries collapse into 1.1 / 1.0 release lines pointing at git
+  history.
+- `docs/EXCEPTIONS.md` lists every file that breaks the 500-LOC
+  soft limit with a rationale, plus the workspace clippy
+  allow-list.
