@@ -297,5 +297,4 @@ impl AppCore {
     // refresh_search_matches, advance_search, jump_to_current_match,
     // open_cell_popup, open_row_detail, handle_row_detail_key moved to
     // `core::results_actions` (L21).
-
 }

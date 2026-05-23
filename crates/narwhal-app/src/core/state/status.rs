@@ -9,4 +9,3 @@ pub struct StatusBar {
     /// Optional fourth slot — open transaction's isolation level.
     pub transaction: Option<String>,
 }
-

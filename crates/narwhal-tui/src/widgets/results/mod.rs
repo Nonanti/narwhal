@@ -23,9 +23,7 @@ use table_paint::draw_table;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Paragraph, Wrap,
-};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::theme::Theme;
@@ -220,7 +218,6 @@ fn format_elapsed(d: std::time::Duration) -> String {
     }
 }
 
-
 fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
     let base = match display {
         ResultDisplay::Empty => " results ".into(),
@@ -301,7 +298,6 @@ fn build_title(display: &ResultDisplay<'_>, view: &ResultView) -> String {
         base
     }
 }
-
 
 #[cfg(test)]
 mod tests {

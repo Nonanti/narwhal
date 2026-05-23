@@ -10,7 +10,12 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 
-pub(super) fn draw_table_detail(frame: &mut Frame<'_>, area: Rect, schema: &TableSchema, theme: &Theme) {
+pub(super) fn draw_table_detail(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    schema: &TableSchema,
+    theme: &Theme,
+) {
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(
         schema.columns.len() + schema.indexes.len() + schema.foreign_keys.len() + 8,
     );
@@ -115,4 +120,3 @@ fn format_foreign_key_line(fk: &ForeignKey) -> String {
 fn format_unique_line(uq: &UniqueConstraint) -> String {
     format!("    {} ({})", uq.name, uq.columns.join(", "))
 }
-

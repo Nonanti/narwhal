@@ -22,7 +22,6 @@ impl AppCore {
         self.help_open = !self.help_open;
     }
 
-
     /// Open the Ctrl+R history modal. Dispatches a background
     /// load via the meta channel (H11) so the UI stays responsive.
     pub fn open_history(&mut self) {
@@ -96,7 +95,6 @@ impl AppCore {
             _ => {}
         }
     }
-
 
     /// Open the `:snippets` modal. Reads the snippet list from the store.
     pub(super) fn open_snippets_modal(&mut self) {

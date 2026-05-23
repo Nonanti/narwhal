@@ -204,7 +204,6 @@ impl ConnectionWizard {
     }
 }
 
-
 impl ConnectionWizard {
     fn rebuild_fields(&mut self) {
         let mut fields = vec![text("name", WizardFieldKind::Name)];

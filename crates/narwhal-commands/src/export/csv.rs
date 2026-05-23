@@ -60,4 +60,3 @@ pub(super) fn write_csv_field<W: Write>(writer: &mut W, field: &str) -> Result<(
     }
     Ok(())
 }
-

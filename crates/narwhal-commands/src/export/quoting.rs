@@ -4,7 +4,10 @@ use std::io::Write;
 
 use super::error::ExportError;
 
-pub(super) fn write_quoted_sql_string<W: Write>(writer: &mut W, s: &str) -> Result<(), ExportError> {
+pub(super) fn write_quoted_sql_string<W: Write>(
+    writer: &mut W,
+    s: &str,
+) -> Result<(), ExportError> {
     writer.write_all(b"'")?;
     for ch in s.chars() {
         if ch == '\'' {
@@ -34,4 +37,3 @@ pub(super) fn unquote_ident(s: &str) -> String {
         s.to_owned()
     }
 }
-

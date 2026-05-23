@@ -3,11 +3,10 @@
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_tui::{
-    render_help_modal, render_history_modal, render_root, render_row_detail,
-    render_snippets_modal, render_wizard, CompletionItemView, CompletionPopupView,
-    EditorSearchHighlight, HistoryModalState, HistoryRow, Pane, RootLayout, RowDetailView,
-    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
-    WizardFieldView, WizardView,
+    render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
+    render_wizard, CompletionItemView, CompletionPopupView, EditorSearchHighlight,
+    HistoryModalState, HistoryRow, Pane, RootLayout, RowDetailView, SearchHighlight, SidebarRow,
+    SidebarView, SnippetsModalState, StatusBarView, WizardFieldView, WizardView,
 };
 use ratatui::layout::Rect;
 use ratatui::Frame;
@@ -188,7 +187,6 @@ impl AppCore {
             render_row_detail(frame, area, &view, &self.theme);
         }
     }
-
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.wizard.is_some() {
@@ -459,7 +457,8 @@ impl AppCore {
                     let desc = plugin
                         .commands()
                         .into_iter()
-                        .find(|cmd| cmd.name == name).map_or_else(|| "(no description)".into(), |cmd| cmd.description);
+                        .find(|cmd| cmd.name == name)
+                        .map_or_else(|| "(no description)".into(), |cmd| cmd.description);
                     self.status.message = format!(":{name} — {desc}");
                 } else {
                     self.status.message = format!("unknown command: {name}");
@@ -499,7 +498,6 @@ impl AppCore {
         }
     }
 
-
     // Plugin lifecycle and dispatch methods moved to `core::plugins` (L21).
 
     /// Insert raw text into the editor buffer. Used by tests to seed
@@ -507,7 +505,6 @@ impl AppCore {
     pub fn insert_into_editor(&mut self, text: &str) {
         self.tabs[self.active_tab].editor.insert_str(text);
     }
-
 
     // Session lifecycle (open_named, open_connection*, close_session),
     // schema (refresh_schema, count_sidebar_tables, schedule_schema_refresh),

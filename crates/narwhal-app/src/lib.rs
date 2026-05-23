@@ -15,7 +15,7 @@ pub use app::App;
 pub use core::{
     AppCore, HistoryState, ResultBundle, ResultState, RowDetailState, SnippetsModal, StatusBar,
 };
-pub use narwhal_commands::export::{ExportError, ExportFormat, QualifiedName, write_format};
+pub use narwhal_commands::export::{write_format, ExportError, ExportFormat, QualifiedName};
 pub use narwhal_commands::session::Session;
 pub use narwhal_commands::snippets::{SnippetError, SnippetStore};
 pub use registry::DriverRegistry;

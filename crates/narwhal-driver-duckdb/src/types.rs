@@ -65,19 +65,24 @@ pub(crate) fn value_from_ref(value: ValueRef<'_>) -> Value {
             // days is days since 1970-01-01 in the Unix epoch.
             // chrono's from_num_days_from_ce_opt uses the CE epoch
             // (day 1 = 0001-01-01). Unix epoch day 0 = CE day 719_163.
-            chrono::NaiveDate::from_num_days_from_ce_opt(days + 719_163).map_or_else(|| Value::String(format!("date({days})")), Value::Date)
+            chrono::NaiveDate::from_num_days_from_ce_opt(days + 719_163)
+                .map_or_else(|| Value::String(format!("date({days})")), Value::Date)
         }
         ValueRef::Time64(unit, ticks) => {
             let ns = scaled_ns(unit, ticks);
             let secs = (ns / 1_000_000_000) as u32;
             let sub_ns = (ns % 1_000_000_000) as u32;
-            chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, sub_ns).map_or_else(|| Value::String(format!("time({ns}ns)")), Value::Time)
+            chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, sub_ns)
+                .map_or_else(|| Value::String(format!("time({ns}ns)")), Value::Time)
         }
         ValueRef::Timestamp(unit, ticks) => {
             let ns = scaled_ns(unit, ticks);
             let secs = ns / 1_000_000_000;
             let sub_ns = (ns % 1_000_000_000) as u32;
-            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns).map_or_else(|| Value::String(format!("timestamp({ns}ns)")), Value::Timestamp)
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, sub_ns).map_or_else(
+                || Value::String(format!("timestamp({ns}ns)")),
+                Value::Timestamp,
+            )
         }
         ValueRef::Interval {
             months,

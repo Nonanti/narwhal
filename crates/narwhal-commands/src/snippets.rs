@@ -44,7 +44,10 @@ impl SnippetStore {
     /// Falls back to `~/.config/narwhal/snippets/` if `ProjectDirs` cannot
     /// be resolved.
     pub fn default_root() -> PathBuf {
-        directories::ProjectDirs::from("dev", "narwhal", "narwhal").map_or_else(|| PathBuf::from(".").join("narwhal").join("snippets"), |dirs| dirs.config_dir().join("snippets"))
+        directories::ProjectDirs::from("dev", "narwhal", "narwhal").map_or_else(
+            || PathBuf::from(".").join("narwhal").join("snippets"),
+            |dirs| dirs.config_dir().join("snippets"),
+        )
     }
 
     /// Save `sql` under `name`. Overwrites if the name already exists.
@@ -92,7 +95,9 @@ impl SnippetStore {
                 let entry = entry.ok()?;
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("sql") {
-                    path.file_stem()?.to_str().map(std::borrow::ToOwned::to_owned)
+                    path.file_stem()?
+                        .to_str()
+                        .map(std::borrow::ToOwned::to_owned)
                 } else {
                     None
                 }

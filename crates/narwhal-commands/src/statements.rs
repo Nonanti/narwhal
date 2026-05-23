@@ -6,8 +6,8 @@
 //! stay reusable for alternative backends (Helix, GPUI, …) without dragging
 //! the SQL splitter into the UI crate (bug.md H18).
 
-use narwhal_sql::{split_with, Dialect};
 use narwhal_domain::editor::EditorBuffer;
+use narwhal_sql::{split_with, Dialect};
 
 /// Return every statement in the buffer, trimmed of surrounding whitespace
 /// and of any trailing semicolon.

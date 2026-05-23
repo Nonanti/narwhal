@@ -498,7 +498,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn dd_deletes_line() {
         let mut vim = Vim::new();
@@ -666,7 +665,6 @@ mod tests {
         vim.handle(Key::char('z'));
         assert_eq!(vim.mode(), Mode::Normal);
     }
-
 
     #[test]
     fn pending_count_clamps_to_max() {

@@ -106,4 +106,3 @@ pub(super) fn write_json_value<W: Write>(writer: &mut W, value: &Value) -> Resul
     }
     Ok(())
 }
-

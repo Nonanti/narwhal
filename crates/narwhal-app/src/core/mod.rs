@@ -2,7 +2,7 @@
 //!
 //! [`AppCore`] owns every piece of state the UI depends on but contains no
 //! terminal-IO logic. The render path takes a [`ratatui::Frame`] from the
-//! caller, and key events come in as parsed crossterm [`KeyEvent`]s, so the
+//! caller, and key events come in as parsed crossterm `KeyEvent`s, so the
 //! core is fully usable with `ratatui::backend::TestBackend` in tests.
 //!
 //! Submodules under `core/` host pure helpers extracted from this file as
@@ -28,10 +28,7 @@ use std::sync::Arc;
 
 use narwhal_config::{ConnectionsFile, CredentialStore};
 use narwhal_history::Journal;
-use narwhal_tui::{
-    LayoutRegions, Pane, ResultView,
-    Theme,
-};
+use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
 use narwhal_vim::Vim;
 use tokio::sync::mpsc;
 
@@ -130,7 +127,6 @@ pub struct AppCore {
     pub(super) refresh_pending: Arc<AtomicBool>,
 }
 
-mod construct;
 mod accessors;
+mod construct;
 mod dispatch;
-

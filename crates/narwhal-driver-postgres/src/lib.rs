@@ -425,7 +425,9 @@ fn extract_csv(value: Option<&Value>) -> Vec<String> {
         return Vec::new();
     }
     if raw.contains('\x1F') {
-        raw.split('\x1F').map(std::borrow::ToOwned::to_owned).collect()
+        raw.split('\x1F')
+            .map(std::borrow::ToOwned::to_owned)
+            .collect()
     } else {
         raw.split(',').map(std::borrow::ToOwned::to_owned).collect()
     }

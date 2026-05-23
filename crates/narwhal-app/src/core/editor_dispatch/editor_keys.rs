@@ -5,8 +5,8 @@ use narwhal_core::ColumnHeader;
 use narwhal_tui::translate_key_event;
 use narwhal_vim::{Action, Mode, Operator};
 
-use crate::core::{AppCore, CompletionState};
 use crate::completion::{detect_context_with_schemas, gather as gather_completions};
+use crate::core::{AppCore, CompletionState};
 
 impl AppCore {
     pub(crate) fn accept_completion_at(&mut self, index: usize) {
@@ -81,7 +81,9 @@ impl AppCore {
     /// Keys are lowercased table names; values are `(schema_name, columns)`
     /// tuples so each column completion can carry the schema as its detail
     /// string. Returns an empty map when no session is active.
-    pub(crate) fn column_cache(&self) -> std::collections::HashMap<String, (String, Vec<ColumnHeader>)> {
+    pub(crate) fn column_cache(
+        &self,
+    ) -> std::collections::HashMap<String, (String, Vec<ColumnHeader>)> {
         let Some(session) = self.session.as_ref() else {
             return std::collections::HashMap::new();
         };
@@ -138,7 +140,6 @@ impl AppCore {
             prefix,
         });
     }
-
 
     /// Open the editor search prompt (`/` for forward, `?` for backward).
     pub(crate) fn apply_action(&mut self, action: Action) {

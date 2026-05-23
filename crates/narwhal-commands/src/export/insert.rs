@@ -46,7 +46,10 @@ pub(super) fn write_insert<W: Write>(
     Ok(())
 }
 
-pub(super) fn write_insert_value<W: Write>(writer: &mut W, value: &Value) -> Result<(), ExportError> {
+pub(super) fn write_insert_value<W: Write>(
+    writer: &mut W,
+    value: &Value,
+) -> Result<(), ExportError> {
     match value {
         Value::Null => writer.write_all(b"NULL")?,
         Value::Bool(b) => {
@@ -93,4 +96,3 @@ pub(super) fn write_insert_value<W: Write>(writer: &mut W, value: &Value) -> Res
     }
     Ok(())
 }
-

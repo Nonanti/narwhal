@@ -3,8 +3,8 @@
 use narwhal_tui::EditorBuffer;
 
 use super::result::{
-    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch,
-    RowDetailState, RowSource,
+    CellEdit, CompletionState, EditorSearchState, ResultBundle, ResultSearch, RowDetailState,
+    RowSource,
 };
 
 pub struct Tab {
@@ -84,4 +84,3 @@ impl Tab {
         self.completion.as_ref()
     }
 }
-

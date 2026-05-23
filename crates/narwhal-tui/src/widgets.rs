@@ -27,11 +27,11 @@ pub mod wizard;
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
 };
+pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
+pub use history::{render_history_modal, HistoryModalState, HistoryRow};
 pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
-pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
-pub use history::{render_history_modal, HistoryModalState, HistoryRow};
 pub use results::{
     compare_values, render_results, sanitize_for_display, CellEditView, CellPopup, ExplainPlanLine,
     ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,

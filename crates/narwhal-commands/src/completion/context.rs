@@ -2,8 +2,6 @@
 //! cursor sits, and which kind of completion candidate makes
 //! sense there.
 
-
-
 use super::tokenizer::{tokenize, Token};
 
 pub(super) const TABLE_EXPECTED_KEYWORDS: &[&str] = &[
@@ -199,4 +197,3 @@ fn trim_to_current_statement(buffer: &str, cursor_byte_offset: usize) -> String 
         prefix.to_owned()
     }
 }
-

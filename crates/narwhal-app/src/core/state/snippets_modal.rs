@@ -6,4 +6,3 @@ pub struct SnippetsModal {
     /// Index of the currently selected entry.
     pub selected: usize,
 }
-

@@ -364,7 +364,10 @@ async fn transform_chain_continues_past_a_failing_plugin() {
             assert_eq!(columns.last().map(|c| c.name.as_str()), Some("__seen"));
             assert_eq!(rows.len(), 3);
             for row in rows {
-                assert_eq!(row.0.last().map(narwhal_core::Value::render), Some("yes".into()));
+                assert_eq!(
+                    row.0.last().map(narwhal_core::Value::render),
+                    Some("yes".into())
+                );
             }
         }
         other => panic!("expected Rows, got {other:?}"),

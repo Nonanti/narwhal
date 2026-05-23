@@ -26,7 +26,6 @@ fn read_journal_raw(tmp: &tempfile::TempDir) -> String {
     fs::read_to_string(path).unwrap()
 }
 
-
 #[tokio::test]
 async fn redacts_create_user_password() {
     let entry = HistoryEntry::success("CREATE USER alice PASSWORD 's3cret'");
@@ -136,7 +135,6 @@ async fn redacts_multiple_secrets_in_one_statement() {
     assert!(!raw.contains("first"), "first password leaked: {raw}");
     assert!(!raw.contains("second"), "second password leaked: {raw}");
 }
-
 
 #[cfg(unix)]
 #[tokio::test]

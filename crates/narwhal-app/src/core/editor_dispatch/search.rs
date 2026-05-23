@@ -3,9 +3,7 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_vim::SearchDirection;
 
-use crate::core::text_utils::{
-    find_all, replace_all, replace_first, row_col_to_offset,
-};
+use crate::core::text_utils::{find_all, replace_all, replace_first, row_col_to_offset};
 use crate::core::AppCore;
 
 impl AppCore {
@@ -237,7 +235,6 @@ impl AppCore {
         self.status.message = format!("/{needle} · {}/{count}", next + 1);
     }
 
-
     /// Execute a substitute command (`:s/old/new/[g][c]` or `:%s/old/new/[g][c]`).
     pub(crate) fn execute_substitute(
         &mut self,
@@ -296,6 +293,4 @@ impl AppCore {
             self.status.message = format!("{total_replacements} replacement(s) made");
         }
     }
-
-
 }

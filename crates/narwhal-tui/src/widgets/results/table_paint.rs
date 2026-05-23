@@ -174,4 +174,3 @@ pub(super) fn draw_table(
         tabs: Vec::new(),
     }
 }
-

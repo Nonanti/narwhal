@@ -173,7 +173,6 @@ impl AppCore {
         }
     }
 
-
     /// Translate the current `TableState` selection (which is an index
     /// into the visible/rendered rows) to the original row index in
     /// the full result set. Returns `None` when there are no rows.
@@ -643,7 +642,6 @@ impl AppCore {
             row_index,
         });
     }
-
 
     fn open_row_detail(&mut self) {
         let tab = &self.tabs[self.active_tab];

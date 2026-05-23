@@ -51,4 +51,3 @@ pub(super) fn write_tsv_field<W: Write>(writer: &mut W, field: &str) -> Result<(
     }
     Ok(())
 }
-

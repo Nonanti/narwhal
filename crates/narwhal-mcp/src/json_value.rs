@@ -190,7 +190,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn json_to_value_primitives() {
         assert!(matches!(

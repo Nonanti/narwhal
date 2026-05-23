@@ -171,7 +171,7 @@ impl ResultView {
     }
 }
 
-/// View model passed to [`render_results`] each frame.
+/// View model passed to `render_results` each frame.
 ///
 /// `Display::Empty` is shown before the first run, `Running` while a
 /// statement is in flight (rows may already be filling in for streamed
@@ -232,7 +232,7 @@ pub struct ExplainPlanLine {
 }
 
 /// Hit-test regions computed during the last render of the results pane.
-/// Returned by [`render_results`] so the host app can route mouse events.
+/// Returned by `render_results` so the host app can route mouse events.
 #[derive(Debug, Default, Clone)]
 pub struct ResultHitRegions {
     /// One `(Rect, column_index)` per rendered column header cell.

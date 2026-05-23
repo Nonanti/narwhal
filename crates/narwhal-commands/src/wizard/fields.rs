@@ -193,4 +193,3 @@ pub(super) fn password(label: &'static str) -> WizardField {
         placeholder: "",
     }
 }
-
