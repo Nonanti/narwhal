@@ -51,6 +51,22 @@ impl Session {
         config: ConnectionConfig,
         password: Option<String>,
     ) -> Result<Self> {
+        // L36 #7: pre-connect step pipeline. Runs *before* the SSH
+        // tunnel because users typically need to fetch credentials
+        // (vault) or look up a target host (kubectl) before either
+        // the tunnel or the driver can dial in. Each step's stdout
+        // is captured and the resulting `${preconnect:NAME}`
+        // substitutions are applied to the connection params in
+        // place — the SSH tunnel + driver see the fully-resolved
+        // string fields.
+        let mut config = config;
+        let pc_vars = crate::pre_connect::run_pre_connect(&config.params.pre_connect)
+            .await
+            .map_err(|e| Error::Connection(format!("pre-connect: {e}")))?;
+        if !pc_vars.is_empty() {
+            crate::pre_connect::substitute_pre_connect(&mut config.params, &pc_vars)
+                .map_err(|e| Error::Connection(format!("pre-connect substitution: {e}")))?;
+        }
         // Bring up the SSH tunnel (if any) before the driver touches
         // the network. The returned `effective_config` carries the
         // loopback host/port the driver should target; the tunnel

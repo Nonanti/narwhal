@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### L36: DataGrip-parity feature pack
+
+First wave of editor-first quality-of-life features inspired by
+`lazysql`, plumbed through narwhal's existing Action / Effect /
+RowSource / dialect-aware quoting stack. Every entry below ships with
+integration tests; the workspace keeps clippy-clean under `pedantic +
+nursery + -D warnings`.
+
+#### Added
+
+- **Row CRUD + pending changes pipeline (#1).** `o` queues an empty
+  insert, `O` duplicates the focused row, `d` queues a delete, cell
+  edit (`e` + `Enter`) now queues an `UPDATE` instead of hitting the
+  database. `Ctrl-S` commits every staged mutation in a single
+  transaction (or savepoint when the user is already inside one);
+  `Ctrl-X` discards the queue; `Ctrl-P` (or `:pending` / `:diff`)
+  toggles a preview modal showing the generated SQL in order.
+  Optimistic concurrency is encoded into every WHERE clause so a
+  concurrent edit fails the commit instead of silently overwriting.
+  Primary-key guard refuses `d` on tables without a PK with a
+  user-readable message.
+- **Metadata tabs in TableDetail (#2).** Sidebar `Enter` on a table
+  opens a five-tab view: Records · Columns · Constraints · Foreign
+  Keys · Indexes. `1`–`5` chord switches the active tab; the sidebar
+  auto-focuses the Results pane so the chord lands on the right
+  widget. Backed by the existing schema queries; no new driver
+  surface required.
+- **Built-in JSON viewer (#3).** `z` opens the focused cell in a
+  full-screen modal, `Z` opens the whole row. `j/k/Ctrl-D/Ctrl-U/g/G`
+  scroll, `y/Y` yank, `q/Esc` close. Pretty-prints valid JSON via
+  `serde_json` and falls back to the raw payload for non-JSON cells.
+- **Action + Keymap layer (#4).** New `narwhal_commands::action`
+  (Action enum + KeyGroup taxonomy) and `narwhal_commands::keymap`
+  (registry + chord parser). `[keymap.<group>]` overrides in
+  `config.toml` rebind any chord; malformed entries surface as
+  warnings instead of panicking. v1 wires the override pipeline
+  end-to-end with an integration test and exposes the live keymap
+  through `AppCore::keymap()` for help/config tooling.
+- **History modal enrichment (#5).** Ctrl+R now shows an outcome
+  glyph (● green/yellow/red), elapsed timing (auto-scaled ms/s/m),
+  and rows summary (↓N for returned, ∼N for affected) so the user
+  can spot slow and failed queries at a glance. Filtering, j/k
+  navigation and Enter-to-paste were already wired in v0.
+- **`${env:VAR}` interpolation (#6).** Connection params, SSH config
+  and SSL certificate paths now accept `${env:NAME}` and
+  `${env:NAME:fallback}` placeholders. Fallbacks may themselves be
+  `${env:…}` references up to a depth of 8. Missing variables
+  surface as `ConfigError::Interpolate` so the failure is visible
+  immediately, not buried in a downstream engine error.
+- **Pre-connect commands (#7).** Each connection can carry an ordered
+  list of `[[connections.pre_connect]]` shell steps that run before
+  the SSH tunnel and the driver. Each step's stdout is optionally
+  captured into a named variable (`save_output_to`) and exposed to
+  the rest of the connection params via `${preconnect:NAME}`
+  placeholders. Per-step `timeout_secs` (default 30) and `required`
+  (default true) flags bound execution.
+- **`--read-only` flag (#11).** Refuses every row-level mutation
+  regardless of the driver's `row_level_dml` capability. The TUI
+  shows an `[RO]` badge in the status bar; the `exec` subcommand
+  refuses `--write` while `--read-only` is in effect.
+- **Pending mutations badge.** Status bar shows `⏳N pending` whenever
+  the staged-mutation queue is non-empty. Uses the same style as the
+  transaction badge so both "uncommitted state" cues read the same
+  way.
+- **Audit log for pending commits.** Each committed mutation lands in
+  the journal as a separate `HistoryEntry` tagged `source = "pending"`.
+  Failures attach the engine error to every statement in the batch.
+- **`row_level_dml` capability flag.** Postgres / SQLite / MySQL /
+  DuckDB opt in; ClickHouse declines and the row CRUD pipeline
+  refuses staging with engine-specific guidance.
+- **`:pending` / `:diff` command.** Discoverable counterpart to the
+  `Ctrl-P` chord for users who navigate by command line.
+
 ### Architecture refactor
 
 The workspace was reorganised around a strict view / domain / app /

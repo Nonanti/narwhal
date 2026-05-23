@@ -21,6 +21,7 @@ pub mod export;
 pub mod keymap;
 pub mod meta;
 pub mod pending;
+pub mod pre_connect;
 pub mod session;
 pub mod snippets;
 pub mod statements;

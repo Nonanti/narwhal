@@ -505,6 +505,7 @@ impl AppCore {
             Command::PluginLoad(path) => self.load_plugin(&path),
             Command::PluginList => self.list_plugins(),
             Command::History => self.open_history(),
+            Command::Pending => self.toggle_pending_preview(),
             Command::NewTab => self.new_tab(),
             Command::CloseTab => self.close_tab(),
             Command::NextTab => self.cycle_tab(1),
