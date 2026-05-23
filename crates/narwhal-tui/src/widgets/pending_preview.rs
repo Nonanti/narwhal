@@ -41,7 +41,9 @@ pub fn render_pending_preview(
         .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
             title,
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(modal);
     frame.render_widget(block, modal);

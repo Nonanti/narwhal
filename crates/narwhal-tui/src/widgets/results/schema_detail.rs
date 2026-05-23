@@ -42,7 +42,9 @@ pub(super) fn draw_table_detail(
             Style::default().fg(theme.muted),
         ))],
         MetaTab::Columns => render_columns(&schema.columns, theme),
-        MetaTab::Constraints => render_constraints(&schema.columns, &schema.unique_constraints, theme),
+        MetaTab::Constraints => {
+            render_constraints(&schema.columns, &schema.unique_constraints, theme)
+        }
         MetaTab::ForeignKeys => render_foreign_keys(&schema.foreign_keys, theme),
         MetaTab::Indexes => render_indexes(&schema.indexes, theme),
     };
@@ -134,7 +136,10 @@ fn render_constraints(
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("  unique constraints", bold_accent)));
+    lines.push(Line::from(Span::styled(
+        "  unique constraints",
+        bold_accent,
+    )));
     if uniques.is_empty() {
         lines.push(Line::from("    (none)".to_owned()));
     } else {

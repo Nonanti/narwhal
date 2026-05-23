@@ -160,9 +160,7 @@ async fn duplicate_row_clones_non_pk_columns_and_commits() {
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    let mut stmt = conn
-        .prepare("SELECT label FROM items ORDER BY id")
-        .unwrap();
+    let mut stmt = conn.prepare("SELECT label FROM items ORDER BY id").unwrap();
     let labels: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(0))
         .unwrap()
@@ -209,6 +207,44 @@ async fn append_then_edit_columns_and_commit_inserts_row() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn read_only_mode_blocks_every_row_crud_action() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("ro.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+         INSERT INTO items (label) VALUES ('alpha');",
+    )
+    .unwrap();
+    drop(conn);
+    let (registry, connections) = fixture(db_path.clone());
+    let mut core = AppCore::new(registry, connections, None);
+    core.set_read_only(true);
+    core.execute_command("open crud");
+    preview_items(&mut core).await;
+
+    core.handle_key(key(KeyCode::Char('j')));
+    core.handle_key(key(KeyCode::Char('d')));
+    assert!(
+        core.status_message().contains("read-only"),
+        "delete must be blocked, got: {}",
+        core.status_message()
+    );
+    assert_eq!(core.tabs()[core.active_tab()].pending().len(), 0);
+
+    core.handle_key(key(KeyCode::Char('o')));
+    assert!(core.status_message().contains("read-only"));
+    assert_eq!(core.tabs()[core.active_tab()].pending().len(), 0);
+
+    // DB is genuinely untouched.
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_rejected_on_table_without_primary_key() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("nopk.db");
@@ -220,8 +256,8 @@ async fn delete_rejected_on_table_without_primary_key() {
     let mut core = AppCore::new(registry, connections, None);
     core.execute_command("open crud");
     preview_items(&mut core).await; // 'items' \u2014 wait, it's `notes` here.
-    // Sidebar layout: conn (0) → main (1) → notes (2). preview_items
-    // already walked there.
+                                    // Sidebar layout: conn (0) → main (1) → notes (2). preview_items
+                                    // already walked there.
 
     while core.focus() != Pane::Results {
         core.handle_key(ctrl('w'));
@@ -335,9 +371,7 @@ async fn multiple_mutations_commit_in_one_transaction() {
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    let mut stmt = conn
-        .prepare("SELECT label FROM items ORDER BY id")
-        .unwrap();
+    let mut stmt = conn.prepare("SELECT label FROM items ORDER BY id").unwrap();
     let labels: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(0))
         .unwrap()

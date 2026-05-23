@@ -115,18 +115,17 @@ impl AppCore {
         // Recompute the visible row count up-front — several navigation
         // arms need it and computing inside each arm would force the
         // borrow checker to revalidate the `results` borrow.
-        let (visible_count, col_count) =
-            match self.tabs[self.active_tab].results.active_state() {
-                ResultState::Rows { rows, columns, .. } => {
-                    let vis = self.tabs[self.active_tab]
-                        .results
-                        .active()
-                        .visible_rows(columns, rows);
-                    (vis.len(), columns.len())
-                }
-                ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
-                _ => (0, 0),
-            };
+        let (visible_count, col_count) = match self.tabs[self.active_tab].results.active_state() {
+            ResultState::Rows { rows, columns, .. } => {
+                let vis = self.tabs[self.active_tab]
+                    .results
+                    .active()
+                    .visible_rows(columns, rows);
+                (vis.len(), columns.len())
+            }
+            ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
+            _ => (0, 0),
+        };
 
         match action {
             Action::ResultsMoveDown => self.tabs[self.active_tab]
@@ -198,8 +197,7 @@ impl AppCore {
                 // RowDetail group. We keep the arm explicit so the
                 // exhaustive match below does not need a misleading
                 // fallthrough message.
-                self.status.message =
-                    "open JSON from the row detail modal with `Z`".into();
+                self.status.message = "open JSON from the row detail modal with `Z`".into();
             }
             // `Action` is `#[non_exhaustive]` so the compiler insists on
             // a fallthrough arm. Today the variants above are exhaustive;
@@ -231,11 +229,9 @@ impl AppCore {
         let (current_schema, current_table, in_table_detail) = {
             let tab = &self.tabs[self.active_tab];
             match tab.results.active_state() {
-                ResultState::TableDetail { schema, .. } => (
-                    schema.table.schema.clone(),
-                    schema.table.name.clone(),
-                    true,
-                ),
+                ResultState::TableDetail { schema, .. } => {
+                    (schema.table.schema.clone(), schema.table.name.clone(), true)
+                }
                 ResultState::Rows {
                     source: Some(src), ..
                 } => (src.schema.clone(), src.table.clone(), false),
@@ -876,9 +872,7 @@ impl AppCore {
         // pre-empt the modal's reflexes (today only `Z` to launch the
         // JSON viewer over the focused column).
         let chord = KeyChord::from_event(key);
-        if self.keymap.resolve(KeyGroup::RowDetail, chord)
-            == Some(Action::OpenJsonViewerRow)
-        {
+        if self.keymap.resolve(KeyGroup::RowDetail, chord) == Some(Action::OpenJsonViewerRow) {
             self.open_json_viewer_from_row_detail();
             return;
         }

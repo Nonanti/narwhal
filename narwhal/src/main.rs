@@ -30,6 +30,14 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 struct Cli {
     #[command(subcommand)]
     command: Option<Mode>,
+    /// Refuse every row-level DML and DDL statement — useful when
+    /// pointing the TUI at a production database for read-only
+    /// auditing. Mirrors `psql --readonly`: the editor still accepts
+    /// any SQL, but the row CRUD pipeline (o/O/d/cell edit) is
+    /// disabled and a banner explains why. Also gates the `:write`
+    /// path of `exec`. Off by default.
+    #[arg(long = "read-only", global = true)]
+    read_only: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -75,14 +83,14 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Mode::Mcp) => run_mcp(paths).await,
-        Some(Mode::Exec(args)) => run_exec(paths, args).await,
-        None => run_tui(paths).await,
+        Some(Mode::Exec(args)) => run_exec(paths, args, cli.read_only).await,
+        None => run_tui(paths, cli.read_only).await,
     }
 }
 
 /// TUI mode (default): logs go to a daily-rotating file because the
 /// terminal is owned by the UI in raw mode.
-async fn run_tui(paths: ConfigPaths) -> Result<()> {
+async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     let file_appender = tracing_appender::rolling::daily(paths.log_dir(), "narwhal.log");
     let (writer, _guard) = tracing_appender::non_blocking(file_appender);
 
@@ -132,7 +140,8 @@ async fn run_tui(paths: ConfigPaths) -> Result<()> {
         .with_connections_path(paths.connections_file())
         .with_last_used_path(paths.last_used_file())
         .with_settings(settings)
-        .with_plugins_dir(&paths.plugins_dir());
+        .with_plugins_dir(&paths.plugins_dir())
+        .with_read_only(read_only);
 
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");
@@ -235,7 +244,7 @@ async fn run_mcp(paths: ConfigPaths) -> Result<()> {
 /// stays clean (`narwhal exec ... | wc -l` does the right thing). Set
 /// `RUST_LOG=info,narwhal=debug` to see the dialled connection + audit
 /// entry.
-async fn run_exec(paths: ConfigPaths, args: ExecArgs) -> Result<()> {
+async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) -> Result<()> {
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
         .with(
@@ -303,7 +312,14 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs) -> Result<()> {
 
     // Sandbox writes by default; `--write` opts out. The MCP server uses
     // the same pattern so behaviour stays predictable across runtimes.
-    let read_only = !args.write;
+    // L36 #11: the global `--read-only` flag forces a sandbox even when
+    // the per-command `--write` opt-out is set.
+    if global_read_only && args.write {
+        anyhow::bail!(
+            "--read-only forbids --write: drop one of them or relaunch without --read-only"
+        );
+    }
+    let read_only = !args.write || global_read_only;
     let exec_result = if read_only {
         match conn.begin().await {
             Ok(()) => {

@@ -104,6 +104,7 @@ impl AppCore {
                 message: &self.status.message,
                 transaction: self.status.transaction.as_deref(),
                 pending: Some(pending_count),
+                read_only: self.read_only,
             },
             running: self.running,
             theme: &self.theme,

@@ -89,6 +89,10 @@ pub struct StatusBarView<'a> {
     /// always aware that there are uncommitted changes to commit or
     /// discard.
     pub pending: Option<usize>,
+    /// L36 #11: `true` when the process was launched with
+    /// `--read-only`. Renders a high-contrast `[RO]` badge so the
+    /// user can tell at a glance that mutations will be refused.
+    pub read_only: bool,
 }
 
 pub struct RootLayout<'a> {
@@ -226,6 +230,13 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     };
     let pending_width = pending_text.width() as u16;
 
+    let ro_text = if view.status_bar.read_only {
+        " [RO] ".to_owned()
+    } else {
+        String::new()
+    };
+    let ro_width = ro_text.width() as u16;
+
     let running_prefix = if view.running { "⏳ " } else { "" };
     let msg_text = format!(" {}{}", running_prefix, view.status_bar.message);
     let msg_width: u16 = 20; // minimum for the right slot
@@ -235,6 +246,7 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         .constraints([
             Constraint::Length(left_width),
             Constraint::Length(conn_width),
+            Constraint::Length(ro_width),
             Constraint::Length(txn_width),
             Constraint::Length(pending_width),
             Constraint::Min(msg_width),
@@ -250,11 +262,22 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
         parts[1],
     );
 
+    // L36 #11: read-only badge sits between the connection and the
+    // transaction slot so it's the very first thing the eye picks up
+    // after the connection name — mirrors the visual priority of a
+    // production banner.
+    if !ro_text.is_empty() {
+        frame.render_widget(
+            Paragraph::new(ro_text).style(view.theme.transaction_badge()),
+            parts[2],
+        );
+    }
+
     // Optional fourth slot: transaction badge (yellow text)
     if !txn_text.is_empty() {
         frame.render_widget(
             Paragraph::new(txn_text).style(view.theme.transaction_badge()),
-            parts[2],
+            parts[3],
         );
     }
 
@@ -264,14 +287,14 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     if !pending_text.is_empty() {
         frame.render_widget(
             Paragraph::new(pending_text).style(view.theme.transaction_badge()),
-            parts[3],
+            parts[4],
         );
     }
 
     // Right slot: message
     frame.render_widget(
         Paragraph::new(msg_text).style(view.theme.status_bar()),
-        parts[4],
+        parts[5],
     );
 }
 

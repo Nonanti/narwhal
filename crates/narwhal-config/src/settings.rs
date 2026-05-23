@@ -14,6 +14,8 @@ pub enum ConfigError {
     TomlSer(#[from] toml::ser::Error),
     #[error("validation: {0}")]
     Validation(String),
+    #[error("interpolation: {0}")]
+    Interpolate(String),
 }
 
 use thiserror::Error;
@@ -112,7 +114,13 @@ impl ConnectionsFile {
             return Ok(Self::default());
         }
         let text = std::fs::read_to_string(path)?;
-        let file: Self = toml::from_str(&text)?;
+        let mut file: Self = toml::from_str(&text)?;
+        // L36 #6: expand `${env:VAR}` placeholders in every string
+        // field before validation — missing variables surface as a
+        // ConfigError instead of a confusing engine-level connect
+        // failure later on.
+        crate::interpolate::interpolate_connections(&mut file)
+            .map_err(|e| ConfigError::Interpolate(e.to_string()))?;
         validate_connections(&file.connections)?;
         Ok(file)
     }
@@ -126,7 +134,9 @@ impl ConnectionsFile {
         Ok(())
     }
 
-    /// Parse a TOML string directly (useful for tests).
+    /// Parse a TOML string directly (useful for tests). Skips
+    /// `${env:…}` interpolation so test fixtures can assert against
+    /// the raw placeholder text without setting up process env vars.
     pub fn load_from_str(toml: &str) -> Result<Self, ConfigError> {
         let file: Self = toml::from_str(toml)?;
         validate_connections(&file.connections)?;

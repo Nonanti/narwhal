@@ -140,7 +140,11 @@ impl PendingMutation {
                     .iter()
                     .map(|(k, v)| format!("{k}={}", v.render()))
                     .collect();
-                format!("DELETE FROM {} WHERE {}", target.display(), parts.join(" AND "))
+                format!(
+                    "DELETE FROM {} WHERE {}",
+                    target.display(),
+                    parts.join(" AND ")
+                )
             }
         }
     }
@@ -206,7 +210,6 @@ impl<'a> IntoIterator for &'a mut PendingChanges {
 }
 
 impl PendingChanges {
-
     /// Borrow the underlying slice. Useful for read-only render paths.
     pub fn as_slice(&self) -> &[PendingMutation] {
         &self.mutations
@@ -224,10 +227,8 @@ impl PendingChanges {
     pub fn compile_all(&self, dialect: Dialect) -> Result<Vec<CompiledMutation>, CompileError> {
         let mut out = Vec::with_capacity(self.mutations.len());
         for (idx, m) in self.mutations.iter().enumerate() {
-            let compiled = compile(m, dialect).map_err(|reason| CompileError {
-                index: idx,
-                reason,
-            })?;
+            let compiled =
+                compile(m, dialect).map_err(|reason| CompileError { index: idx, reason })?;
             out.push(compiled);
         }
         Ok(out)
@@ -289,7 +290,14 @@ fn compile(m: &PendingMutation, dialect: Dialect) -> Result<CompiledMutation, St
             new_value,
             pk_values,
             ..
-        } => compile_update(target, column_name, old_value, new_value, pk_values, dialect),
+        } => compile_update(
+            target,
+            column_name,
+            old_value,
+            new_value,
+            pk_values,
+            dialect,
+        ),
         PendingMutation::Delete {
             target, pk_values, ..
         } => compile_delete(target, pk_values, dialect),
@@ -445,7 +453,11 @@ fn compile_delete(
             .iter()
             .map(|(k, v)| format!("{k}={}", v.render()))
             .collect();
-        format!("DELETE FROM {} WHERE {}", target.display(), parts.join(" AND "))
+        format!(
+            "DELETE FROM {} WHERE {}",
+            target.display(),
+            parts.join(" AND ")
+        )
     };
     Ok(CompiledMutation {
         sql,
@@ -574,7 +586,11 @@ mod tests {
             target: TableId::new("", "t"),
             columns: vec![pk("a"), pk("b"), col("c")],
             pk_values,
-            snapshot: Row(vec![Value::Int(1), Value::Int(2), Value::String("x".into())]),
+            snapshot: Row(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::String("x".into()),
+            ]),
             column_order: vec!["a".into(), "b".into(), "c".into()],
         };
         let compiled = compile(&m, Dialect::MySql).unwrap();

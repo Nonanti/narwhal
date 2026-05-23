@@ -98,6 +98,16 @@ impl App {
         self
     }
 
+    /// L36 #11: refuse every row-level mutation. The TUI still loads
+    /// and the user can still issue freeform SELECTs, but the pending
+    /// pipeline (o/O/d/cell edit) bails with a banner instead of
+    /// queueing a change. Set by the CLI flag `--read-only`.
+    #[must_use]
+    pub fn with_read_only(mut self, on: bool) -> Self {
+        self.core.set_read_only(on);
+        self
+    }
+
     pub async fn run(mut self) -> Result<()> {
         let mut guard = TerminalGuard::enter()?;
         let mut events = EventStream::new();

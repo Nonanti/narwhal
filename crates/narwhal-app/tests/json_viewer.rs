@@ -85,7 +85,7 @@ async fn open_with_payload(payload: &str) -> (AppCore, Arc<InMemoryClipboard>) {
         core.handle_key(ctrl_w);
     }
     core.handle_key(key(KeyCode::Char('j'))); // select row 0
-    // Move to the `body` column.
+                                              // Move to the `body` column.
     core.handle_key(key(KeyCode::Char('l')));
     (core, clipboard)
 }
@@ -204,7 +204,9 @@ async fn shift_z_opens_viewer_from_row_detail_modal() {
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
     });
-    let view = core.json_viewer_for_test().expect("modal must open from row-detail");
+    let view = core
+        .json_viewer_for_test()
+        .expect("modal must open from row-detail");
     assert!(view.pretty.contains("42"));
 }
 

@@ -150,6 +150,7 @@ impl AppCore {
             refresh_pending: Arc::new(AtomicBool::new(false)),
             keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
+            read_only: false,
         }
     }
 
@@ -188,6 +189,13 @@ impl AppCore {
     #[doc(hidden)]
     pub fn set_snippet_store_root(&mut self, root: std::path::PathBuf) {
         self.snippet_store = SnippetStore::new(root);
+    }
+
+    /// L36 #11: enter / leave read-only mode. When `on` is true every
+    /// row-CRUD entry point bails with an explanatory status message
+    /// before staging any mutation.
+    pub fn set_read_only(&mut self, on: bool) {
+        self.read_only = on;
     }
 
     /// Apply a user-supplied [`narwhal_config::Settings`] payload.

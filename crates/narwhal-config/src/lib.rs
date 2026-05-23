@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod credentials;
+pub mod interpolate;
 pub mod last_used;
 pub mod paths;
 pub mod pgpass;
@@ -10,6 +11,7 @@ pub mod settings;
 pub mod url;
 
 pub use credentials::{CredentialError, CredentialStore, InMemoryStore, KeyringStore};
+pub use interpolate::{interpolate, interpolate_connections, InterpolateError};
 pub use last_used::{LastUsedError, LastUsedStore};
 pub use paths::{ConfigPaths, PathsError};
 pub use pgpass::{
