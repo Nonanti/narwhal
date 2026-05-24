@@ -69,7 +69,7 @@ fn no_pair_when_next_char_is_opener() {
     buf.insert_char('('); // () with cursor at 1
     buf.insert_char(')'); // skip over, cursor at 2 (after ))
                           // Now go to start and type ( before the existing pair
-    buf.apply_motion(narwhal_vim::Motion::LineStart, 1);
+    buf.apply_motion(narwhal_domain::Motion::LineStart, 1);
     buf.insert_char('(');
     // Should NOT over-pair: buffer should be ((), not (())(
     assert_eq!(buf.lines(), &["(()"]);
