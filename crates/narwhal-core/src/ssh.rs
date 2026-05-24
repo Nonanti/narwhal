@@ -126,7 +126,12 @@ impl SshTunnel {
     /// path for the full `READY_TIMEOUT`. When the child has exited
     /// before the port is up we surface its captured stderr.
     fn wait_for_ready(&mut self) -> io::Result<()> {
-        let addr: SocketAddr = format!("127.0.0.1:{}", self.local_port).parse().unwrap();
+        // `127.0.0.1:<port>` with a `u16` port is always a syntactically
+        // valid SocketAddr; the parse can only fail for malformed input,
+        // which the format string makes impossible.
+        let addr: SocketAddr = format!("127.0.0.1:{}", self.local_port)
+            .parse()
+            .expect("127.0.0.1:<u16> is always a valid SocketAddr");
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
             if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(250)) {
