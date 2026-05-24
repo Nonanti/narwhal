@@ -149,12 +149,19 @@ where
 /// Options whitelist for the PG connection string. Only these keys from
 /// `params.options` are forwarded to the server; unknown keys are
 /// rejected with a config error to prevent injection.
+///
+/// `sslmode` is included for backward compatibility: the driver's
+/// [`InternalSslMode::from_params`] reads it from the options map when
+/// the explicit `ssl_mode` field is at the default. Without the whitelist
+/// entry, a config that sets `options.sslmode` would be rejected at load
+/// time, breaking existing user configurations.
 const OPTIONS_WHITELIST: &[&str] = &[
     "application_name",
     "connect_timeout",
     "options",
     "keepalives",
     "keepalives_idle",
+    "sslmode",
 ];
 
 fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<PgConfig> {
@@ -211,6 +218,12 @@ fn build_pg_config(config: &ConnectionConfig, password: Option<&str>) -> Result<
                     .map_err(|_| Error::Config(format!("invalid keepalives_idle value: {v}")))?;
                 cfg.keepalives_idle(Duration::from_secs(secs));
             }
+            // `sslmode` is consumed by `InternalSslMode::from_params`
+            // before reaching `build_pg_config`. It is whitelisted so
+            // the config parser does not reject it, but it is not
+            // forwarded to the server — libpq's sslmode is handled at
+            // the TLS layer, not as a connection parameter.
+            "sslmode" => {}
             _ => unreachable!("whitelist check above guarantees this"),
         }
     }
