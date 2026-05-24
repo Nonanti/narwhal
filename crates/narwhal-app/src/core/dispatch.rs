@@ -2,6 +2,7 @@
 //! `:`-prompt command parser, snippet insertion.
 
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
+use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
     render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
     render_wizard, CompletionItemView, CompletionPopupView, EditorSearchHighlight,
@@ -442,10 +443,10 @@ impl AppCore {
             let buf = &mut self.tabs[self.active_tab].editor;
             if delta > 0 {
                 // Scroll down: move cursor down
-                buf.apply_motion(narwhal_vim::Motion::Down, 1);
+                buf.apply_motion(DomainMotion::Down, 1);
                 buf.ensure_visible(height);
             } else {
-                buf.apply_motion(narwhal_vim::Motion::Up, 1);
+                buf.apply_motion(DomainMotion::Up, 1);
                 buf.ensure_visible(height);
             }
         } else if layout
