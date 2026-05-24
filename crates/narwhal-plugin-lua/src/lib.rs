@@ -235,7 +235,28 @@ impl LuaPlugin {
                         )));
                     }
                 };
-                let outcome = tokio::task::block_in_place(|| handle.block_on(exec.run(&sql)));
+                // Apply the plugin's timeout budget to sql_run as well.
+                // Without this, a long-running SQL query called from Lua
+                // would bypass the EVERY_LINE timeout hook since the hook
+                // only fires on Lua bytecode boundaries, not during
+                // blocking Rust calls.
+                let budget = read_timeout_budget(lua).unwrap_or(DEFAULT_TIMEOUT);
+                let fut = exec.run(&sql);
+                let outcome = if budget == Duration::MAX {
+                    // Timeout disabled — run without a deadline.
+                    tokio::task::block_in_place(|| handle.block_on(fut))
+                } else {
+                    tokio::task::block_in_place(|| {
+                        handle.block_on(async {
+                            match tokio::time::timeout(budget, fut).await {
+                                Ok(result) => result,
+                                Err(_) => Err(PluginError::Timeout {
+                                    elapsed_secs: budget.as_secs_f64(),
+                                }),
+                            }
+                        })
+                    })
+                };
                 match outcome {
                     Ok(qr) => result_to_lua(lua, &qr)
                         .map_err(|e| mlua::Error::external(format!("encode result: {e}"))),
