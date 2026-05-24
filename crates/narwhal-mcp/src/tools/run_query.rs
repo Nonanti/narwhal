@@ -303,9 +303,9 @@ fn guard_read_only(sql: &str) -> Result<(), String> {
     // function calls that can hold a connection or mutate state.
     let upper_sql = stripped.to_ascii_uppercase();
     const BLOCKED_PATTERNS: &[&str] = &[
-        "PG_SLEEP",       // holds a connection indefinitely
-        "SLEEP",           // MySQL equivalent
-        "SLEEP(",           // with parenthesis
+        "PG_SLEEP", // holds a connection indefinitely
+        "SLEEP",    // MySQL equivalent
+        "SLEEP(",   // with parenthesis
     ];
     for pattern in BLOCKED_PATTERNS {
         if upper_sql.contains(pattern) {
