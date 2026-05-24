@@ -160,24 +160,24 @@ impl DatabaseDriver for ClickhouseDriver {
             // Determine certificate and hostname validation based on
             // ssl_mode and whether an explicit CA was provided:
             //
-            // | ssl_mode   | ssl_root_cert | accept_invalid_certs | accept_invalid_hostnames |
-            // |------------|---------------|----------------------|--------------------------|
-            // | Prefer     | None          | true                 | true                     |
-            // | Prefer     | Some          | false                | true                     |
-            // | Require    | None          | true                 | true                     |
-            // | Require    | Some          | false                | true                     |
-            // | VerifyCa   | *             | false                | true                     |
-            // | VerifyFull | *             | false                | false                    |
-            let accept_invalid_certs = match config.params.ssl_mode {
-                SslMode::VerifyCa | SslMode::VerifyFull => false,
-                // Prefer/Require: if user supplied a CA cert, honour it.
-                _ => !has_root_cert,
-            };
+            // SECURITY (was CRITICAL): Prefer/Require without an explicit
+            // CA previously set accept_invalid_certs=true, which enables
+            // MITM attacks. Now we always validate the chain against the
+            // system CA store (or ssl_root_cert if provided). Only hostname
+            // checking is relaxed for non-VerifyFull modes.
+            //
+            // | ssl_mode   | chain verify | hostname verify |
+            // |------------|-------------|-----------------|
+            // | Prefer     | yes         | no              |
+            // | Require    | yes         | no              |
+            // | VerifyCa   | yes         | no              |
+            // | VerifyFull | yes         | yes             |
+            let accept_invalid_certs = false;
             let accept_invalid_hostnames = !matches!(config.params.ssl_mode, SslMode::VerifyFull);
 
             if has_root_cert && matches!(config.params.ssl_mode, SslMode::Prefer | SslMode::Require)
             {
-                tracing::warn!(
+                tracing::info!(
                     target: "narwhal::clickhouse",
                     "ssl_root_cert is set with ssl_mode='{}'; \
                      CA certificate will be validated but hostname will not — \
@@ -187,6 +187,17 @@ impl DatabaseDriver for ClickhouseDriver {
                         SslMode::Require => "require",
                         _ => "unknown",
                     }
+                );
+            }
+
+            // When no explicit CA is provided and TLS is requested, the
+            // system native CA store is used for chain verification.
+            // Previously this path skipped verification entirely (MITM risk).
+            if !has_root_cert {
+                tracing::debug!(
+                    target: "narwhal::clickhouse",
+                    ssl_mode = ?config.params.ssl_mode,
+                    "no ssl_root_cert provided; using system CA store for chain verification"
                 );
             }
 
