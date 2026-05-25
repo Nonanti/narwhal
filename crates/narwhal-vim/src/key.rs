@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Terminal back-ends translate their native event types into this
 /// representation. Keeping the type free of back-end specifics keeps the
 /// state machine portable and unit-testable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Sprint 6 (LOW): derive `Hash` so user keymaps can use `HashMap<Key, _>`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Key {
     pub code: KeyCode,
     pub mods: KeyMod,

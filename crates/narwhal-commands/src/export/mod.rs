@@ -53,7 +53,11 @@ pub fn export_rows(
         ExportFormat::Json => json::write_json(&mut writer, columns, rows)?,
         ExportFormat::Tsv => tsv::write_tsv(&mut writer, columns, rows)?,
         ExportFormat::Table => table::write_table(&mut writer, columns, rows)?,
-        ExportFormat::Insert => unreachable!(),
+        // Sprint 6 (M10): `Insert` is handled by the early-return
+        // above; reaching this arm means a refactor missed wiring a
+        // new format. Convert the impossible-state into a typed error
+        // so a future bug surfaces as `Err` instead of a panic.
+        ExportFormat::Insert => return Err(ExportError::NoSourceTable),
     }
     writer.flush()?;
     Ok(())

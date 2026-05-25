@@ -206,6 +206,20 @@ pub struct MysqlConnection {
 /// connection. Best-effort: if opening the secondary connection fails
 /// (e.g. server is at `max_connections`) we surface the error rather than
 /// pretending the cancel succeeded.
+///
+/// Sprint 6 (M14): `connection_id` is captured **once at connect time**,
+/// not refreshed before each cancel. This is intentional — the same
+/// `Conn` keeps the same thread-id for its lifetime, so the id is
+/// stable for any query that started on this connection. The narrow
+/// race window is: user issues `cancel()`, the current query finishes
+/// in the few-millisecond gap before `KILL QUERY` lands, and a *new*
+/// query starts on the same `Conn` — that new query gets killed by
+/// mistake. The window only opens when the runtime reuses the same
+/// `Conn` synchronously across the cancel, which the pool/run-loop
+/// avoid by draining the in-flight query before resubmitting. The
+/// trade-off is documented here so a future contributor doesn't try to
+/// "fix" the missing freshness check and accidentally introduce a
+/// `SELECT CONNECTION_ID()` round-trip on every cancel.
 struct MysqlCancelHandle {
     connection_id: u64,
     opts: Opts,

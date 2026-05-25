@@ -103,7 +103,7 @@ impl Settings {
             std::fs::create_dir_all(parent)?;
         }
         let text = toml::to_string_pretty(self)?;
-        atomic_write(path, &text)?;
+        atomic_write(path, &text).map_err(ConfigError::from)?;
         Ok(())
     }
 }
@@ -132,7 +132,7 @@ impl ConnectionsFile {
         // Validate before writing so corrupt configs are never persisted.
         validate_connections(&self.connections)?;
         let text = toml::to_string_pretty(self)?;
-        atomic_write(path, &text)?;
+        atomic_write(path, &text).map_err(ConfigError::from)?;
         Ok(())
     }
 
@@ -159,7 +159,7 @@ impl Settings {
 /// Write `data` to `path` atomically by writing to a temporary file
 /// in the same directory and renaming. This prevents partial writes
 /// from corrupting the config file on crash or power loss.
-fn atomic_write(path: &Path, data: &str) -> Result<(), ConfigError> {
+pub(crate) fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let temp_name = format!(
         ".narwhal-{}.tmp",
@@ -169,6 +169,20 @@ fn atomic_write(path: &Path, data: &str) -> Result<(), ConfigError> {
     );
     let temp_path = parent.join(temp_name);
     std::fs::write(&temp_path, data)?;
+    // Sprint 6 (LOW): tighten permissions on unix so a config file
+    // that may carry interpolated `${env:VAR}` references or
+    // connection metadata is not world-readable. We set the mode on
+    // the temp file *before* rename so the visible file is never
+    // briefly readable by others.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        // Best-effort: ignore failure on filesystems that don't honour
+        // POSIX modes (FAT, some network FS) so the rename below can
+        // still complete.
+        let _ = std::fs::set_permissions(&temp_path, perms);
+    }
     std::fs::rename(&temp_path, path)?;
     Ok(())
 }
