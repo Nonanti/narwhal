@@ -28,17 +28,153 @@ static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     // Inner literal alternation `(?:[^']|'')*` matches the SQL standard
     // doubled-single-quote escape so passwords containing `'` aren't
     // cut short mid-string (which would leak the tail). Tested below.
+    //
+    // H9: pattern list expanded from the original 4 to cover:
+    //  - PostgreSQL `ENCRYPTED PASSWORD`, `WITH PASSWORD`
+    //  - Dollar-quoted function bodies (`$$…$$`, `$tag$…$tag$`) which
+    //    frequently wrap credentials inside `CREATE FUNCTION` blocks.
+    //  - Connection-string DSNs (`postgres://user:pw@host/db`, MySQL,
+    //    ClickHouse, Redis, MongoDB) where the userinfo segment leaks
+    //    the password verbatim if logged in an error message.
+    //  - AWS-style key literals (`ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`)
+    //    and generic `TOKEN`/`AUTHORIZATION` keywords used by Snowflake,
+    //    BigQuery, S3 `COPY`, etc.
+    //  - `password=…` kv pairs (JDBC / connection-property syntax).
     vec![
-        // CREATE/ALTER USER ... PASSWORD '...'
-        Regex::new(r"(?i)(\bpassword\s+)'(?:[^']|'')*'").unwrap(),
-        // CREATE USER ... IDENTIFIED BY '...'
-        Regex::new(r"(?i)(\bidentified\s+by\s+)'(?:[^']|'')*'").unwrap(),
-        // COPY ... CREDENTIALS '...'
+        // CREATE/ALTER USER … [ENCRYPTED] PASSWORD '…'
+        Regex::new(r"(?i)(\b(?:encrypted\s+)?password\s+)'(?:[^']|'')*'").unwrap(),
+        // … WITH PASSWORD '…'
+        Regex::new(r"(?i)(\bwith\s+password\s+)'(?:[^']|'')*'").unwrap(),
+        // CREATE USER … IDENTIFIED [WITH …] BY '…'
+        Regex::new(r"(?i)(\bidentified\s+(?:with\s+\S+\s+)?by\s+)'(?:[^']|'')*'").unwrap(),
+        // COPY … CREDENTIALS '…'
         Regex::new(r"(?i)(\bcredentials\s+)'(?:[^']|'')*'").unwrap(),
-        // SET PASSWORD = '...'
+        // SET PASSWORD = '…' / SET password = '…'
         Regex::new(r"(?i)(\bset\s+password\s*=\s+)'(?:[^']|'')*'").unwrap(),
+        // AWS-style key literals (used by Redshift / Snowflake / BigQuery COPY).
+        Regex::new(r"(?i)(\baccess_key_id\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\bsecret_access_key\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\baws_secret_access_key\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        // Bearer tokens / OAuth client secrets / API keys.
+        Regex::new(r"(?i)(\btoken\s+)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\bauthorization\s+)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\boauth_client_secret\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\bapi_key\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        Regex::new(r"(?i)(\bprivate_key\s*=?\s*)'(?:[^']|'')*'").unwrap(),
+        // JDBC / connection-property kv pairs: `password=…` until
+        // whitespace, `;`, `&`, or end-of-input. Used by Spark, Trino,
+        // ODBC connection strings, etc.
+        Regex::new(r#"(?i)(\bpassword\s*=\s*)[^\s;&'"]+"#).unwrap(),
+        // (Dollar-quoted PG function bodies are handled by a separate
+        // hand-rolled pass below — the `regex` crate does not support
+        // the backreference needed to pair the opening/closing tag.)
+
+        // DSN userinfo: `scheme://user:password@host`. Replacement
+        // collapses the entire userinfo segment (`user:***@`). We list
+        // the schemes we ship drivers for plus a couple of common ones
+        // that show up in errors.
+        Regex::new(
+            r"(?i)\b(postgres(?:ql)?|mysql|clickhouse|redis|mongodb(?:\+srv)?|jdbc:[a-z0-9]+)://([^:@/\s]+):([^@/\s]+)@",
+        )
+        .unwrap(),
     ]
 });
+
+/// Bespoke replacement string per pattern.
+///
+/// Most patterns capture the keyword in group 1 and want the literal
+/// replaced with `'***'`. A few (DSN userinfo, JDBC kv pairs) carry a
+/// different shape and need their own template. The index here mirrors
+/// the order of [`REDACT_PATTERNS`].
+const fn redact_replacement(idx: usize) -> &'static str {
+    match idx {
+        // JDBC kv pair (`password=foo` — no quotes). Index must match
+        // the position of the corresponding regex in REDACT_PATTERNS.
+        13 => "$1***",
+        // DSN userinfo — keep scheme + user, mask password.
+        14 => "$1://$2:***@",
+        // Every other pattern: replace the captured quoted literal.
+        _ => "${1}'***'",
+    }
+}
+
+/// Replace the body of every dollar-quoted PG block (`$$ … $$`,
+/// `$tag$ … $tag$`) with `***`, preserving both fences. Implemented
+/// by hand because the `regex` crate does not support backreferences
+/// and pulling in `fancy-regex` for one pattern is overkill.
+fn redact_dollar_quoted(sql: &str) -> Cow<'_, str> {
+    let bytes = sql.as_bytes();
+    let mut out: Option<String> = None;
+    let mut i = 0usize;
+    let mut last_copied = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'$' {
+            i += 1;
+            continue;
+        }
+        // Try to read a tag: `$` + identifier chars + `$`.
+        let tag_start = i + 1;
+        let mut j = tag_start;
+        while j < bytes.len() {
+            let b = bytes[j];
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if j >= bytes.len() || bytes[j] != b'$' {
+            // Not a dollar-quote opener.
+            i += 1;
+            continue;
+        }
+        let tag = &bytes[tag_start..j];
+        let body_start = j + 1;
+        // Search for the matching closer.
+        let closer_len = 2 + tag.len();
+        let Some(rel_close) = find_subsequence(&bytes[body_start..], tag, closer_len) else {
+            // Unterminated — stop scanning to avoid quadratic walks.
+            break;
+        };
+        let close_start = body_start + rel_close;
+        let close_end = close_start + closer_len;
+        // Emit pending prefix + opener.
+        let buf = out.get_or_insert_with(|| String::with_capacity(sql.len()));
+        buf.push_str(&sql[last_copied..body_start]);
+        buf.push_str("***");
+        buf.push_str(&sql[close_start..close_end]);
+        last_copied = close_end;
+        i = close_end;
+    }
+    match out {
+        Some(mut s) => {
+            s.push_str(&sql[last_copied..]);
+            Cow::Owned(s)
+        }
+        None => Cow::Borrowed(sql),
+    }
+}
+
+/// Find the byte offset of `$<tag>$` (a closing dollar-quote) within
+/// `haystack`, where `tag` is the bare identifier between the fences.
+/// `closer_len` = `tag.len() + 2` (the two `$` bytes).
+fn find_subsequence(haystack: &[u8], tag: &[u8], closer_len: usize) -> Option<usize> {
+    if haystack.len() < closer_len {
+        return None;
+    }
+    let limit = haystack.len() - closer_len + 1;
+    let mut k = 0usize;
+    while k < limit {
+        if haystack[k] == b'$'
+            && haystack[k + 1..k + 1 + tag.len()] == *tag
+            && haystack[k + 1 + tag.len()] == b'$'
+        {
+            return Some(k);
+        }
+        k += 1;
+    }
+    None
+}
 
 /// Redact known secret patterns from a SQL string.
 ///
@@ -51,8 +187,14 @@ static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 /// string once per pattern in the common (no-secret) path.
 fn redact_secrets(sql: &str) -> Cow<'_, str> {
     let mut result: Cow<'_, str> = Cow::Borrowed(sql);
-    for re in REDACT_PATTERNS.iter() {
-        match re.replace_all(&result, "${1}'***'") {
+    // Hand-rolled pass first so subsequent regexes don't see the
+    // already-masked body and misfire on `***` content.
+    if let Cow::Owned(s) = redact_dollar_quoted(&result) {
+        result = Cow::Owned(s);
+    }
+    for (idx, re) in REDACT_PATTERNS.iter().enumerate() {
+        let replacement = redact_replacement(idx);
+        match re.replace_all(&result, replacement) {
             // No replacement — keep the existing Cow (borrowed or owned).
             Cow::Borrowed(_) => {}
             Cow::Owned(s) => result = Cow::Owned(s),
@@ -99,11 +241,14 @@ struct HistoryEntryView<'a> {
     rows_affected: &'a Option<u64>,
     rows_returned: &'a Option<u64>,
     outcome: &'a Outcome,
-    error: &'a Option<String>,
+    // H9: error is now a borrowed `Option<&str>` so the cold-path can
+    // pass either the original message or a redacted variant without
+    // cloning. JSON shape is unchanged (`null` vs. string).
+    error: Option<&'a str>,
 }
 
 impl<'a> HistoryEntryView<'a> {
-    const fn from(entry: &'a HistoryEntry, sql: &'a str) -> Self {
+    const fn from(entry: &'a HistoryEntry, sql: &'a str, error: Option<&'a str>) -> Self {
         Self {
             timestamp: &entry.timestamp,
             connection_id: &entry.connection_id,
@@ -114,7 +259,7 @@ impl<'a> HistoryEntryView<'a> {
             rows_affected: &entry.rows_affected,
             rows_returned: &entry.rows_returned,
             outcome: &entry.outcome,
-            error: &entry.error,
+            error,
         }
     }
 }
@@ -276,7 +421,17 @@ impl Journal {
         // timestamp/uuid/string fields used to be cloned twice).
         const SQL_MAX_BYTES: usize = 64 * 1024;
 
+        // H9: redact both `sql` AND `error` — driver error messages on
+        // Postgres / MySQL frequently echo back the offending statement
+        // (including the password literal) and were previously persisted
+        // verbatim. We rewrite the `error` field in place on the cold
+        // path so the hot path (no secrets, no truncation) stays
+        // allocation-free.
         let redacted_sql = redact_secrets(&entry.sql);
+        let redacted_error: Option<Cow<'_, str>> = entry
+            .error
+            .as_deref()
+            .map(redact_secrets);
         // Apply truncation on top of the redaction result. Both are
         // expressed as a single owned `String` when either fires; we
         // pay one allocation, not two.
@@ -298,10 +453,20 @@ impl Journal {
             redacted_sql
         };
 
-        let mut line = if matches!(final_sql, Cow::Borrowed(_)) {
+        // Cold path triggers if EITHER sql was rewritten/truncated OR
+        // the error field carried a secret.
+        let error_changed = matches!(redacted_error, Some(Cow::Owned(_)));
+        let mut line = if matches!(final_sql, Cow::Borrowed(_)) && !error_changed {
             serde_json::to_vec(entry)?
         } else {
-            serde_json::to_vec(&HistoryEntryView::from(entry, &final_sql))?
+            // Prefer the redacted error when produced, otherwise pass
+            // through the original reference. Both paths borrow — no
+            // clones either way.
+            let err_ref: Option<&str> = redacted_error
+                .as_deref()
+                .or(entry.error.as_deref());
+            let view = HistoryEntryView::from(entry, &final_sql, err_ref);
+            serde_json::to_vec(&view)?
         };
         line.push(b'\n');
 
@@ -563,6 +728,111 @@ mod tests {
         assert_eq!(redacted, "ALTER USER x PASSWORD '***'");
         // The leaky tail must not survive anywhere in the output.
         assert!(!redacted.contains("s3cret"));
+    }
+
+    // ---- H9: expanded redaction coverage ----
+
+    #[test]
+    fn redact_encrypted_password() {
+        let r = redact_secrets("CREATE USER bob ENCRYPTED PASSWORD 'h4sh'");
+        assert_eq!(r, "CREATE USER bob ENCRYPTED PASSWORD '***'");
+    }
+
+    #[test]
+    fn redact_identified_with_plugin_by() {
+        let r = redact_secrets("CREATE USER x IDENTIFIED WITH mysql_native_password BY 'pw'");
+        assert!(r.ends_with("'***'"), "got: {r}");
+        assert!(!r.contains("pw'"));
+    }
+
+    #[test]
+    fn redact_with_password() {
+        let r = redact_secrets("CREATE ROLE app WITH PASSWORD 'sup3r-secret'");
+        assert!(!r.contains("sup3r-secret"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_aws_access_keys() {
+        let r = redact_secrets(
+            "COPY t FROM 's3://b/k' ACCESS_KEY_ID 'AKIA123' SECRET_ACCESS_KEY 'wJalrXUt'",
+        );
+        assert!(!r.contains("AKIA123"), "got: {r}");
+        assert!(!r.contains("wJalrXUt"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_bearer_token_and_authorization() {
+        let r = redact_secrets("SET TOKEN 'eyJhbGciOi' AUTHORIZATION 'Bearer xyz'");
+        assert!(!r.contains("eyJhbGciOi"), "got: {r}");
+        assert!(!r.contains("Bearer xyz"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_jdbc_password_kv() {
+        let r = redact_secrets(
+            "jdbc:postgresql://h/db?user=app&password=hunter2&sslmode=require",
+        );
+        assert!(!r.contains("hunter2"), "got: {r}");
+        assert!(r.contains("sslmode=require"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_dsn_userinfo() {
+        let r =
+            redact_secrets("failed to connect: postgres://app:hunter2@db.local:5432/orders");
+        assert!(!r.contains("hunter2"), "got: {r}");
+        assert!(r.contains("postgres://app:***@"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_mysql_and_clickhouse_dsn() {
+        let r1 = redact_secrets("mysql://root:toor@db:3306/x");
+        assert!(!r1.contains("toor"), "got: {r1}");
+        let r2 = redact_secrets("clickhouse://user:p4ss@db:8123/d");
+        assert!(!r2.contains("p4ss"), "got: {r2}");
+    }
+
+    #[test]
+    fn redact_dollar_quoted_function_body() {
+        let sql = "CREATE FUNCTION f() RETURNS void AS $$ SELECT 'leaked' $$ LANGUAGE sql";
+        let r = redact_secrets(sql);
+        assert!(!r.contains("leaked"), "got: {r}");
+        assert!(r.contains("$$***$$"), "got: {r}");
+    }
+
+    #[test]
+    fn redact_tagged_dollar_quoted_body() {
+        let sql = "AS $body$ PASSWORD 's3cret' $body$";
+        let r = redact_secrets(sql);
+        assert!(!r.contains("s3cret"), "got: {r}");
+        assert!(r.contains("$body$***$body$"), "got: {r}");
+    }
+
+    #[test]
+    fn unterminated_dollar_quote_does_not_panic() {
+        // Defensive: malformed input must not loop or panic.
+        let sql = "weird $tag$ never closed";
+        let r = redact_secrets(sql);
+        // Unterminated bodies are left as-is (we can't safely mask them).
+        assert_eq!(r, sql);
+    }
+
+    #[tokio::test]
+    async fn error_field_is_redacted_on_write() {
+        // H9: drivers (PG, MySQL) echo offending SQL into error
+        // messages. Make sure that text is redacted on disk too.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("history.jsonl");
+        let journal = Journal::open(&path).await.unwrap();
+        let entry = HistoryEntry::success("SELECT 1").with_failure(
+            "syntax error at or near \"CREATE USER x PASSWORD 's3cret'\"",
+        );
+        journal.append(&entry).await.unwrap();
+        drop(journal);
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(!body.contains("s3cret"), "raw secret leaked: {body}");
+        assert!(body.contains("PASSWORD '***'"), "got: {body}");
     }
 
     /// M13: `recent` warns on corrupt lines rather than silently swallowing.

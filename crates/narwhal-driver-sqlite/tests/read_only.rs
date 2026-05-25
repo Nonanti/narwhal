@@ -1,4 +1,4 @@
-use narwhal_core::{Connection, ConnectionConfig, ConnectionParams, DatabaseDriver};
+use narwhal_core::{ConnectionConfig, ConnectionParams, DatabaseDriver};
 use narwhal_driver_sqlite::SqliteDriver;
 use uuid::Uuid;
 

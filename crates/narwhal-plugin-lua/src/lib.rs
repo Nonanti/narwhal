@@ -71,8 +71,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use mlua::{
-    Function, HookTriggers, Lua, RegistryKey, Result as LuaResult, Table, Value as LuaValue,
-    VmState,
+    Function, HookTriggers, Lua, LuaOptions, RegistryKey, Result as LuaResult, StdLib, Table,
+    Value as LuaValue, VmState,
 };
 use narwhal_plugin::{
     ColumnHeader, CommandContext, CommandDescriptor, CommandOutcome, Plugin, PluginError,
@@ -86,6 +86,69 @@ use tokio::task;
 /// for any reasonable result-pane transformation, short enough to be
 /// obvious when something went wrong.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Sandboxing policy applied to the embedded Lua VM.
+///
+/// M12: prior to this enum the runtime always called `Lua::new()`,
+/// which loads every standard library mlua ships, including `io`,
+/// `os` (with `os.execute`), `package` (with `package.loadlib`) and
+/// `debug`. Trusted local scripts (e.g. `examples/plugins/csv_export.lua`,
+/// which writes a CSV via `io.open`) rely on that surface, so the
+/// default stays permissive for backwards compatibility — but hosts
+/// that load *untrusted* scripts (curated marketplace, network sync,
+/// etc.) can now opt in to a restricted VM that excludes the
+/// filesystem, process-spawning, dynamic-library, and debug surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LuaSandbox {
+    /// Load every standard library mlua provides. Equivalent to the
+    /// historical `Lua::new()` call — keeps existing scripts working.
+    /// **Only use for scripts you trust to the same degree as native
+    /// code.**
+    Permissive,
+
+    /// Load only the side-effect-free standard libraries: `table`,
+    /// `string`, `utf8`, `math`, `coroutine`, `bit` (Lua 5.2+) and
+    /// `buffer` (`LuaJIT`). `io`, `os`, `package`, `debug` and `ffi`
+    /// are *not* loaded, so a malicious script cannot touch the
+    /// filesystem, spawn processes, or escape via `debug.getregistry`.
+    Restricted,
+}
+
+impl LuaSandbox {
+    /// Build the [`mlua::Lua`] state for this sandbox policy.
+    fn build_lua(self) -> PluginResult<Lua> {
+        match self {
+            Self::Permissive => Ok(Lua::new()),
+            Self::Restricted => {
+                // Bitwise-OR the safe libraries explicitly so that future
+                // mlua versions adding a new `StdLib::FOO` don't silently
+                // get included — we'd rather review the addition first.
+                // BIT / BUFFER are LuaJIT-only and aren't loadable under
+                // lua54 (the workspace feature flag), so they're omitted.
+                let safe = StdLib::TABLE
+                    | StdLib::STRING
+                    | StdLib::UTF8
+                    | StdLib::MATH
+                    | StdLib::COROUTINE;
+                Lua::new_with(safe, LuaOptions::new()).map_err(|e| {
+                    PluginError::Runtime(format!("failed to build sandboxed Lua VM: {e}"))
+                })
+            }
+        }
+    }
+}
+
+// `Default` is derived rather than hand-written so future variants
+// don't accidentally change the default without an explicit annotation.
+impl Default for LuaSandbox {
+    #[inline]
+    fn default() -> Self {
+        // Equivalent to `#[derive(Default)]` + `#[default]`, written
+        // explicitly so the choice is obvious at the variant site.
+        Self::Permissive
+    }
+}
 
 /// Tracks elapsed time for a single plugin invocation against a
 /// configured budget. Used inside the mlua hook callback to decide
@@ -162,8 +225,24 @@ impl LuaPlugin {
     /// transforms it declares. `name` is the identifier surfaced to the
     /// host (`Plugin::name`).
     pub fn from_script(name: impl Into<String>, script: &str) -> PluginResult<Self> {
+        Self::from_script_with_sandbox(name, script, LuaSandbox::default())
+    }
+
+    /// Compile and run `script` in a VM configured with the given
+    /// [`LuaSandbox`] policy.
+    ///
+    /// M12: prefer [`LuaSandbox::Restricted`] for scripts that come
+    /// from an untrusted source. The current default policy
+    /// ([`LuaSandbox::Permissive`]) keeps the historical behaviour so
+    /// existing scripts that use `io.open`, `os.date`, etc. continue
+    /// to work — the security trade-off is the caller's to make.
+    pub fn from_script_with_sandbox(
+        name: impl Into<String>,
+        script: &str,
+        sandbox: LuaSandbox,
+    ) -> PluginResult<Self> {
         let name = name.into();
-        let lua = Lua::new();
+        let lua = sandbox.build_lua()?;
         let commands_table = lua
             .create_table()
             .map_err(|e| PluginError::Runtime(e.to_string()))?;
@@ -1092,6 +1171,69 @@ mod tests {
             matches!(err, PluginError::Timeout { .. }),
             "expected Timeout, got: {err:?}"
         );
+    }
+
+    /// M12: Permissive sandbox keeps `io`/`os` visible so existing
+    /// scripts (e.g. `examples/plugins/csv_export.lua`) keep working.
+    #[test]
+    fn permissive_sandbox_exposes_io_and_os() {
+        let script = r#"
+            assert(io ~= nil, "io should be present")
+            assert(os ~= nil, "os should be present")
+            assert(type(io.open) == "function", "io.open should be present")
+            narwhal.register_command("x", "x", function() end)
+        "#;
+        let _plugin = LuaPlugin::from_script_with_sandbox(
+            "permissive",
+            script,
+            LuaSandbox::Permissive,
+        )
+        .expect("permissive must load");
+    }
+
+    /// M12: Restricted sandbox blocks the dangerous standard libraries
+    /// (`io`, `os`, `package`, `debug`, `ffi`). Scripts that try to
+    /// touch them see `nil` and can decide to fail loudly.
+    #[test]
+    fn restricted_sandbox_hides_io_os_package_debug() {
+        let script = r#"
+            assert(io == nil, "io must be sandboxed away")
+            assert(os == nil, "os must be sandboxed away")
+            assert(package == nil, "package must be sandboxed away")
+            assert(debug == nil, "debug must be sandboxed away")
+            assert(type(string) == "table", "string must still be present")
+            assert(type(math) == "table", "math must still be present")
+            narwhal.register_command("x", "x", function() end)
+        "#;
+        let _plugin = LuaPlugin::from_script_with_sandbox(
+            "restricted",
+            script,
+            LuaSandbox::Restricted,
+        )
+        .expect("restricted must load with safe libs only");
+    }
+
+    /// M12: even if the script smuggles a string like `"os.execute"`
+    /// into `load()`, the resulting chunk runs against an environment
+    /// where `os` is `nil`, so the attack still fails.
+    #[test]
+    fn restricted_sandbox_blocks_loadstring_escape() {
+        // `load` is part of the base library and is always present;
+        // what matters is that the loaded chunk inherits the same
+        // restricted globals.
+        let script = r#"
+            local chunk, err = load("return os.execute('echo PWND')")
+            assert(chunk ~= nil, "load itself stays available")
+            local ok, run_err = pcall(chunk)
+            assert(not ok, "call must fail because os is nil in the env")
+            narwhal.register_command("x", "x", function() end)
+        "#;
+        let _plugin = LuaPlugin::from_script_with_sandbox(
+            "escape",
+            script,
+            LuaSandbox::Restricted,
+        )
+        .expect("restricted must contain loadstring escape attempts");
     }
 
     /// M19: Plugin name derived from file stem is deterministic across

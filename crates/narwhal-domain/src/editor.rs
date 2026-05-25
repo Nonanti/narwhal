@@ -259,14 +259,19 @@ impl EditorBuffer {
         while !line.is_char_boundary(end) && end > 0 {
             end -= 1;
         }
-        let bytes = line.as_bytes();
+        // H5: walk codepoints, not bytes, so multi-byte identifiers
+        // (Turkish, CJK, …) participate in the word-prefix scan and
+        // we never land mid-codepoint.
         let mut start = end;
         while start > 0 {
-            let prev = start - 1;
-            if !is_word_char(bytes[prev]) {
+            if let Some(ch) = line[..start].chars().next_back() {
+                if !is_word_char(ch) {
+                    break;
+                }
+                start -= ch.len_utf8();
+            } else {
                 break;
             }
-            start = prev;
         }
         line[start..end].to_owned()
     }
@@ -562,44 +567,61 @@ impl<'a> LineCursor<'a> {
         self.row == 0 && self.col == 0
     }
 
-    /// Byte at the cursor, or `None` past the end. Returns `b'\n'` for
+    /// Char at the cursor, or `None` past the end. Returns `'\n'` for
     /// the synthetic newline between lines.
-    fn peek(&self) -> Option<u8> {
+    ///
+    /// H5: UTF-8 aware — decodes the next `char` rather than the next
+    /// byte. `is_word()` / `is_whitespace()` now see whole codepoints,
+    /// so multi-byte word characters (Turkish `şahin`, CJK, Cyrillic,
+    /// etc.) are treated as word characters via `char::is_alphanumeric`.
+    fn peek_char(&self) -> Option<char> {
         let line = self.lines.get(self.row)?;
         if self.col < line.len() {
-            Some(line.as_bytes()[self.col])
+            line[self.col..].chars().next()
         } else if self.row + 1 < self.lines.len() {
-            Some(b'\n')
+            Some('\n')
         } else {
             None
         }
     }
 
     fn is_word(&self) -> bool {
-        self.peek().is_some_and(is_word_char)
+        self.peek_char().is_some_and(is_word_char)
     }
 
     fn is_whitespace(&self) -> bool {
-        self.peek().is_some_and(|b| b.is_ascii_whitespace())
+        self.peek_char().is_some_and(char::is_whitespace)
     }
 
-    /// `move_word_backward` peeks at `bytes[idx - 1]` while standing
-    /// at `idx`; this returns whether that byte is a word character
-    /// without retreating. The previous byte at `(self.row, 0)` is
-    /// the synthetic newline separating the previous line, never a
-    /// word character.
+    /// `move_word_backward` peeks at the codepoint immediately before
+    /// the cursor while standing at `idx`; this returns whether that
+    /// codepoint is a word character without retreating. The position
+    /// before `(self.row, 0)` is the synthetic newline separating the
+    /// previous line, never a word character.
     fn peek_prev_is_word(&self) -> bool {
         if self.col > 0 {
-            is_word_char(self.lines[self.row].as_bytes()[self.col - 1])
+            self.lines[self.row][..self.col]
+                .chars()
+                .next_back()
+                .is_some_and(is_word_char)
         } else {
             false
         }
     }
 
     fn advance(&mut self) {
-        let line_len = self.lines.get(self.row).map_or(0, String::len);
+        let line = match self.lines.get(self.row) {
+            Some(l) => l,
+            None => return,
+        };
+        let line_len = line.len();
         if self.col < line_len {
-            self.col += 1;
+            // Step a full UTF-8 codepoint (1..=4 bytes).
+            if let Some(ch) = line[self.col..].chars().next() {
+                self.col += ch.len_utf8();
+            } else {
+                self.col = line_len;
+            }
         } else if self.row + 1 < self.lines.len() {
             // Stepping over the synthetic newline.
             self.row += 1;
@@ -609,7 +631,11 @@ impl<'a> LineCursor<'a> {
 
     fn retreat(&mut self) {
         if self.col > 0 {
-            self.col -= 1;
+            if let Some(ch) = self.lines[self.row][..self.col].chars().next_back() {
+                self.col -= ch.len_utf8();
+            } else {
+                self.col -= 1;
+            }
         } else if self.row > 0 {
             self.row -= 1;
             self.col = self.lines[self.row].len(); // synthetic-newline slot
@@ -617,8 +643,15 @@ impl<'a> LineCursor<'a> {
     }
 }
 
-const fn is_word_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+/// Unicode-aware word-character predicate.
+///
+/// H5: replaces the prior ASCII-only `(u8) -> bool` so that Turkish
+/// (`şahin`), Cyrillic, CJK, full-width Latin, etc. are recognised as
+/// word characters in vim-style word motions and the completion-engine
+/// prefix scan. Underscore is preserved as a word character to keep
+/// SQL identifier semantics (`my_table`).
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
 }
 
 /// Snap a byte index backwards to the nearest UTF-8 char boundary.
@@ -685,6 +718,43 @@ mod tests {
         assert_eq!(buf.cursor().1, 8);
         buf.apply_motion(Motion::WordBackward, 1);
         assert_eq!(buf.cursor().1, 4);
+    }
+
+    #[test]
+    fn word_motion_treats_unicode_as_word_chars() {
+        // H5 regression: Turkish letters used to count as non-word
+        // bytes, so `w` stopped between every multi-byte character.
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("şahin köpek");
+        buf.apply_motion(Motion::LineStart, 1);
+        buf.apply_motion(Motion::WordForward, 1);
+        // After `şahin ` (6 bytes + 1 space) the cursor lands on `k`.
+        assert_eq!(buf.cursor(), (0, 7));
+        buf.apply_motion(Motion::WordBackward, 1);
+        assert_eq!(buf.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn word_motion_handles_cjk_and_mixed_scripts() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("中文 ENG русский");
+        buf.apply_motion(Motion::LineStart, 1);
+        buf.apply_motion(Motion::WordForward, 1);
+        // "中文 " → 6 bytes + 1 space; cursor at start of "ENG".
+        assert_eq!(buf.cursor(), (0, 7));
+        buf.apply_motion(Motion::WordForward, 1);
+        // "ENG " → 4 more bytes; cursor at start of "русский".
+        assert_eq!(buf.cursor(), (0, 11));
+    }
+
+    #[test]
+    fn current_word_prefix_handles_unicode_identifiers() {
+        let mut buf = EditorBuffer::new();
+        buf.insert_str("SELECT * FROM kullanıcı");
+        // Prefix should be the whole Turkish identifier, not just the
+        // ASCII tail — the byte-walking version stopped at the first
+        // non-ASCII byte and returned a partial "cı".
+        assert_eq!(buf.current_word_prefix(), "kullanıcı");
     }
 
     #[test]
