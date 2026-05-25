@@ -340,6 +340,36 @@ impl AppCore {
             MetaUpdate::MetaFailed { message } => {
                 self.status.message = message;
             }
+            MetaUpdate::InjectDdlReady {
+                tab_id,
+                schema,
+                name,
+                ddl,
+            } => {
+                // Sprint 11 (Opus M1): same C5 stable-handle
+                // discipline as `DumpSchemaReady` — if the user
+                // closed the tab while the DDL fetch was in flight
+                // the reply is dropped with a status message rather
+                // than written into an arbitrary tab.
+                let Some(idx) = self.tabs.iter().position(|t| t.id() == tab_id) else {
+                    tracing::debug!(
+                        target: "narwhal::app",
+                        tab_id,
+                        "dropping inject-ddl reply: originating tab closed",
+                    );
+                    self.status.message = "inject-ddl cancelled: target tab was closed".into();
+                    return;
+                };
+                self.tabs[idx].editor.insert_str(&ddl);
+                // Refocus the editor only if the user is currently
+                // looking at the originating tab; otherwise the
+                // insert is silent so we don't yank focus from
+                // wherever the user moved on to.
+                if idx == self.active_tab {
+                    self.focus = narwhal_tui::Pane::Editor;
+                }
+                self.status.message = format!("injected DDL for {schema}.{name}");
+            }
             MetaUpdate::TestCompleted { label, result } => {
                 // Sprint 9 (H7): `:test <name|url>` outcome from the
                 // meta worker. The status bar is the only side-effect
@@ -348,6 +378,18 @@ impl AppCore {
                     Ok(driver_name) => format!("test ok: {label} · {driver_name}"),
                     Err(message) => format!("test failed: {label} — {message}"),
                 };
+            }
+            // Sprint 11 (Opus M2): `MetaUpdate` is `#[non_exhaustive]`
+            // so future variants added across crates do not break
+            // downstream `match`. Surfacing the variant name in
+            // tracing gives operators a breadcrumb if a worker is
+            // shipping updates the UI does not yet know how to handle.
+            other => {
+                tracing::warn!(
+                    target: "narwhal::app",
+                    update = ?other,
+                    "meta update variant not handled by current event loop — dropped",
+                );
             }
         }
     }

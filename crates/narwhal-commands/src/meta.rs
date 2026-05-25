@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::session::{Session, SessionOpenOptions};
 
 /// A request to perform a metadata operation in the background.
+#[non_exhaustive]
 pub enum MetaRequest {
     /// Fetch DDL for every table in the current session's schema listing.
     DumpSchemaAll {
@@ -121,6 +122,7 @@ impl std::fmt::Debug for MetaRequest {
 /// The result of a background metadata operation, delivered back to
 /// the event loop via the meta channel.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MetaUpdate {
     /// Response to [`MetaRequest::DumpSchemaAll`].
     DumpSchemaReady {
@@ -176,6 +178,23 @@ pub enum MetaUpdate {
         label: String,
         /// `Ok(driver_name)` on success, `Err(message)` on failure.
         result: Result<String, String>,
+    },
+
+    /// Sprint 11 (Opus M1): sidebar `inject_ddl` result. The handler
+    /// resolves `tab_id` to the current index (C5 stable handle),
+    /// drops the update if the originating tab was closed, and
+    /// otherwise pastes `ddl` into the tab's editor buffer.
+    InjectDdlReady {
+        /// Stable tab id of the tab that requested the DDL.
+        tab_id: u64,
+        /// Schema-qualified object the DDL describes (for the status
+        /// bar message).
+        schema: String,
+        /// Object name the DDL describes.
+        name: String,
+        /// Rendered DDL text. The driver decides the dialect; the
+        /// UI does not re-render.
+        ddl: String,
     },
 }
 
