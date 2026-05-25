@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
         .context("creating configuration directories")?;
 
     match cli.command {
-        Some(Mode::Mcp) => run_mcp(paths).await,
+        Some(Mode::Mcp) => run_mcp(paths, cli.read_only).await,
         Some(Mode::Exec(args)) => run_exec(paths, args, cli.read_only).await,
         None => run_tui(paths, cli.read_only).await,
     }
@@ -159,7 +159,12 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
 /// MCP mode: stdout is the JSON-RPC transport, so logs MUST go to stderr.
 /// We use a synchronous appender here because the JSON-RPC reader is what
 /// drives runtime activity — there's no UI competing for the terminal.
-async fn run_mcp(paths: ConfigPaths) -> Result<()> {
+///
+/// `force_read_only` reflects the global `--read-only` CLI flag. When
+/// true, the server refuses any `read_only=false` tool call regardless
+/// of the workspace ACL — the flag is the most user-visible safety
+/// promise and MUST apply to the highest-risk surface (LLM authorship).
+async fn run_mcp(paths: ConfigPaths, force_read_only: bool) -> Result<()> {
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(
@@ -201,7 +206,11 @@ async fn run_mcp(paths: ConfigPaths) -> Result<()> {
             None
         }
     };
-    let mut ctx = ServerContext::new(drivers, Arc::new(connections), credentials);
+    let mut ctx = ServerContext::new(drivers, Arc::new(connections), credentials)
+        .with_force_read_only(force_read_only);
+    if force_read_only {
+        tracing::info!("MCP server forced to read-only by --read-only flag");
+    }
     if let Some(journal) = journal {
         ctx = ctx.with_journal(journal);
     }

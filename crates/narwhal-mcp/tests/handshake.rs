@@ -357,3 +357,64 @@ async fn describe_schema_reads_real_sqlite_tables() {
         "views must be labelled as `view`"
     );
 }
+
+#[tokio::test]
+async fn oversized_frame_aborts_transport_without_oom() {
+    // Reproduces C2: a client streaming bytes without a newline used
+    // to be buffered unbounded before the post-read length check fired,
+    // so a sufficiently large payload could OOM the process. After the
+    // fix `AsyncReadExt::take(MAX + 1)` caps the read at the I/O layer
+    // and the transport closes cleanly with an error response.
+    //
+    // We send ~1.5 MiB of `a` with NO trailing newline. The server must:
+    // (1) NOT block forever waiting for `\n`,
+    // (2) NOT allocate the full payload,
+    // (3) emit an error response, then close.
+    let ctx = ctx_with_in_memory_sqlite();
+    let (client_side, server_side) = duplex(64 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_side);
+    let (client_read, mut client_write) = tokio::io::split(client_side);
+
+    let server = McpServer::new(ctx);
+    let task = tokio::spawn(async move {
+        server.serve(server_read, server_write).await.expect("serve");
+    });
+
+    // Stream 1.5 MiB without a newline. Use a write loop because the
+    // duplex buffer is only 64 KiB — the server's take-wrapper drains
+    // it as we go.
+    let payload = vec![b'a'; 64 * 1024];
+    let mut written = 0usize;
+    let target = 1_500_000usize;
+    while written < target {
+        match client_write.write(&payload).await {
+            Ok(0) => break,
+            Ok(n) => written += n,
+            // EPIPE / similar — server already aborted the transport,
+            // which is the expected outcome.
+            Err(_) => break,
+        }
+    }
+    let _ = client_write.shutdown().await;
+    drop(client_write);
+
+    let mut reader = BufReader::new(client_read).lines();
+    // The server must surface a structured error before closing.
+    let line = reader
+        .next_line()
+        .await
+        .expect("read first frame")
+        .expect("server must emit an error frame for the oversized payload");
+    let resp: Value = serde_json::from_str(&line).expect("response is JSON");
+    assert_eq!(
+        resp["error"]["code"], -32600,
+        "oversized frame must surface as invalid_request: got {resp}"
+    );
+    let msg = resp["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("cap") || msg.contains("large"),
+        "error message must explain the cap: {msg}"
+    );
+
+    task.await.expect("server task panicked");
+}

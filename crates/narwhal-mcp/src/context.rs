@@ -40,6 +40,11 @@ pub struct ServerContext {
     /// found" — expose every connection from `connections.toml` and
     /// honour the per-call `read_only` flag without further restriction.
     workspace: Option<Arc<Workspace>>,
+    /// Global CLI-level read-only override. When `true`, `writes_allowed()`
+    /// returns `false` regardless of workspace ACL — `narwhal --read-only mcp`
+    /// must trump any permissive `workspace.toml` so the user-facing flag
+    /// keeps its promise on the MCP surface (the highest-risk path).
+    force_read_only: bool,
 }
 
 impl ServerContext {
@@ -54,7 +59,18 @@ impl ServerContext {
             credentials,
             journal: None,
             workspace: None,
+            force_read_only: false,
         }
+    }
+
+    /// Force read-only mode regardless of workspace ACL.
+    ///
+    /// Wired from `--read-only` on the CLI. Once set, `writes_allowed()`
+    /// always returns `false` so every tool rejects `read_only=false`.
+    #[must_use]
+    pub const fn with_force_read_only(mut self, force: bool) -> Self {
+        self.force_read_only = force;
+        self
     }
 
     /// Attach an audit journal. Returns `self` so the constructor can be
@@ -101,11 +117,24 @@ impl ServerContext {
     }
 
     /// True when writes are permitted in the current workspace.
-    /// `true` is returned when no workspace is attached.
+    ///
+    /// Returns `false` when the global `--read-only` flag is set, even
+    /// if the workspace ACL would otherwise permit writes. Returns
+    /// `true` when no workspace is attached *and* the flag is unset.
     pub fn writes_allowed(&self) -> bool {
+        if self.force_read_only {
+            return false;
+        }
         self.workspace
             .as_ref()
             .map_or(true, |ws| ws.file.allow_writes)
+    }
+
+    /// True when the global `--read-only` CLI flag is in effect.
+    /// Surfaces in error messages so the agent learns *why* writes
+    /// are off instead of guessing it's a workspace policy.
+    pub const fn force_read_only(&self) -> bool {
+        self.force_read_only
     }
 
     /// Borrow the workspace if one is attached. Tools usually go through

@@ -160,19 +160,29 @@ impl Tool for RunQueryTool {
 
         let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
-        // Workspace ACL: if `allow_writes = false` the agent cannot opt
-        // out of read_only mode even by passing the flag. We refuse
-        // up-front with a clear message so the agent can adapt.
+        // Workspace ACL + global --read-only flag: if writes aren't
+        // permitted the agent cannot opt out of read_only mode even by
+        // passing the flag. We refuse up-front with a message that
+        // tells the agent *why* so it can stop retrying.
         let read_only = if !ctx.writes_allowed() && !args.read_only {
-            return Ok(ToolOutput::err(format!(
-                "the active workspace (root: {root}) disallows writes \
-                 — `read_only=false` is rejected. Open a permissive \
-                 workspace or call again with `read_only=true`.",
-                root = ctx
-                    .workspace()
-                    .map(|w| w.root.display().to_string())
-                    .unwrap_or_default()
-            )));
+            let reason = if ctx.force_read_only() {
+                String::from(
+                    "the MCP server was launched with --read-only \
+                     — `read_only=false` is rejected on every call. \
+                     Relaunch without the flag to allow writes.",
+                )
+            } else {
+                format!(
+                    "the active workspace (root: {root}) disallows writes \
+                     — `read_only=false` is rejected. Open a permissive \
+                     workspace or call again with `read_only=true`.",
+                    root = ctx
+                        .workspace()
+                        .map(|w| w.root.display().to_string())
+                        .unwrap_or_default()
+                )
+            };
+            return Ok(ToolOutput::err(reason));
         } else {
             args.read_only
         };

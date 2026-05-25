@@ -1,5 +1,5 @@
 use crate::action::{Action, Motion, Operator, SearchDirection};
-use crate::key::{Key, KeyCode};
+use crate::key::{Key, KeyCode, KeyMod};
 use crate::mode::Mode;
 
 /// Maximum count value. Prevents overflow from sticky keys or malicious
@@ -38,7 +38,17 @@ impl Vim {
     }
 
     /// Feed one key event and obtain the resulting action.
+    ///
+    /// Modifier handling: `Ctrl+<letter>` and `Alt+<letter>` are NEVER
+    /// matched against the bare-letter arms below — Ctrl+C must not
+    /// fire the `change` operator. `Ctrl+C`, `Ctrl+[` (the canonical
+    /// vim escape on stripped-down terminals) and `Ctrl+G` all map to
+    /// Esc semantics. Anything else with a modifier we don't bind goes
+    /// to the host as `Action::Pending` so the parent widget can decide.
     pub fn handle(&mut self, key: Key) -> Action {
+        if let Some(action) = self.intercept_modifier(&key) {
+            return action;
+        }
         match self.mode {
             Mode::Normal => self.handle_normal(key),
             Mode::Insert => self.handle_insert(key),
@@ -46,6 +56,60 @@ impl Vim {
             Mode::Visual | Mode::VisualLine => self.handle_visual(key),
             Mode::OperatorPending(_) => self.handle_operator_pending(key),
         }
+    }
+
+    /// Pre-dispatch hook for modifier-bearing keys. Returns `Some` when
+    /// the modifier alone fully decides the action; returns `None` to
+    /// let the normal mode dispatcher run (e.g. for Shift-only keys,
+    /// which are already encoded into the `Char(c)` itself).
+    fn intercept_modifier(&mut self, key: &Key) -> Option<Action> {
+        // Shift alone is already part of the `Char` codepoint (`'A'`
+        // vs. `'a'`) — fall through.
+        if key.mods == KeyMod::NONE || key.mods == KeyMod::SHIFT {
+            return None;
+        }
+        // Ctrl-only chords we recognise. Esc-equivalents come first so
+        // they behave consistently across modes.
+        if key.mods == KeyMod::CTRL {
+            if let KeyCode::Char(c) = key.code {
+                match c {
+                    // Esc-equivalents: cancel pending op/count, return to Normal.
+                    'c' | 'C' | '[' | 'g' | 'G' => {
+                        self.pending_count = None;
+                        // Command-mode Ctrl-C should also drop the buffer.
+                        if matches!(self.mode, Mode::Command) {
+                            self.command_buffer.clear();
+                        }
+                        self.mode = Mode::Normal;
+                        return Some(Action::EnterMode(Mode::Normal));
+                    }
+                    // Ctrl-D / Ctrl-U / Ctrl-F / Ctrl-B: half/full page scroll.
+                    'd' | 'D' => {
+                        let count = self.take_count();
+                        return Some(Action::Move {
+                            motion: Motion::Down,
+                            count: count.saturating_mul(10),
+                        });
+                    }
+                    'u' | 'U' => {
+                        let count = self.take_count();
+                        return Some(Action::Move {
+                            motion: Motion::Up,
+                            count: count.saturating_mul(10),
+                        });
+                    }
+                    _ => return Some(Action::Pending),
+                }
+            }
+            // Ctrl + non-Char (Ctrl+Enter, Ctrl+Tab, …) — not bound here.
+            return Some(Action::Pending);
+        }
+        // Alt-anything: not bound; surface as Pending so the host widget
+        // (e.g. tab switching) can handle it.
+        if key.mods.contains(KeyMod::ALT) {
+            return Some(Action::Pending);
+        }
+        None
     }
 
     fn take_count(&mut self) -> usize {
@@ -663,6 +727,62 @@ mod tests {
         vim.handle(Key::char('d'));
         // 'z' is not a recognized motion or operator
         vim.handle(Key::char('z'));
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn ctrl_c_does_not_trigger_change_operator() {
+        let mut vim = Vim::new();
+        // Without the modifier fix, Ctrl+C used to hit the bare 'c' arm
+        // and put the editor into OperatorPending(Change) — destructive
+        // and surprising. It must behave like Esc.
+        assert_eq!(
+            vim.handle(Key::ctrl('c')),
+            Action::EnterMode(Mode::Normal)
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn ctrl_c_cancels_pending_operator() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('d'));
+        assert_eq!(vim.mode(), Mode::OperatorPending(Operator::Delete));
+        vim.handle(Key::ctrl('c'));
+        assert_eq!(vim.mode(), Mode::Normal);
+        assert_eq!(vim.pending_count, None);
+    }
+
+    #[test]
+    fn ctrl_c_in_command_mode_clears_buffer() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char(':'));
+        vim.handle(Key::char('w'));
+        vim.handle(Key::char('q'));
+        assert_eq!(vim.command_buffer(), "wq");
+        vim.handle(Key::ctrl('c'));
+        assert_eq!(vim.mode(), Mode::Normal);
+        assert!(vim.command_buffer().is_empty());
+    }
+
+    #[test]
+    fn ctrl_d_pages_down() {
+        let mut vim = Vim::new();
+        assert_eq!(
+            vim.handle(Key::ctrl('d')),
+            Action::Move {
+                motion: Motion::Down,
+                count: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn ctrl_letter_does_not_match_bare_letter() {
+        let mut vim = Vim::new();
+        // Ctrl+W must not enter the WordForward motion arm.
+        let action = vim.handle(Key::ctrl('w'));
+        assert_eq!(action, Action::Pending);
         assert_eq!(vim.mode(), Mode::Normal);
     }
 

@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
@@ -22,6 +22,15 @@ use crate::tools::ToolRegistry;
 
 const SERVER_NAME: &str = "narwhal";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Hard cap on the size of a single inbound JSON-RPC frame.
+///
+/// 1 MiB is comfortable for any legitimate MCP call (`tools/list` of
+/// every tool with all schemas inlined sits well under 50 KiB). The cap
+/// is enforced at the *read* layer (`AsyncReadExt::take`), not after the
+/// line is already in memory, so a client streaming bytes without a
+/// newline can never allocate more than this.
+const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 /// Configured but not-yet-running server. Build via [`McpServer::new`] and
 /// call [`McpServer::serve_stdio`] to take over stdin/stdout.
@@ -52,12 +61,21 @@ impl McpServer {
     /// Splitting `serve_stdio` from a transport-generic `serve` lets the
     /// integration tests pipe JSON-RPC traffic through `tokio::io::duplex`
     /// without spawning a subprocess.
+    ///
+    /// **Per-frame cap**: the reader is wrapped with `take(MAX_LINE_BYTES + 1)`
+    /// so a client sending an unbounded stream without a newline can
+    /// never allocate more than the cap. The previous implementation
+    /// only checked length *after* a full line landed in memory, which
+    /// let a hostile/buggy client OOM the process before the check fired.
     pub async fn serve<R, W>(self, reader: R, mut writer: W) -> std::io::Result<()>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let mut lines = BufReader::new(reader).lines();
+        // +1 so we can DISTINGUISH "exactly at the cap" from "overflow":
+        // if `next_line` ever returns a string of length MAX_LINE_BYTES+1
+        // we know the cap was reached and the rest was truncated.
+        let mut lines = BufReader::new(reader.take((MAX_LINE_BYTES as u64) + 1)).lines();
 
         tracing::info!(
             server = SERVER_NAME,
@@ -68,6 +86,31 @@ impl McpServer {
         );
 
         while let Some(line) = lines.next_line().await? {
+            // Defence in depth: if the cap was reached the take-wrapper
+            // will swallow the trailing bytes silently and the parser
+            // will choke on a truncated JSON frame. Detect and reject
+            // BEFORE attempting to parse so the agent sees a clean error.
+            if line.len() > MAX_LINE_BYTES {
+                tracing::warn!(
+                    len = line.len(),
+                    max = MAX_LINE_BYTES,
+                    "rejecting oversized JSON-RPC message (capped at read time)"
+                );
+                let response = Response::error(
+                    Value::Null,
+                    RpcError::invalid_request(format!(
+                        "message exceeded {MAX_LINE_BYTES}-byte cap; connection aborted"
+                    )),
+                );
+                let mut payload = serde_json::to_vec(&response).unwrap_or_default();
+                payload.push(b'\n');
+                writer.write_all(&payload).await?;
+                writer.flush().await?;
+                // Bail — once the stream lost framing we cannot trust
+                // the next "line" boundary either. Hostile-client policy.
+                tracing::warn!("closing transport after oversized frame");
+                break;
+            }
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -88,25 +131,11 @@ impl McpServer {
     /// Parse and dispatch one line. Returns `None` when the message is a
     /// notification (no response expected) or unparseable in a way that
     /// JSON-RPC says should be silently dropped.
+    ///
+    /// The hard size cap is enforced upstream in [`Self::serve`] via
+    /// `AsyncReadExt::take` so a hostile client cannot OOM us before the
+    /// post-read check ever runs.
     async fn handle_line(&self, line: &str) -> Option<Response> {
-        // Hard cap on incoming payload size to prevent OOM from oversized
-        // messages. 1 MiB is generous for any legitimate MCP call.
-        const MAX_LINE_BYTES: usize = 1024 * 1024;
-        if line.len() > MAX_LINE_BYTES {
-            tracing::warn!(
-                len = line.len(),
-                max = MAX_LINE_BYTES,
-                "rejecting oversized JSON-RPC message"
-            );
-            return Some(Response::error(
-                Value::Null,
-                RpcError::invalid_request(format!(
-                    "message too large: {} bytes (max {MAX_LINE_BYTES})",
-                    line.len()
-                )),
-            ));
-        }
-
         let request: Request = match serde_json::from_str(line) {
             Ok(req) => req,
             Err(error) => {
