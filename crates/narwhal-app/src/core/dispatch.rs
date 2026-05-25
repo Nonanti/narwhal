@@ -251,6 +251,18 @@ impl AppCore {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // H7 compat: when an `:open` is in flight we wait briefly for
+        // the background `SessionOpened` reply so a follow-up key sees
+        // the new session. In production this is a no-op once the
+        // user's typing rhythm exceeds the connect latency; on tests
+        // it lets `execute_command(":open ...")` + `handle_key` flow
+        // continue working without a manual
+        // `await_pending_session_opens` call. The wait runs through
+        // `block_in_place` so the multi-thread runtime keeps draining
+        // other workers in the meantime.
+        if !self.pending_session_opens.is_empty() {
+            self.await_pending_session_opens_sync();
+        }
         if self.wizard.is_some() {
             self.handle_wizard_key(key);
             return;
@@ -470,7 +482,18 @@ impl AppCore {
     /// Execute a command exactly as if the user submitted it from command-line
     /// mode. Useful from tests.
     pub fn execute_command(&mut self, raw: &str) {
-        match parse(raw) {
+        // H7 compat: any command other than `:open` that follows an
+        // in-flight open should see the freshly-opened session. Mirror
+        // the same brief wait that `handle_key` does so callers can
+        // chain `execute_command(":open foo"); execute_command(":run")`
+        // without explicit drains.
+        let parsed = parse(raw);
+        if !matches!(parsed, Command::Open(_) | Command::Quit | Command::Cancel)
+            && !self.pending_session_opens.is_empty()
+        {
+            self.await_pending_session_opens_sync();
+        }
+        match parsed {
             Command::Quit => self.should_quit = true,
             Command::Open(name) => self.open_named(&name),
             Command::Close => self.close_session(),

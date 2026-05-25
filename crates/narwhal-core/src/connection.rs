@@ -303,6 +303,29 @@ pub trait Connection: Send + Sync {
         Err(crate::Error::unsupported("fetch_ddl"))
     }
 
+    /// Toggle session-level read-only enforcement.
+    ///
+    /// When `true`, the driver instructs the database engine to refuse
+    /// writes for the lifetime of the session (until this method is
+    /// called again with `false`). Mapping per driver:
+    ///
+    /// - `PostgreSQL`: `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`
+    ///   + `SET default_transaction_read_only TO ON`.
+    /// - `MySQL`/`MariaDB`: `SET SESSION TRANSACTION READ ONLY`.
+    /// - `SQLite`: `PRAGMA query_only = ON`.
+    /// - `ClickHouse`: `SET readonly = 2` (allow SELECT + SET).
+    /// - `DuckDB`: opens are file-mode driven; per-session flip is
+    ///   reported as [`crate::Error::Unsupported`] so callers can fall
+    ///   back to the connection-string toggle.
+    ///
+    /// The default implementation reports the feature as unsupported so
+    /// driver authors are forced to make an explicit choice (and so a
+    /// security-sensitive caller can detect the absence of enforcement).
+    async fn set_read_only(&mut self, read_only: bool) -> Result<()> {
+        let _ = read_only;
+        Err(crate::Error::unsupported("set_read_only"))
+    }
+
     /// Tear down the underlying connection.
     async fn close(self: Box<Self>) -> Result<()>;
 }

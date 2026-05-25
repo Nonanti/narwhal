@@ -151,6 +151,7 @@ impl AppCore {
             keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
             read_only: false,
+            pending_session_opens: std::collections::HashSet::new(),
         }
     }
 

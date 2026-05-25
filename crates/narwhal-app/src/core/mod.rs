@@ -27,6 +27,8 @@ use plugin_executor::PluginConnectionState;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use narwhal_config::{ConnectionsFile, CredentialStore};
 use narwhal_history::Journal;
 use narwhal_tui::{LayoutRegions, Pane, ResultView, Theme};
@@ -143,6 +145,11 @@ pub struct AppCore {
     /// driver's `row_level_dml` capability. Driven by the `--read-only`
     /// CLI flag.
     pub(super) read_only: bool,
+    /// `ConnectionConfig.id`s for which an `OpenSession` meta request
+    /// is in flight. Used to drop stale `MetaUpdate::SessionOpened`
+    /// replies (user opened another connection, closed the active
+    /// one) before they clobber the current state.  (Bug H7 fix.)
+    pub(super) pending_session_opens: std::collections::HashSet<Uuid>,
 }
 
 mod accessors;

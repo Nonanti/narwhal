@@ -23,6 +23,10 @@ pub struct TxnHandle {
 }
 
 /// Open connection plus its driver capabilities and cached metadata.
+///
+/// Implements a non-trivial [`std::fmt::Debug`] so the meta channel
+/// (`MetaUpdate::SessionOpened`) can derive `Debug` without dragging
+/// driver / pool internals into the format output.
 pub struct Session {
     pub config: ConnectionConfig,
     pub driver: Arc<dyn DatabaseDriver>,
@@ -43,6 +47,17 @@ pub struct Session {
     /// with the session so the forwarded port goes away as soon as
     /// the user runs `:close`.
     pub _ssh_tunnel: Option<Arc<SshTunnel>>,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("config.name", &self.config.name)
+            .field("config.driver", &self.config.driver)
+            .field("schema_count", &self.schemas.len())
+            .field("has_transaction", &self.transaction.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Options that modulate [`Session::open`] without bloating its

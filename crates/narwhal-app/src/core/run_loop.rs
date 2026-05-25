@@ -303,6 +303,27 @@ impl AppCore {
                 let table_count = self.count_sidebar_tables();
                 self.status.message = format!("schema refreshed · {table_count} tables");
             }
+            MetaUpdate::SessionOpened { config_id, result } => {
+                // H7: drop the reply if the user opened another
+                // connection in the meantime (or hit `:close`).
+                if !self.pending_session_opens.remove(&config_id) {
+                    tracing::debug!(
+                        target: "narwhal::app",
+                        ?config_id,
+                        "dropping SessionOpened: no pending open for this id"
+                    );
+                    return;
+                }
+                match result {
+                    Ok(session) => {
+                        self.apply_opened_session(*session);
+                    }
+                    Err(message) => {
+                        self.status.connection = None;
+                        self.status.message = format!("connect failed: {message}");
+                    }
+                }
+            }
             MetaUpdate::HistoryReady { entries } => {
                 if entries.is_empty() {
                     self.status.message = "no history entries".into();
@@ -331,6 +352,7 @@ impl AppCore {
             request,
             pool,
             self.history_journal.clone(),
+            Some(self.credentials.clone()),
             self.meta_tx.clone(),
         );
         true
@@ -338,11 +360,60 @@ impl AppCore {
 
     /// Drive the worker channel to completion. Useful from tests after
     /// dispatching a batch: pumps every [`RunUpdate`] until `AllDone`.
+    ///
+    /// H7: also drains any pending `SessionOpened` meta replies
+    /// up-front so tests that call `:open` and then expect the session
+    /// to be live continue to work without an extra `drain_meta`
+    /// step on every call site.
     pub async fn drain_run_updates(&mut self) {
+        if !self.pending_session_opens.is_empty() {
+            self.await_pending_session_opens().await;
+        }
         while self.running {
             match self.recv_run_update().await {
                 Some(update) => self.handle_run_update(update),
                 None => break,
+            }
+        }
+    }
+
+    /// Non-blocking sibling of [`Self::await_pending_session_opens`].
+    /// Drains any meta updates that are *already* sitting in the
+    /// channel; does **not** wait if none are queued.
+    pub fn drain_ready_meta_updates(&mut self) {
+        while let Ok(update) = self.meta_rx.try_recv() {
+            self.handle_meta_update(update);
+        }
+    }
+
+    /// Sync wrapper around [`Self::await_pending_session_opens`] for
+    /// use from `handle_key`. Uses `block_in_place` so the multi-thread
+    /// runtime keeps draining other workers; the wait is bounded by
+    /// the inner timeout in `await_pending_session_opens`.
+    pub fn await_pending_session_opens_sync(&mut self) {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(self.await_pending_session_opens());
+            });
+        }
+    }
+
+    /// Block until every pending `OpenSession` has been resolved
+    /// (success or failure). Used by [`Self::drain_run_updates`] and
+    /// exposed for direct use in tests that call `:open` outside the
+    /// usual run-channel flow.
+    pub async fn await_pending_session_opens(&mut self) {
+        while !self.pending_session_opens.is_empty() {
+            if let Ok(Some(update)) =
+                tokio::time::timeout(Duration::from_secs(5), self.meta_rx.recv()).await
+            {
+                self.handle_meta_update(update);
+            } else {
+                // Channel closed or timed out — clear the ledger so
+                // we don't spin forever.
+                self.pending_session_opens.clear();
+                break;
             }
         }
     }
