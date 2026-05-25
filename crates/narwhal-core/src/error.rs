@@ -89,10 +89,7 @@ impl Error {
 
     /// Build a connection error that preserves the underlying driver
     /// error in the `source()` chain.
-    pub fn connection_with(
-        msg: impl Into<String>,
-        source: impl Into<Source>,
-    ) -> Self {
+    pub fn connection_with(msg: impl Into<String>, source: impl Into<Source>) -> Self {
         Self::ConnectionWithSource {
             msg: msg.into(),
             source: source.into(),
@@ -110,10 +107,7 @@ impl Error {
 
     /// Build a configuration error that preserves the underlying parse
     /// / validation error in the `source()` chain.
-    pub fn config_with(
-        msg: impl Into<String>,
-        source: impl Into<Source>,
-    ) -> Self {
+    pub fn config_with(msg: impl Into<String>, source: impl Into<Source>) -> Self {
         Self::ConfigWithSource {
             msg: msg.into(),
             source: source.into(),
@@ -157,8 +151,7 @@ mod tests {
     #[test]
     fn query_with_chain_is_walkable() {
         let err = Error::query_with("select bombed", FakeDriverError(7));
-        let mut chain: Option<&(dyn std::error::Error + 'static)> =
-            std::error::Error::source(&err);
+        let mut chain: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(&err);
         let mut hops = 0;
         while let Some(c) = chain {
             hops += 1;

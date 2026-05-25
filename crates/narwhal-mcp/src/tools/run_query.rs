@@ -31,7 +31,7 @@ use tracing::warn;
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::{json_array_to_values, value_to_json};
-use crate::tools::{Tool, ToolOutput};
+use crate::tools::{cap_response, Tool, ToolOutput};
 
 /// Default ceiling on returned rows. A handful of agents (Claude Desktop,
 /// Cursor) cap tool-call responses at ~100 KB; 1 000 rows is well under
@@ -311,9 +311,13 @@ impl Tool for RunQueryTool {
             "rows_affected": query_result.rows_affected,
         });
 
-        Ok(ToolOutput::ok(
-            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string()),
-        ))
+        // Issue A (sprint 5): apply the total-response cap the way the
+        // other three tools do. Per-cell capping alone leaves
+        // `limit * MAX_CELL_BYTES` (10k * 64 KiB ≈ 640 MiB) on the
+        // table, which trivially exceeds the agent host's reply budget.
+        let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+        let (body, _truncated) = cap_response(body, "run_query");
+        Ok(ToolOutput::ok(body))
     }
 }
 
@@ -359,22 +363,109 @@ fn guard_read_only(sql: &str) -> Result<(), String> {
 
     // Even when the first token is allowed, block known dangerous
     // function calls that can hold a connection or mutate state.
-    let upper_sql = stripped.to_ascii_uppercase();
-    const BLOCKED_PATTERNS: &[&str] = &[
-        "PG_SLEEP", // holds a connection indefinitely
-        "SLEEP",    // MySQL equivalent
-        "SLEEP(",   // with parenthesis
+    //
+    // Issue D (sprint 5): the previous substring match produced both
+    // false positives (`sleeping_bags`, `asleep`, a column named
+    // `"SLEEP"`) and false negatives (`pg_sleep_for`, `WAITFOR DELAY`,
+    // `BENCHMARK(...)`). The new check
+    //
+    //   1. Strips string literals and quoted identifiers so a comment
+    //      or `'pg_sleep'` cannot trip the guard, and
+    //   2. Requires word-boundary matches so `sleeping_bags` is not
+    //      mistaken for `SLEEP`.
+    //
+    // The denylist is also widened to cover the engines we ship
+    // drivers for plus the documented dialect quirks (MSSQL
+    // `WAITFOR`, MySQL `BENCHMARK` CPU bomb, PG `pg_sleep_for` /
+    // `pg_sleep_until`).
+    let sanitised = strip_sql_literals(stripped);
+    let upper_sql = sanitised.to_ascii_uppercase();
+    const BLOCKED_FUNCS: &[&str] = &[
+        "PG_SLEEP",       // postgres: holds the connection
+        "PG_SLEEP_FOR",   // postgres alt
+        "PG_SLEEP_UNTIL", // postgres alt
+        "SLEEP",          // mysql / mariadb
+        "DBMS_LOCK",      // oracle (`DBMS_LOCK.SLEEP(…)`)
+        "BENCHMARK",      // mysql cpu bomb
+        "WAITFOR",        // mssql delay
     ];
-    for pattern in BLOCKED_PATTERNS {
-        if upper_sql.contains(pattern) {
+    for pattern in BLOCKED_FUNCS {
+        if contains_word(&upper_sql, pattern) {
             return Err(format!(
                 "statement contains blocked function `{pattern}` which can \
-                 hold a connection — pass `read_only=false` if intentional"
+                 hold a connection or burn CPU — pass `read_only=false` if intentional"
             ));
         }
     }
 
     Ok(())
+}
+
+/// Replace the contents of every SQL string literal (`'…'`) and
+/// double-quoted identifier (`"…"`) with spaces so that subsequent
+/// keyword scans see only structural tokens. Handles the SQL standard
+/// doubled-quote escapes (`''` inside a single-quoted literal, `""`
+/// inside a double-quoted identifier). Backslash escapes are *not*
+/// honoured — the goal is keyword stripping, not full lexing.
+fn strip_sql_literals(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut iter = sql.chars().peekable();
+    while let Some(c) = iter.next() {
+        match c {
+            '\'' | '"' => {
+                let quote = c;
+                out.push(c);
+                while let Some(&next) = iter.peek() {
+                    iter.next();
+                    if next == quote {
+                        if iter.peek() == Some(&quote) {
+                            // Doubled-quote escape: stay inside.
+                            iter.next();
+                            out.push(' ');
+                            out.push(' ');
+                            continue;
+                        }
+                        out.push(next);
+                        break;
+                    }
+                    // Mask the body so a keyword inside the literal
+                    // (e.g. `'pg_sleep'`) doesn't reach the scanner.
+                    out.push(if next == '\n' { '\n' } else { ' ' });
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Word-boundary substring match. `needle` is searched in `haystack`
+/// with the requirement that the character immediately before and
+/// after the match is *not* an identifier character (ASCII alphanumeric
+/// or underscore).
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    let n = needle.len();
+    if n == 0 || n > haystack.len() {
+        return false;
+    }
+    let bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut i = 0;
+    while i + n <= bytes.len() {
+        if &bytes[i..i + n] == needle_bytes {
+            let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
+            let after_ok = i + n == bytes.len() || !is_ident_byte(bytes[i + n]);
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// H2: clamp a single JSON cell to [`MAX_CELL_BYTES`] so a fat

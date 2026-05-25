@@ -53,7 +53,7 @@ impl AppCore {
         self.run_rx.try_recv().ok()
     }
 
-    pub fn handle_run_update(&mut self, update: RunUpdate) {
+    pub async fn handle_run_update(&mut self, update: RunUpdate) {
         // All mutations target the tab that *started* the run, not the
         // tab the user may have switched to in the meantime (K1-A fix).
         let rt = self.run_tab_index();
@@ -128,7 +128,8 @@ impl AppCore {
                 rows_affected,
                 streamed,
             } => {
-                self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed);
+                self.finalize_statement(elapsed_ms, rows_returned, rows_affected, streamed)
+                    .await;
             }
             RunUpdate::Failed {
                 error,
@@ -258,8 +259,7 @@ impl AppCore {
                         tab_id,
                         "dropping dump-schema reply: originating tab closed"
                     );
-                    self.status.message =
-                        "dump-schema cancelled: target tab was closed".into();
+                    self.status.message = "dump-schema cancelled: target tab was closed".into();
                     return;
                 };
                 let ddl = if tables.len() == 1 {
@@ -371,7 +371,7 @@ impl AppCore {
         }
         while self.running {
             match self.recv_run_update().await {
-                Some(update) => self.handle_run_update(update),
+                Some(update) => self.handle_run_update(update).await,
                 None => break,
             }
         }
@@ -393,8 +393,7 @@ impl AppCore {
     pub fn await_pending_session_opens_sync(&mut self) {
         if tokio::runtime::Handle::try_current().is_ok() {
             tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(self.await_pending_session_opens());
+                tokio::runtime::Handle::current().block_on(self.await_pending_session_opens());
             });
         }
     }
@@ -429,7 +428,7 @@ impl AppCore {
             // The debounce task sends SchemaRefresh through run_rx;
             // consume it.
             while let Ok(update) = self.run_rx.try_recv() {
-                self.handle_run_update(update);
+                self.handle_run_update(update).await;
             }
         }
         // The SchemaRefresh handler now dispatches a MetaRequest::RefreshSchemas
@@ -466,7 +465,13 @@ impl AppCore {
     /// Failures from a transform are reported to the status bar but the
     /// original (untransformed) rows are still surfaced — a misbehaving
     /// plugin shouldn't be able to hide query data from the user.
-    fn apply_plugin_transforms(
+    /// Issue B / H7 (sprint 5): the previous implementation used
+    /// `block_in_place` + `Handle::block_on` to bridge the synchronous
+    /// `handle_run_update` path to the async plugin trait. Now that
+    /// `handle_run_update` is itself `async`, we await the transform
+    /// directly — no scheduler-thread blockage, no current-thread
+    /// runtime deadlock risk.
+    async fn apply_plugin_transforms(
         &mut self,
         columns: Vec<ColumnHeader>,
         rows: Vec<Row>,
@@ -482,10 +487,7 @@ impl AppCore {
             rows_affected: None,
             elapsed_ms,
         };
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { plugins.transform_result(&mut qr).await })
-        });
+        let result = plugins.transform_result(&mut qr).await;
         if let Err(errors) = result {
             // The registry already ran every plugin's transform regardless
             // of intermediate failures (see PluginRegistry::transform_result),
@@ -497,7 +499,7 @@ impl AppCore {
         (qr.columns, qr.rows)
     }
 
-    fn finalize_statement(
+    async fn finalize_statement(
         &mut self,
         elapsed_ms: u64,
         rows_returned: usize,
@@ -559,7 +561,9 @@ impl AppCore {
             // originating table.
             let source = self.tabs[rt].pending_source.take();
             let source_table = crate::export::extract_source_table(&sql);
-            let (columns, rows) = self.apply_plugin_transforms(columns, rows, elapsed_ms);
+            let (columns, rows) = self
+                .apply_plugin_transforms(columns, rows, elapsed_ms)
+                .await;
             *self.tabs[rt].results.active_state_mut() = ResultState::Rows {
                 columns,
                 rows,

@@ -140,7 +140,7 @@ impl App {
                 }
                 Some(update) = self.core.run_rx.recv() => {
                     let is_stream = matches!(update, RunUpdate::RowsAppended { .. });
-                    self.core.handle_run_update(update);
+                    self.core.handle_run_update(update).await;
                     Some(if is_stream { DrawTrigger::Stream } else { DrawTrigger::Force })
                 }
                 Some(meta) = self.core.meta_rx.recv() => {

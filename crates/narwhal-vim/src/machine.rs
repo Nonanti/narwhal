@@ -736,10 +736,7 @@ mod tests {
         // Without the modifier fix, Ctrl+C used to hit the bare 'c' arm
         // and put the editor into OperatorPending(Change) — destructive
         // and surprising. It must behave like Esc.
-        assert_eq!(
-            vim.handle(Key::ctrl('c')),
-            Action::EnterMode(Mode::Normal)
-        );
+        assert_eq!(vim.handle(Key::ctrl('c')), Action::EnterMode(Mode::Normal));
         assert_eq!(vim.mode(), Mode::Normal);
     }
 

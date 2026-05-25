@@ -184,7 +184,10 @@ pub fn spawn_meta_request(
                     return;
                 };
                 match refresh_schemas_via_pool(&pool).await {
-                    Ok(schemas) => MetaUpdate::SchemasRefreshed { session_id, schemas },
+                    Ok(schemas) => MetaUpdate::SchemasRefreshed {
+                        session_id,
+                        schemas,
+                    },
                     Err(e) => MetaUpdate::MetaFailed {
                         message: format!("refresh failed: {e}"),
                     },

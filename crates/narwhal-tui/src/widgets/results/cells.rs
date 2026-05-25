@@ -133,7 +133,10 @@ mod tests {
         // 👨‍👩‍👧 family emoji — must NOT be split into individual heads.
         let input = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
         let out = render_for_grid(input);
-        assert!(out.contains('\u{200D}'), "ZWJ must be preserved: got {out:?}");
+        assert!(
+            out.contains('\u{200D}'),
+            "ZWJ must be preserved: got {out:?}"
+        );
         assert_eq!(out, input);
         let cow = sanitize_for_display(input);
         assert_eq!(cow.as_ref(), input);

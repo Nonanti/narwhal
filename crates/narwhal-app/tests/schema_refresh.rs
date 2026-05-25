@@ -277,7 +277,7 @@ async fn schema_refresh_skipped_when_session_changed() {
     // Let the debounce fire and the stale SchemaRefresh arrive.
     tokio::time::sleep(std::time::Duration::from_millis(350)).await;
     while let Some(update) = core.try_recv_run_update() {
-        core.handle_run_update(update);
+        core.handle_run_update(update).await;
     }
 
     // B's table count must be unchanged — the refresh targeted A and

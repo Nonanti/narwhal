@@ -1183,12 +1183,9 @@ mod tests {
             assert(type(io.open) == "function", "io.open should be present")
             narwhal.register_command("x", "x", function() end)
         "#;
-        let _plugin = LuaPlugin::from_script_with_sandbox(
-            "permissive",
-            script,
-            LuaSandbox::Permissive,
-        )
-        .expect("permissive must load");
+        let _plugin =
+            LuaPlugin::from_script_with_sandbox("permissive", script, LuaSandbox::Permissive)
+                .expect("permissive must load");
     }
 
     /// M12: Restricted sandbox blocks the dangerous standard libraries
@@ -1205,12 +1202,9 @@ mod tests {
             assert(type(math) == "table", "math must still be present")
             narwhal.register_command("x", "x", function() end)
         "#;
-        let _plugin = LuaPlugin::from_script_with_sandbox(
-            "restricted",
-            script,
-            LuaSandbox::Restricted,
-        )
-        .expect("restricted must load with safe libs only");
+        let _plugin =
+            LuaPlugin::from_script_with_sandbox("restricted", script, LuaSandbox::Restricted)
+                .expect("restricted must load with safe libs only");
     }
 
     /// M12: even if the script smuggles a string like `"os.execute"`
@@ -1228,12 +1222,8 @@ mod tests {
             assert(not ok, "call must fail because os is nil in the env")
             narwhal.register_command("x", "x", function() end)
         "#;
-        let _plugin = LuaPlugin::from_script_with_sandbox(
-            "escape",
-            script,
-            LuaSandbox::Restricted,
-        )
-        .expect("restricted must contain loadstring escape attempts");
+        let _plugin = LuaPlugin::from_script_with_sandbox("escape", script, LuaSandbox::Restricted)
+            .expect("restricted must contain loadstring escape attempts");
     }
 
     /// M19: Plugin name derived from file stem is deterministic across
