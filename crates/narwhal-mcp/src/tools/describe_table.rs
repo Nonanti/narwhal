@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{Tool, ToolOutput};
+use crate::tools::{cap_response, Tool, ToolOutput};
 
 pub struct DescribeTableTool;
 
@@ -112,8 +112,10 @@ impl Tool for DescribeTableTool {
             }
         }
 
-        Ok(ToolOutput::ok(
-            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string()),
-        ))
+        // H2: clamp the body — raw DDL plus thousands of columns on a
+        // wide table can easily exceed the agent's response budget.
+        let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+        let (body, _truncated) = cap_response(body, "describe_table");
+        Ok(ToolOutput::ok(body))
     }
 }

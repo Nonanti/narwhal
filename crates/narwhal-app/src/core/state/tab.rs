@@ -9,6 +9,12 @@ use super::result::{
 use crate::pending::PendingChanges;
 
 pub struct Tab {
+    /// Stable, monotonically-assigned identifier. Used by the meta
+    /// channel to address replies to the originating tab even after
+    /// other tabs are closed (which shifts indices). Initial tab is
+    /// `1`; `new_tab` allocates from `AppCore::next_tab_id`. Wraps at
+    /// `u64::MAX` — well beyond any plausible session.  (Bug C5 fix.)
+    pub(crate) id: u64,
     pub(crate) name: String,
     pub(crate) editor: EditorBuffer,
     pub(crate) results: ResultBundle,
@@ -53,8 +59,9 @@ pub struct PendingPreviewState {
 }
 
 impl Tab {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(id: u64, name: impl Into<String>) -> Self {
         Self {
+            id,
             name: name.into(),
             editor: EditorBuffer::new(),
             results: ResultBundle::default(),
@@ -69,6 +76,11 @@ impl Tab {
             pending: PendingChanges::new(),
             pending_preview: None,
         }
+    }
+
+    /// Stable identifier (see field doc).
+    pub const fn id(&self) -> u64 {
+        self.id
     }
 
     /// Tab display name shown in the tab bar.

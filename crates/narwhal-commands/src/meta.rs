@@ -15,18 +15,28 @@ use std::sync::Arc;
 use narwhal_core::TableSchema;
 use narwhal_domain::SchemaListing;
 use narwhal_history::HistoryEntry;
+use uuid::Uuid;
 
 /// A request to perform a metadata operation in the background.
 #[derive(Debug)]
 pub enum MetaRequest {
     /// Fetch DDL for every table in the current session's schema listing.
     DumpSchemaAll {
-        /// The tab index that initiated the request.
-        tab: usize,
+        /// The stable tab id (see `Tab::id`) that initiated the request.
+        /// Round-tripped through [`MetaUpdate::DumpSchemaReady`] so the
+        /// reply lands on the originating tab even if other tabs were
+        /// closed in the meantime (which shifts indices).  (Bug C5 fix.)
+        tab_id: u64,
     },
 
     /// Refresh the schema listing for the current session.
-    RefreshSchemas,
+    RefreshSchemas {
+        /// The connection (session) id that originated the refresh.
+        /// Round-tripped via [`MetaUpdate::SchemasRefreshed`] so a stale
+        /// reply is dropped if the user switched sessions in the
+        /// meantime.  (Bug H8 fix.)
+        session_id: Uuid,
+    },
 
     /// Load recent history entries from the journal.
     LoadHistory {
@@ -41,14 +51,19 @@ pub enum MetaRequest {
 pub enum MetaUpdate {
     /// Response to [`MetaRequest::DumpSchemaAll`].
     DumpSchemaReady {
-        /// The tab index that initiated the request.
-        tab: usize,
+        /// The stable tab id (see `Tab::id`) that originated the request.
+        /// The handler resolves this back to a current tab index, or
+        /// drops the update if the tab was closed.
+        tab_id: u64,
         /// Fetched table schemas, in the same order as the sidebar listing.
         tables: Vec<TableSchema>,
     },
 
     /// Response to [`MetaRequest::RefreshSchemas`].
     SchemasRefreshed {
+        /// The session id that originated the refresh. The handler drops
+        /// the update if the active session no longer matches.
+        session_id: Uuid,
         /// Updated schema listing.
         schemas: Vec<SchemaListing>,
     },
@@ -79,7 +94,7 @@ pub fn spawn_meta_request(
 ) {
     tokio::spawn(async move {
         let update = match request {
-            MetaRequest::DumpSchemaAll { tab } => {
+            MetaRequest::DumpSchemaAll { tab_id } => {
                 let Some(pool) = pool else {
                     let _ = tx
                         .send(MetaUpdate::MetaFailed {
@@ -89,13 +104,13 @@ pub fn spawn_meta_request(
                     return;
                 };
                 match dump_schema_all(&pool).await {
-                    Ok(tables) => MetaUpdate::DumpSchemaReady { tab, tables },
+                    Ok(tables) => MetaUpdate::DumpSchemaReady { tab_id, tables },
                     Err(e) => MetaUpdate::MetaFailed {
                         message: format!("dump-schema failed: {e}"),
                     },
                 }
             }
-            MetaRequest::RefreshSchemas => {
+            MetaRequest::RefreshSchemas { session_id } => {
                 let Some(pool) = pool else {
                     let _ = tx
                         .send(MetaUpdate::MetaFailed {
@@ -105,7 +120,7 @@ pub fn spawn_meta_request(
                     return;
                 };
                 match refresh_schemas_via_pool(&pool).await {
-                    Ok(schemas) => MetaUpdate::SchemasRefreshed { schemas },
+                    Ok(schemas) => MetaUpdate::SchemasRefreshed { session_id, schemas },
                     Err(e) => MetaUpdate::MetaFailed {
                         message: format!("refresh failed: {e}"),
                     },

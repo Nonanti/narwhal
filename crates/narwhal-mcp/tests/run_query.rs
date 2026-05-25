@@ -456,3 +456,167 @@ async fn audit_marks_explicit_writes() {
         entry.sql
     );
 }
+
+/// H1 regression: a write rejected by the read-only guard must still
+/// land in the audit journal (with a failure outcome + a
+/// `-- mcp: rejected (read_only_guard: …)` prefix) so the operator
+/// can audit blocked attempts.
+#[tokio::test]
+async fn rejected_write_lands_in_audit_journal() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+    let history_path = dir.path().join("history.jsonl");
+
+    let ctx = ctx_for(&db_path).with_journal(Arc::new(
+        Journal::open(&history_path).await.expect("open journal"),
+    ));
+
+    let response = rpc_one(
+        ctx,
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "DROP TABLE users"
+        })),
+    )
+    .await;
+    // The guard should refuse with a tool-level error.
+    assert_eq!(
+        response["result"]["isError"], true,
+        "DROP TABLE under read_only=true must be refused"
+    );
+
+    let reader = JournalReader::open(&history_path).expect("reader");
+    let entries: Vec<_> = reader
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .expect("entries");
+    assert_eq!(
+        entries.len(),
+        1,
+        "the rejected attempt must still produce one audit entry"
+    );
+    let entry = &entries[0];
+    assert!(
+        entry.sql.starts_with("-- mcp: rejected (read_only_guard"),
+        "rejection must be annotated: {}",
+        entry.sql
+    );
+    assert!(
+        entry.error.as_deref().is_some_and(|e| e.contains("rejected")),
+        "audit outcome must be a failure: {entry:?}"
+    );
+    // The DROP must NOT have run.
+    let conn = rusqlite::Connection::open(&db_path).expect("reopen db");
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+        .expect("users still present");
+    assert_eq!(n, 3, "the rejected DROP must not have executed");
+}
+
+/// H1 regression: a call to an unknown / hidden connection must also
+/// be audited (workspace ACL rejections land on this path).
+#[tokio::test]
+async fn rejected_unknown_connection_lands_in_audit_journal() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+    let history_path = dir.path().join("history.jsonl");
+
+    let ctx = ctx_for(&db_path).with_journal(Arc::new(
+        Journal::open(&history_path).await.expect("open journal"),
+    ));
+
+    let _ = rpc_one(
+        ctx,
+        call_run_query(json!({
+            "connection": "ghost",
+            "sql": "SELECT 1"
+        })),
+    )
+    .await;
+
+    let reader = JournalReader::open(&history_path).expect("reader");
+    let entries: Vec<_> = reader
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .expect("entries");
+    assert_eq!(entries.len(), 1, "unknown-connection rejection must audit");
+    let entry = &entries[0];
+    assert!(
+        entry
+            .sql
+            .starts_with("-- mcp: rejected (unknown_or_hidden_connection)"),
+        "rejection reason must be annotated: {}",
+        entry.sql
+    );
+}
+
+/// H2 regression: individual cells larger than `MAX_CELL_BYTES` are
+/// truncated in place with a `…<N bytes truncated>` suffix and the
+/// response flag `cell_truncated` is set.
+#[tokio::test]
+async fn oversized_cell_is_truncated_with_marker() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+    let conn = rusqlite::Connection::open(&db_path).expect("open");
+    // 100 KiB string — well above the 64 KiB per-cell cap.
+    let blob = "x".repeat(100 * 1024);
+    conn.execute(
+        "CREATE TABLE blobs(id INTEGER PRIMARY KEY, payload TEXT)",
+        [],
+    )
+    .unwrap();
+    conn.execute("INSERT INTO blobs(payload) VALUES (?1)", [blob])
+        .unwrap();
+    drop(conn);
+
+    let response = rpc_one(
+        ctx_for(&db_path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT payload FROM blobs"
+        })),
+    )
+    .await;
+    assert_ne!(response["result"]["isError"], true);
+    let body = tool_body(&response);
+    assert_eq!(
+        body["cell_truncated"], true,
+        "cell_truncated flag must be set"
+    );
+    let cell = body["rows"][0][0]
+        .as_str()
+        .expect("payload returned as string");
+    assert!(
+        cell.contains("bytes truncated>"),
+        "cell must carry the truncation marker: {}",
+        &cell[cell.len().saturating_sub(80)..]
+    );
+    assert!(
+        cell.len() < 100 * 1024,
+        "cell must actually be smaller than the original blob (was {} bytes)",
+        cell.len()
+    );
+}
+
+/// H2 regression: small responses must not be flagged as truncated.
+#[tokio::test]
+async fn small_response_is_not_flagged_as_truncated() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+
+    let response = rpc_one(
+        ctx_for(&db_path),
+        call_run_query(json!({
+            "connection": "demo",
+            "sql": "SELECT 1"
+        })),
+    )
+    .await;
+    let body = tool_body(&response);
+    assert_eq!(body["cell_truncated"], false);
+    assert_eq!(body["truncated"], false);
+}
