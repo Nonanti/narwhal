@@ -111,6 +111,21 @@ impl ConnectionWizard {
         w
     }
 
+    /// Populate the password field with a secret resolved out-of-band
+    /// (e.g. by an async keyring lookup after the wizard was opened).
+    /// Used by `start_wizard_edit` so the field is filled in after
+    /// the background credential fetch completes without making the
+    /// initial wizard open block on the keyring round-trip.
+    pub fn set_password(&mut self, secret: SecretString) {
+        if let Some(field) = self
+            .fields
+            .iter_mut()
+            .find(|f| f.kind == WizardFieldKind::Password)
+        {
+            field.value = WizardFieldValue::Secret(secret);
+        }
+    }
+
     pub fn driver(&self) -> &'static str {
         DRIVERS[self.driver_index]
     }

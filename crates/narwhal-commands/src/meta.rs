@@ -16,7 +16,7 @@ use narwhal_config::CredentialStore;
 use narwhal_core::{ConnectionConfig, DatabaseDriver, TableSchema};
 use narwhal_domain::SchemaListing;
 use narwhal_history::HistoryEntry;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 use crate::session::{Session, SessionOpenOptions};
@@ -178,6 +178,37 @@ pub enum MetaUpdate {
         label: String,
         /// `Ok(driver_name)` on success, `Err(message)` on failure.
         result: Result<String, String>,
+    },
+
+    /// Bug-fix: a keyring lookup initiated by `start_wizard_edit`
+    /// has completed. The UI handler injects the secret into the
+    /// currently-open wizard, *but only if* the wizard is still
+    /// open against the same `connection_id` — if the user moved
+    /// on (closed the wizard, started editing a different
+    /// connection, opened a fresh "new" wizard) the reply is
+    /// silently dropped. The secret is wrapped in `SecretString` so
+    /// it stays zeroized on drop even when sitting in this enum.
+    CredentialReady {
+        /// The connection whose password was being fetched.
+        connection_id: Uuid,
+        /// `Some(secret)` when the keyring had a stored secret,
+        /// `None` when the keyring lookup succeeded but the slot
+        /// was empty (no error — user has never saved one).
+        password: Option<SecretString>,
+    },
+
+    /// Bug-fix: outcome of an async keyring delete initiated by
+    /// `:forget <name>`. The UI handler shows a real success /
+    /// failure status instead of the previous "(best-effort)"
+    /// jargon.
+    ForgetCompleted {
+        /// Connection name echoed back for the status line.
+        name: String,
+        /// `Ok(())` on a successful delete, `Err(message)` when the
+        /// keyring rejected the operation. "Slot not found" is a
+        /// success — the user already had nothing stored — so the
+        /// worker normalises that case to `Ok`.
+        result: Result<(), String>,
     },
 
     /// Sprint 11 (Opus M1): sidebar `inject_ddl` result. The handler
