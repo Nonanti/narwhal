@@ -75,7 +75,7 @@ impl AppCore {
     fn dml_supported(&mut self) -> bool {
         match self.dml_block_reason() {
             Some(reason) => {
-                self.status.message = reason;
+                self.ui.status.message = reason;
                 false
             }
             None => true,
@@ -87,7 +87,7 @@ impl AppCore {
     /// the active result is not editable (no `RowSource`, no PK,
     /// nothing selected, ...) and leaves a status hint on the bar.
     fn snapshot_focused_row(&mut self) -> Option<FocusedRowSnapshot> {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let (columns, rows, source) = if let ResultState::Rows {
             columns,
             rows,
@@ -97,11 +97,11 @@ impl AppCore {
         {
             (columns.clone(), rows.clone(), source.clone())
         } else {
-            self.status.message = "no editable row here".into();
+            self.ui.status.message = "no editable row here".into();
             return None;
         };
         if source.columns.iter().all(|c| !c.primary_key) {
-            self.status.message = format!(
+            self.ui.status.message = format!(
                 "{}: no primary key — deletes and edits are disabled",
                 source.table
             );
@@ -132,7 +132,7 @@ impl AppCore {
     /// focused row, falling back to `0` when `visible_indices` is
     /// empty (no render has populated it yet).
     fn row_index_for_focus(&self) -> usize {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let Some(vis_selected) = tab.results.active().selected() else {
             return 0;
         };
@@ -152,28 +152,28 @@ impl AppCore {
         if !self.dml_supported() {
             return;
         }
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let source = if let ResultState::Rows {
             source: Some(s), ..
         } = tab.results.active_state()
         {
             s.clone()
         } else {
-            self.status.message = "open a table preview before appending rows".into();
+            self.ui.status.message = "open a table preview before appending rows".into();
             return;
         };
         let target = TableId::new(source.schema.clone(), source.table.clone());
-        self.tabs[self.active_tab]
+        self.ui.tabs[self.ui.active_tab]
             .pending
             .push(PendingMutation::Insert {
                 target: target.clone(),
                 columns: source.columns.clone(),
                 values: BTreeMap::new(),
             });
-        self.status.message = format!(
+        self.ui.status.message = format!(
             "queued INSERT on {} · edit then Ctrl-S to commit ({} pending)",
             target.display(),
-            self.tabs[self.active_tab].pending.len(),
+            self.ui.tabs[self.ui.active_tab].pending.len(),
         );
     }
 
@@ -198,15 +198,15 @@ impl AppCore {
                 }
             }
         }
-        let count_before = self.tabs[self.active_tab].pending.len();
-        self.tabs[self.active_tab]
+        let count_before = self.ui.tabs[self.ui.active_tab].pending.len();
+        self.ui.tabs[self.ui.active_tab]
             .pending
             .push(PendingMutation::Insert {
                 target: target.clone(),
                 columns,
                 values,
             });
-        self.status.message = format!(
+        self.ui.status.message = format!(
             "duplicated row on {} · {} pending",
             target.display(),
             count_before + 1,
@@ -223,14 +223,14 @@ impl AppCore {
             return;
         };
         if pk_values.values().any(Value::is_null) {
-            self.status.message = format!(
+            self.ui.status.message = format!(
                 "{}: PK column is NULL on this row — cannot DELETE safely",
                 target.display()
             );
             return;
         }
-        let count_before = self.tabs[self.active_tab].pending.len();
-        self.tabs[self.active_tab]
+        let count_before = self.ui.tabs[self.ui.active_tab].pending.len();
+        self.ui.tabs[self.ui.active_tab]
             .pending
             .push(PendingMutation::Delete {
                 target: target.clone(),
@@ -239,7 +239,7 @@ impl AppCore {
                 snapshot: row,
                 column_order,
             });
-        self.status.message = format!(
+        self.ui.status.message = format!(
             "queued DELETE on {} · {} pending",
             target.display(),
             count_before + 1,
@@ -256,11 +256,11 @@ impl AppCore {
         if !self.dml_supported() {
             // Drop the in-flight edit so the modal closes — leaving
             // it open would suggest the change will land.
-            self.tabs[self.active_tab].editing = None;
-            self.tabs[self.active_tab].results.active_mut().edit = None;
+            self.ui.tabs[self.ui.active_tab].editing = None;
+            self.ui.tabs[self.ui.active_tab].results.active_mut().edit = None;
             return;
         }
-        let Some(edit) = self.tabs[self.active_tab].editing.clone() else {
+        let Some(edit) = self.ui.tabs[self.ui.active_tab].editing.clone() else {
             return;
         };
         let (columns, rows, source) = if let ResultState::Rows {
@@ -268,7 +268,7 @@ impl AppCore {
             rows,
             source: Some(source),
             ..
-        } = self.tabs[self.active_tab].results.active_state()
+        } = self.ui.tabs[self.ui.active_tab].results.active_state()
         {
             (columns.clone(), rows.clone(), source.clone())
         } else {
@@ -315,7 +315,7 @@ impl AppCore {
         }
         let old_value = row.0.get(edit.column_index).cloned().unwrap_or(Value::Null);
         let target = TableId::new(source.schema.clone(), source.table.clone());
-        self.tabs[self.active_tab]
+        self.ui.tabs[self.ui.active_tab]
             .pending
             .push(PendingMutation::Update {
                 target: target.clone(),
@@ -329,7 +329,7 @@ impl AppCore {
         // change. The user still sees a `[N pending]` badge until they
         // commit.
         if let ResultState::Rows { rows, .. } =
-            self.tabs[self.active_tab].results.active_state_mut()
+            self.ui.tabs[self.ui.active_tab].results.active_state_mut()
         {
             if let Some(row_mut) = rows.get_mut(edit.row_index) {
                 if let Some(cell) = row_mut.0.get_mut(edit.column_index) {
@@ -337,22 +337,22 @@ impl AppCore {
                 }
             }
         }
-        self.tabs[self.active_tab].editing = None;
-        self.tabs[self.active_tab].results.active_mut().edit = None;
-        let total = self.tabs[self.active_tab].pending.len();
-        self.status.message = format!("queued UPDATE on {} · {total} pending", target.display());
+        self.ui.tabs[self.ui.active_tab].editing = None;
+        self.ui.tabs[self.ui.active_tab].results.active_mut().edit = None;
+        let total = self.ui.tabs[self.ui.active_tab].pending.len();
+        self.ui.status.message = format!("queued UPDATE on {} · {total} pending", target.display());
     }
 
     /// `Ctrl-X` — throw away every staged mutation.
     pub(super) fn discard_pending(&mut self) {
-        let n = self.tabs[self.active_tab].pending.len();
+        let n = self.ui.tabs[self.ui.active_tab].pending.len();
         if n == 0 {
-            self.status.message = "nothing pending to discard".into();
+            self.ui.status.message = "nothing pending to discard".into();
             return;
         }
-        self.tabs[self.active_tab].pending.clear();
-        self.tabs[self.active_tab].pending_preview = None;
-        self.status.message = format!("discarded {n} pending mutation(s)");
+        self.ui.tabs[self.ui.active_tab].pending.clear();
+        self.ui.tabs[self.ui.active_tab].pending_preview = None;
+        self.ui.status.message = format!("discarded {n} pending mutation(s)");
     }
 
     /// Modal handler for the pending preview overlay. Owns scroll
@@ -362,12 +362,12 @@ impl AppCore {
     /// the user does not lose their muscle memory; both close the
     /// modal as a side effect of clearing the queue.
     pub(super) fn handle_pending_preview_key(&mut self, key: KeyEvent) {
-        let total = self.tabs[self.active_tab].pending.len() as u16;
+        let total = self.ui.tabs[self.ui.active_tab].pending.len() as u16;
         let max_scroll = total.saturating_sub(1);
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
-                self.tabs[self.active_tab].pending_preview = None;
-                self.status.message = "preview closed".into();
+                self.ui.tabs[self.ui.active_tab].pending_preview = None;
+                self.ui.status.message = "preview closed".into();
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_pending_preview();
@@ -379,32 +379,32 @@ impl AppCore {
                 self.discard_pending();
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = state.scroll.saturating_add(1).min(max_scroll);
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = state.scroll.saturating_sub(1);
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = state.scroll.saturating_add(10).min(max_scroll);
                 }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = state.scroll.saturating_sub(10);
                 }
             }
             KeyCode::Char('g') => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = 0;
                 }
             }
             KeyCode::Char('G') => {
-                if let Some(state) = self.tabs[self.active_tab].pending_preview.as_mut() {
+                if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
                     state.scroll = max_scroll;
                 }
             }
@@ -414,18 +414,18 @@ impl AppCore {
 
     /// `Ctrl-P` — toggle the pending preview modal.
     pub(super) fn toggle_pending_preview(&mut self) {
-        if self.tabs[self.active_tab].pending_preview.is_some() {
-            self.tabs[self.active_tab].pending_preview = None;
-            self.status.message = "preview closed".into();
+        if self.ui.tabs[self.ui.active_tab].pending_preview.is_some() {
+            self.ui.tabs[self.ui.active_tab].pending_preview = None;
+            self.ui.status.message = "preview closed".into();
             return;
         }
-        if self.tabs[self.active_tab].pending.is_empty() {
-            self.status.message = "nothing pending to preview".into();
+        if self.ui.tabs[self.ui.active_tab].pending.is_empty() {
+            self.ui.status.message = "nothing pending to preview".into();
             return;
         }
-        self.tabs[self.active_tab].pending_preview = Some(PendingPreviewState::default());
-        let n = self.tabs[self.active_tab].pending.len();
-        self.status.message =
+        self.ui.tabs[self.ui.active_tab].pending_preview = Some(PendingPreviewState::default());
+        let n = self.ui.tabs[self.ui.active_tab].pending.len();
+        self.ui.status.message =
             format!("preview: {n} pending · Ctrl-S commit · Ctrl-X discard · Esc close");
     }
 
@@ -434,22 +434,22 @@ impl AppCore {
     /// and the queue is left intact so the user can inspect and fix.
     pub(super) fn commit_pending(&mut self) {
         let queue: PendingChanges = {
-            let tab = &mut self.tabs[self.active_tab];
+            let tab = &mut self.ui.tabs[self.ui.active_tab];
             if tab.pending.is_empty() {
-                self.status.message = "nothing pending to commit".into();
+                self.ui.status.message = "nothing pending to commit".into();
                 return;
             }
             tab.pending.clone()
         };
         let Some(session) = self.session.active.as_ref() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let dialect = session.dialect();
         let compiled: Vec<CompiledMutation> = match queue.compile_all(dialect) {
             Ok(v) => v,
             Err(e) => {
-                self.status.message = format!("commit blocked: {e}");
+                self.ui.status.message = format!("commit blocked: {e}");
                 return;
             }
         };
@@ -485,9 +485,9 @@ impl AppCore {
         match outcome {
             Ok(rows_affected) => {
                 let n = compiled.len();
-                self.tabs[self.active_tab].pending.clear();
-                self.tabs[self.active_tab].pending_preview = None;
-                self.status.message =
+                self.ui.tabs[self.ui.active_tab].pending.clear();
+                self.ui.tabs[self.ui.active_tab].pending_preview = None;
+                self.ui.status.message =
                     format!("committed {n} mutation(s) · {rows_affected} row(s) affected");
                 // Re-run the current preview so the grid shows the
                 // server's authoritative view (auto-increment PKs,
@@ -495,7 +495,7 @@ impl AppCore {
                 self.refresh_current_preview();
             }
             Err(e) => {
-                self.status.message = format!("commit failed: {e} — queue preserved");
+                self.ui.status.message = format!("commit failed: {e} — queue preserved");
             }
         }
     }
@@ -567,7 +567,7 @@ impl AppCore {
     /// any. Used after a successful commit to repaint the grid.
     fn refresh_current_preview(&mut self) {
         let target = {
-            let tab = &self.tabs[self.active_tab];
+            let tab = &self.ui.tabs[self.ui.active_tab];
             match tab.results.active_state() {
                 ResultState::Rows {
                     source: Some(src), ..

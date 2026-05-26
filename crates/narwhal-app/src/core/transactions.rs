@@ -40,15 +40,15 @@ pub(super) const fn isolation_label(level: IsolationLevel) -> &'static str {
 impl AppCore {
     pub(super) fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
         if self.process.running {
-            self.status.message = "a query is already running".into();
+            self.ui.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.active.as_mut() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         if session.transaction.is_some() {
-            self.status.message = "a transaction is already open".into();
+            self.ui.status.message = "a transaction is already open".into();
             return;
         }
         let iso = isolation.map(map_isolation);
@@ -93,14 +93,14 @@ impl AppCore {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .in_transaction = true;
-                self.status.transaction = iso.map(|level| isolation_label(level).to_owned());
-                self.status.message = match iso {
+                self.ui.status.transaction = iso.map(|level| isolation_label(level).to_owned());
+                self.ui.status.message = match iso {
                     Some(level) => format!("transaction started ({})", isolation_label(level)),
                     None => "transaction started".into(),
                 };
             }
             Err(error) => {
-                self.status.message = format!("begin failed: {error}");
+                self.ui.status.message = format!("begin failed: {error}");
             }
         }
     }
@@ -118,11 +118,11 @@ impl AppCore {
     /// returned to the pool.
     pub(super) fn end_transaction(&mut self, commit: bool) {
         if self.process.running {
-            self.status.message = "a query is already running".into();
+            self.ui.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.active.as_mut() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         // Peek at the Arc without taking it: if another holder is still
@@ -132,11 +132,11 @@ impl AppCore {
         // `take()`'d unconditionally and emitted "connection still in
         // use", which silently de-synced the session (Round 2 fix).
         let Some(txn) = session.transaction.as_ref() else {
-            self.status.message = "no open transaction".into();
+            self.ui.status.message = "no open transaction".into();
             return;
         };
         if Arc::strong_count(&txn.conn) > 1 {
-            self.status.message = if commit {
+            self.ui.status.message = if commit {
                 "commit failed: transaction connection still in use".into()
             } else {
                 "rollback failed: transaction connection still in use".into()
@@ -173,17 +173,17 @@ impl AppCore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .in_transaction = false;
-        self.status.transaction = None;
+        self.ui.status.transaction = None;
         match outcome {
             Ok(()) => {
-                self.status.message = if commit {
+                self.ui.status.message = if commit {
                     "transaction committed".into()
                 } else {
                     "transaction rolled back".into()
                 };
             }
             Err(error) => {
-                self.status.message = if commit {
+                self.ui.status.message = if commit {
                     format!("commit failed: {error}")
                 } else {
                     format!("rollback failed: {error}")
@@ -263,15 +263,15 @@ impl AppCore {
         ErrF: FnOnce(&str, &narwhal_core::Error) -> String,
     {
         if self.process.running {
-            self.status.message = "a query is already running".into();
+            self.ui.status.message = "a query is already running".into();
             return;
         }
         let Some(session) = self.session.active.as_mut() else {
-            self.status.message = "no active connection".into();
+            self.ui.status.message = "no active connection".into();
             return;
         };
         let Some(txn) = session.transaction.as_ref() else {
-            self.status.message = "no open transaction".into();
+            self.ui.status.message = "no open transaction".into();
             return;
         };
         let conn_arc = txn.conn.clone();
@@ -293,10 +293,10 @@ impl AppCore {
         match result {
             Ok(()) => {
                 on_success(session, name);
-                self.status.message = ok_msg(name);
+                self.ui.status.message = ok_msg(name);
             }
             Err(error) => {
-                self.status.message = err_msg(name, &error);
+                self.ui.status.message = err_msg(name, &error);
             }
         }
     }

@@ -8,10 +8,12 @@ use crate::core::{AppCore, CompletionState};
 
 impl AppCore {
     pub(crate) fn trigger_completion(&mut self) {
-        let prefix = self.tabs[self.active_tab].editor.current_word_prefix();
+        let prefix = self.ui.tabs[self.ui.active_tab]
+            .editor
+            .current_word_prefix();
         if prefix.is_empty() {
             // Empty prefix: behave like a plain insert (4 spaces).
-            self.tabs[self.active_tab].editor.insert_str("    ");
+            self.ui.tabs[self.ui.active_tab].editor.insert_str("    ");
             return;
         }
         let schemas = self
@@ -20,30 +22,30 @@ impl AppCore {
             .as_ref()
             .map_or(&[][..], |s| s.schemas.as_slice());
         let known_schemas: Vec<String> = schemas.iter().map(|(s, _)| s.name.clone()).collect();
-        let buffer_text = self.tabs[self.active_tab].editor.entire_text();
-        let offset = self.tabs[self.active_tab].editor.cursor_byte_offset();
+        let buffer_text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
+        let offset = self.ui.tabs[self.ui.active_tab].editor.cursor_byte_offset();
         let context = detect_context_with_schemas(&buffer_text, offset, &known_schemas);
         let columns = self.column_cache();
         let items = gather_completions(&prefix, schemas, &context, &columns, 50);
         if items.is_empty() {
-            self.status.message = format!("no completions for '{prefix}'");
+            self.ui.status.message = format!("no completions for '{prefix}'");
             return;
         }
         if items.len() == 1 {
             // Exactly one match: insert it without showing the popup.
             let only = items[0].text.clone();
-            self.tabs[self.active_tab]
+            self.ui.tabs[self.ui.active_tab]
                 .editor
                 .replace_current_word_with(&only);
-            self.status.message = format!("completed: {only}");
+            self.ui.status.message = format!("completed: {only}");
             return;
         }
-        self.tabs[self.active_tab].completion = Some(CompletionState {
+        self.ui.tabs[self.ui.active_tab].completion = Some(CompletionState {
             items,
             selected: 0,
             prefix,
         });
-        self.status.message = "completion: ↑↓ cycles · Tab/Enter accepts · Esc cancels".into();
+        self.ui.status.message = "completion: ↑↓ cycles · Tab/Enter accepts · Esc cancels".into();
     }
 
     /// Returns `true` when the key was consumed by the completion popup.
@@ -57,22 +59,22 @@ impl AppCore {
     /// - Esc: dismiss the popup; the editor stays in insert mode and
     ///   the originally typed prefix is preserved
     pub(crate) fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
-        let Some(state) = self.tabs[self.active_tab].completion.as_mut() else {
+        let Some(state) = self.ui.tabs[self.ui.active_tab].completion.as_mut() else {
             return false;
         };
         match key.code {
             CtKey::Esc => {
-                self.tabs[self.active_tab].completion = None;
-                self.status.message = "completion cancelled".into();
+                self.ui.tabs[self.ui.active_tab].completion = None;
+                self.ui.status.message = "completion cancelled".into();
                 true
             }
             CtKey::Enter | CtKey::Tab => {
                 let choice = state.items[state.selected].text.clone();
-                self.tabs[self.active_tab]
+                self.ui.tabs[self.ui.active_tab]
                     .editor
                     .replace_current_word_with(&choice);
-                self.tabs[self.active_tab].completion = None;
-                self.status.message = format!("completed: {choice}");
+                self.ui.tabs[self.ui.active_tab].completion = None;
+                self.ui.status.message = format!("completed: {choice}");
                 true
             }
             CtKey::BackTab | CtKey::Up => {
@@ -87,14 +89,14 @@ impl AppCore {
             // Any other key dismisses the popup and falls through to the
             // editor so the keystroke takes effect.
             _ => {
-                self.tabs[self.active_tab].completion = None;
+                self.ui.tabs[self.ui.active_tab].completion = None;
                 false
             }
         }
     }
 
     pub(crate) fn complete_prompt(&mut self) {
-        let buf = self.vim.command_buffer().to_owned();
+        let buf = self.ui.vim.command_buffer().to_owned();
         let parts: Vec<&str> = buf.split_whitespace().collect();
         let head = parts.first().copied().unwrap_or("");
 
@@ -151,18 +153,18 @@ impl AppCore {
 
         match matches.as_slice() {
             [] => {
-                self.status.message = format!("no completions for {prefix:?}");
+                self.ui.status.message = format!("no completions for {prefix:?}");
             }
             [only] => {
-                self.vim.replace_command_token(only);
-                self.status.message = format!(":{}", self.vim.command_buffer());
+                self.ui.vim.replace_command_token(only);
+                self.ui.status.message = format!(":{}", self.ui.vim.command_buffer());
             }
             many => {
                 let lcp = longest_common_prefix(many);
                 if lcp.len() > prefix.len() {
-                    self.vim.replace_command_token(&lcp);
+                    self.ui.vim.replace_command_token(&lcp);
                 }
-                self.status.message = many.join(" ");
+                self.ui.status.message = many.join(" ");
             }
         }
     }

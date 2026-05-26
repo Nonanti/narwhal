@@ -5,12 +5,11 @@ use std::sync::Arc;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_history::Journal;
 use narwhal_plugin::PluginRegistry;
-use narwhal_tui::{LayoutRegions, Pane, Theme};
-use narwhal_vim::Vim;
+use narwhal_tui::Theme;
 use tokio::sync::{mpsc, Mutex};
 
 use super::plugin_executor::PluginConnectionState;
-use super::{AppCore, SidebarItem, StatusBar, Tab};
+use super::{AppCore, SidebarItem};
 use crate::clipboard::{Clipboard, InMemoryClipboard};
 use crate::meta::MetaUpdate;
 use crate::registry::DriverRegistry;
@@ -115,28 +114,14 @@ impl AppCore {
             // session, recency cache, history journal, snippet
             // store, audit gate, and pending-open ledger.
             session: super::SessionState::new(connections, history),
-            tabs: vec![Tab::new(1, "untitled-1")],
-            active_tab: 0,
-            next_tab_id: 2,
-            vim: Vim::new(),
-            theme: Theme::default(),
-            focus: Pane::Editor,
-            sidebar_items: Vec::new(),
-            sidebar_index: 0,
-            sidebar_scroll: 0,
-            status: StatusBar {
-                message: "ready".into(),
-                ..Default::default()
-            },
+            // UiState::new() = one untitled tab, editor focused,
+            // empty sidebar, default theme, status "ready".
+            ui: super::UiState::new(),
             // ProcessState bundles every lifecycle / async-bridge
             // field. Receivers stay outside it (see mod.rs comment).
             process: super::ProcessState::new(run_tx, meta_tx, Arc::new(Mutex::new(None))),
             run_rx,
             meta_rx,
-            pending_result_leader: None,
-            pending_result_entries_states: Vec::new(),
-            pending_result_entries_views: Vec::new(),
-            last_layout: LayoutRegions::default(),
             keymap: crate::keymap::Keymap::builtin(),
             keymap_warnings: Vec::new(),
         }
@@ -195,7 +180,7 @@ impl AppCore {
     /// catches malformed `config.toml` files at start-up so we never
     /// fall back to defaults blindly.
     pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
-        self.theme = match settings.theme {
+        self.ui.theme = match settings.theme {
             narwhal_config::Theme::Dark => Theme::DARK,
             narwhal_config::Theme::Light => Theme::LIGHT,
             narwhal_config::Theme::HighContrast => Theme::HIGH_CONTRAST,
@@ -267,9 +252,9 @@ impl AppCore {
                 }
             }
         }
-        self.sidebar_items = items;
-        if self.sidebar_index >= self.sidebar_items.len() {
-            self.sidebar_index = self.sidebar_items.len().saturating_sub(1);
+        self.ui.sidebar_items = items;
+        if self.ui.sidebar_index >= self.ui.sidebar_items.len() {
+            self.ui.sidebar_index = self.ui.sidebar_items.len().saturating_sub(1);
         }
     }
 }

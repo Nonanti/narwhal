@@ -13,12 +13,12 @@ use crate::snippets::SnippetStore;
 
 impl AppCore {
     pub fn status_message(&self) -> &str {
-        &self.status.message
+        &self.ui.status.message
     }
 
     /// Read-only accessor for the full [`StatusBar`] struct.
     pub const fn status_bar(&self) -> &StatusBar {
-        &self.status
+        &self.ui.status
     }
 
     pub fn result(&self) -> &ResultState {
@@ -31,7 +31,7 @@ impl AppCore {
     /// specific status-bar message.
     #[doc(hidden)]
     pub fn editor_completion_is_open(&self) -> bool {
-        self.tabs[self.active_tab].completion.is_some()
+        self.ui.tabs[self.ui.active_tab].completion.is_some()
     }
 
     /// Test helper: borrow the JSON viewer modal state, if open. Lives
@@ -39,7 +39,7 @@ impl AppCore {
     /// don't have to plumb through the full `Tab` graph.
     #[doc(hidden)]
     pub fn json_viewer_for_test(&self) -> Option<&JsonViewerState> {
-        self.tabs[self.active_tab].json_viewer.as_ref()
+        self.ui.tabs[self.ui.active_tab].json_viewer.as_ref()
     }
 
     pub fn editor(&self) -> &EditorBuffer {
@@ -47,7 +47,7 @@ impl AppCore {
     }
 
     pub fn tabs(&self) -> &[Tab] {
-        &self.tabs
+        &self.ui.tabs
     }
 
     /// L36 #4 v1: read-only access to the live keymap. Used by tests
@@ -69,31 +69,31 @@ impl AppCore {
     /// staged-mutation queue) before exercising a public path.
     #[doc(hidden)]
     pub fn tabs_mut(&mut self) -> &mut Vec<Tab> {
-        &mut self.tabs
+        &mut self.ui.tabs
     }
 
     pub const fn active_tab(&self) -> usize {
-        self.active_tab
+        self.ui.active_tab
     }
 
     /// Borrow the active tab.
     ///
     /// Indexing is sound because two invariants are upheld at every
     /// `&mut self` entry point:
-    /// - `self.tabs` always contains at least one element. `close_tab`
+    /// - `self.ui.tabs` always contains at least one element. `close_tab`
     ///   early-returns when `tabs.len() == 1`.
-    /// - `self.active_tab < self.tabs.len()`. `close_tab` clamps after
+    /// - `self.ui.active_tab < self.ui.tabs.len()`. `close_tab` clamps after
     ///   removal; `cycle_tab` uses `rem_euclid(len)`.
     ///
     /// See `active_tab_invariant_holds_after_close` in the test suite.
     fn tab(&self) -> &Tab {
-        &self.tabs[self.active_tab]
+        &self.ui.tabs[self.ui.active_tab]
     }
 
     /// Mutable counterpart to [`Self::tab`]. Same invariants apply.
     #[allow(dead_code)]
     fn tab_mut(&mut self) -> &mut Tab {
-        &mut self.tabs[self.active_tab]
+        &mut self.ui.tabs[self.ui.active_tab]
     }
 
     pub const fn session(&self) -> Option<&Session> {
@@ -101,24 +101,24 @@ impl AppCore {
     }
 
     pub const fn focus(&self) -> Pane {
-        self.focus
+        self.ui.focus
     }
 
     /// Tab index that owns the in-flight run.  Falls back to
     /// `active_tab` when no run is in progress (defensive default).
     pub(super) fn run_tab_index(&self) -> usize {
-        self.process.run_tab.unwrap_or(self.active_tab)
+        self.process.run_tab.unwrap_or(self.ui.active_tab)
     }
 
     /// Read-only accessor for the most recent layout regions computed
     /// during render. Used by tests to determine where to click.
     #[doc(hidden)]
     pub const fn last_layout(&self) -> &narwhal_tui::LayoutRegions {
-        &self.last_layout
+        &self.ui.last_layout
     }
 
     pub const fn mode(&self) -> Mode {
-        self.vim.mode()
+        self.ui.vim.mode()
     }
 
     /// Read-only accessor for the connection wizard. Tests use this to
@@ -141,14 +141,14 @@ impl AppCore {
     /// ordering without a real terminal render.
     #[doc(hidden)]
     pub fn sidebar_items_for_test(&self) -> &[SidebarItem] {
-        &self.sidebar_items
+        &self.ui.sidebar_items
     }
 
     /// Read-only accessor for the vim command buffer. Used by tests to
     /// assert prompt Tab-completion results.
     #[doc(hidden)]
     pub fn command_buffer(&self) -> &str {
-        self.vim.command_buffer()
+        self.ui.vim.command_buffer()
     }
 
     pub const fn is_running(&self) -> bool {
@@ -186,7 +186,7 @@ impl AppCore {
     /// Whether the row detail modal is currently open on the active tab.
     #[doc(hidden)]
     pub fn row_detail_is_open(&self) -> bool {
-        self.tabs[self.active_tab].row_detail.is_some()
+        self.ui.tabs[self.ui.active_tab].row_detail.is_some()
     }
 
     /// Whether the snippets modal is currently open.
@@ -210,7 +210,7 @@ impl AppCore {
     /// Read-only accessor for the row detail modal state (for tests).
     #[doc(hidden)]
     pub fn row_detail_state(&self) -> Option<&RowDetailState> {
-        self.tabs[self.active_tab].row_detail.as_ref()
+        self.ui.tabs[self.ui.active_tab].row_detail.as_ref()
     }
 
     // open_help and other help/history/snippets modal handlers moved to

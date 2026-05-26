@@ -15,51 +15,64 @@ impl AppCore {
     pub(super) fn handle_results_key(&mut self, key: KeyEvent) {
         // Row detail modal: sits at the same layer as the cell popup.
         // When open, it intercepts navigation and dismiss keys.
-        if self.tabs[self.active_tab].row_detail.is_some() {
+        if self.ui.tabs[self.ui.active_tab].row_detail.is_some() {
             self.handle_row_detail_key(key);
             return;
         }
-        if self.tabs[self.active_tab].editing.is_some() {
+        if self.ui.tabs[self.ui.active_tab].editing.is_some() {
             self.handle_cell_edit_key(key);
             return;
         }
-        if self.tabs[self.active_tab].results.active().popup.is_some() {
+        if self.ui.tabs[self.ui.active_tab]
+            .results
+            .active()
+            .popup
+            .is_some()
+        {
             if matches!(key.code, CtKey::Esc | CtKey::Char('q') | CtKey::Enter) {
-                self.tabs[self.active_tab].results.active_mut().popup = None;
+                self.ui.tabs[self.ui.active_tab].results.active_mut().popup = None;
             }
             return;
         }
         // Filter prompt editing: modal — consumes keys before any
         // other result-pane handler.
-        if self.tabs[self.active_tab]
+        if self.ui.tabs[self.ui.active_tab]
             .results
             .active()
             .filter_prompt_open
         {
             match key.code {
                 CtKey::Esc => {
-                    let rv = self.tabs[self.active_tab].results.active_mut();
+                    let rv = self.ui.tabs[self.ui.active_tab].results.active_mut();
                     rv.filter.clear();
                     rv.filter_prompt_open = false;
-                    self.status.message = "filter cleared".into();
+                    self.ui.status.message = "filter cleared".into();
                 }
                 CtKey::Enter => {
-                    let filter_text = self.tabs[self.active_tab].results.active().filter.clone();
-                    self.tabs[self.active_tab]
+                    let filter_text = self.ui.tabs[self.ui.active_tab]
+                        .results
+                        .active()
+                        .filter
+                        .clone();
+                    self.ui.tabs[self.ui.active_tab]
                         .results
                         .active_mut()
                         .filter_prompt_open = false;
-                    self.status.message = if filter_text.is_empty() {
+                    self.ui.status.message = if filter_text.is_empty() {
                         "filter closed".into()
                     } else {
                         format!("filter: {filter_text}")
                     };
                 }
                 CtKey::Backspace => {
-                    self.tabs[self.active_tab].results.active_mut().filter.pop();
+                    self.ui.tabs[self.ui.active_tab]
+                        .results
+                        .active_mut()
+                        .filter
+                        .pop();
                 }
                 CtKey::Char(c) => {
-                    self.tabs[self.active_tab]
+                    self.ui.tabs[self.ui.active_tab]
                         .results
                         .active_mut()
                         .filter
@@ -69,12 +82,12 @@ impl AppCore {
             }
             return;
         }
-        if let Some(search) = self.tabs[self.active_tab].search.as_mut() {
+        if let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_mut() {
             if search.editing {
                 match key.code {
                     CtKey::Esc => {
-                        self.tabs[self.active_tab].search = None;
-                        self.status.message = "search cancelled".into();
+                        self.ui.tabs[self.ui.active_tab].search = None;
+                        self.ui.status.message = "search cancelled".into();
                     }
                     CtKey::Enter => {
                         search.editing = false;
@@ -115,39 +128,46 @@ impl AppCore {
         // Recompute the visible row count up-front — several navigation
         // arms need it and computing inside each arm would force the
         // borrow checker to revalidate the `results` borrow.
-        let (visible_count, col_count) = match self.tabs[self.active_tab].results.active_state() {
-            ResultState::Rows { rows, columns, .. } => {
-                let vis = self.tabs[self.active_tab]
-                    .results
-                    .active()
-                    .visible_rows(columns, rows);
-                (vis.len(), columns.len())
-            }
-            ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
-            _ => (0, 0),
-        };
+        let (visible_count, col_count) =
+            match self.ui.tabs[self.ui.active_tab].results.active_state() {
+                ResultState::Rows { rows, columns, .. } => {
+                    let vis = self.ui.tabs[self.ui.active_tab]
+                        .results
+                        .active()
+                        .visible_rows(columns, rows);
+                    (vis.len(), columns.len())
+                }
+                ResultState::Running { rows, columns, .. } => (rows.len(), columns.len()),
+                _ => (0, 0),
+            };
 
         match action {
-            Action::ResultsMoveDown => self.tabs[self.active_tab]
+            Action::ResultsMoveDown => self.ui.tabs[self.ui.active_tab]
                 .results
                 .active_mut()
                 .move_down(visible_count),
             Action::ResultsMoveUp => {
-                self.tabs[self.active_tab].results.active_mut().move_up();
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .move_up();
             }
             Action::ResultsMoveLeft => {
-                self.tabs[self.active_tab].results.active_mut().move_left();
+                self.ui.tabs[self.ui.active_tab]
+                    .results
+                    .active_mut()
+                    .move_left();
             }
-            Action::ResultsMoveRight => self.tabs[self.active_tab]
+            Action::ResultsMoveRight => self.ui.tabs[self.ui.active_tab]
                 .results
                 .active_mut()
                 .move_right(col_count),
-            Action::ResultsFirstRow => self.tabs[self.active_tab]
+            Action::ResultsFirstRow => self.ui.tabs[self.ui.active_tab]
                 .results
                 .active_mut()
                 .select(Some(0)),
             Action::ResultsLastRow if visible_count > 0 => {
-                self.tabs[self.active_tab]
+                self.ui.tabs[self.ui.active_tab]
                     .results
                     .active_mut()
                     .select(Some(visible_count - 1));
@@ -164,10 +184,10 @@ impl AppCore {
             Action::ResultsYankCell => self.yank_cell(),
             Action::ResultsYankRow => self.yank_row(),
             Action::ResultsNextStatementLeader => {
-                self.pending_result_leader = Some(']');
+                self.ui.pending_result_leader = Some(']');
             }
             Action::ResultsPrevStatementLeader => {
-                self.pending_result_leader = Some('[');
+                self.ui.pending_result_leader = Some('[');
             }
             // ─── Row CRUD + Pending changes (L36) ────────────────────────────────
             Action::ResultsAppendRow => self.append_row(),
@@ -197,7 +217,7 @@ impl AppCore {
                 // RowDetail group. We keep the arm explicit so the
                 // exhaustive match below does not need a misleading
                 // fallthrough message.
-                self.status.message = "open JSON from the row detail modal with `Z`".into();
+                self.ui.status.message = "open JSON from the row detail modal with `Z`".into();
             }
             // `Action` is `#[non_exhaustive]` so the compiler insists on
             // a fallthrough arm. Today the variants above are exhaustive;
@@ -205,7 +225,7 @@ impl AppCore {
             // additions without breaking compilation, and to keep status
             // bar feedback honest.
             other => {
-                self.status.message =
+                self.ui.status.message =
                     format!("action '{other:?}' not yet implemented in the Results pane");
             }
         }
@@ -227,7 +247,7 @@ impl AppCore {
     pub(super) fn switch_meta_tab(&mut self, target: narwhal_tui::MetaTab) {
         // Snapshot the current table identity (if any) before borrowing.
         let (current_schema, current_table, in_table_detail) = {
-            let tab = &self.tabs[self.active_tab];
+            let tab = &self.ui.tabs[self.ui.active_tab];
             match tab.results.active_state() {
                 ResultState::TableDetail { schema, .. } => {
                     (schema.table.schema.clone(), schema.table.name.clone(), true)
@@ -236,7 +256,7 @@ impl AppCore {
                     source: Some(src), ..
                 } => (src.schema.clone(), src.table.clone(), false),
                 _ => {
-                    self.status.message = format!(
+                    self.ui.status.message = format!(
                         "tab '{}' needs a table on screen — open one from the sidebar first",
                         target.label()
                     );
@@ -252,7 +272,7 @@ impl AppCore {
                 if in_table_detail {
                     self.run_preview(&current_schema, &current_table, 0);
                 } else {
-                    self.status.message = "already on Records".into();
+                    self.ui.status.message = "already on Records".into();
                 }
             }
             other => {
@@ -260,11 +280,11 @@ impl AppCore {
                     // Cheap in-place mutation; the schema payload stays.
                     if let ResultState::TableDetail {
                         active_meta_tab, ..
-                    } = self.tabs[self.active_tab].results.active_state_mut()
+                    } = self.ui.tabs[self.ui.active_tab].results.active_state_mut()
                     {
                         *active_meta_tab = other;
                     }
-                    self.status.message = format!("meta tab → {}", other.label());
+                    self.ui.status.message = format!("meta tab → {}", other.label());
                 } else {
                     // Coming from a Rows preview: re-describe the table
                     // and land in the requested sub-view. The describe
@@ -274,11 +294,11 @@ impl AppCore {
                     self.describe_table_into_result(&current_schema, &current_table);
                     if let ResultState::TableDetail {
                         active_meta_tab, ..
-                    } = self.tabs[self.active_tab].results.active_state_mut()
+                    } = self.ui.tabs[self.ui.active_tab].results.active_state_mut()
                     {
                         *active_meta_tab = other;
                     }
-                    self.status.message = format!("meta tab → {}", other.label());
+                    self.ui.status.message = format!("meta tab → {}", other.label());
                 }
             }
         }
@@ -311,22 +331,22 @@ impl AppCore {
         // which case row 0 is the natural target anyway.
         let row_idx = self.selected_original_row().unwrap_or(0);
         let (column_name, column_type, raw) = {
-            let tab = &self.tabs[self.active_tab];
+            let tab = &self.ui.tabs[self.ui.active_tab];
             let col_idx = tab.results.active().column_index;
             let (columns, rows) = match tab.results.active_state() {
                 ResultState::Rows { columns, rows, .. }
                 | ResultState::Running { columns, rows, .. } => (columns, rows),
                 _ => {
-                    self.status.message = "no JSON cell here".into();
+                    self.ui.status.message = "no JSON cell here".into();
                     return;
                 }
             };
             let Some(column) = columns.get(col_idx) else {
-                self.status.message = "select a column first (h/l)".into();
+                self.ui.status.message = "select a column first (h/l)".into();
                 return;
             };
             let Some(row) = rows.get(row_idx) else {
-                self.status.message = "no row selected".into();
+                self.ui.status.message = "no row selected".into();
                 return;
             };
             let raw_text = match row.0.get(col_idx) {
@@ -336,19 +356,19 @@ impl AppCore {
             (column.name.clone(), column.data_type.clone(), raw_text)
         };
         if raw.is_empty() {
-            self.status.message = "cell is NULL or empty — nothing to view".into();
+            self.ui.status.message = "cell is NULL or empty — nothing to view".into();
             return;
         }
         let (pretty, parse_error) = Self::prettify_json(&raw);
         let title = format!("{column_name} ({column_type})");
-        self.tabs[self.active_tab].json_viewer = Some(JsonViewerState {
+        self.ui.tabs[self.ui.active_tab].json_viewer = Some(JsonViewerState {
             title,
             pretty,
             raw,
             scroll: 0,
             parse_error,
         });
-        self.status.message = "JSON viewer: j/k scroll · y copy · q close".into();
+        self.ui.status.message = "JSON viewer: j/k scroll · y copy · q close".into();
     }
 
     /// Open the JSON viewer from inside the row-detail modal: the
@@ -356,11 +376,11 @@ impl AppCore {
     /// `handle_row_detail_key` when the `OpenJsonViewerRow` action
     /// resolves.
     pub(super) fn open_json_viewer_from_row_detail(&mut self) {
-        let Some(state) = self.tabs[self.active_tab].row_detail.as_ref() else {
+        let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_ref() else {
             return;
         };
         let Some(column) = state.columns.get(state.selected_column) else {
-            self.status.message = "select a column first (j/k)".into();
+            self.ui.status.message = "select a column first (j/k)".into();
             return;
         };
         let raw = match state.values.get(state.selected_column) {
@@ -368,19 +388,19 @@ impl AppCore {
             Some(v) => v.render(),
         };
         if raw.is_empty() {
-            self.status.message = "cell is NULL or empty — nothing to view".into();
+            self.ui.status.message = "cell is NULL or empty — nothing to view".into();
             return;
         }
         let title = format!("{} ({})", column.name, column.data_type);
         let (pretty, parse_error) = Self::prettify_json(&raw);
-        self.tabs[self.active_tab].json_viewer = Some(JsonViewerState {
+        self.ui.tabs[self.ui.active_tab].json_viewer = Some(JsonViewerState {
             title,
             pretty,
             raw,
             scroll: 0,
             parse_error,
         });
-        self.status.message = "JSON viewer: j/k scroll · y copy · q close".into();
+        self.ui.status.message = "JSON viewer: j/k scroll · y copy · q close".into();
     }
 
     /// Modal handler for the JSON viewer. Owns its own key vocabulary;
@@ -388,16 +408,16 @@ impl AppCore {
     /// has hard-coded reflexes (`q`/`Esc` always closes, etc.) that the
     /// user cannot reasonably want to unbind.
     pub(super) fn handle_json_viewer_key(&mut self, key: KeyEvent) {
-        let active = self.active_tab;
-        let Some(state) = self.tabs[active].json_viewer.as_mut() else {
+        let active = self.ui.active_tab;
+        let Some(state) = self.ui.tabs[active].json_viewer.as_mut() else {
             return;
         };
         let total_lines = state.pretty.lines().count() as u16;
         let max_scroll = total_lines.saturating_sub(1);
         match key.code {
             CtKey::Esc | CtKey::Char('q') => {
-                self.tabs[active].json_viewer = None;
-                self.status.message = "JSON viewer closed".into();
+                self.ui.tabs[active].json_viewer = None;
+                self.ui.status.message = "JSON viewer closed".into();
             }
             CtKey::Char('j') | CtKey::Down => {
                 state.scroll = state.scroll.saturating_add(1).min(max_scroll);
@@ -418,9 +438,9 @@ impl AppCore {
                 let len = text.len();
                 match self.clipboard.set_text(&text) {
                     Ok(()) => {
-                        self.status.message = format!("yanked {len} char(s) (pretty)");
+                        self.ui.status.message = format!("yanked {len} char(s) (pretty)");
                     }
-                    Err(e) => self.status.message = format!("yank failed: {e}"),
+                    Err(e) => self.ui.status.message = format!("yank failed: {e}"),
                 }
             }
             CtKey::Char('Y') => {
@@ -428,9 +448,9 @@ impl AppCore {
                 let len = text.len();
                 match self.clipboard.set_text(&text) {
                     Ok(()) => {
-                        self.status.message = format!("yanked {len} char(s) (raw)");
+                        self.ui.status.message = format!("yanked {len} char(s) (raw)");
                     }
-                    Err(e) => self.status.message = format!("yank failed: {e}"),
+                    Err(e) => self.ui.status.message = format!("yank failed: {e}"),
                 }
             }
             _ => {}
@@ -438,20 +458,20 @@ impl AppCore {
     }
 
     fn handle_results_escape(&mut self) {
-        let had_search = self.tabs[self.active_tab].search.take().is_some();
-        let had_filter = !self.tabs[self.active_tab]
+        let had_search = self.ui.tabs[self.ui.active_tab].search.take().is_some();
+        let had_filter = !self.ui.tabs[self.ui.active_tab]
             .results
             .active()
             .filter
             .is_empty();
         if had_search {
-            self.status.message = "search cleared".into();
+            self.ui.status.message = "search cleared".into();
         }
         if had_filter {
-            let rv = self.tabs[self.active_tab].results.active_mut();
+            let rv = self.ui.tabs[self.ui.active_tab].results.active_mut();
             rv.filter.clear();
             rv.filter_prompt_open = false;
-            self.status.message = "filter cleared".into();
+            self.ui.status.message = "filter cleared".into();
         }
     }
 
@@ -459,7 +479,7 @@ impl AppCore {
     /// into the visible/rendered rows) to the original row index in
     /// the full result set. Returns `None` when there are no rows.
     fn selected_original_row(&self) -> Option<usize> {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let vis_selected = tab.results.active().selected()?;
         tab.results
             .active()
@@ -469,19 +489,19 @@ impl AppCore {
     }
 
     fn yank_cell(&mut self) {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let (rows, _columns) = match tab.results.active_state() {
             ResultState::Rows { rows, columns, .. }
             | ResultState::Running { rows, columns, .. } => (rows, columns),
             _ => {
-                self.status.message = "no cell to yank".into();
+                self.ui.status.message = "no cell to yank".into();
                 return;
             }
         };
         let row_idx = self.selected_original_row().unwrap_or(0);
         let col_idx = tab.results.active().column_index;
         let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
-            self.status.message = "no cell selected".into();
+            self.ui.status.message = "no cell selected".into();
             return;
         };
         let text = match value {
@@ -490,26 +510,26 @@ impl AppCore {
         };
         match self.clipboard.set_text(&text) {
             Ok(()) => {
-                self.status.message = format!("yanked {} char(s) to clipboard", text.len());
+                self.ui.status.message = format!("yanked {} char(s) to clipboard", text.len());
             }
             Err(error) => {
-                self.status.message = format!("yank failed: {error}");
+                self.ui.status.message = format!("yank failed: {error}");
             }
         }
     }
 
     fn yank_row(&mut self) {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         let rows = match tab.results.active_state() {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
             _ => {
-                self.status.message = "no row to yank".into();
+                self.ui.status.message = "no row to yank".into();
                 return;
             }
         };
         let row_idx = self.selected_original_row().unwrap_or(0);
         let Some(row) = rows.get(row_idx) else {
-            self.status.message = "no row selected".into();
+            self.ui.status.message = "no row selected".into();
             return;
         };
         let text = row
@@ -523,10 +543,11 @@ impl AppCore {
             .join("\t");
         match self.clipboard.set_text(&text) {
             Ok(()) => {
-                self.status.message = format!("yanked row ({} cell(s)) to clipboard", row.0.len());
+                self.ui.status.message =
+                    format!("yanked row ({} cell(s)) to clipboard", row.0.len());
             }
             Err(error) => {
-                self.status.message = format!("yank failed: {error}");
+                self.ui.status.message = format!("yank failed: {error}");
             }
         }
     }
@@ -534,7 +555,7 @@ impl AppCore {
     fn start_cell_edit(&mut self) {
         // Gather the data we need by value first, then mutate.
         let prepared = {
-            let tab = &self.tabs[self.active_tab];
+            let tab = &self.ui.tabs[self.ui.active_tab];
             let (columns, rows, source) = match tab.results.active_state() {
                 ResultState::Rows {
                     columns,
@@ -543,32 +564,32 @@ impl AppCore {
                     ..
                 } => (columns, rows, source),
                 ResultState::Rows { source: None, .. } => {
-                    self.status.message =
+                    self.ui.status.message =
                         "this result is read-only (no row source); preview a table to edit".into();
                     return;
                 }
                 _ => {
-                    self.status.message = "no editable cell here".into();
+                    self.ui.status.message = "no editable cell here".into();
                     return;
                 }
             };
             if columns.is_empty() || rows.is_empty() {
-                self.status.message = "no rows to edit".into();
+                self.ui.status.message = "no rows to edit".into();
                 return;
             }
             if !source.columns.iter().any(|c| c.primary_key) {
-                self.status.message =
+                self.ui.status.message =
                     format!("{}: no primary key, cell edits are disabled", source.table);
                 return;
             }
             let row_index = self.selected_original_row().unwrap_or(0);
             let col_index = tab.results.active().column_index;
             let Some(row) = rows.get(row_index) else {
-                self.status.message = "select a row first (j/k)".into();
+                self.ui.status.message = "select a row first (j/k)".into();
                 return;
             };
             let Some(column) = columns.get(col_index) else {
-                self.status.message = "select a column first (h/l)".into();
+                self.ui.status.message = "select a column first (h/l)".into();
                 return;
             };
             let cell = row.0.get(col_index);
@@ -588,7 +609,7 @@ impl AppCore {
             )
         };
         let (column_name, column_type, row_index, column_index, original, buffer) = prepared;
-        let tab = &mut self.tabs[self.active_tab];
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
         tab.editing = Some(CellEdit {
             column_name: column_name.clone(),
             column_type: column_type.clone(),
@@ -604,18 +625,18 @@ impl AppCore {
             buffer,
             error: None,
         });
-        self.status.message = "edit: Enter saves · Esc cancels".into();
+        self.ui.status.message = "edit: Enter saves · Esc cancels".into();
     }
 
     fn handle_cell_edit_key(&mut self, key: KeyEvent) {
-        let Some(edit) = self.tabs[self.active_tab].editing.as_mut() else {
+        let Some(edit) = self.ui.tabs[self.ui.active_tab].editing.as_mut() else {
             return;
         };
         match key.code {
             CtKey::Esc => {
-                self.tabs[self.active_tab].editing = None;
-                self.tabs[self.active_tab].results.active_mut().edit = None;
-                self.status.message = "edit cancelled".into();
+                self.ui.tabs[self.ui.active_tab].editing = None;
+                self.ui.tabs[self.ui.active_tab].results.active_mut().edit = None;
+                self.ui.status.message = "edit cancelled".into();
             }
             // L36: cell edit no longer touches the database directly.
             // The Enter key queues the change so the user can review it
@@ -635,7 +656,7 @@ impl AppCore {
     }
 
     fn sync_edit_view(&mut self) {
-        let tab = &mut self.tabs[self.active_tab];
+        let tab = &mut self.ui.tabs[self.ui.active_tab];
         if let (Some(edit), Some(view)) =
             (tab.editing.as_ref(), tab.results.active_mut().edit.as_mut())
         {
@@ -650,7 +671,7 @@ impl AppCore {
     // `narwhal_commands::pending::compile`.
 
     pub(super) fn set_edit_error(&mut self, message: String) {
-        if let Some(view) = self.tabs[self.active_tab]
+        if let Some(view) = self.ui.tabs[self.ui.active_tab]
             .results
             .active_mut()
             .edit
@@ -658,42 +679,45 @@ impl AppCore {
         {
             view.error = Some(message.clone());
         }
-        self.status.message = format!("edit failed: {message}");
+        self.ui.status.message = format!("edit failed: {message}");
     }
 
     #[allow(dead_code)]
     fn start_search(&mut self) {
         if !matches!(
-            self.tabs[self.active_tab].results.active_state(),
+            self.ui.tabs[self.ui.active_tab].results.active_state(),
             ResultState::Rows { .. } | ResultState::Running { .. }
         ) {
-            self.status.message = "no result to search".into();
+            self.ui.status.message = "no result to search".into();
             return;
         }
-        self.tabs[self.active_tab].search = Some(ResultSearch {
+        self.ui.tabs[self.ui.active_tab].search = Some(ResultSearch {
             query: String::new(),
             matches: Vec::new(),
             current: None,
             editing: true,
         });
-        self.status.message = "search: ".into();
+        self.ui.status.message = "search: ".into();
     }
 
     pub(super) fn toggle_sort(&mut self) {
         // Streaming guard.
         if self.process.running {
-            self.status.message = "sort/filter unavailable while streaming".into();
+            self.ui.status.message = "sort/filter unavailable while streaming".into();
             return;
         }
         if !matches!(
-            self.tabs[self.active_tab].results.active_state(),
+            self.ui.tabs[self.ui.active_tab].results.active_state(),
             ResultState::Rows { .. }
         ) {
-            self.status.message = "no result to sort".into();
+            self.ui.status.message = "no result to sort".into();
             return;
         }
-        let col = self.tabs[self.active_tab].results.active().column_index;
-        let view = self.tabs[self.active_tab].results.active_mut();
+        let col = self.ui.tabs[self.ui.active_tab]
+            .results
+            .active()
+            .column_index;
+        let view = self.ui.tabs[self.ui.active_tab].results.active_mut();
         let next = match view.sort {
             Some((c, SortDir::Asc)) if c == col => Some((col, SortDir::Desc)),
             Some((c, SortDir::Desc)) if c == col => None,
@@ -707,43 +731,43 @@ impl AppCore {
             // Future SortDir variants: fall back to ascending wording.
             Some((c, _)) => format!("sort: column {} (custom)", c + 1),
         };
-        self.status.message = msg;
+        self.ui.status.message = msg;
     }
 
     fn open_filter_prompt(&mut self) {
         // Streaming guard.
         if self.process.running {
-            self.status.message = "sort/filter unavailable while streaming".into();
+            self.ui.status.message = "sort/filter unavailable while streaming".into();
             return;
         }
         if !matches!(
-            self.tabs[self.active_tab].results.active_state(),
+            self.ui.tabs[self.ui.active_tab].results.active_state(),
             ResultState::Rows { .. }
         ) {
-            self.status.message = "no result to filter".into();
+            self.ui.status.message = "no result to filter".into();
             return;
         }
-        self.tabs[self.active_tab]
+        self.ui.tabs[self.ui.active_tab]
             .results
             .active_mut()
             .filter_prompt_open = true;
-        self.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
+        self.ui.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
     }
 
     fn refresh_search_matches(&mut self) {
-        let needle = match self.tabs[self.active_tab].search.as_ref() {
+        let needle = match self.ui.tabs[self.ui.active_tab].search.as_ref() {
             Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
             Some(_) => {
-                if let Some(s) = self.tabs[self.active_tab].search.as_mut() {
+                if let Some(s) = self.ui.tabs[self.ui.active_tab].search.as_mut() {
                     s.matches.clear();
                     s.current = None;
                 }
-                self.status.message = "search: ".into();
+                self.ui.status.message = "search: ".into();
                 return;
             }
             None => return,
         };
-        let matches = match self.tabs[self.active_tab].results.active_state() {
+        let matches = match self.ui.tabs[self.ui.active_tab].results.active_state() {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows
                 .iter()
                 .enumerate()
@@ -757,13 +781,13 @@ impl AppCore {
             _ => Vec::new(),
         };
         let total = matches.len();
-        let Some(search) = self.tabs[self.active_tab].search.as_mut() else {
+        let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_mut() else {
             return;
         };
         let query = search.query.clone();
         search.matches = matches;
         search.current = if total == 0 { None } else { Some(0) };
-        self.status.message = if total == 0 {
+        self.ui.status.message = if total == 0 {
             format!("search: {query} · no matches")
         } else {
             format!("search: {query} · 1/{total}")
@@ -771,7 +795,7 @@ impl AppCore {
     }
 
     fn advance_search(&mut self, delta: i32) {
-        let Some(search) = self.tabs[self.active_tab].search.as_mut() else {
+        let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_mut() else {
             return;
         };
         if search.matches.is_empty() {
@@ -783,18 +807,18 @@ impl AppCore {
         search.current = Some(next);
         let total = search.matches.len();
         let query = search.query.clone();
-        self.status.message = format!("search: {query} · {}/{}", next + 1, total);
+        self.ui.status.message = format!("search: {query} · {}/{}", next + 1, total);
         self.jump_to_current_match();
     }
 
     fn jump_to_current_match(&mut self) {
-        let Some(search) = self.tabs[self.active_tab].search.as_ref() else {
+        let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_ref() else {
             return;
         };
         let Some(idx) = search.current.and_then(|c| search.matches.get(c).copied()) else {
             return;
         };
-        self.tabs[self.active_tab]
+        self.ui.tabs[self.ui.active_tab]
             .results
             .active_mut()
             .select(Some(idx));
@@ -802,11 +826,14 @@ impl AppCore {
 
     fn open_cell_popup(&mut self) {
         let Some(row_index) = self.selected_original_row() else {
-            self.status.message = "select a row first (j/k)".into();
+            self.ui.status.message = "select a row first (j/k)".into();
             return;
         };
-        let col_index = self.tabs[self.active_tab].results.active().column_index;
-        let (columns, rows) = match self.tabs[self.active_tab].results.active_state() {
+        let col_index = self.ui.tabs[self.ui.active_tab]
+            .results
+            .active()
+            .column_index;
+        let (columns, rows) = match self.ui.tabs[self.ui.active_tab].results.active_state() {
             ResultState::Rows { rows, columns, .. } => (columns, rows),
             ResultState::Running { rows, columns, .. } => (columns, rows),
             _ => return,
@@ -820,7 +847,7 @@ impl AppCore {
         let Some(value) = row.0.get(col_index) else {
             return;
         };
-        self.tabs[self.active_tab].results.active_mut().popup = Some(CellPopup {
+        self.ui.tabs[self.ui.active_tab].results.active_mut().popup = Some(CellPopup {
             column_name: column.name.clone(),
             column_type: column.data_type.clone(),
             value_text: value.render(),
@@ -829,7 +856,7 @@ impl AppCore {
     }
 
     fn open_row_detail(&mut self) {
-        let tab = &self.tabs[self.active_tab];
+        let tab = &self.ui.tabs[self.ui.active_tab];
         // Don't open if another modal at the same layer is already open.
         if tab.row_detail.is_some() || tab.results.active().popup.is_some() || tab.editing.is_some()
         {
@@ -839,26 +866,26 @@ impl AppCore {
         // This avoids depending on `visible_indices` being populated by
         // a prior render pass.
         let Some(vis_selected) = tab.results.active().selected() else {
-            self.status.message = "no row selected".into();
+            self.ui.status.message = "no row selected".into();
             return;
         };
         let (columns, rows) = match tab.results.active_state() {
             ResultState::Rows { columns, rows, .. } => (columns.clone(), rows.clone()),
             ResultState::Running { columns, rows, .. } => (columns.clone(), rows.clone()),
             _ => {
-                self.status.message = "no result to inspect".into();
+                self.ui.status.message = "no result to inspect".into();
                 return;
             }
         };
         let visible = tab.results.active().visible_rows(&columns, &rows);
         let Some(&row_idx) = visible.get(vis_selected) else {
-            self.status.message = "no row selected".into();
+            self.ui.status.message = "no row selected".into();
             return;
         };
         let Some(row) = rows.get(row_idx) else {
             return;
         };
-        self.tabs[self.active_tab].row_detail = Some(RowDetailState {
+        self.ui.tabs[self.ui.active_tab].row_detail = Some(RowDetailState {
             row_index: row_idx,
             columns,
             values: row.0.clone(),
@@ -876,7 +903,7 @@ impl AppCore {
             self.open_json_viewer_from_row_detail();
             return;
         }
-        let Some(state) = self.tabs[self.active_tab].row_detail.as_mut() else {
+        let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_mut() else {
             return;
         };
         let col_count = state.columns.len().saturating_sub(1);
@@ -910,12 +937,12 @@ impl AppCore {
                 state.scroll_offset = 0;
             }
             CtKey::Esc | CtKey::Char('R') => {
-                self.tabs[self.active_tab].row_detail = None;
-                self.status.message = "row detail closed".into();
+                self.ui.tabs[self.ui.active_tab].row_detail = None;
+                self.ui.status.message = "row detail closed".into();
             }
             CtKey::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.tabs[self.active_tab].row_detail = None;
-                self.status.message = "row detail closed".into();
+                self.ui.tabs[self.ui.active_tab].row_detail = None;
+                self.ui.status.message = "row detail closed".into();
             }
             _ => {}
         }

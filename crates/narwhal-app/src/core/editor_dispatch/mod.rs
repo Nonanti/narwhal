@@ -52,12 +52,12 @@ impl AppCore {
             match key.code {
                 CtKey::Char('w') => {
                     // Shift+Ctrl+W cycles backwards (L27).
-                    self.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                        self.focus.cycle_back()
+                    self.ui.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        self.ui.focus.cycle_back()
                     } else {
-                        self.focus.cycle()
+                        self.ui.focus.cycle()
                     };
-                    self.status.message = format!("focus → {}", self.focus.label());
+                    self.ui.status.message = format!("focus → {}", self.ui.focus.label());
                     return true;
                 }
                 CtKey::Char('c') if self.process.running => {
@@ -69,7 +69,7 @@ impl AppCore {
                     return true;
                 }
                 CtKey::Char(' ')
-                    if self.focus == Pane::Editor && self.vim.mode() == Mode::Insert =>
+                    if self.ui.focus == Pane::Editor && self.ui.vim.mode() == Mode::Insert =>
                 {
                     // Ctrl-Space is the IDE-standard completion trigger
                     // and survives most terminal key-encoding layers.
@@ -85,7 +85,7 @@ impl AppCore {
                 // than overload the chord with two meanings. Without
                 // this, the global handler would short-circuit before
                 // the pending-commit action ever ran.
-                CtKey::Char('s') if self.focus == Pane::Editor => {
+                CtKey::Char('s') if self.ui.focus == Pane::Editor => {
                     self.dispatch_current_statement(RunMode::Stream);
                     return true;
                 }
@@ -120,8 +120,8 @@ impl AppCore {
         // In the editor pane, ? is reserved for reverse search (plan 06-06).
         if key.code == CtKey::Char('?')
             && key.modifiers.is_empty()
-            && self.vim.mode() == Mode::Normal
-            && self.focus != Pane::Editor
+            && self.ui.vim.mode() == Mode::Normal
+            && self.ui.focus != Pane::Editor
         {
             self.toggle_help();
             return true;
@@ -131,8 +131,9 @@ impl AppCore {
         // press Ctrl-W back to the editor before being able to type
         // `:open <conn>`. We snap focus to the editor and forward the
         // keystroke so the vim layer enters Command mode normally.
-        if key.code == CtKey::Char(':') && key.modifiers.is_empty() && self.focus != Pane::Editor {
-            self.focus = Pane::Editor;
+        if key.code == CtKey::Char(':') && key.modifiers.is_empty() && self.ui.focus != Pane::Editor
+        {
+            self.ui.focus = Pane::Editor;
             self.handle_editor_key(key);
             return true;
         }
