@@ -47,18 +47,18 @@ async fn results_land_on_originating_tab_after_switch() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open pin-test");
+    core.execute_command("open pin-test").await;
 
     // Open a second tab so we have somewhere to switch to.
-    core.execute_command("new");
+    core.execute_command("new").await;
     assert_eq!(core.tabs().len(), 2);
     assert_eq!(core.active_tab(), 1, "new tab should be active");
 
     // Switch back to tab 0 and start a multi-statement batch.
-    core.execute_command("tabprev");
+    core.execute_command("tabprev").await;
     assert_eq!(core.active_tab(), 0);
-    core.insert_into_editor("SELECT * FROM t; SELECT 42;");
-    core.execute_command("run-all");
+    core.insert_into_editor("SELECT * FROM t; SELECT 42;").await;
+    core.execute_command("run-all").await;
 
     // Drain all updates — results must land on tab 0 regardless.
     core.drain_run_updates().await;
@@ -94,19 +94,19 @@ async fn cycle_tab_blocked_while_running() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open pin-test");
-    core.execute_command("new");
-    core.execute_command("tabprev");
+    core.execute_command("open pin-test").await;
+    core.execute_command("new").await;
+    core.execute_command("tabprev").await;
     assert_eq!(core.active_tab(), 0);
 
-    core.insert_into_editor("SELECT 1");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT 1").await;
+    core.execute_command("run").await;
 
     // Before draining, the run is in-flight.
     assert!(core.is_running());
 
     // Attempt to switch tabs — should be no-op with status message.
-    core.execute_command("tabnext");
+    core.execute_command("tabnext").await;
     assert_eq!(core.active_tab(), 0, "tab switch should be blocked");
     assert!(
         core.status_message().contains("running"),
@@ -129,15 +129,15 @@ async fn close_tab_blocked_while_running() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open pin-test");
-    core.execute_command("new");
-    core.execute_command("tabprev");
+    core.execute_command("open pin-test").await;
+    core.execute_command("new").await;
+    core.execute_command("tabprev").await;
 
-    core.insert_into_editor("SELECT 1");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT 1").await;
+    core.execute_command("run").await;
     assert!(core.is_running());
 
-    core.execute_command("tabclose");
+    core.execute_command("tabclose").await;
     assert_eq!(core.tabs().len(), 2, "tab close should be blocked");
     assert!(
         core.status_message().contains("running"),
@@ -158,13 +158,13 @@ async fn new_tab_blocked_while_running() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open pin-test");
+    core.execute_command("open pin-test").await;
 
-    core.insert_into_editor("SELECT 1");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT 1").await;
+    core.execute_command("run").await;
     assert!(core.is_running());
 
-    core.execute_command("new");
+    core.execute_command("new").await;
     assert_eq!(core.tabs().len(), 1, "new tab should be blocked");
     assert!(
         core.status_message().contains("running"),

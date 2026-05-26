@@ -12,15 +12,15 @@ use crate::keymap::KeyChord;
 use narwhal_core::Value;
 
 impl AppCore {
-    pub(super) fn handle_results_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_results_key(&mut self, key: KeyEvent) {
         // Row detail modal: sits at the same layer as the cell popup.
         // When open, it intercepts navigation and dismiss keys.
         if self.ui.tabs[self.ui.active_tab].row_detail.is_some() {
-            self.handle_row_detail_key(key);
+            self.handle_row_detail_key(key).await;
             return;
         }
         if self.ui.tabs[self.ui.active_tab].editing.is_some() {
-            self.handle_cell_edit_key(key);
+            self.handle_cell_edit_key(key).await;
             return;
         }
         if self.ui.tabs[self.ui.active_tab]
@@ -91,16 +91,16 @@ impl AppCore {
                     }
                     CtKey::Enter => {
                         search.editing = false;
-                        self.refresh_search_matches();
-                        self.jump_to_current_match();
+                        self.refresh_search_matches().await;
+                        self.jump_to_current_match().await;
                     }
                     CtKey::Backspace => {
                         search.query.pop();
-                        self.refresh_search_matches();
+                        self.refresh_search_matches().await;
                     }
                     CtKey::Char(c) => {
                         search.query.push(c);
-                        self.refresh_search_matches();
+                        self.refresh_search_matches().await;
                     }
                     _ => {}
                 }
@@ -114,7 +114,7 @@ impl AppCore {
         // legitimate future bindings.
         let chord = KeyChord::from_event(key);
         if let Some(action) = self.deps.keymap.resolve(KeyGroup::Results, chord) {
-            self.apply_results_action(action);
+            self.apply_results_action(action).await;
         }
     }
 
@@ -124,7 +124,7 @@ impl AppCore {
     /// future plugin / macro layer all funnel through the same path.
     /// Each arm delegates to the existing helper so the diff with the
     /// pre-L36 code stays small.
-    pub(super) fn apply_results_action(&mut self, action: Action) {
+    pub(super) async fn apply_results_action(&mut self, action: Action) {
         // Recompute the visible row count up-front — several navigation
         // arms need it and computing inside each arm would force the
         // borrow checker to revalidate the `results` borrow.
@@ -173,16 +173,16 @@ impl AppCore {
                     .select(Some(visible_count - 1));
             }
             Action::ResultsLastRow => {}
-            Action::ResultsToggleSort => self.toggle_sort(),
-            Action::ResultsOpenFilterPrompt => self.open_filter_prompt(),
-            Action::ResultsNextMatch => self.advance_search(1),
-            Action::ResultsPrevMatch => self.advance_search(-1),
-            Action::ResultsEscape => self.handle_results_escape(),
-            Action::ResultsOpenCellPopup => self.open_cell_popup(),
-            Action::ResultsOpenRowDetail => self.open_row_detail(),
-            Action::ResultsStartCellEdit => self.start_cell_edit(),
-            Action::ResultsYankCell => self.yank_cell(),
-            Action::ResultsYankRow => self.yank_row(),
+            Action::ResultsToggleSort => self.toggle_sort().await,
+            Action::ResultsOpenFilterPrompt => self.open_filter_prompt().await,
+            Action::ResultsNextMatch => self.advance_search(1).await,
+            Action::ResultsPrevMatch => self.advance_search(-1).await,
+            Action::ResultsEscape => self.handle_results_escape().await,
+            Action::ResultsOpenCellPopup => self.open_cell_popup().await,
+            Action::ResultsOpenRowDetail => self.open_row_detail().await,
+            Action::ResultsStartCellEdit => self.start_cell_edit().await,
+            Action::ResultsYankCell => self.yank_cell().await,
+            Action::ResultsYankRow => self.yank_row().await,
             Action::ResultsNextStatementLeader => {
                 self.ui.pending_result_leader = Some(']');
             }
@@ -190,28 +190,30 @@ impl AppCore {
                 self.ui.pending_result_leader = Some('[');
             }
             // ─── Row CRUD + Pending changes (L36) ────────────────────────────────
-            Action::ResultsAppendRow => self.append_row(),
-            Action::ResultsDuplicateRow => self.duplicate_row(),
-            Action::ResultsDeleteRow => self.delete_row(),
-            Action::ResultsCommitPending => self.commit_pending(),
-            Action::ResultsDiscardPending => self.discard_pending(),
-            Action::ResultsOpenPendingPreview => self.toggle_pending_preview(),
+            Action::ResultsAppendRow => self.append_row().await,
+            Action::ResultsDuplicateRow => self.duplicate_row().await,
+            Action::ResultsDeleteRow => self.delete_row().await,
+            Action::ResultsCommitPending => self.commit_pending().await,
+            Action::ResultsDiscardPending => self.discard_pending().await,
+            Action::ResultsOpenPendingPreview => self.toggle_pending_preview().await,
             // ─── Metadata tabs (L36) ────────────────────────────────
-            Action::MetaTabRecords => self.switch_meta_tab(narwhal_tui::MetaTab::Records),
-            Action::MetaTabColumns => self.switch_meta_tab(narwhal_tui::MetaTab::Columns),
+            Action::MetaTabRecords => self.switch_meta_tab(narwhal_tui::MetaTab::Records).await,
+            Action::MetaTabColumns => self.switch_meta_tab(narwhal_tui::MetaTab::Columns).await,
             Action::MetaTabConstraints => {
-                self.switch_meta_tab(narwhal_tui::MetaTab::Constraints);
+                self.switch_meta_tab(narwhal_tui::MetaTab::Constraints)
+                    .await;
             }
             Action::MetaTabForeignKeys => {
-                self.switch_meta_tab(narwhal_tui::MetaTab::ForeignKeys);
+                self.switch_meta_tab(narwhal_tui::MetaTab::ForeignKeys)
+                    .await;
             }
-            Action::MetaTabIndexes => self.switch_meta_tab(narwhal_tui::MetaTab::Indexes),
+            Action::MetaTabIndexes => self.switch_meta_tab(narwhal_tui::MetaTab::Indexes).await,
             // ─── JSON viewer (L36) ──────────────────────────────────
             // `z` from a cell opens the viewer over the currently
             // selected cell. `Z` from the row-detail modal opens it
             // over the column the row-detail cursor is on; that arm
             // is routed through `handle_row_detail_key` below.
-            Action::OpenJsonViewerCell => self.open_json_viewer_for_cell(),
+            Action::OpenJsonViewerCell => self.open_json_viewer_for_cell().await,
             Action::OpenJsonViewerRow => {
                 // Should never reach here — the chord lives in the
                 // RowDetail group. We keep the arm explicit so the
@@ -244,7 +246,7 @@ impl AppCore {
     ///   is a no-op (already there).
     /// - **Neither:** the action becomes a status hint so the keypress
     ///   never silently does nothing.
-    pub(super) fn switch_meta_tab(&mut self, target: narwhal_tui::MetaTab) {
+    pub(super) async fn switch_meta_tab(&mut self, target: narwhal_tui::MetaTab) {
         // Snapshot the current table identity (if any) before borrowing.
         let (current_schema, current_table, in_table_detail) = {
             let tab = &self.ui.tabs[self.ui.active_tab];
@@ -270,7 +272,7 @@ impl AppCore {
                 // Records = paged preview. If we're already in a Rows
                 // preview, no-op; otherwise dispatch a fresh preview.
                 if in_table_detail {
-                    self.run_preview(&current_schema, &current_table, 0);
+                    self.run_preview(&current_schema, &current_table, 0).await;
                 } else {
                     self.ui.status.message = "already on Records".into();
                 }
@@ -291,7 +293,8 @@ impl AppCore {
                     // helper resets the state to `TableDetail` with
                     // `Columns` as the default, so we overwrite the
                     // active tab afterwards.
-                    self.describe_table_into_result(&current_schema, &current_table);
+                    self.describe_table_into_result(&current_schema, &current_table)
+                        .await;
                     if let ResultState::TableDetail {
                         active_meta_tab, ..
                     } = self.ui.tabs[self.ui.active_tab].results.active_state_mut()
@@ -322,14 +325,14 @@ impl AppCore {
     /// error in its footer when the cell value is not legal JSON, so
     /// the user still gets pretty-printed-on-best-effort behaviour for
     /// quasi-JSON text.
-    pub(super) fn open_json_viewer_for_cell(&mut self) {
+    pub(super) async fn open_json_viewer_for_cell(&mut self) {
         // `selected_original_row` only resolves once the table has been
         // rendered at least once (it consults the cached
         // `visible_indices`). Headless tests skip the render pass, so
         // we mirror the `cell_edit` fallback of `unwrap_or(0)` — a
         // missing mapping means there is no active filter/sort, in
         // which case row 0 is the natural target anyway.
-        let row_idx = self.selected_original_row().unwrap_or(0);
+        let row_idx = self.selected_original_row().await.unwrap_or(0);
         let (column_name, column_type, raw) = {
             let tab = &self.ui.tabs[self.ui.active_tab];
             let col_idx = tab.results.active().column_index;
@@ -375,7 +378,7 @@ impl AppCore {
     /// active column there is the source. Called from
     /// `handle_row_detail_key` when the `OpenJsonViewerRow` action
     /// resolves.
-    pub(super) fn open_json_viewer_from_row_detail(&mut self) {
+    pub(super) async fn open_json_viewer_from_row_detail(&mut self) {
         let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_ref() else {
             return;
         };
@@ -407,7 +410,7 @@ impl AppCore {
     /// the configured keymap is *not* consulted here because the modal
     /// has hard-coded reflexes (`q`/`Esc` always closes, etc.) that the
     /// user cannot reasonably want to unbind.
-    pub(super) fn handle_json_viewer_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_json_viewer_key(&mut self, key: KeyEvent) {
         let active = self.ui.active_tab;
         let Some(state) = self.ui.tabs[active].json_viewer.as_mut() else {
             return;
@@ -457,7 +460,7 @@ impl AppCore {
         }
     }
 
-    fn handle_results_escape(&mut self) {
+    async fn handle_results_escape(&mut self) {
         let had_search = self.ui.tabs[self.ui.active_tab].search.take().is_some();
         let had_filter = !self.ui.tabs[self.ui.active_tab]
             .results
@@ -478,7 +481,7 @@ impl AppCore {
     /// Translate the current `TableState` selection (which is an index
     /// into the visible/rendered rows) to the original row index in
     /// the full result set. Returns `None` when there are no rows.
-    fn selected_original_row(&self) -> Option<usize> {
+    async fn selected_original_row(&self) -> Option<usize> {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let vis_selected = tab.results.active().selected()?;
         tab.results
@@ -488,7 +491,7 @@ impl AppCore {
             .copied()
     }
 
-    fn yank_cell(&mut self) {
+    async fn yank_cell(&mut self) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let (rows, _columns) = match tab.results.active_state() {
             ResultState::Rows { rows, columns, .. }
@@ -498,7 +501,7 @@ impl AppCore {
                 return;
             }
         };
-        let row_idx = self.selected_original_row().unwrap_or(0);
+        let row_idx = self.selected_original_row().await.unwrap_or(0);
         let col_idx = tab.results.active().column_index;
         let Some(value) = rows.get(row_idx).and_then(|r| r.0.get(col_idx)) else {
             self.ui.status.message = "no cell selected".into();
@@ -518,7 +521,7 @@ impl AppCore {
         }
     }
 
-    fn yank_row(&mut self) {
+    async fn yank_row(&mut self) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let rows = match tab.results.active_state() {
             ResultState::Rows { rows, .. } | ResultState::Running { rows, .. } => rows,
@@ -527,7 +530,7 @@ impl AppCore {
                 return;
             }
         };
-        let row_idx = self.selected_original_row().unwrap_or(0);
+        let row_idx = self.selected_original_row().await.unwrap_or(0);
         let Some(row) = rows.get(row_idx) else {
             self.ui.status.message = "no row selected".into();
             return;
@@ -552,7 +555,7 @@ impl AppCore {
         }
     }
 
-    fn start_cell_edit(&mut self) {
+    async fn start_cell_edit(&mut self) {
         // Gather the data we need by value first, then mutate.
         let prepared = {
             let tab = &self.ui.tabs[self.ui.active_tab];
@@ -582,7 +585,7 @@ impl AppCore {
                     format!("{}: no primary key, cell edits are disabled", source.table);
                 return;
             }
-            let row_index = self.selected_original_row().unwrap_or(0);
+            let row_index = self.selected_original_row().await.unwrap_or(0);
             let col_index = tab.results.active().column_index;
             let Some(row) = rows.get(row_index) else {
                 self.ui.status.message = "select a row first (j/k)".into();
@@ -628,7 +631,7 @@ impl AppCore {
         self.ui.status.message = "edit: Enter saves · Esc cancels".into();
     }
 
-    fn handle_cell_edit_key(&mut self, key: KeyEvent) {
+    async fn handle_cell_edit_key(&mut self, key: KeyEvent) {
         let Some(edit) = self.ui.tabs[self.ui.active_tab].editing.as_mut() else {
             return;
         };
@@ -642,20 +645,20 @@ impl AppCore {
             // The Enter key queues the change so the user can review it
             // alongside any insert/delete in the pending preview before
             // committing with Ctrl-S.
-            CtKey::Enter => self.queue_cell_edit_commit(),
+            CtKey::Enter => self.queue_cell_edit_commit().await,
             CtKey::Backspace => {
                 edit.buffer.pop();
-                self.sync_edit_view();
+                self.sync_edit_view().await;
             }
             CtKey::Char(c) => {
                 edit.buffer.push(c);
-                self.sync_edit_view();
+                self.sync_edit_view().await;
             }
             _ => {}
         }
     }
 
-    fn sync_edit_view(&mut self) {
+    async fn sync_edit_view(&mut self) {
         let tab = &mut self.ui.tabs[self.ui.active_tab];
         if let (Some(edit), Some(view)) =
             (tab.editing.as_ref(), tab.results.active_mut().edit.as_mut())
@@ -670,7 +673,7 @@ impl AppCore {
     // impl. The optimistic UPDATE generator now lives in
     // `narwhal_commands::pending::compile`.
 
-    pub(super) fn set_edit_error(&mut self, message: String) {
+    pub(super) async fn set_edit_error(&mut self, message: String) {
         if let Some(view) = self.ui.tabs[self.ui.active_tab]
             .results
             .active_mut()
@@ -683,7 +686,7 @@ impl AppCore {
     }
 
     #[allow(dead_code)]
-    fn start_search(&mut self) {
+    async fn start_search(&mut self) {
         if !matches!(
             self.ui.tabs[self.ui.active_tab].results.active_state(),
             ResultState::Rows { .. } | ResultState::Running { .. }
@@ -700,7 +703,7 @@ impl AppCore {
         self.ui.status.message = "search: ".into();
     }
 
-    pub(super) fn toggle_sort(&mut self) {
+    pub(super) async fn toggle_sort(&mut self) {
         // Streaming guard.
         if self.process.running {
             self.ui.status.message = "sort/filter unavailable while streaming".into();
@@ -734,7 +737,7 @@ impl AppCore {
         self.ui.status.message = msg;
     }
 
-    fn open_filter_prompt(&mut self) {
+    async fn open_filter_prompt(&mut self) {
         // Streaming guard.
         if self.process.running {
             self.ui.status.message = "sort/filter unavailable while streaming".into();
@@ -754,7 +757,7 @@ impl AppCore {
         self.ui.status.message = "filter: type to filter, Enter accepts, Esc clears".into();
     }
 
-    fn refresh_search_matches(&mut self) {
+    async fn refresh_search_matches(&mut self) {
         let needle = match self.ui.tabs[self.ui.active_tab].search.as_ref() {
             Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
             Some(_) => {
@@ -794,7 +797,7 @@ impl AppCore {
         };
     }
 
-    fn advance_search(&mut self, delta: i32) {
+    async fn advance_search(&mut self, delta: i32) {
         let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_mut() else {
             return;
         };
@@ -808,10 +811,10 @@ impl AppCore {
         let total = search.matches.len();
         let query = search.query.clone();
         self.ui.status.message = format!("search: {query} · {}/{}", next + 1, total);
-        self.jump_to_current_match();
+        self.jump_to_current_match().await;
     }
 
-    fn jump_to_current_match(&mut self) {
+    async fn jump_to_current_match(&mut self) {
         let Some(search) = self.ui.tabs[self.ui.active_tab].search.as_ref() else {
             return;
         };
@@ -824,8 +827,8 @@ impl AppCore {
             .select(Some(idx));
     }
 
-    fn open_cell_popup(&mut self) {
-        let Some(row_index) = self.selected_original_row() else {
+    async fn open_cell_popup(&mut self) {
+        let Some(row_index) = self.selected_original_row().await else {
             self.ui.status.message = "select a row first (j/k)".into();
             return;
         };
@@ -855,7 +858,7 @@ impl AppCore {
         });
     }
 
-    fn open_row_detail(&mut self) {
+    async fn open_row_detail(&mut self) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         // Don't open if another modal at the same layer is already open.
         if tab.row_detail.is_some() || tab.results.active().popup.is_some() || tab.editing.is_some()
@@ -894,13 +897,13 @@ impl AppCore {
         });
     }
 
-    fn handle_row_detail_key(&mut self, key: KeyEvent) {
+    async fn handle_row_detail_key(&mut self, key: KeyEvent) {
         // L36: try the configured keymap first for chords that
         // pre-empt the modal's reflexes (today only `Z` to launch the
         // JSON viewer over the focused column).
         let chord = KeyChord::from_event(key);
         if self.deps.keymap.resolve(KeyGroup::RowDetail, chord) == Some(Action::OpenJsonViewerRow) {
-            self.open_json_viewer_from_row_detail();
+            self.open_json_viewer_from_row_detail().await;
             return;
         }
         let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_mut() else {

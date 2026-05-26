@@ -49,10 +49,10 @@ async fn dump_schema_all_does_not_block_ui() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open meta-test");
+    core.execute_command("open meta-test").await;
 
     // Dispatch dump_schema all. It should return immediately (non-blocking).
-    core.execute_command("dump-schema all");
+    core.execute_command("dump-schema all").await;
 
     // The status should indicate the operation is in progress.
     assert!(
@@ -92,7 +92,7 @@ async fn refresh_schemas_does_not_block_ui() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open meta-test");
+    core.execute_command("open meta-test").await;
 
     // Initial table count should be 1.
     let initial_count = core
@@ -101,7 +101,7 @@ async fn refresh_schemas_does_not_block_ui() {
     assert_eq!(initial_count, 1);
 
     // Dispatch refresh. It should return immediately.
-    core.execute_command("refresh");
+    core.execute_command("refresh").await;
     assert!(
         core.status_message().contains("refreshing schema"),
         "expected in-progress status, got: {}",
@@ -152,7 +152,7 @@ async fn open_history_does_not_block_ui() {
     let mut core = AppCore::new(registry, connections, Some(journal));
 
     // Open history. It should return immediately.
-    core.open_history();
+    core.open_history().await;
     assert!(
         core.status_message().contains("loading history"),
         "expected in-progress status, got: {}",
@@ -188,15 +188,15 @@ async fn dump_schema_drops_reply_when_originating_tab_closed() {
 
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open meta-test");
+    core.execute_command("open meta-test").await;
 
     // Open a second tab and dispatch dump-schema *from there*. The
     // originating tab is tab 1 (id=2); tab 0 carries id=1.
-    core.execute_command("tabnew");
+    core.execute_command("tabnew").await;
     assert_eq!(core.tabs().len(), 2);
     assert_eq!(core.active_tab(), 1);
     let originating_tab_id = core.tabs()[1].id();
-    core.execute_command("dump-schema all");
+    core.execute_command("dump-schema all").await;
 
     // Close the originating tab BEFORE the reply arrives. `tabclose`
     // closes whichever tab is active, so we close tab 1 directly
@@ -204,7 +204,7 @@ async fn dump_schema_drops_reply_when_originating_tab_closed() {
     // would (a) panic on `self.tabs[1]` access, or (b) write into
     // the only remaining tab — both wrong. The stable-id resolution
     // should drop the reply and surface a status message.
-    core.execute_command("tabclose");
+    core.execute_command("tabclose").await;
 
     // Sanity: tab 0 (the original initial tab) is now alone and its
     // id is NOT the originating id.
@@ -272,12 +272,12 @@ async fn refresh_schemas_drops_reply_when_session_changed() {
     let mut core = AppCore::new(registry, connections, None);
 
     // Open A, dispatch refresh (stale reply will target A).
-    core.execute_command("open conn-a");
-    core.execute_command("refresh");
+    core.execute_command("open conn-a").await;
+    core.execute_command("refresh").await;
 
     // Before draining the stale reply, switch to B and let B's
     // schemas be loaded directly via `open` (B has 2 tables).
-    core.execute_command("open conn-b");
+    core.execute_command("open conn-b").await;
     let b_table_count_before = core
         .session()
         .map_or(0, |s| s.schemas.iter().map(|(_, t)| t.len()).sum::<usize>());

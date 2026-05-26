@@ -127,8 +127,8 @@ fn save_uses_atomic_rename() {
 }
 
 /// 6. Tab-completion for `:load` includes snippet names.
-#[test]
-fn tab_complete_includes_snippets() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tab_complete_includes_snippets() {
     let dir = TempDir::new().unwrap();
     let mut core = empty_core_with_snippet_store(&dir);
 
@@ -138,13 +138,13 @@ fn tab_complete_includes_snippets() {
         .unwrap();
 
     // Enter command mode and type "load us"
-    core.handle_key(key(KeyCode::Char(':')));
+    core.handle_key(key(KeyCode::Char(':'))).await;
     for ch in "load us".chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
 
     // Press Tab
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
 
     // The command buffer should complete to "load users-active"
     assert_eq!(

@@ -7,7 +7,7 @@ use crate::core::text_utils::{find_all, replace_all, replace_first, row_col_to_o
 use crate::core::AppCore;
 
 impl AppCore {
-    pub(crate) fn open_editor_search(&mut self, direction: SearchDirection) {
+    pub(crate) async fn open_editor_search(&mut self, direction: SearchDirection) {
         let tab = &mut self.ui.tabs[self.ui.active_tab];
         tab.editor_search.saved_cursor = Some(tab.editor.cursor());
         tab.editor_search.direction = direction;
@@ -25,7 +25,7 @@ impl AppCore {
     }
 
     /// Handle a key event while the editor search prompt is open.
-    pub(crate) fn handle_editor_search_key(&mut self, key: KeyEvent) {
+    pub(crate) async fn handle_editor_search_key(&mut self, key: KeyEvent) {
         match key.code {
             CtKey::Esc => {
                 let tab = &mut self.ui.tabs[self.ui.active_tab];
@@ -44,7 +44,7 @@ impl AppCore {
                 tab.editor_search.prompt_open = false;
                 tab.editor_search.highlight = true;
                 // Set current to whatever match the cursor is on.
-                self.sync_editor_search_current();
+                self.sync_editor_search_current().await;
                 let count = self.ui.tabs[self.ui.active_tab].editor_search.matches.len();
                 let needle = self.ui.tabs[self.ui.active_tab]
                     .editor_search
@@ -62,8 +62,8 @@ impl AppCore {
             }
             CtKey::Backspace => {
                 self.ui.tabs[self.ui.active_tab].editor_search.needle.pop();
-                self.refresh_editor_search_matches();
-                self.jump_to_editor_search_match();
+                self.refresh_editor_search_matches().await;
+                self.jump_to_editor_search_match().await;
                 let needle = self.ui.tabs[self.ui.active_tab]
                     .editor_search
                     .needle
@@ -81,8 +81,8 @@ impl AppCore {
                     .editor_search
                     .needle
                     .push(c);
-                self.refresh_editor_search_matches();
-                self.jump_to_editor_search_match();
+                self.refresh_editor_search_matches().await;
+                self.jump_to_editor_search_match().await;
                 let needle = self.ui.tabs[self.ui.active_tab]
                     .editor_search
                     .needle
@@ -100,7 +100,7 @@ impl AppCore {
     }
 
     /// Recompute all match positions for the current needle.
-    pub(crate) fn refresh_editor_search_matches(&mut self) {
+    pub(crate) async fn refresh_editor_search_matches(&mut self) {
         let needle = self.ui.tabs[self.ui.active_tab]
             .editor_search
             .needle
@@ -116,12 +116,12 @@ impl AppCore {
         let text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let matches = find_all(&text, &needle);
         self.ui.tabs[self.ui.active_tab].editor_search.matches = matches;
-        self.sync_editor_search_current();
+        self.sync_editor_search_current().await;
     }
 
     /// Jump the cursor to the best match given the current direction
     /// and saved cursor position.
-    pub(crate) fn jump_to_editor_search_match(&mut self) {
+    pub(crate) async fn jump_to_editor_search_match(&mut self) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         if tab.editor_search.matches.is_empty() {
             return;
@@ -194,7 +194,7 @@ impl AppCore {
     }
 
     /// Set `current` to the index of the match the cursor currently sits on.
-    pub(crate) fn sync_editor_search_current(&mut self) {
+    pub(crate) async fn sync_editor_search_current(&mut self) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let (cur_row, cur_col) = tab.editor.cursor();
         let needle_len = tab.editor_search.needle.len();
@@ -217,7 +217,7 @@ impl AppCore {
     }
 
     /// Repeat the editor search in the original or reverse direction.
-    pub(crate) fn repeat_editor_search(&mut self, reverse: bool) {
+    pub(crate) async fn repeat_editor_search(&mut self, reverse: bool) {
         let tab = &self.ui.tabs[self.ui.active_tab];
         if tab.editor_search.needle.is_empty() {
             self.ui.status.message = "no previous search".into();
@@ -257,7 +257,7 @@ impl AppCore {
     }
 
     /// Execute a substitute command (`:s/old/new/[g][c]` or `:%s/old/new/[g][c]`).
-    pub(crate) fn execute_substitute(
+    pub(crate) async fn execute_substitute(
         &mut self,
         range: crate::commands::SubstituteRange,
         pattern: &str,

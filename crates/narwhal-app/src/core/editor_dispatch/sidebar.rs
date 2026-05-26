@@ -9,7 +9,7 @@ use crate::core::{AppCore, ResultState, RowSource, SidebarItem};
 use crate::run::RunMode;
 
 impl AppCore {
-    pub(crate) fn click_sidebar_table(&mut self, sidebar_idx: usize) {
+    pub(crate) async fn click_sidebar_table(&mut self, sidebar_idx: usize) {
         let Some(item) = self.ui.sidebar_items.get(sidebar_idx).cloned() else {
             return;
         };
@@ -17,11 +17,11 @@ impl AppCore {
             return;
         };
         self.ui.sidebar_index = sidebar_idx;
-        self.run_preview(&schema, &name, 0);
+        self.run_preview(&schema, &name, 0).await;
     }
 
     /// Click on a result tab: switch to that result index.
-    pub(crate) fn handle_sidebar_key(&mut self, key: KeyEvent) {
+    pub(crate) async fn handle_sidebar_key(&mut self, key: KeyEvent) {
         // L24: paging step. The actual viewport size depends on the
         // terminal height; using a fixed step keeps the binding
         // predictable regardless of layout. Wheel events use a smaller
@@ -54,9 +54,9 @@ impl AppCore {
             CtKey::End if !self.ui.sidebar_items.is_empty() => {
                 self.ui.sidebar_index = self.ui.sidebar_items.len() - 1;
             }
-            CtKey::Enter => self.activate_sidebar_selection(),
-            CtKey::Char('o') => self.preview_sidebar_selection(),
-            CtKey::Char('d') => self.ddl_sidebar_selection(),
+            CtKey::Enter => self.activate_sidebar_selection().await,
+            CtKey::Char('o') => self.preview_sidebar_selection().await,
+            CtKey::Char('d') => self.ddl_sidebar_selection().await,
             _ => {}
         }
     }
@@ -64,7 +64,7 @@ impl AppCore {
     /// L24: scroll the sidebar viewport by `delta` rows without moving
     /// the selection. Mouse-wheel handlers call this so the user can
     /// inspect off-screen rows before committing to a click.
-    pub(crate) fn scroll_sidebar(&mut self, delta: isize) {
+    pub(crate) async fn scroll_sidebar(&mut self, delta: isize) {
         if self.ui.sidebar_items.is_empty() {
             return;
         }
@@ -73,7 +73,7 @@ impl AppCore {
         self.ui.sidebar_scroll = new;
     }
 
-    pub(crate) fn preview_sidebar_selection(&mut self) {
+    pub(crate) async fn preview_sidebar_selection(&mut self) {
         let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
@@ -81,13 +81,13 @@ impl AppCore {
             self.ui.status.message = "select a table to preview".into();
             return;
         };
-        self.run_preview(&schema, &name, 0);
+        self.run_preview(&schema, &name, 0).await;
     }
 
     /// Pressing `d` with a sidebar table focused fetches the DDL and
     /// injects it into the editor at the cursor. No auto-run — the
     /// user inspects and decides.
-    pub(crate) fn ddl_sidebar_selection(&mut self) {
+    pub(crate) async fn ddl_sidebar_selection(&mut self) {
         let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
@@ -95,7 +95,7 @@ impl AppCore {
             self.ui.status.message = "select a table to fetch DDL".into();
             return;
         };
-        self.inject_ddl(&schema, &name);
+        self.inject_ddl(&schema, &name).await;
     }
 
     /// Sprint 11 (Opus M1): sidebar DDL fetch goes through the meta
@@ -106,7 +106,7 @@ impl AppCore {
     /// id; if the user closed the tab during the fetch the reply is
     /// dropped with a status message instead of writing DDL into an
     /// arbitrary tab (C5 invariant).
-    pub(crate) fn inject_ddl(&mut self, schema: &str, name: &str) {
+    pub(crate) async fn inject_ddl(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -144,7 +144,7 @@ impl AppCore {
     /// Dispatch a `SELECT * FROM schema.table LIMIT n OFFSET k` and attach
     /// the table's schema as the result's row source so cell edits and
     /// pagination work.
-    pub(crate) fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
+    pub(crate) async fn run_preview(&mut self, schema: &str, table: &str, offset: usize) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -161,15 +161,14 @@ impl AppCore {
         // and the dispatch happens *after* the describe completes
         // (so the column metadata is already on the row source).
         // Splitting these requires a two-stage RunRequest API.
-        let described = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let mut conn = pool
-                    .acquire()
-                    .await
-                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
-                conn.describe_table(&schema_owned, &name_owned).await
-            })
-        });
+        let described = async move {
+            let mut conn = pool
+                .acquire()
+                .await
+                .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+            conn.describe_table(&schema_owned, &name_owned).await
+        }
+        .await;
         let source = match described {
             Ok(ts) => {
                 let columns = ts.columns;
@@ -204,21 +203,21 @@ impl AppCore {
         };
         let sql = crate::ddl::preview_query_paged(schema, table, limit, offset, dialect);
         self.ui.tabs[self.ui.active_tab].pending_source = source;
-        self.dispatch_batch(vec![sql], RunMode::Execute);
+        self.dispatch_batch(vec![sql], RunMode::Execute).await;
         self.ui.focus = Pane::Results;
     }
 
-    pub(crate) fn next_page(&mut self) {
-        let Some((schema, table, offset)) = self.current_preview_target() else {
+    pub(crate) async fn next_page(&mut self) {
+        let Some((schema, table, offset)) = self.current_preview_target().await else {
             self.ui.status.message = "no preview to paginate; select a table first".into();
             return;
         };
         let limit = self.ui.tabs[self.ui.active_tab].page_size;
-        self.run_preview(&schema, &table, offset + limit);
+        self.run_preview(&schema, &table, offset + limit).await;
     }
 
-    pub(crate) fn prev_page(&mut self) {
-        let Some((schema, table, offset)) = self.current_preview_target() else {
+    pub(crate) async fn prev_page(&mut self) {
+        let Some((schema, table, offset)) = self.current_preview_target().await else {
             self.ui.status.message = "no preview to paginate; select a table first".into();
             return;
         };
@@ -228,15 +227,15 @@ impl AppCore {
         }
         let limit = self.ui.tabs[self.ui.active_tab].page_size;
         let new_offset = offset.saturating_sub(limit);
-        self.run_preview(&schema, &table, new_offset);
+        self.run_preview(&schema, &table, new_offset).await;
     }
 
-    pub(crate) fn set_page_size(&mut self, size: usize) {
+    pub(crate) async fn set_page_size(&mut self, size: usize) {
         self.ui.tabs[self.ui.active_tab].page_size = size;
         self.ui.status.message = format!("page size set to {size}");
     }
 
-    pub(crate) fn current_preview_target(&self) -> Option<(String, String, usize)> {
+    pub(crate) async fn current_preview_target(&self) -> Option<(String, String, usize)> {
         match self.ui.tabs[self.ui.active_tab].results.active_state() {
             ResultState::Rows {
                 source: Some(s), ..
@@ -245,15 +244,15 @@ impl AppCore {
         }
     }
 
-    pub(crate) fn activate_sidebar_selection(&mut self) {
+    pub(crate) async fn activate_sidebar_selection(&mut self) {
         let Some(item) = self.ui.sidebar_items.get(self.ui.sidebar_index).cloned() else {
             return;
         };
         match item {
-            SidebarItem::Connection { name, .. } => self.open_named(&name),
+            SidebarItem::Connection { name, .. } => self.open_named(&name).await,
             SidebarItem::Schema { .. } => {}
             SidebarItem::Table { schema, name, .. } => {
-                self.describe_table_into_result(&schema, &name);
+                self.describe_table_into_result(&schema, &name).await;
             }
         }
     }
@@ -269,7 +268,7 @@ impl AppCore {
     /// "transitioning" UI state for the sidebar — deferred to the
     /// same epic that owns the `handle_key` async refactor. The
     /// multi-thread runtime absorbs the freeze (typical < 30 ms).
-    pub(crate) fn describe_table_into_result(&mut self, schema: &str, name: &str) {
+    pub(crate) async fn describe_table_into_result(&mut self, schema: &str, name: &str) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -277,15 +276,14 @@ impl AppCore {
         let pool = session.pool.clone();
         let schema_owned = schema.to_owned();
         let name_owned = name.to_owned();
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let mut conn = pool
-                    .acquire()
-                    .await
-                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
-                conn.describe_table(&schema_owned, &name_owned).await
-            })
-        });
+        let result = async move {
+            let mut conn = pool
+                .acquire()
+                .await
+                .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+            conn.describe_table(&schema_owned, &name_owned).await
+        }
+        .await;
         match result {
             Ok(ts) => {
                 let col_count = ts.columns.len();

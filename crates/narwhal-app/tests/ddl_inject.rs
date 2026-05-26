@@ -51,7 +51,7 @@ async fn d_on_sidebar_table_injects_ddl() {
     let mut core = AppCore::new(registry, connections, None);
 
     // Open the connection.
-    core.execute_command("open ddl-test");
+    core.execute_command("open ddl-test").await;
     assert!(core.session().is_some(), "session must open");
 
     // Switch focus to the sidebar (Ctrl-W cycles editor->results->sidebar).
@@ -62,17 +62,17 @@ async fn d_on_sidebar_table_injects_ddl() {
         state: KeyEventState::NONE,
     };
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
 
     // Walk down the sidebar until we land on the 'items' table row.
     // Layout: connection (0) -> main (1) -> items (2).
     for _ in 0..2 {
-        core.handle_key(key(KeyCode::Down));
+        core.handle_key(key(KeyCode::Down)).await;
     }
 
     // Press 'd' to fetch DDL.
-    core.handle_key(key(KeyCode::Char('d')));
+    core.handle_key(key(KeyCode::Char('d'))).await;
 
     // Sprint 11 (Opus M1): DDL fetch now goes through the meta
     // channel, so the reply arrives asynchronously. Drain pending

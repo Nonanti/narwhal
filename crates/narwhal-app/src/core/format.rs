@@ -15,9 +15,9 @@ use narwhal_sql::{format_for_driver, split_with, Dialect};
 use super::AppCore;
 
 impl AppCore {
-    pub(super) fn format_current_statement(&mut self) {
-        let dialect = self.active_dialect();
-        let driver_name = self.active_driver_name();
+    pub(super) async fn format_current_statement(&mut self) {
+        let dialect = self.active_dialect().await;
+        let driver_name = self.active_driver_name().await;
         let text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let cursor_offset = self.ui.tabs[self.ui.active_tab].editor.cursor_byte_offset();
         let stmts = split_with(&text, dialect);
@@ -42,9 +42,9 @@ impl AppCore {
         self.ui.status.message = format!("formatted statement {}/{}", target_idx + 1, stmts.len());
     }
 
-    pub(super) fn format_all_statements(&mut self) {
-        let dialect = self.active_dialect();
-        let driver_name = self.active_driver_name();
+    pub(super) async fn format_all_statements(&mut self) {
+        let dialect = self.active_dialect().await;
+        let driver_name = self.active_driver_name().await;
         let text = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         let stmts = split_with(&text, dialect);
         if stmts.is_empty() {
@@ -63,14 +63,14 @@ impl AppCore {
         self.ui.status.message = format!("formatted {} statement(s)", stmts.len());
     }
 
-    fn active_dialect(&self) -> Dialect {
+    async fn active_dialect(&self) -> Dialect {
         self.session
             .active
             .as_ref()
             .map_or(Dialect::Generic, super::super::session::Session::dialect)
     }
 
-    fn active_driver_name(&self) -> String {
+    async fn active_driver_name(&self) -> String {
         self.session
             .active
             .as_ref()

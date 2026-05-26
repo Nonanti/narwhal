@@ -17,9 +17,9 @@ const fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-fn type_str(core: &mut AppCore, text: &str) {
+async fn type_str(core: &mut AppCore, text: &str) {
     for ch in text.chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
 }
 
@@ -51,7 +51,7 @@ async fn open_with_tables(tables: &[&str]) -> AppCore {
         }],
     };
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open c");
+    core.execute_command("open c").await;
     core
 }
 
@@ -60,10 +60,10 @@ async fn unique_match_tab_accepts_from_popup() {
     let mut core = open_with_tables(&["users"]).await;
     // Insert mode + type a prefix that uniquely matches the `users` table.
     // Auto-trigger opens the popup as soon as 2+ characters are typed.
-    core.handle_key(key(KeyCode::Char('i')));
-    type_str(&mut core, "user");
+    core.handle_key(key(KeyCode::Char('i'))).await;
+    type_str(&mut core, "user").await;
     // Tab inside an open popup accepts the highlighted entry (IDE-style).
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Tab)).await;
     let text = core.editor().entire_text();
     assert!(
         text.contains("users"),
@@ -74,35 +74,35 @@ async fn unique_match_tab_accepts_from_popup() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multiple_matches_open_popup_and_enter_inserts() {
     let mut core = open_with_tables(&["orders", "order_items", "owners"]).await;
-    core.handle_key(key(KeyCode::Char('i')));
-    type_str(&mut core, "ord");
+    core.handle_key(key(KeyCode::Char('i'))).await;
+    type_str(&mut core, "ord").await;
     // Auto-trigger opens the popup silently — no status spam.
     assert!(
-        core.editor_completion_is_open(),
+        core.editor_completion_is_open().await,
         "popup should be open after auto-trigger"
     );
 
     // Down arrow moves the highlight to the second item.
-    core.handle_key(key(KeyCode::Down));
+    core.handle_key(key(KeyCode::Down)).await;
     // Enter accepts.
-    core.handle_key(key(KeyCode::Enter));
+    core.handle_key(key(KeyCode::Enter)).await;
     let text = core.editor().entire_text();
     // The exact ordering depends on lexicographic sort; assert the
     // buffer grew beyond the original prefix and the popup is closed.
     assert!(text.len() > "ord".len(), "buffer: {text:?}");
-    assert!(!core.editor_completion_is_open());
+    assert!(!core.editor_completion_is_open().await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn esc_dismisses_popup_without_inserting() {
     let mut core = open_with_tables(&["orders", "order_items"]).await;
-    core.handle_key(key(KeyCode::Char('i')));
-    type_str(&mut core, "ord");
+    core.handle_key(key(KeyCode::Char('i'))).await;
+    type_str(&mut core, "ord").await;
     assert!(
-        core.editor_completion_is_open(),
+        core.editor_completion_is_open().await,
         "popup should be open after auto-trigger"
     );
-    core.handle_key(key(KeyCode::Esc));
+    core.handle_key(key(KeyCode::Esc)).await;
     assert!(core.status_message().contains("cancelled"));
     let text = core.editor().entire_text();
     assert_eq!(text, "ord");
@@ -111,8 +111,8 @@ async fn esc_dismisses_popup_without_inserting() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn empty_prefix_inserts_four_spaces() {
     let mut core = open_with_tables(&["orders"]).await;
-    core.handle_key(key(KeyCode::Char('i')));
-    core.handle_key(key(KeyCode::Tab));
+    core.handle_key(key(KeyCode::Char('i'))).await;
+    core.handle_key(key(KeyCode::Tab)).await;
     let text = core.editor().entire_text();
     assert_eq!(text, "    ");
 }

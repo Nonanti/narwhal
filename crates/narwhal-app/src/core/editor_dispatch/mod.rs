@@ -16,26 +16,26 @@ use crate::core::AppCore;
 use crate::run::RunMode;
 
 impl AppCore {
-    pub(crate) fn handle_global_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) async fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         // Terminal-agnostic function keys first. Most terminal emulators
         // forward F-keys and Alt-Enter as distinct events, while Ctrl +
         // punctuation (Ctrl-;, Ctrl-/) is frequently swallowed by the
         // VT100-style key encoding before it ever reaches the program.
         match key.code {
             CtKey::F(1) => {
-                self.toggle_help();
+                self.toggle_help().await;
                 return true;
             }
             CtKey::F(5) => {
-                self.dispatch_current_statement(RunMode::Execute);
+                self.dispatch_current_statement(RunMode::Execute).await;
                 return true;
             }
             CtKey::F(6) => {
-                self.dispatch_all_statements(RunMode::Execute);
+                self.dispatch_all_statements(RunMode::Execute).await;
                 return true;
             }
             CtKey::F(7) => {
-                self.dispatch_current_statement(RunMode::Stream);
+                self.dispatch_current_statement(RunMode::Stream).await;
                 return true;
             }
             CtKey::F(4) if self.process.running => {
@@ -43,7 +43,7 @@ impl AppCore {
                 return true;
             }
             CtKey::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.dispatch_current_statement(RunMode::Execute);
+                self.dispatch_current_statement(RunMode::Execute).await;
                 return true;
             }
             _ => {}
@@ -65,7 +65,7 @@ impl AppCore {
                     return true;
                 }
                 CtKey::Char(';') => {
-                    self.dispatch_current_statement(RunMode::Execute);
+                    self.dispatch_current_statement(RunMode::Execute).await;
                     return true;
                 }
                 CtKey::Char(' ')
@@ -76,7 +76,7 @@ impl AppCore {
                     // Only fires when the editor pane is focused and
                     // we're in insert mode — in normal mode it would
                     // collide with the vim layer's leader.
-                    self.trigger_completion();
+                    self.trigger_completion().await;
                     return true;
                 }
                 // L36: Ctrl-S is now reserved for the Results pane's
@@ -86,31 +86,31 @@ impl AppCore {
                 // this, the global handler would short-circuit before
                 // the pending-commit action ever ran.
                 CtKey::Char('s') if self.ui.focus == Pane::Editor => {
-                    self.dispatch_current_statement(RunMode::Stream);
+                    self.dispatch_current_statement(RunMode::Stream).await;
                     return true;
                 }
                 CtKey::Tab => {
-                    self.cycle_tab(1);
+                    self.cycle_tab(1).await;
                     return true;
                 }
                 CtKey::BackTab => {
-                    self.cycle_tab(-1);
+                    self.cycle_tab(-1).await;
                     return true;
                 }
                 CtKey::Char('t') => {
-                    self.new_tab();
+                    self.new_tab().await;
                     return true;
                 }
                 CtKey::Char('r') => {
-                    self.open_history();
+                    self.open_history().await;
                     return true;
                 }
                 CtKey::PageDown => {
-                    self.cycle_result_tab(1);
+                    self.cycle_result_tab(1).await;
                     return true;
                 }
                 CtKey::PageUp => {
-                    self.cycle_result_tab(-1);
+                    self.cycle_result_tab(-1).await;
                     return true;
                 }
                 _ => {}
@@ -123,7 +123,7 @@ impl AppCore {
             && self.ui.vim.mode() == Mode::Normal
             && self.ui.focus != Pane::Editor
         {
-            self.toggle_help();
+            self.toggle_help().await;
             return true;
         }
         // `:` opens the command palette from any non-editor pane.
@@ -134,7 +134,7 @@ impl AppCore {
         if key.code == CtKey::Char(':') && key.modifiers.is_empty() && self.ui.focus != Pane::Editor
         {
             self.ui.focus = Pane::Editor;
-            self.handle_editor_key(key);
+            self.handle_editor_key(key).await;
             return true;
         }
         false

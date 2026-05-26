@@ -20,7 +20,6 @@ use std::collections::BTreeMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use narwhal_core::{Column, Row, Value};
-use tokio::runtime::Handle;
 
 use super::state::PendingPreviewState;
 use super::{AppCore, ResultState};
@@ -49,7 +48,7 @@ impl AppCore {
     /// twin [`Self::dml_supported`] helper still exists for the
     /// common case where the caller wants both the boolean and the
     /// status update.
-    fn dml_block_reason(&self) -> Option<String> {
+    async fn dml_block_reason(&self) -> Option<String> {
         if self.session.read_only {
             return Some(
                 "read-only mode: row-level DML disabled (relaunch without --read-only)".into(),
@@ -72,8 +71,8 @@ impl AppCore {
     /// driver does not expose row-level DML. The two checks are kept
     /// distinct in the status message so the user can tell why an
     /// action was refused.
-    fn dml_supported(&mut self) -> bool {
-        match self.dml_block_reason() {
+    async fn dml_supported(&mut self) -> bool {
+        match self.dml_block_reason().await {
             Some(reason) => {
                 self.ui.status.message = reason;
                 false
@@ -86,7 +85,7 @@ impl AppCore {
     /// the table identity and PK column values. Returns `None` when
     /// the active result is not editable (no `RowSource`, no PK,
     /// nothing selected, ...) and leaves a status hint on the bar.
-    fn snapshot_focused_row(&mut self) -> Option<FocusedRowSnapshot> {
+    async fn snapshot_focused_row(&mut self) -> Option<FocusedRowSnapshot> {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let (columns, rows, source) = if let ResultState::Rows {
             columns,
@@ -107,7 +106,7 @@ impl AppCore {
             );
             return None;
         }
-        let row_idx = self.row_index_for_focus();
+        let row_idx = self.row_index_for_focus().await;
         let row = rows.get(row_idx).cloned()?;
         let column_order: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let mut pk_values = BTreeMap::new();
@@ -131,7 +130,7 @@ impl AppCore {
     /// results-actions impl): returns the original row index of the
     /// focused row, falling back to `0` when `visible_indices` is
     /// empty (no render has populated it yet).
-    fn row_index_for_focus(&self) -> usize {
+    async fn row_index_for_focus(&self) -> usize {
         let tab = &self.ui.tabs[self.ui.active_tab];
         let Some(vis_selected) = tab.results.active().selected() else {
             return 0;
@@ -148,8 +147,8 @@ impl AppCore {
     /// falls back to column defaults. The user typically then steps
     /// across the staged row in the grid and uses `e` (cell edit) to
     /// populate fields before committing.
-    pub(super) fn append_row(&mut self) {
-        if !self.dml_supported() {
+    pub(super) async fn append_row(&mut self) {
+        if !self.dml_supported().await {
             return;
         }
         let tab = &self.ui.tabs[self.ui.active_tab];
@@ -180,11 +179,12 @@ impl AppCore {
     /// `O` — duplicate the focused row as a fresh `INSERT`. Every
     /// non-PK column is copied; PK columns are skipped (PK is typically
     /// auto-generated; leave it to engine defaults).
-    pub(super) fn duplicate_row(&mut self) {
-        if !self.dml_supported() {
+    pub(super) async fn duplicate_row(&mut self) {
+        if !self.dml_supported().await {
             return;
         }
-        let Some((target, columns, row, column_order, _pk)) = self.snapshot_focused_row() else {
+        let Some((target, columns, row, column_order, _pk)) = self.snapshot_focused_row().await
+        else {
             return;
         };
         let mut values: BTreeMap<String, Value> = BTreeMap::new();
@@ -214,11 +214,12 @@ impl AppCore {
     }
 
     /// `d` — queue a `DELETE` on the focused row.
-    pub(super) fn delete_row(&mut self) {
-        if !self.dml_supported() {
+    pub(super) async fn delete_row(&mut self) {
+        if !self.dml_supported().await {
             return;
         }
-        let Some((target, columns, row, column_order, pk_values)) = self.snapshot_focused_row()
+        let Some((target, columns, row, column_order, pk_values)) =
+            self.snapshot_focused_row().await
         else {
             return;
         };
@@ -252,8 +253,8 @@ impl AppCore {
     /// path: the change goes into the queue and the in-memory grid is
     /// patched so the user sees the new value while it is still
     /// uncommitted.
-    pub(super) fn queue_cell_edit_commit(&mut self) {
-        if !self.dml_supported() {
+    pub(super) async fn queue_cell_edit_commit(&mut self) {
+        if !self.dml_supported().await {
             // Drop the in-flight edit so the modal closes — leaving
             // it open would suggest the change will land.
             self.ui.tabs[self.ui.active_tab].editing = None;
@@ -272,11 +273,13 @@ impl AppCore {
         {
             (columns.clone(), rows.clone(), source.clone())
         } else {
-            self.set_edit_error("result is no longer editable".into());
+            self.set_edit_error("result is no longer editable".into())
+                .await;
             return;
         };
         let Some(row) = rows.get(edit.row_index).cloned() else {
-            self.set_edit_error("row went away under the editor".into());
+            self.set_edit_error("row went away under the editor".into())
+                .await;
             return;
         };
         let hint = columns
@@ -292,7 +295,8 @@ impl AppCore {
             self.set_edit_error(format!(
                 "{}: no primary key, cell edits are disabled",
                 source.table
-            ));
+            ))
+            .await;
             return;
         }
         for pk in &pk_columns {
@@ -300,7 +304,8 @@ impl AppCore {
                 self.set_edit_error(format!(
                     "primary key column '{}' is not present in the result set",
                     pk.name
-                ));
+                ))
+                .await;
                 return;
             };
             let value = row.0.get(idx).cloned().unwrap_or(Value::Null);
@@ -308,7 +313,8 @@ impl AppCore {
                 self.set_edit_error(format!(
                     "primary key column '{}' is NULL in this row; refusing to UPDATE",
                     pk.name
-                ));
+                ))
+                .await;
                 return;
             }
             pk_values.insert(pk.name.clone(), value);
@@ -344,7 +350,7 @@ impl AppCore {
     }
 
     /// `Ctrl-X` — throw away every staged mutation.
-    pub(super) fn discard_pending(&mut self) {
+    pub(super) async fn discard_pending(&mut self) {
         let n = self.ui.tabs[self.ui.active_tab].pending.len();
         if n == 0 {
             self.ui.status.message = "nothing pending to discard".into();
@@ -361,7 +367,7 @@ impl AppCore {
     /// discard are forwarded to the regular Results-pane handlers so
     /// the user does not lose their muscle memory; both close the
     /// modal as a side effect of clearing the queue.
-    pub(super) fn handle_pending_preview_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_pending_preview_key(&mut self, key: KeyEvent) {
         let total = self.ui.tabs[self.ui.active_tab].pending.len() as u16;
         let max_scroll = total.saturating_sub(1);
         match key.code {
@@ -370,13 +376,13 @@ impl AppCore {
                 self.ui.status.message = "preview closed".into();
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.toggle_pending_preview();
+                self.toggle_pending_preview().await;
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.commit_pending();
+                self.commit_pending().await;
             }
             KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.discard_pending();
+                self.discard_pending().await;
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if let Some(state) = self.ui.tabs[self.ui.active_tab].pending_preview.as_mut() {
@@ -413,7 +419,7 @@ impl AppCore {
     }
 
     /// `Ctrl-P` — toggle the pending preview modal.
-    pub(super) fn toggle_pending_preview(&mut self) {
+    pub(super) async fn toggle_pending_preview(&mut self) {
         if self.ui.tabs[self.ui.active_tab].pending_preview.is_some() {
             self.ui.tabs[self.ui.active_tab].pending_preview = None;
             self.ui.status.message = "preview closed".into();
@@ -432,7 +438,7 @@ impl AppCore {
     /// `Ctrl-S` — flush every staged mutation inside one transaction.
     /// On any compile / dispatch error the transaction is rolled back
     /// and the queue is left intact so the user can inspect and fix.
-    pub(super) fn commit_pending(&mut self) {
+    pub(super) async fn commit_pending(&mut self) {
         let queue: PendingChanges = {
             let tab = &mut self.ui.tabs[self.ui.active_tab];
             if tab.pending.is_empty() {
@@ -473,15 +479,14 @@ impl AppCore {
         // owned by AppCore) plus a `PendingCommitted` MetaUpdate that
         // carries the audit payload back. Tracked as a follow-up;
         // for now the multi-thread runtime absorbs the freeze.
-        let outcome = tokio::task::block_in_place(|| {
-            Handle::current().block_on(execute_batch(target, exec_compiled))
-        });
+        let outcome = execute_batch(target, exec_compiled).await;
         // L36: audit log — every committed mutation is journalled as
         // a separate HistoryEntry tagged with `source = "pending"` so
         // an auditor can both (a) replay the exact SQL the user sent
         // and (b) tell that it came from the staged-mutation pipeline
         // rather than the regular query editor.
-        self.record_pending_audit(&compiled, &outcome, started.elapsed());
+        self.record_pending_audit(&compiled, &outcome, started.elapsed())
+            .await;
         match outcome {
             Ok(rows_affected) => {
                 let n = compiled.len();
@@ -492,7 +497,7 @@ impl AppCore {
                 // Re-run the current preview so the grid shows the
                 // server's authoritative view (auto-increment PKs,
                 // generated timestamps, deletions reflected, ...).
-                self.refresh_current_preview();
+                self.refresh_current_preview().await;
             }
             Err(e) => {
                 self.ui.status.message = format!("commit failed: {e} — queue preserved");
@@ -515,7 +520,7 @@ impl AppCore {
     /// 0; the auditor can sum a `source = "pending"` window to
     /// recover the batch duration without us pretending to measure
     /// per-statement timings we never collected.
-    fn record_pending_audit(
+    async fn record_pending_audit(
         &self,
         compiled: &[CompiledMutation],
         outcome: &Result<u64, String>,
@@ -565,7 +570,7 @@ impl AppCore {
 
     /// Re-issue the currently visible `SELECT * FROM ...` preview, if
     /// any. Used after a successful commit to repaint the grid.
-    fn refresh_current_preview(&mut self) {
+    async fn refresh_current_preview(&mut self) {
         let target = {
             let tab = &self.ui.tabs[self.ui.active_tab];
             match tab.results.active_state() {
@@ -576,7 +581,7 @@ impl AppCore {
             }
         };
         if let Some((schema, table, offset)) = target {
-            self.run_preview(&schema, &table, offset);
+            self.run_preview(&schema, &table, offset).await;
         }
     }
 

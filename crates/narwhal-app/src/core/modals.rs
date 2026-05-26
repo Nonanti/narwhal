@@ -14,39 +14,40 @@ use crate::run::RunMode;
 use crate::wizard::DRIVERS;
 
 impl AppCore {
-    pub fn open_help(&mut self) {
+    pub async fn open_help(&mut self) {
         self.modals.help_open = true;
     }
 
-    pub(super) fn toggle_help(&mut self) {
+    pub(super) async fn toggle_help(&mut self) {
         self.modals.help_open = !self.modals.help_open;
     }
 
     /// Open the Ctrl+R history modal. Dispatches a background
     /// load via the meta channel (H11) so the UI stays responsive.
-    pub fn open_history(&mut self) {
+    pub async fn open_history(&mut self) {
         let Some(_journal) = &self.session.history_journal else {
             self.ui.status.message = "history disabled".into();
             return;
         };
         self.dispatch_meta(MetaRequest::LoadHistory {
             limit: narwhal_tui::constants::HISTORY_LOAD_LIMIT,
-        });
+        })
+        .await;
         self.ui.status.message = "loading history…".into();
     }
 
-    pub(super) fn close_history(&mut self) {
+    pub(super) async fn close_history(&mut self) {
         self.modals.history = None;
     }
 
     /// Handle key events while the history modal is open.
-    pub(super) fn handle_history_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_history_key(&mut self, key: KeyEvent) {
         let Some(state) = self.modals.history.as_mut() else {
             return;
         };
         match key.code {
             CtKey::Esc => {
-                self.close_history();
+                self.close_history().await;
                 self.ui.status.message = "history closed".into();
             }
             CtKey::Up | CtKey::Char('k')
@@ -72,16 +73,16 @@ impl AppCore {
                 };
                 if let Some(sql) = sql {
                     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-                    self.close_history();
+                    self.close_history().await;
                     self.ui.tabs[self.ui.active_tab].editor.insert_str(&sql);
                     if shift {
-                        self.dispatch_current_statement(RunMode::Execute);
+                        self.dispatch_current_statement(RunMode::Execute).await;
                     } else {
                         self.ui.status.message =
                             format!("inserted {} char(s) from history", sql.len());
                     }
                 } else {
-                    self.close_history();
+                    self.close_history().await;
                 }
             }
             CtKey::Backspace => {
@@ -97,7 +98,7 @@ impl AppCore {
     }
 
     /// Open the `:snippets` modal. Reads the snippet list from the store.
-    pub(super) fn open_snippets_modal(&mut self) {
+    pub(super) async fn open_snippets_modal(&mut self) {
         match self.session.snippet_store.list() {
             Ok(entries) => {
                 if entries.is_empty() {
@@ -116,18 +117,18 @@ impl AppCore {
         }
     }
 
-    pub(super) fn close_snippets_modal(&mut self) {
+    pub(super) async fn close_snippets_modal(&mut self) {
         self.modals.snippets = None;
     }
 
     /// Handle key events while the snippets modal is open.
-    pub(super) fn handle_snippets_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_snippets_key(&mut self, key: KeyEvent) {
         let Some(modal) = self.modals.snippets.as_mut() else {
             return;
         };
         match key.code {
             CtKey::Esc => {
-                self.close_snippets_modal();
+                self.close_snippets_modal().await;
                 self.ui.status.message = "snippets closed".into();
             }
             CtKey::Up | CtKey::Char('k')
@@ -148,9 +149,9 @@ impl AppCore {
                     .snippets
                     .as_ref()
                     .and_then(|m| m.entries.get(m.selected).cloned());
-                self.close_snippets_modal();
+                self.close_snippets_modal().await;
                 if let Some(name) = name {
-                    self.load_snippet_by_name(&name);
+                    self.load_snippet_by_name(&name).await;
                 } else {
                     self.ui.status.message = "snippets closed".into();
                 }
@@ -160,10 +161,10 @@ impl AppCore {
     }
 
     /// Load a snippet by name into a new editor tab.
-    pub(super) fn load_snippet_by_name(&mut self, name: &str) {
+    pub(super) async fn load_snippet_by_name(&mut self, name: &str) {
         match self.session.snippet_store.load(name) {
             Ok(sql) => {
-                self.new_tab();
+                self.new_tab().await;
                 self.ui.tabs[self.ui.active_tab].editor.insert_str(&sql);
                 self.ui.tabs[self.ui.active_tab].name = name.to_owned();
                 self.ui.status.message = format!("loaded snippet '{name}' ({} char(s))", sql.len());
@@ -175,7 +176,7 @@ impl AppCore {
     }
 
     /// Save the current editor buffer as a named snippet.
-    pub(super) fn save_snippet(&mut self, name: &str) {
+    pub(super) async fn save_snippet(&mut self, name: &str) {
         let sql = self.ui.tabs[self.ui.active_tab].editor.entire_text();
         if sql.trim().is_empty() {
             self.ui.status.message = "editor is empty; nothing to save".into();
@@ -192,7 +193,7 @@ impl AppCore {
     }
 
     /// Remove a named snippet.
-    pub(super) fn remove_snippet(&mut self, name: &str) {
+    pub(super) async fn remove_snippet(&mut self, name: &str) {
         match self.session.snippet_store.remove(name) {
             Ok(()) => {
                 self.ui.status.message = format!("removed snippet '{name}'");
@@ -203,14 +204,14 @@ impl AppCore {
         }
     }
 
-    pub(super) fn cancel_wizard(&mut self) {
+    pub(super) async fn cancel_wizard(&mut self) {
         if self.modals.wizard.take().is_some() {
             self.modals.wizard_error = None;
             self.ui.status.message = "add cancelled".into();
         }
     }
 
-    pub(super) fn commit_wizard(&mut self) {
+    pub(super) async fn commit_wizard(&mut self) {
         let Some(wizard) = self.modals.wizard.as_ref() else {
             return;
         };
@@ -298,10 +299,7 @@ impl AppCore {
                     // already unlocked) and the wizard view is the
                     // user's mental "loading" surface for the entire
                     // commit step.
-                    if let Err(error) = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(self.deps.credentials.set(connection_id, secret))
-                    }) {
+                    if let Err(error) = self.deps.credentials.set(connection_id, secret).await {
                         // The connection is still saved; just warn the user
                         // that the secret didn't make it to the keyring.
                         self.modals.wizard_error = Some(format!(
@@ -329,7 +327,7 @@ impl AppCore {
         }
     }
 
-    pub(super) fn handle_wizard_key(&mut self, key: KeyEvent) {
+    pub(super) async fn handle_wizard_key(&mut self, key: KeyEvent) {
         let Some(wizard) = self.modals.wizard.as_mut() else {
             return;
         };
@@ -353,12 +351,12 @@ impl AppCore {
             return;
         }
         match key.code {
-            CtKey::Esc => self.cancel_wizard(),
+            CtKey::Esc => self.cancel_wizard().await,
             CtKey::Tab | CtKey::Down => wizard.next_focus(),
             CtKey::BackTab | CtKey::Up => wizard.prev_focus(),
             CtKey::Left if wizard.focused == 0 => wizard.cycle_driver(-1),
             CtKey::Right if wizard.focused == 0 => wizard.cycle_driver(1),
-            CtKey::Enter => self.commit_wizard(),
+            CtKey::Enter => self.commit_wizard().await,
             CtKey::Backspace => wizard.pop_char(),
             CtKey::Char(c) => {
                 if wizard.focused == 0 {

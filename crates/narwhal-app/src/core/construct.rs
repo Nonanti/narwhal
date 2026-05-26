@@ -80,7 +80,7 @@ impl AppCore {
 
     /// Read-only accessor for the active clipboard. Mostly useful for
     /// tests that want to assert what was just yanked.
-    pub fn clipboard(&self) -> Arc<dyn Clipboard> {
+    pub async fn clipboard(&self) -> Arc<dyn Clipboard> {
         Arc::clone(&self.deps.clipboard)
     }
 

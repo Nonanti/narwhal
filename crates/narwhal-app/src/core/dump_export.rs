@@ -17,7 +17,7 @@ use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::RunMode;
 
 impl AppCore {
-    pub(super) fn dump_schema(&mut self, target: DumpTarget) {
+    pub(super) async fn dump_schema(&mut self, target: DumpTarget) {
         let Some(_) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -29,20 +29,21 @@ impl AppCore {
                 // responsive during long-running dump_schema all.
                 self.dispatch_meta(MetaRequest::DumpSchemaAll {
                     tab_id: self.ui.tabs[self.ui.active_tab].id(),
-                });
+                })
+                .await;
                 self.ui.status.message = "dump-schema: fetching DDL for all tables…".into();
             }
             DumpTarget::Current | DumpTarget::Named(_) => {
                 // Current/Named targets fetch a single table's DDL;
                 // the blocking call is brief enough that the
                 // block_in_place overhead is negligible.
-                self.dump_schema_single(target);
+                self.dump_schema_single(target).await;
             }
         }
     }
 
     /// Fetch DDL for a single named or current table (synchronous path).
-    fn dump_schema_single(&mut self, target: DumpTarget) {
+    async fn dump_schema_single(&mut self, target: DumpTarget) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -124,7 +125,7 @@ impl AppCore {
         });
     }
 
-    pub(super) fn dispatch_explain(&mut self) {
+    pub(super) async fn dispatch_explain(&mut self) {
         let Some(session) = self.session.active.as_ref() else {
             self.ui.status.message = "no active connection".into();
             return;
@@ -145,11 +146,12 @@ impl AppCore {
             self.ui.status.message = "no statement under cursor".into();
             return;
         }
-        self.dispatch_batch(vec![wrap_explain(&trimmed)], RunMode::Execute);
+        self.dispatch_batch(vec![wrap_explain(&trimmed)], RunMode::Execute)
+            .await;
         self.ui.status.message = "explaining…".into();
     }
 
-    pub(super) fn export_results(&mut self, format: &str, path: &str) {
+    pub(super) async fn export_results(&mut self, format: &str, path: &str) {
         let Some(format) = ExportFormat::from_token(format) else {
             self.ui.status.message = format!("unknown export format: {format} (csv|json|insert)");
             return;

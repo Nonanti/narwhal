@@ -49,11 +49,12 @@ async fn open_then_run_returns_rows() {
     assert!(matches!(core.result(), ResultState::Empty));
     assert!(core.session().is_none());
 
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
     assert!(core.session().is_some(), "session must open");
 
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     match core.result() {
@@ -76,14 +77,15 @@ async fn run_all_executes_every_statement() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
     core.insert_into_editor(
         "CREATE TABLE notes (n TEXT); \
          INSERT INTO notes VALUES ('alpha'); \
          INSERT INTO notes VALUES ('beta'); \
          SELECT * FROM notes",
-    );
-    core.execute_command("run-all");
+    )
+    .await;
+    core.execute_command("run-all").await;
     core.drain_run_updates().await;
 
     match core.result() {
@@ -97,7 +99,7 @@ async fn run_all_executes_every_statement() {
 async fn unknown_connection_emits_status_only() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open does-not-exist");
+    core.execute_command("open does-not-exist").await;
     assert!(core.session().is_none());
     assert!(core.status_message().contains("connection not found"));
 }
@@ -120,7 +122,7 @@ async fn sidebar_enter_opens_table_detail() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
 
     // Switch focus to the sidebar (Ctrl-W cycles editor->results->sidebar).
     let ctrl_w = KeyEvent {
@@ -130,7 +132,7 @@ async fn sidebar_enter_opens_table_detail() {
         state: KeyEventState::NONE,
     };
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
     // Step down to the `orders` row: connection (0) -> main (1) ->
     // customers (2) -> orders (3).
@@ -141,7 +143,7 @@ async fn sidebar_enter_opens_table_detail() {
         state: KeyEventState::NONE,
     };
     for _ in 0..3 {
-        core.handle_key(j);
+        core.handle_key(j).await;
     }
     let enter = KeyEvent {
         code: KeyCode::Enter,
@@ -149,7 +151,7 @@ async fn sidebar_enter_opens_table_detail() {
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
     };
-    core.handle_key(enter);
+    core.handle_key(enter).await;
 
     match core.result() {
         ResultState::TableDetail { schema, .. } => {
@@ -180,7 +182,7 @@ async fn colon_from_sidebar_focuses_editor_and_enters_command_mode() {
         state: KeyEventState::NONE,
     };
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl_w);
+        core.handle_key(ctrl_w).await;
     }
     assert_eq!(core.focus(), Pane::Sidebar);
 
@@ -191,7 +193,7 @@ async fn colon_from_sidebar_focuses_editor_and_enters_command_mode() {
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
     };
-    core.handle_key(colon);
+    core.handle_key(colon).await;
     assert_eq!(core.focus(), Pane::Editor);
     assert_eq!(core.mode(), Mode::Command);
     assert_eq!(core.command_buffer(), "");
@@ -203,7 +205,8 @@ async fn colon_from_sidebar_focuses_editor_and_enters_command_mode() {
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
-        });
+        })
+        .await;
     }
     assert_eq!(core.command_buffer(), "open");
 }
@@ -212,7 +215,7 @@ async fn colon_from_sidebar_focuses_editor_and_enters_command_mode() {
 async fn run_without_session_emits_status_only() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("run");
+    core.execute_command("run").await;
     assert!(core.status_message().contains("no active connection"));
     assert!(matches!(core.result(), ResultState::Empty));
 }
@@ -242,30 +245,30 @@ async fn active_tab_invariant_holds_across_lifecycle() {
 
     check(&core, "fresh AppCore");
 
-    core.execute_command("new");
-    core.execute_command("new");
-    core.execute_command("new");
+    core.execute_command("new").await;
+    core.execute_command("new").await;
+    core.execute_command("new").await;
     check(&core, "after :new x3");
     assert_eq!(core.tabs().len(), 4);
 
-    core.execute_command("tabnext");
-    core.execute_command("tabnext");
-    core.execute_command("tabnext");
-    core.execute_command("tabnext");
+    core.execute_command("tabnext").await;
+    core.execute_command("tabnext").await;
+    core.execute_command("tabnext").await;
+    core.execute_command("tabnext").await;
     check(&core, "after :tabnext x4 (wrap)");
 
-    core.execute_command("tabprev");
-    core.execute_command("tabprev");
+    core.execute_command("tabprev").await;
+    core.execute_command("tabprev").await;
     check(&core, "after :tabprev x2");
 
-    core.execute_command("tabclose");
-    core.execute_command("tabclose");
-    core.execute_command("tabclose");
+    core.execute_command("tabclose").await;
+    core.execute_command("tabclose").await;
+    core.execute_command("tabclose").await;
     check(&core, "after :tabclose x3");
     assert_eq!(core.tabs().len(), 1);
 
     // Closing the last tab is a no-op with a status message.
-    core.execute_command("tabclose");
+    core.execute_command("tabclose").await;
     check(&core, "after attempted close of last tab");
     assert_eq!(core.tabs().len(), 1);
     assert!(core.status_message().contains("last tab"));
@@ -293,7 +296,7 @@ async fn status_bar_pins_connection_through_transient_messages() {
     assert!(core.status_bar().connection.is_none());
 
     // Open a connection — the center slot must be populated.
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
     let conn_slot = core
         .status_bar()
         .connection
@@ -306,8 +309,9 @@ async fn status_bar_pins_connection_through_transient_messages() {
 
     // Run a query — produces a transient message but must NOT clear the
     // connection slot.
-    core.insert_into_editor("SELECT id, label FROM items ORDER BY id");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items ORDER BY id")
+        .await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     assert!(
@@ -340,14 +344,14 @@ async fn status_bar_clears_connection_on_close() {
     assert!(core.status_bar().connection.is_none());
 
     // Open — slot appears.
-    core.execute_command("open headless");
+    core.execute_command("open headless").await;
     assert!(
         core.status_bar().connection.is_some(),
         "connection slot must be set after :open"
     );
 
     // Close — slot clears.
-    core.execute_command("close");
+    core.execute_command("close").await;
     assert!(
         core.status_bar().connection.is_none(),
         "connection slot must be cleared after :close"

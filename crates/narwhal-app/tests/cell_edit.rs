@@ -36,9 +36,9 @@ const fn ctrl(c: char) -> KeyEvent {
     }
 }
 
-fn type_str(core: &mut AppCore, text: &str) {
+async fn type_str(core: &mut AppCore, text: &str) {
     for ch in text.chars() {
-        core.handle_key(key(KeyCode::Char(ch)));
+        core.handle_key(key(KeyCode::Char(ch))).await;
     }
 }
 
@@ -62,12 +62,12 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 /// preview with `o`. Drains the resulting run updates.
 async fn preview_at(core: &mut AppCore, jumps: usize) {
     while core.focus() != Pane::Sidebar {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
     for _ in 0..jumps {
-        core.handle_key(key(KeyCode::Char('j')));
+        core.handle_key(key(KeyCode::Char('j'))).await;
     }
-    core.handle_key(key(KeyCode::Char('o')));
+    core.handle_key(key(KeyCode::Char('o'))).await;
     core.drain_run_updates().await;
 }
 
@@ -85,22 +85,22 @@ async fn edit_string_cell_updates_database() {
     }
     let (registry, connections) = fixture(db_path.clone());
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open edit");
+    core.execute_command("open edit").await;
     // Sidebar layout: connection (0) -> main schema (1) -> items (2).
     preview_at(&mut core, 2).await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('l'))); // column 1 = label
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('l'))).await; // column 1 = label
 
-    core.handle_key(key(KeyCode::Char('e')));
+    core.handle_key(key(KeyCode::Char('e'))).await;
     for _ in 0..16 {
-        core.handle_key(key(KeyCode::Backspace));
+        core.handle_key(key(KeyCode::Backspace)).await;
     }
-    type_str(&mut core, "gamma");
-    core.handle_key(key(KeyCode::Enter));
+    type_str(&mut core, "gamma").await;
+    core.handle_key(key(KeyCode::Enter)).await;
 
     // L36: the edit is now staged. The in-memory grid reflects the
     // queued value, but the database has not been touched yet.
@@ -133,7 +133,7 @@ async fn edit_string_cell_updates_database() {
     // → "executing…" → "done" by the time we observe it, so we
     // verify the commit by inspecting the database directly
     // (transactional truth) rather than racing the status bar.
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
 
     let conn = rusqlite::Connection::open(&db_path).unwrap();
@@ -157,27 +157,27 @@ async fn edit_with_null_token_sets_null() {
     }
     let (registry, connections) = fixture(db_path.clone());
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open edit");
+    core.execute_command("open edit").await;
     preview_at(&mut core, 2).await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('l')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('l'))).await;
 
-    core.handle_key(key(KeyCode::Char('e')));
+    core.handle_key(key(KeyCode::Char('e'))).await;
     for _ in 0..16 {
-        core.handle_key(key(KeyCode::Backspace));
+        core.handle_key(key(KeyCode::Backspace)).await;
     }
-    type_str(&mut core, "NULL");
-    core.handle_key(key(KeyCode::Enter));
+    type_str(&mut core, "NULL").await;
+    core.handle_key(key(KeyCode::Enter)).await;
     assert!(
         core.status_message().contains("queued UPDATE"),
         "got: {}",
         core.status_message()
     );
-    core.handle_key(ctrl('s'));
+    core.handle_key(ctrl('s')).await;
     core.drain_run_updates().await;
     let conn = rusqlite::Connection::open(&db_path).unwrap();
     let null: Option<String> = conn
@@ -198,14 +198,14 @@ async fn edit_rejected_for_table_without_pk() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open edit");
+    core.execute_command("open edit").await;
     preview_at(&mut core, 2).await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('e')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('e'))).await;
     let msg = core.status_message();
     assert!(
         msg.contains("no primary key") || msg.contains("disabled") || msg.contains("read-only"),
@@ -227,16 +227,16 @@ async fn freeform_run_results_are_read_only() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open edit");
+    core.execute_command("open edit").await;
 
-    core.insert_into_editor("SELECT id, label FROM items");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT id, label FROM items").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     while core.focus() != Pane::Results {
-        core.handle_key(ctrl('w'));
+        core.handle_key(ctrl('w')).await;
     }
-    core.handle_key(key(KeyCode::Char('j')));
-    core.handle_key(key(KeyCode::Char('e')));
+    core.handle_key(key(KeyCode::Char('j'))).await;
+    core.handle_key(key(KeyCode::Char('e'))).await;
     assert!(core.status_message().contains("read-only"));
 }

@@ -30,7 +30,7 @@ impl AppCore {
     /// want to assert auto-trigger fired without depending on a
     /// specific status-bar message.
     #[doc(hidden)]
-    pub fn editor_completion_is_open(&self) -> bool {
+    pub async fn editor_completion_is_open(&self) -> bool {
         self.ui.tabs[self.ui.active_tab].completion.is_some()
     }
 
@@ -106,7 +106,7 @@ impl AppCore {
 
     /// Tab index that owns the in-flight run.  Falls back to
     /// `active_tab` when no run is in progress (defensive default).
-    pub(super) fn run_tab_index(&self) -> usize {
+    pub(super) async fn run_tab_index(&self) -> usize {
         self.process.run_tab.unwrap_or(self.ui.active_tab)
     }
 
@@ -185,7 +185,7 @@ impl AppCore {
 
     /// Whether the row detail modal is currently open on the active tab.
     #[doc(hidden)]
-    pub fn row_detail_is_open(&self) -> bool {
+    pub async fn row_detail_is_open(&self) -> bool {
         self.ui.tabs[self.ui.active_tab].row_detail.is_some()
     }
 

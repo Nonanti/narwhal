@@ -38,7 +38,7 @@ pub(super) const fn isolation_label(level: IsolationLevel) -> &'static str {
 }
 
 impl AppCore {
-    pub(super) fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
+    pub(super) async fn begin_transaction(&mut self, isolation: Option<IsolationArg>) {
         if self.process.running {
             self.ui.status.message = "a query is already running".into();
             return;
@@ -65,19 +65,18 @@ impl AppCore {
         // draining during the short BEGIN round-trip so the freeze
         // window is bounded.
         let result: std::result::Result<narwhal_pool::PooledConnection, narwhal_core::Error> =
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async move {
-                    let mut conn = pool
-                        .acquire()
-                        .await
-                        .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
-                    match iso {
-                        Some(level) => conn.begin_with(level).await?,
-                        None => conn.begin().await?,
-                    }
-                    Ok(conn)
-                })
-            });
+            async move {
+                let mut conn = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| narwhal_core::Error::Connection(e.to_string()))?;
+                match iso {
+                    Some(level) => conn.begin_with(level).await?,
+                    None => conn.begin().await?,
+                }
+                Ok(conn)
+            }
+            .await;
         match result {
             Ok(conn) => {
                 session.transaction = Some(TxnHandle {
@@ -106,18 +105,18 @@ impl AppCore {
         }
     }
 
-    pub(super) fn commit_transaction(&mut self) {
-        self.end_transaction(true);
+    pub(super) async fn commit_transaction(&mut self) {
+        self.end_transaction(true).await;
     }
 
-    pub(super) fn rollback_transaction(&mut self) {
-        self.end_transaction(false);
+    pub(super) async fn rollback_transaction(&mut self) {
+        self.end_transaction(false).await;
     }
 
     /// Finish an open transaction. `commit == true` invokes `commit()`,
     /// otherwise `rollback()`. Either way the pinned connection is
     /// returned to the pool.
-    pub(super) fn end_transaction(&mut self, commit: bool) {
+    pub(super) async fn end_transaction(&mut self, commit: bool) {
         if self.process.running {
             self.ui.status.message = "a query is already running".into();
             return;
@@ -150,22 +149,21 @@ impl AppCore {
             return;
         };
         let conn_arc = txn.conn;
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let mutex = Arc::try_unwrap(conn_arc).map_err(|_| {
-                    narwhal_core::Error::Connection(
-                        "transaction connection raced after strong-count check".into(),
-                    )
-                })?;
-                let mut conn = mutex.into_inner();
-                if commit {
-                    conn.commit().await?;
-                } else {
-                    conn.rollback().await?;
-                }
-                Ok::<(), narwhal_core::Error>(())
-            })
-        });
+        let outcome = async move {
+            let mutex = Arc::try_unwrap(conn_arc).map_err(|_| {
+                narwhal_core::Error::Connection(
+                    "transaction connection raced after strong-count check".into(),
+                )
+            })?;
+            let mut conn = mutex.into_inner();
+            if commit {
+                conn.commit().await?;
+            } else {
+                conn.rollback().await?;
+            }
+            Ok::<(), narwhal_core::Error>(())
+        }
+        .await;
         // Clear the plugin-side flag so subsequent `sql_run` calls work
         // against the pool again. The connection itself is now back in
         // the pool (PooledConnection::drop returned it), regardless of
@@ -194,7 +192,7 @@ impl AppCore {
         }
     }
 
-    pub(super) fn savepoint(&mut self, name: &str) {
+    pub(super) async fn savepoint(&mut self, name: &str) {
         self.with_txn_conn(
             |conn, name| Box::pin(async move { conn.savepoint(name).await }),
             name,
@@ -205,10 +203,11 @@ impl AppCore {
             },
             |name| format!("savepoint '{name}' established"),
             |name, error| format!("savepoint '{name}' failed: {error}"),
-        );
+        )
+        .await;
     }
 
-    pub(super) fn release_savepoint(&mut self, name: &str) {
+    pub(super) async fn release_savepoint(&mut self, name: &str) {
         self.with_txn_conn(
             |conn, name| Box::pin(async move { conn.release_savepoint(name).await }),
             name,
@@ -221,10 +220,11 @@ impl AppCore {
             },
             |name| format!("savepoint '{name}' released"),
             |name, error| format!("release '{name}' failed: {error}"),
-        );
+        )
+        .await;
     }
 
-    pub(super) fn rollback_to_savepoint(&mut self, name: &str) {
+    pub(super) async fn rollback_to_savepoint(&mut self, name: &str) {
         self.with_txn_conn(
             |conn, name| Box::pin(async move { conn.rollback_to_savepoint(name).await }),
             name,
@@ -238,7 +238,8 @@ impl AppCore {
             },
             |name| format!("rolled back to savepoint '{name}'"),
             |name, error| format!("rollback-to '{name}' failed: {error}"),
-        );
+        )
+        .await;
     }
 
     /// Lock the pinned transaction connection and run `op` on it. Used by
@@ -246,7 +247,7 @@ impl AppCore {
     /// guarding boilerplate. Statement execution (`:run`/`:run-all`) goes
     /// through `dispatch_batch` instead since that path streams updates
     /// back through `RunUpdate`.
-    fn with_txn_conn<F, S, OkF, ErrF>(
+    async fn with_txn_conn<F, S, OkF, ErrF>(
         &mut self,
         op: F,
         name: &str,
@@ -286,12 +287,11 @@ impl AppCore {
         // RunUpdate variant. Deferred to the same epic as the other
         // txn bridges. Wait window is bounded by the engine's
         // savepoint round-trip (single-digit ms on local engines).
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let mut guard = conn_arc.lock().await;
-                op(&mut **guard, name).await
-            })
-        });
+        let result = async move {
+            let mut guard = conn_arc.lock().await;
+            op(&mut **guard, name).await
+        }
+        .await;
         match result {
             Ok(()) => {
                 on_success(session, name);

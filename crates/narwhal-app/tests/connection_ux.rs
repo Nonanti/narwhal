@@ -39,7 +39,8 @@ async fn url_prefills_wizard_without_committing() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("url postgres://alice:s3cret@db.example.com:6432/inventory");
+    core.execute_command("url postgres://alice:s3cret@db.example.com:6432/inventory")
+        .await;
 
     let wizard = core.wizard().expect("wizard must be open after :url");
     let by = |kind: WizardFieldKind| -> String {
@@ -69,7 +70,7 @@ async fn url_rejects_invalid_dsn() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("url not-a-url");
+    core.execute_command("url not-a-url").await;
     assert!(
         core.wizard().is_none(),
         "wizard must stay closed on parse failure"
@@ -93,7 +94,7 @@ async fn edit_prefills_wizard_with_existing_id() {
     let saved_id = connections.connections[0].id;
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("edit headless");
+    core.execute_command("edit headless").await;
     let wizard = core.wizard().expect("wizard must open after :edit");
     assert_eq!(wizard.existing_id, Some(saved_id));
     assert_eq!(wizard.driver(), "sqlite");
@@ -110,7 +111,7 @@ async fn edit_prefills_wizard_with_existing_id() {
 async fn edit_unknown_connection_emits_status_only() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("edit ghost");
+    core.execute_command("edit ghost").await;
     assert!(core.wizard().is_none());
     assert!(
         core.status_message().contains("ghost"),
@@ -129,7 +130,7 @@ async fn test_named_connection_does_not_persist_session() {
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("test headless");
+    core.execute_command("test headless").await;
     // Sprint 9 (H7): `:test` now goes through the meta channel, so
     // the verdict arrives asynchronously.
     core.drain_meta_updates().await;
@@ -147,7 +148,7 @@ async fn test_named_connection_does_not_persist_session() {
 async fn test_invalid_url_reports_parse_error() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("test http://wrong-scheme/db");
+    core.execute_command("test http://wrong-scheme/db").await;
     assert!(
         core.status_message().contains("test"),
         "expected test prefix in status, got: {}",
@@ -162,7 +163,7 @@ async fn test_invalid_url_reports_parse_error() {
 async fn test_without_session_or_arg_emits_hint() {
     let (registry, connections) = fixture(PathBuf::from(":memory:"));
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("test");
+    core.execute_command("test").await;
     assert!(
         core.status_message().contains("no active connection"),
         "expected 'no active connection' hint, got: {}",
@@ -183,7 +184,7 @@ async fn url_then_enter_persists_row() {
     // `connections_path` is None.
     let mut core = AppCore::new(registry, connections, None);
 
-    core.execute_command("url postgres://u@h/db");
+    core.execute_command("url postgres://u@h/db").await;
     // The wizard placed the cursor on the driver row; jump to `name`
     // (field index 0 ⇒ focused = 1) and overwrite the default.
     {
@@ -196,24 +197,25 @@ async fn url_then_enter_persists_row() {
     }
     // Drive the form through the public key handler so we exercise the
     // same path the TUI uses.
-    let send = |core: &mut AppCore, code: KeyCode| {
+    async fn send(core: &mut AppCore, code: KeyCode) {
         core.handle_key(KeyEvent {
             code,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
-        });
-    };
+        })
+        .await;
+    }
     // Move focus to the name field, clear the default, retype "prod".
-    send(&mut core, KeyCode::Tab);
+    send(&mut core, KeyCode::Tab).await;
     // The default name is "db" (3 chars) — pop until empty.
     for _ in 0..16 {
-        send(&mut core, KeyCode::Backspace);
+        send(&mut core, KeyCode::Backspace).await;
     }
     for c in "prod".chars() {
-        send(&mut core, KeyCode::Char(c));
+        send(&mut core, KeyCode::Char(c)).await;
     }
-    send(&mut core, KeyCode::Enter);
+    send(&mut core, KeyCode::Enter).await;
 
     assert!(core.wizard().is_none(), "wizard must close after commit");
     assert_eq!(core.connections().len(), 2);

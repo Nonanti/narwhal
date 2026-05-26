@@ -128,7 +128,7 @@ impl App {
                 event = events.next() => {
                     match event {
                         Some(Ok(ev)) => {
-                            self.handle_event(ev);
+                            self.handle_event(ev).await;
                             Some(DrawTrigger::Force)
                         }
                         Some(Err(error)) => {
@@ -171,10 +171,12 @@ impl App {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: Event) {
+    async fn handle_event(&mut self, event: Event) {
         match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => self.core.handle_key(key),
-            Event::Mouse(m) => self.core.handle_mouse(m),
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                self.core.handle_key(key).await;
+            }
+            Event::Mouse(m) => self.core.handle_mouse(m).await,
             Event::Resize(_, _) => debug!(target: "narwhal::app", "terminal resized"),
             // Sprint 7 (LOW): bracketed-paste support. crossterm emits
             // `Event::Paste(s)` for OSC 200 paste sequences when paste
@@ -184,7 +186,7 @@ impl App {
             // keystrokes one-by-one (which would trip motion handlers
             // and modal commands). Other panes ignore paste — only
             // the editor accepts text input today.
-            Event::Paste(text) => self.core.editor_paste(&text),
+            Event::Paste(text) => self.core.editor_paste(&text).await,
             _ => {}
         }
     }

@@ -73,23 +73,26 @@ async fn pane_click_changes_focus() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open mouse-test");
+    core.execute_command("open mouse-test").await;
 
     render(&mut core);
 
     // Click inside the editor rect → focus should switch to Editor.
     let editor_rect = core.last_layout().editor;
-    core.handle_mouse(click_at(editor_rect.x + 2, editor_rect.y + 2));
+    core.handle_mouse(click_at(editor_rect.x + 2, editor_rect.y + 2))
+        .await;
     assert_eq!(core.focus(), Pane::Editor);
 
     // Click inside the sidebar rect → focus should switch to Sidebar.
     let sidebar_rect = core.last_layout().sidebar;
-    core.handle_mouse(click_at(sidebar_rect.x + 2, sidebar_rect.y + 2));
+    core.handle_mouse(click_at(sidebar_rect.x + 2, sidebar_rect.y + 2))
+        .await;
     assert_eq!(core.focus(), Pane::Sidebar);
 
     // Click inside the results rect → focus should switch to Results.
     let results_rect = core.last_layout().results;
-    core.handle_mouse(click_at(results_rect.x + 2, results_rect.y + 2));
+    core.handle_mouse(click_at(results_rect.x + 2, results_rect.y + 2))
+        .await;
     assert_eq!(core.focus(), Pane::Results);
 }
 
@@ -107,7 +110,7 @@ async fn sidebar_table_click_injects_preview() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open mouse-test");
+    core.execute_command("open mouse-test").await;
 
     render(&mut core);
 
@@ -118,7 +121,7 @@ async fn sidebar_table_click_injects_preview() {
         "sidebar should have at least one table entry"
     );
     let (rect, _idx) = &table_rects[0];
-    core.handle_mouse(click_at(rect.x + 2, rect.y));
+    core.handle_mouse(click_at(rect.x + 2, rect.y)).await;
 
     // The click should have dispatched a preview query via
     // run_preview (same as keyboard `o`). The core should be
@@ -155,7 +158,7 @@ async fn completion_item_click_accepts() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open mouse-test");
+    core.execute_command("open mouse-test").await;
 
     // Enter insert mode and type a prefix that matches multiple tables.
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -165,19 +168,20 @@ async fn completion_item_click_accepts() {
         kind: KeyEventKind::Press,
         state: KeyEventState::NONE,
     };
-    core.handle_key(i_key);
+    core.handle_key(i_key).await;
     for ch in "ord".chars() {
         core.handle_key(KeyEvent {
             code: KeyCode::Char(ch),
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
-        });
+        })
+        .await;
     }
 
     // The completion popup should now be open.
     assert!(
-        core.editor_completion_is_open(),
+        core.editor_completion_is_open().await,
         "completion popup should be open after typing 'ord'"
     );
 
@@ -187,13 +191,13 @@ async fn completion_item_click_accepts() {
     let items = core.last_layout().completion_items.clone();
     if items.len() >= 2 {
         let (rect, _idx) = &items[1];
-        core.handle_mouse(click_at(rect.x + 1, rect.y));
+        core.handle_mouse(click_at(rect.x + 1, rect.y)).await;
     }
 
     // The completion popup should be closed and the editor should contain
     // the accepted item.
     assert!(
-        !core.editor_completion_is_open(),
+        !core.editor_completion_is_open().await,
         "completion popup should close after click"
     );
     let text = core.editor().entire_text();
@@ -219,11 +223,11 @@ async fn scroll_in_results_pane_moves_view() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open mouse-test");
+    core.execute_command("open mouse-test").await;
 
     // Run a query that produces enough rows to scroll.
-    core.insert_into_editor("SELECT * FROM big");
-    core.execute_command("run");
+    core.insert_into_editor("SELECT * FROM big").await;
+    core.execute_command("run").await;
     core.drain_run_updates().await;
 
     render(&mut core);
@@ -232,7 +236,8 @@ async fn scroll_in_results_pane_moves_view() {
     let initial_selected = core.tabs()[core.active_tab()].results().active().selected();
 
     // Scroll down inside the results pane.
-    core.handle_mouse(scroll_down_at(results_rect.x + 2, results_rect.y + 5));
+    core.handle_mouse(scroll_down_at(results_rect.x + 2, results_rect.y + 5))
+        .await;
     let after_scroll = core.tabs()[core.active_tab()].results().active().selected();
 
     // The selection should have moved down (or been set to 0 from None).
@@ -262,7 +267,7 @@ async fn mouse_click_preview_enables_cell_edit() {
     }
     let (registry, connections) = fixture(db_path);
     let mut core = AppCore::new(registry, connections, None);
-    core.execute_command("open mouse-test");
+    core.execute_command("open mouse-test").await;
 
     render(&mut core);
 
@@ -273,7 +278,7 @@ async fn mouse_click_preview_enables_cell_edit() {
         "sidebar should have at least one table entry"
     );
     let (rect, _idx) = &table_rects[0];
-    core.handle_mouse(click_at(rect.x + 2, rect.y));
+    core.handle_mouse(click_at(rect.x + 2, rect.y)).await;
 
     // Drain the run so the result is materialised.
     core.drain_run_updates().await;
