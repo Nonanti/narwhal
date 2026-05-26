@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Rust dependencies — grouped weekly so we don't drown in PRs.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      tokio-stack:
+        patterns:
+          - "tokio*"
+          - "futures*"
+          - "async-*"
+      tracing-stack:
+        patterns:
+          - "tracing*"
+      serde-stack:
+        patterns:
+          - "serde*"
+          - "toml"
+      tui-stack:
+        patterns:
+          - "ratatui"
+          - "crossterm"
+      patch-updates:
+        update-types:
+          - "patch"
+
+  # GitHub Actions — keep workflows current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(ci)"

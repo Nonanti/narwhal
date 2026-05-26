@@ -600,7 +600,7 @@ impl AppCore {
                 confirm,
             } => {
                 self.execute_substitute(range, &pattern, &replacement, global, confirm)
-                    .await
+                    .await;
             }
             Command::NoHlSearch => {
                 self.ui.tabs[self.ui.active_tab].editor_search.highlight = false;

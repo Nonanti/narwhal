@@ -1,0 +1,91 @@
+name: Bug report
+description: Something broke or behaves unexpectedly.
+title: "bug: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in as much as you can.
+        For security issues, use the Security advisory link instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: narwhal version
+      description: Output of `narwhal --version`
+      placeholder: "narwhal 1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: driver
+    attributes:
+      label: Database driver
+      multiple: false
+      options:
+        - postgres
+        - mysql
+        - sqlite
+        - duckdb
+        - clickhouse
+        - not driver-specific
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: "Ubuntu 24.04 x86_64 / macOS 14 arm64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps to reproduce. SQL snippets welcome.
+      placeholder: |
+        1. `narwhal tui`
+        2. `:open mydb`
+        3. Run `SELECT ...`
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Paste error messages, stack traces, screenshots.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Contents of `~/.cache/narwhal/logs/narwhal.log` around the failure, or
+        the output of `RUST_LOG=debug narwhal ...` for CLI runs.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest released version (or main).
+          required: true
