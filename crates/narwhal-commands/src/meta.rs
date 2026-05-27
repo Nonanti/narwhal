@@ -85,8 +85,8 @@ pub enum MetaRequest {
         password: Option<String>,
         /// Sandbox flag mirrored from `OpenSession`.
         opts: SessionOpenOptions,
-        /// Label shown in the status bar ("test ok: <label>" /
-        /// "test failed: <label>").
+        /// Label shown in the status bar (`test ok: <label>` /
+        /// `test failed: <label>`).
         label: String,
     },
 }
