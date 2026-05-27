@@ -25,6 +25,26 @@ yanked = "warn"
 ignore = [
     # Add `RUSTSEC-YYYY-NNNN = "reason"` entries here when an upstream
     # advisory is acknowledged but cannot be remediated immediately.
+
+    # `paste` is unmaintained but still required by `duckdb` 1.x via
+    # its bindgen-generated bindings. Tracked upstream
+    # (duckdb/duckdb-rs#612); will drop when duckdb-rs ships a
+    # `paste`-free release.
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained, transitive through duckdb 1.x; no exploit path" },
+
+    # `rustls-pemfile` <= 1.x is unmaintained; `tokio-postgres-rustls`
+    # 0.13 still pulls the old major. Goes away when we bump to
+    # tokio-postgres-rustls 0.14 (queued behind the dependabot PR).
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile 1.x unmaintained, transitive through tokio-postgres-rustls 0.13" },
+
+    # `tokio-tar` PAX header parse advisory — transitive through a
+    # dev-dep only test fixture and not reachable from the production
+    # binary. Will revisit when an unaffected release ships.
+    { id = "RUSTSEC-2025-0111", reason = "tokio-tar advisory, dev-dependency path only" },
+
+    # `error-code`/`atomic-polyfill` IterMut Stacked-Borrows unsoundness
+    # — transitive only, no UB observed on stable, fix is upstream-blocked.
+    { id = "RUSTSEC-2026-0002", reason = "transitive unsoundness; stable does not exercise the path" },
 ]
 
 # ---------------------------------------------------------------------------
@@ -44,13 +64,22 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    # Boost Software License: OSI-approved permissive (clipboard-win,
+    # error-code).
+    "BSL-1.0",
+    # CDLA-Permissive-2.0: permissive licence used by the modern
+    # webpki-roots crate for the bundled CA bundle.
+    "CDLA-Permissive-2.0",
     # CC0 is dedicated to the public domain.
     "CC0-1.0",
     # MPL is weak copyleft (file-scoped); allowed because narwhal does
     # not modify any MPL-licensed file.
     "MPL-2.0",
 ]
-confidence-threshold = 0.93
+# 0.8 lets cargo-deny auto-detect a couple of older crates that ship
+# the licence as a hand-written file without SPDX tagging (notably
+# webpki 0.22). 0.8 is still high enough to refuse misidentified text.
+confidence-threshold = 0.8
 
 # Some crates ship the licence as a hand-written LICENSE file rather
 # than a SPDX tag; allow-list the well-known ones explicitly here.
@@ -58,6 +87,18 @@ confidence-threshold = 0.93
 name = "ring"
 expression = "MIT AND ISC AND OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# `webpki` 0.22.x predates SPDX tagging — it ships an ISC LICENSE file
+# at the crate root but cargo-deny can't auto-detect it with high
+# enough confidence (no `license =` field in Cargo.toml). The transitive
+# pull comes from `webpki` 0.22 major still propagating through old
+# `rustls`; new 0.103+ versions carry the SPDX tag, so this exception
+# only matters until that transitive dep is bumped (tracked under the
+# tokio-postgres-rustls 0.14 dependabot PR).
+[[licenses.exceptions]]
+name = "webpki"
+version = "0.22.4"
+allow = ["ISC"]
 
 # ---------------------------------------------------------------------------
 # Duplicate / banned crates.

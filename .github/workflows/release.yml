@@ -57,7 +57,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libclang-dev
+          sudo apt-get install -y cmake libclang-dev libdbus-1-dev pkg-config
           # bindgen needs LIBCLANG_PATH; pick whichever llvm-N is installed.
           llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
           if [ -z "$llvm_dir" ]; then

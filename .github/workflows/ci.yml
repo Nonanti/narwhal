@@ -33,7 +33,7 @@ jobs:
       - name: Install system dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libclang-dev
+          sudo apt-get install -y cmake libclang-dev libdbus-1-dev pkg-config
           llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
           echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
@@ -53,7 +53,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libclang-dev
+          sudo apt-get install -y cmake libclang-dev libdbus-1-dev pkg-config
           llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
           echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
@@ -68,7 +68,7 @@ jobs:
       - name: Install system dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libclang-dev
+          sudo apt-get install -y cmake libclang-dev libdbus-1-dev pkg-config
           llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
           echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
@@ -85,7 +85,7 @@ jobs:
       - name: Install system dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libclang-dev
+          sudo apt-get install -y cmake libclang-dev libdbus-1-dev pkg-config
           llvm_dir=$(ls -d /usr/lib/llvm-* 2>/dev/null | sort -V | tail -1)
           echo "LIBCLANG_PATH=${llvm_dir}/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
