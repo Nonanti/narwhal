@@ -2778,25 +2778,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "narwhal"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "narwhal-app",
- "narwhal-commands",
- "narwhal-config",
- "narwhal-core",
- "narwhal-history",
- "narwhal-mcp",
- "secrecy",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "narwhal-app"
 version = "1.0.0"
 dependencies = [
@@ -3108,6 +3089,25 @@ name = "narwhal-vim"
 version = "1.0.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "narwhaldb"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "narwhal-app",
+ "narwhal-commands",
+ "narwhal-config",
+ "narwhal-core",
+ "narwhal-history",
+ "narwhal-mcp",
+ "secrecy",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
