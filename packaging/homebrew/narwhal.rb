@@ -1,10 +1,10 @@
 class Narwhal < Formula
   desc "TUI database client with a built-in MCP server"
-  homepage "https://github.com/nonantiy/narwhal"
-  url "https://github.com/nonantiy/narwhal/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/Nonanti/narwhal"
+  url "https://github.com/Nonanti/narwhal/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "REPLACE_AT_RELEASE_TIME"  # shasum -a 256 v1.0.0.tar.gz
   license any_of: ["MIT", "Apache-2.0"]
-  head "https://github.com/nonantiy/narwhal.git", branch: "main"
+  head "https://github.com/Nonanti/narwhal.git", branch: "main"
 
   # Build-time only. The mysql / postgres drivers link statically through
   # their respective Rust crates (rusqlite/duckdb are bundled); the

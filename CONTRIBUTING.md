@@ -7,7 +7,7 @@ clear before it can land on `main`.
 ## Getting started
 
 ```sh
-git clone https://github.com/nonantiy/narwhal
+git clone https://github.com/Nonanti/narwhal
 cd narwhal
 nix develop          # or: install rust 1.75+, cmake, libclang
 cargo test --workspace
