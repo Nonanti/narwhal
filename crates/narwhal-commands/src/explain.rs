@@ -23,7 +23,7 @@ pub struct ExplainLine {
     pub text: String,
 }
 
-/// v1.1 #3: structured per-node metrics extracted from the EXPLAIN
+/// structured per-node metrics extracted from the EXPLAIN
 /// JSON. Drives the tree visualiser — cost bars, row
 /// estimate-vs-actual divergence highlighting, and the hot-path
 /// classification.
@@ -115,7 +115,7 @@ impl ExplainNode {
 #[derive(Debug, Clone, Default)]
 pub struct ExplainPlan {
     pub lines: Vec<ExplainLine>,
-    /// v1.1 #3: structured tree mirroring `lines`. `None` when the
+    /// structured tree mirroring `lines`. `None` when the
     /// plan source isn't a parsable PG JSON document (we fall back
     /// to the text-only renderer).
     pub root: Option<ExplainNode>,

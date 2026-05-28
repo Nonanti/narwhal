@@ -43,7 +43,7 @@ uuid.workspace = true
 thiserror.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
-# T1-T3-B: workspace-state snapshot serialisation.
+# Workspace-state snapshot serialisation.
 toml.workspace = true
 arboard.workspace = true
 notify.workspace = true

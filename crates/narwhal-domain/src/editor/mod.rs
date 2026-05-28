@@ -82,7 +82,7 @@ pub struct EditorBuffer {
     cursor_col: usize,
     scroll: usize,
     auto_pair_enabled: bool,
-    /// T2-T3-D: secondary cursor positions, stored as `(row, col)` byte
+    /// secondary cursor positions, stored as `(row, col)` byte
     /// offsets. Edits applied via [`Self::insert_char`] /
     /// [`Self::insert_str`] / [`Self::delete_char`] propagate to every
     /// secondary so the user can edit at multiple locations
@@ -91,10 +91,10 @@ pub struct EditorBuffer {
     /// Invariants:
     /// - Positions are kept sorted lexicographically by `(row, col)`.
     /// - No secondary cursor ever coincides with the primary cursor;
-    ///   duplicates collapse on insert.
+    /// duplicates collapse on insert.
     /// - Out-of-range positions are clamped at edit time, not at
-    ///   insert time — a row delete elsewhere can leave a stale
-    ///   secondary that the next edit fixes lazily.
+    /// insert time — a row delete elsewhere can leave a stale
+    /// secondary that the next edit fixes lazily.
     ///
     /// MVP scope: vim-mode motions and undo/redo do *not* propagate
     /// across secondaries; they remain single-cursor. Full sorted-set
@@ -484,24 +484,24 @@ impl EditorBuffer {
         }
     }
 
-    /// T2-T3-D: read-only access to the secondary cursor list.
+    /// read-only access to the secondary cursor list.
     pub fn secondary_cursors(&self) -> &[(usize, usize)] {
         &self.secondary_cursors
     }
 
-    /// T2-T3-D: true when at least one secondary cursor is active.
+    /// true when at least one secondary cursor is active.
     pub fn has_multi_cursors(&self) -> bool {
         !self.secondary_cursors.is_empty()
     }
 
-    /// T2-T3-D: drop every secondary cursor and return to single-cursor
+    /// drop every secondary cursor and return to single-cursor
     /// mode. Called by the editor host on `Esc` when multi-cursor is
     /// active.
     pub fn collapse_to_primary(&mut self) {
         self.secondary_cursors.clear();
     }
 
-    /// T2-T3-D: insert `(row, col)` into the secondary set if it isn't
+    /// insert `(row, col)` into the secondary set if it isn't
     /// already the primary or another secondary. Keeps the list sorted.
     /// Returns `true` when a new cursor was added.
     pub fn add_secondary_cursor(&mut self, row: usize, col: usize) -> bool {
@@ -525,7 +525,7 @@ impl EditorBuffer {
         }
     }
 
-    /// T2-T3-D: find the next occurrence of the word currently under
+    /// find the next occurrence of the word currently under
     /// the primary cursor and add a secondary cursor at the *end* of
     /// the match. Search wraps around the buffer once. Returns `true`
     /// when an occurrence was found and added.
@@ -580,7 +580,7 @@ impl EditorBuffer {
         false
     }
 
-    /// T2-T3-D: add a secondary cursor at every other occurrence of
+    /// add a secondary cursor at every other occurrence of
     /// the word under the primary cursor. Returns the number of cursors
     /// added (0 when no needle / no other matches).
     pub fn add_secondary_cursors_at_all_word_matches(&mut self) -> usize {
@@ -616,7 +616,7 @@ impl EditorBuffer {
         added
     }
 
-    /// T2-T3-D: the identifier text containing or immediately to the
+    /// the identifier text containing or immediately to the
     /// left of the primary cursor. Mirrors
     /// [`Self::current_word_prefix`] but extends the match to the
     /// right when the cursor sits inside a word.
@@ -780,7 +780,7 @@ impl EditorBuffer {
         positions.push((self.cursor_row, self.cursor_col, true));
         positions.sort_unstable_by_key(|&(r, c, _)| (r, c));
 
-        // Review fix N7 / MR-N7: per-row insert shift accumulated
+        // Note: per-row insert shift accumulated
         // in a flat `Vec<usize>` indexed by row. Allocating once is
         // cheaper than a `HashMap::new()` per keystroke. We use
         // `.get(row)` / `.get_mut(row)` everywhere so a row beyond
@@ -830,8 +830,8 @@ impl EditorBuffer {
     }
 
     pub fn insert_str(&mut self, text: &str) {
-        // MR-N11: paste-into-multi-cursor is intentionally out of
-        // scope for the T2-T3-D MVP. A multi-line `insert_str`
+        // paste-into-multi-cursor is intentionally out of
+        // scope for the MVP. A multi-line `insert_str`
         // collapses to the primary cursor so callers pasting large
         // blobs / newlines don't end up duplicating the payload at
         // every secondary. The dispatch layer
@@ -891,7 +891,7 @@ impl EditorBuffer {
         positions.push((self.cursor_row, self.cursor_col, true));
         positions.sort_unstable_by_key(|&(r, c, _)| (r, c));
 
-        // Review fix N7 / MR-N7: flat `Vec` shift map; same
+        // Note: flat `Vec` shift map; same
         // reasoning as the insert path. Out-of-range rows are
         // ignored via `.get()` / `.get_mut()` rather than panicking.
         let mut shifts: Vec<isize> = vec![0; self.lines.len()];
@@ -986,7 +986,7 @@ impl EditorBuffer {
         while !line.is_char_boundary(end) && end > 0 {
             end -= 1;
         }
-        // H5: walk codepoints, not bytes, so multi-byte identifiers
+        // walk codepoints, not bytes, so multi-byte identifiers
         // (Turkish, CJK, …) participate in the word-prefix scan and
         // we never land mid-codepoint.
         let mut start = end;
@@ -1388,7 +1388,7 @@ impl EditorBuffer {
         while cur.has_more() && cur.is_word() {
             cur.advance();
         }
-        // L16: skip trailing whitespace *including* newlines so `w`
+        // skip trailing whitespace *including* newlines so `w`
         // lands on the next word even if the previous one was at
         // end-of-line.
         while cur.has_more() && cur.is_whitespace() {
@@ -1576,7 +1576,7 @@ impl<'a> LineCursor<'a> {
     /// Char at the cursor, or `None` past the end. Returns `'\n'` for
     /// the synthetic newline between lines.
     ///
-    /// H5: UTF-8 aware — decodes the next `char` rather than the next
+    /// UTF-8 aware — decodes the next `char` rather than the next
     /// byte. `is_word()` / `is_whitespace()` now see whole codepoints,
     /// so multi-byte word characters (Turkish `şahin`, CJK, Cyrillic,
     /// etc.) are treated as word characters via `char::is_alphanumeric`.
@@ -1651,7 +1651,7 @@ impl<'a> LineCursor<'a> {
 
 /// Unicode-aware word-character predicate.
 ///
-/// H5: replaces the prior ASCII-only `(u8) -> bool` so that Turkish
+/// replaces the prior ASCII-only `(u8) -> bool` so that Turkish
 /// (`şahin`), Cyrillic, CJK, full-width Latin, etc. are recognised as
 /// word characters in vim-style word motions and the completion-engine
 /// prefix scan. Underscore is preserved as a word character to keep

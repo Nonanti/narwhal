@@ -33,7 +33,7 @@ const fn domain_motion(m: VimMotion) -> DomainMotion {
 }
 
 impl AppCore {
-    /// T2-T3-D: add a secondary cursor at the next occurrence of the
+    /// add a secondary cursor at the next occurrence of the
     /// word under the primary cursor.
     pub(crate) async fn add_multi_cursor_next(&mut self) {
         let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
@@ -45,7 +45,7 @@ impl AppCore {
         }
     }
 
-    /// T2-T3-D: add a secondary cursor at every other occurrence of
+    /// add a secondary cursor at every other occurrence of
     /// the word under the primary cursor.
     pub(crate) async fn add_multi_cursor_all(&mut self) {
         let buf = &mut self.ui.tabs[self.ui.active_tab].editor;
@@ -126,13 +126,13 @@ impl AppCore {
                 narwhal_config::EditorMode::Vim | _ => {}
             }
         }
-        // T2-T3-D: multi-cursor chords intercepted before vim:
+        // multi-cursor chords intercepted before vim:
         // - Alt-N: add a secondary cursor at the next occurrence of
-        //   the word under the primary cursor
+        // the word under the primary cursor
         // - Alt-A: add a secondary cursor at every other occurrence
         // - Esc when multi-cursor is active: collapse to primary
-        //   (intercepted only if not in vim insert mode — normal-mode
-        //   Esc behaviour stays untouched)
+        // (intercepted only if not in vim insert mode — normal-mode
+        // Esc behaviour stays untouched)
         if key.modifiers == KeyModifiers::ALT {
             match key.code {
                 CtKey::Char('n' | 'N') => {
@@ -181,7 +181,7 @@ impl AppCore {
         // popup against the new word prefix. Two thresholds:
         // - prefix.len() >= 2 opens or refreshes the popup;
         // - prefix.len() < 2 closes any open popup so the user can
-        //   type short words without a flashing list.
+        // type short words without a flashing list.
         // Silent: no status spam, no '4-space' fallback — manual Tab
         // / Ctrl-Space still handle those cases.
         if self.ui.vim.mode() == Mode::Insert {
@@ -266,7 +266,7 @@ impl AppCore {
                     .apply_motion(domain_motion(motion), count);
             }
             Action::InsertText(text) => {
-                // Review fix M7 / MR-M3: warn the user when a
+                // Note: warn the user when a
                 // multi-line paste collapses the secondary-cursor
                 // set. The buffer drops them silently (paste-into-
                 // multi-cursor is v2.1 scope); using

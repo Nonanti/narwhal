@@ -84,11 +84,10 @@ fn unique_constraints_filter_pk_index() {
     assert_eq!(uc[0].columns, vec!["email".to_owned()]);
 }
 
-/// Lock in the four routing shapes that downstream Tier-2 audit
-/// snapshots depend on. The classifier replaced the v1
+/// Lock in the four routing shapes downstream audit snapshots
+/// depend on. The classifier replaced the v1
 /// `is_mutating_statement` boolean because that path silently lost
-/// rows from OUTPUT clauses, EXEC and mutating CTEs (T1-T2-A code
-/// review, C1).
+/// rows from OUTPUT clauses, EXEC and mutating CTEs.
 #[test]
 fn classify_statement_routes_real_world_shapes() {
     use __test_only::StatementShape::*;

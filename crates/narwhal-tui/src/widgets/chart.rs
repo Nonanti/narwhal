@@ -1,4 +1,4 @@
-//! T2-T4-C: inline ASCII chart widget.
+//! inline ASCII chart widget.
 //!
 //! Renders a [`ChartView`] as a ratatui [`BarChart`], [`Chart`], or
 //! [`Sparkline`] depending on the kind. The widget owns no state — the

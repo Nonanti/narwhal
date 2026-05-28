@@ -10,7 +10,7 @@ pub struct StatusBar {
     pub message: String,
     /// Optional fourth slot — open transaction's isolation level.
     pub transaction: Option<String>,
-    /// MR-M3: sticky notification slot. Set via [`Self::notify`]; the
+    /// sticky notification slot. Set via [`Self::notify`]; the
     /// renderer prefers this over [`Self::message`] until it expires,
     /// so a one-shot event (e.g. "multi-line paste collapsed secondary
     /// cursors") survives the next keystroke instead of being
@@ -30,7 +30,7 @@ impl StatusBar {
     /// regardless of other `status.message =` writes that happen in
     /// the same frame.
     ///
-    /// **TTL semantics (R3-M3):** the cap is enforced *the next
+    /// **TTL semantics:** the cap is enforced *the next
     /// time the renderer is invoked* after `expires_at`. The draw
     /// scheduler in the host app is event-driven — it fires on input,
     /// mouse, resize, and stream updates, but does not run a
@@ -47,7 +47,7 @@ impl StatusBar {
         });
     }
 
-    /// R3-N4: read-only peek used by the render path. Returns the
+    /// read-only peek used by the render path. Returns the
     /// active notification text, or `None` once `expires_at` has
     /// passed. Does **not** mutate the slot — separating peek from
     /// expiry keeps the render call genuinely pure (no implicit
@@ -62,7 +62,7 @@ impl StatusBar {
         }
     }
 
-    /// R3-N4: companion to [`Self::peek_notification`]; drops an
+    /// companion to [`Self::peek_notification`]; drops an
     /// expired notification so the slot can be reused. Called from
     /// the event loop once per turn (input / stream tick), keeping
     /// the render path free of mutation.

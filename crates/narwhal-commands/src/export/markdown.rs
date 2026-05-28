@@ -1,4 +1,4 @@
-//! GitHub-Flavoured Markdown table writer (T1-T4-B).
+//! GitHub-Flavoured Markdown table writer.
 //!
 //! GFM tables are intentionally simple: a header row, a separator
 //! row that doubles as alignment metadata (`:---`, `:---:`, `---:`),
@@ -135,9 +135,9 @@ fn write_cell<W: Write>(writer: &mut W, value: &Value) -> Result<(), ExportError
 /// - `|` → `\|` (column separator)
 /// - `\n`, `\r` → `<br>` (rows are line-delimited)
 /// - `\\` → `\\\\` so the backslash escape we just emitted is not
-///   itself swallowed by a later parse pass
+/// itself swallowed by a later parse pass
 /// - leading whitespace is preserved (some renderers eat it, but the
-///   round-trip cost of `&nbsp;`-ing every cell isn't worth it)
+/// round-trip cost of `&nbsp;`-ing every cell isn't worth it)
 fn write_escaped<W: Write>(writer: &mut W, text: &str) -> Result<(), ExportError> {
     for ch in text.chars() {
         match ch {

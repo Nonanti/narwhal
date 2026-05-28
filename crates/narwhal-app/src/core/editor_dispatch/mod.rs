@@ -152,7 +152,7 @@ impl AppCore {
                     self.trigger_completion().await;
                     return true;
                 }
-                // L36: Ctrl-S is now reserved for the Results pane's
+                // Ctrl-S is now reserved for the Results pane's
                 // "commit pending" action. Streaming still has F7 and
                 // `:stream`, so we drop the global binding here rather
                 // than overload the chord with two meanings. Without
@@ -178,10 +178,10 @@ impl AppCore {
                     self.open_history().await;
                     return true;
                 }
-                // v1.1 #1: Ctrl-N opens the goto fuzzy navigator from
+                // Ctrl-N opens the goto fuzzy navigator from
                 // any focus. Mirrors the DataGrip / IntelliJ binding.
                 //
-                // M1: defer to the editor's completion popup when it's
+                // defer to the editor's completion popup when it's
                 // open and the editor pane is focused. Vim and most
                 // IDE-style editors bind Ctrl-N to "next completion";
                 // intercepting it while the popup is visible would

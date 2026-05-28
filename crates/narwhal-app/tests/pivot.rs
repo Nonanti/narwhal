@@ -1,4 +1,4 @@
-//! T2-T4-D integration tests for the `:pivot` command.
+//! integration tests for the `:pivot` command.
 
 use std::path::PathBuf;
 

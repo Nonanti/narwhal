@@ -47,7 +47,7 @@ impl McpServer {
         }
     }
 
-    /// T2-T5-C: construct the server with a *pre-populated* tool
+    /// construct the server with a *pre-populated* tool
     /// registry. The host caller (typically the `narwhal mcp` binary)
     /// builds the registry first, registers dynamic plugin tools via
     /// [`ToolRegistry::register_dynamic`], then hands the result to
@@ -247,8 +247,8 @@ impl McpServer {
         let arguments = params.arguments.unwrap_or(Value::Null);
         let output = tool.call(&self.ctx, arguments).await?;
 
-        // T2-T5-C review fix C3 / MR-C3: enforce the response cap
-        // centrally so dynamic plugin-defined tools cannot blow past
+        // Enforce the response cap centrally so dynamic
+        // plugin-defined tools cannot blow past
         // the MCP host size budget. Built-in tools no longer need to
         // call `cap_response` themselves. The original `is_error`
         // flag is preserved across truncation — a truncated error

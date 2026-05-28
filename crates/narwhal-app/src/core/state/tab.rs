@@ -1,8 +1,8 @@
 //! One editor tab: name, buffer, run state, results.
 
+use narwhal_domain::editor::EditorBuffer;
 use narwhal_pivot::PivotConfig;
 use narwhal_sql::treesitter::{HighlightSpan, Parser as TsParser};
-use narwhal_domain::editor::EditorBuffer;
 
 use crate::core::chart::ChartConfig;
 
@@ -47,7 +47,7 @@ pub struct Tab {
     /// pending preview, so a diagram opened while a cell-popup is up
     /// becomes the active overlay.
     pub(crate) diagram: Option<DiagramModalState>,
-    /// L36: staged row-level mutations awaiting commit. Persists for
+    /// staged row-level mutations awaiting commit. Persists for
     /// the lifetime of the tab; the user dismisses it with Ctrl-X or
     /// commits it with Ctrl-S. Cross-table batches are explicitly
     /// allowed — useful for fixing foreign-key chains in one
@@ -57,25 +57,25 @@ pub struct Tab {
     /// minimal (just a scroll cursor); the body is reconstructed from
     /// `pending` every render.
     pub(crate) pending_preview: Option<PendingPreviewState>,
-    /// T1-T3-A: per-tab tree-sitter parser. Lazily initialised on the
+    /// per-tab tree-sitter parser. Lazily initialised on the
     /// first highlight request so a tab that never opens an editor
     /// (e.g. one used only via :run) pays nothing. `None` after
     /// construction; populated by [`Tab::sql_highlights`].
     pub(crate) ts_parser: Option<TsParser>,
-    /// T1-T3-A: cached highlight spans for the current editor buffer.
+    /// cached highlight spans for the current editor buffer.
     /// Refreshed when the editor's content changes (the dispatch
     /// layer compares revision counters before re-rendering).
     pub(crate) sql_highlights: Option<Vec<HighlightSpan>>,
-    /// T1-T3-A: byte length of the buffer the cached spans were
+    /// byte length of the buffer the cached spans were
     /// computed against. A mismatch with the current buffer length
     /// invalidates the cache.
     pub(crate) sql_highlights_buf_len: usize,
-    /// T2-T4-C: sticky chart configuration. When `Some`, the result
+    /// sticky chart configuration. When `Some`, the result
     /// pane splits horizontally and the top half renders an inline
     /// ASCII chart derived from the active result. `None` means the
     /// chart pane is hidden (default).
     pub(crate) chart: Option<ChartConfig>,
-    /// T2-T4-D: sticky pivot configuration. When `Some`, the result
+    /// sticky pivot configuration. When `Some`, the result
     /// pane splits (chart on top, pivot middle, table bottom). `None`
     /// keeps the pivot pane hidden.
     pub(crate) pivot: Option<PivotConfig>,
@@ -116,7 +116,7 @@ impl Tab {
         }
     }
 
-    /// T1-T3-A: refresh and return the tree-sitter highlight spans
+    /// refresh and return the tree-sitter highlight spans
     /// for the current editor buffer.
     ///
     /// Cache policy: spans are recomputed when the buffer length
@@ -125,7 +125,7 @@ impl Tab {
     /// minor visual glitch resolved by the next length-changing
     /// keystroke. A precise revision counter on `EditorBuffer`
     /// would close the hole; deferred until the multi-cursor task
-    /// (T2-T3-D) adds one anyway.
+    /// adds one anyway.
     ///
     /// The reparse path goes through `Parser::reparse`, which falls
     /// back to a from-scratch parse the first time it's called per
@@ -213,12 +213,12 @@ impl Tab {
         self.completion.as_ref()
     }
 
-    /// L36: read-only access to the staged-mutation queue.
+    /// read-only access to the staged-mutation queue.
     pub const fn pending(&self) -> &PendingChanges {
         &self.pending
     }
 
-    /// L36: mutable handle to the staged-mutation queue. Used by
+    /// mutable handle to the staged-mutation queue. Used by
     /// tests and any future inline-edit path that needs to populate
     /// values on an `Insert` row without going through the cell
     /// editor.
@@ -226,7 +226,7 @@ impl Tab {
         &mut self.pending
     }
 
-    /// L36: pending-preview modal state, if open.
+    /// pending-preview modal state, if open.
     pub const fn pending_preview(&self) -> Option<&PendingPreviewState> {
         self.pending_preview.as_ref()
     }

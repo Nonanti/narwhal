@@ -62,7 +62,7 @@ impl PathScope {
 
     /// The wildcard scope (`/`). Used by the parser when a legacy
     /// unit-form capability is encountered, so plugins built against
-    /// T1-T5-A keep loading.
+    /// keep loading.
     #[must_use]
     pub fn root() -> Self {
         Self(PathBuf::from("/"))

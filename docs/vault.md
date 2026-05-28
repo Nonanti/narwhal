@@ -10,7 +10,7 @@ external secrets manager so you never have to put plaintext into
 This page covers setup, the reference syntax, the resolution order
 and the security guarantees. The developer-facing contract — trait
 shape, error taxonomy, in-flight dedup — lives in
-[`docs/dev/t1-t2-b-vault.md`](dev/t1-t2-b-vault.md).
+[`docs/dev/vault-providers.md`](dev/vault-providers.md).
 
 ## TL;DR
 
@@ -281,7 +281,7 @@ password = "${env:LOCAL_DB_PASS}"
 
 ## See also
 
-- Developer notes: [`docs/dev/t1-t2-b-vault.md`](dev/t1-t2-b-vault.md)
+- Developer notes: [`docs/dev/vault-providers.md`](dev/vault-providers.md)
 - v1 → v2 migration guide: `narwhal migrate-config`
 - HashiCorp KV v2 docs: <https://developer.hashicorp.com/vault/api-docs/secret/kv/kv-v2>
 - 1Password CLI docs: <https://developer.1password.com/docs/cli/reference/commands/read/>

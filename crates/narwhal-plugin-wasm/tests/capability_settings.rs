@@ -4,12 +4,12 @@
 //! capability lands in the effective set:
 //!
 //! 1. **Coarse settings** ([`narwhal_config::WasmPluginSettings`]) —
-//!    bool flags. Reflects a Tier-0 v2 setting most operators will
-//!    edit by hand.
+//! bool flags. Reflects a Tier-0 v2 setting most operators will
+//! edit by hand.
 //! 2. **Fine grants** ([`narwhal_plugin_wasm::Grants`]) — typed
-//!    capability list. Reflects an explicit
-//!    `[[plugins.grants]]`-style allow-list. Embedders construct
-//!    these directly until the Tier-2 settings parser catches up.
+//! capability list. Reflects an explicit
+//! `[[plugins.grants]]`-style allow-list. Embedders construct
+//! these directly until the Tier-2 settings parser catches up.
 //!
 //! The runtime intersects manifest ∩ settings ∩ grants. Each of
 //! the three layers can short-circuit a load.
@@ -118,7 +118,7 @@ async fn fine_grants_covering_manifest_passes_capability_gate() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn legacy_unit_tokens_still_load_with_settings_only() {
-    // The T1-T5-A on-disk manifest uses unit tokens. Operators who
+    // The on-disk manifest uses unit tokens. Operators who
     // upgraded their settings (allow_fs_read=true) should still see
     // those manifests load — Grants::from_settings exposes the same
     // mapping the load-time check uses.

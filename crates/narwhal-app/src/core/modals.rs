@@ -29,7 +29,7 @@ impl AppCore {
         self.open_history_with_filter(None).await;
     }
 
-    /// v1.3 #11: pre-fill the filter so `:history /pattern` lands the
+    /// pre-fill the filter so `:history /pattern` lands the
     /// user directly on the matching subset.
     pub async fn open_history_with_filter(&mut self, filter: Option<String>) {
         let Some(_journal) = &self.session.history_journal else {
@@ -317,7 +317,7 @@ impl AppCore {
                         ));
                     }
                 }
-                // T2-T2-D: a successful wizard commit is a
+                // a successful wizard commit is a
                 // configuration change. Emit *after* the disk save
                 // succeeded so a rolled-back save (handled above)
                 // never produces an audit line.

@@ -1,4 +1,4 @@
-//! T2-T3-D integration tests for multi-cursor editing in the editor pane.
+//! integration tests for multi-cursor editing in the editor pane.
 //!
 //! MVP scope: Alt-N (add next), Alt-A (add all), Esc (collapse), and
 //! character-level edit propagation. Vim block-visual interop, undo /

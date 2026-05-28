@@ -1,6 +1,6 @@
 //! Structural diff between two database schemas, plus DDL emission.
 //!
-//! T2-T2-C of the v2.0 roadmap. Consumes `TableSchema` slices (the
+//! Consumes `TableSchema` slices (the
 //! same shape `narwhal-diagram` already reads from the drivers) and
 //! produces a [`SchemaDiff`] describing what is missing, what is
 //! extra, and what differs. The diff is dialect-agnostic; DDL is

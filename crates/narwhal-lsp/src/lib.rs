@@ -1,4 +1,4 @@
-//! T2-T3-C: embedded LSP client for narwhal.
+//! embedded LSP client for narwhal.
 //!
 //! Speaks JSON-RPC 2.0 over a generic [`Transport`] (typically the
 //! stdin/stdout of an `sqls` / `sqlls` child process). The client owns

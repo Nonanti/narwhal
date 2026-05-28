@@ -120,17 +120,17 @@ pub struct RootLayout<'a> {
     pub completion: Option<CompletionPopupView<'a>>,
     /// When `Some`, editor search matches are highlighted.
     pub editor_search: Option<EditorSearchHighlight<'a>>,
-    /// T1-T3-A: when `Some`, treesitter SQL highlight spans for the
+    /// when `Some`, treesitter SQL highlight spans for the
     /// editor buffer are overlaid on the visible rows. The host app
     /// keeps the underlying [`narwhal_sql::treesitter::Parser`] per
     /// tab and refreshes the slice each render tick.
     pub editor_sql_highlights: Option<&'a [narwhal_sql::treesitter::HighlightSpan]>,
-    /// T2-T4-C: when `Some(Ok(view))`, an inline ASCII chart is rendered
+    /// when `Some(Ok(view))`, an inline ASCII chart is rendered
     /// in the top half of the result pane; `Some(Err(placeholder))`
     /// shows the error message inside an otherwise-empty chart block;
     /// `None` leaves the chart pane hidden (full-table layout).
     pub chart: Option<Result<ChartView<'a>, ChartPlaceholder<'a>>>,
-    /// T2-T4-D: when `Some(Ok(view))`, an inline pivot table is
+    /// when `Some(Ok(view))`, an inline pivot table is
     /// rendered in the top half of the result pane;
     /// `Some(Err(placeholder))` shows the error message inside an
     /// otherwise-empty pivot block; `None` leaves the pivot pane
@@ -140,7 +140,7 @@ pub struct RootLayout<'a> {
     pub result_count: usize,
     /// Index of the active result (0-based).
     pub active_result: usize,
-    /// v1.1 #2: optional accent colour pulled from the active
+    /// optional accent colour pulled from the active
     /// connection's `color = "…"` field. When `Some`, the connection
     /// slot in the status bar is tinted to give the user a constant
     /// peripheral cue about which database they're on (`red` = prod
@@ -184,7 +184,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.editor_sql_highlights,
     );
 
-    // T2-T4-C / T2-T4-D: when chart or pivot is active, split the
+    // /: when chart or pivot is active, split the
     // result pane area horizontally so the overlay panes stack above
     // the regular table. Chart takes priority when both are active
     // (the more frequent case in demos); pivot takes the same slot
@@ -335,7 +335,7 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     frame.render_widget(Paragraph::new(left_text).style(mode_style), parts[0]);
 
     // Center slot: connection (sticky). When the connection declared
-    // an accent colour (v1.1 #2), tint the slot so the user has a
+    // an accent colour, tint the slot so the user has a
     // constant peripheral cue about which database they're on.
     let conn_style = match view.accent_color {
         Some(c) => view

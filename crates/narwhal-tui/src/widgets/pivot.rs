@@ -1,4 +1,4 @@
-//! T2-T4-D: pivot table widget.
+//! pivot table widget.
 //!
 //! Pure projection of a [`PivotTableView`] into a ratatui [`Table`].
 //! Owns no state; the host derives a fresh [`PivotTableView`] on every

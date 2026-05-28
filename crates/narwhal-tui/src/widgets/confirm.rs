@@ -1,4 +1,4 @@
-//! Type-`YES` confirmation modal renderer (v1.1 #2).
+//! Type-`YES` confirmation modal renderer.
 //!
 //! Drawn on top of everything else when a connection with
 //! `confirm_writes = true` is about to run a mutating statement. The

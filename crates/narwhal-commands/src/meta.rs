@@ -237,7 +237,7 @@ pub enum MetaUpdate {
 /// `None`). `credentials` and `vault` are consulted only by
 /// `OpenSession` and `TestConnection`. `vault` defaults to
 /// [`VaultRegistry::empty`] when the caller does not supply one
-/// (T1-T2-B).
+///.
 pub fn spawn_meta_request(
     request: MetaRequest,
     pool: Option<narwhal_pool::Pool>,
@@ -361,7 +361,7 @@ pub fn spawn_meta_request(
                         .await;
                     return;
                 };
-                // M13: Journal::recent is async; it already off-loads
+                // Journal::recent is async; it already off-loads
                 // file I/O via spawn_blocking internally and returns
                 // entries in chronological order (oldest first).
                 match journal.recent(limit).await {

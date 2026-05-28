@@ -1,6 +1,6 @@
 //! Capability vocabulary the WASM plugin runtime understands.
 //!
-//! ## v2.0 model (T1-T5-B)
+//! ## v2.0 model
 //!
 //! A *capability* is an explicit authorisation token a plugin
 //! declares in its `plugin.toml` manifest. Tokens are
@@ -28,9 +28,9 @@
 //! the syscall is racy and would leak host directory structure
 //! through error messages.
 //!
-//! ### Backwards compatibility with T1-T5-A
+//! ### Backwards compatibility with
 //!
-//! T1-T5-A shipped bare unit-style tokens (`fs-read`, `net`, `env`,
+//! shipped bare unit-style tokens (`fs-read`, `net`, `env`,
 //! `fs-write`). To keep already-on-disk manifests loading, the
 //! parser still accepts those forms and maps them to the
 //! widest-possible scope (`fs.read:/`, `net.connect:*`,
@@ -110,7 +110,7 @@ impl Capability {
     }
 
     /// Parse a manifest-form token. Accepts the legacy unit forms
-    /// (`fs-read` etc.) for forward-compat with T1-T5-A manifests.
+    /// (`fs-read` etc.) for forward-compat with manifests.
     pub fn parse(token: &str) -> Result<Self, CapabilityParseError> {
         parser::parse(token)
     }

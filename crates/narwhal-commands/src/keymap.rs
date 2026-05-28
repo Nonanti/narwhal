@@ -22,14 +22,14 @@ use crate::action::{Action, KeyGroup};
 /// Normalisation rules — invariants every constructor enforces:
 ///
 /// - **Letters** are stored *lowercase* in [`KeyCode::Char`]. The `Shift`
-///   modifier bit is set independently. So `K` parses as
-///   `KeyChord { code: Char('k'), mods: SHIFT }` not `Char('K') | NONE`.
+/// modifier bit is set independently. So `K` parses as
+/// `KeyChord { code: Char('k'), mods: SHIFT }` not `Char('K') | NONE`.
 /// - **Symbols and digits** are stored as-is; we do not infer SHIFT from
-///   characters like `!` or `?` because the producing key combo is
-///   layout-dependent.
+/// characters like `!` or `?` because the producing key combo is
+/// layout-dependent.
 /// - Only the *meaningful* modifier bits (CTRL/ALT/SHIFT) are kept; SUPER,
-///   HYPER, etc. are dropped because crossterm reports them inconsistently
-///   across terminals.
+/// HYPER, etc. are dropped because crossterm reports them inconsistently
+/// across terminals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyChord {
     pub code: KeyCode,
@@ -377,7 +377,7 @@ impl Keymap {
         self.bind(Results, KeyChord::ch('['), A::ResultsPrevStatementLeader);
 
         // ─── Row CRUD + Pending changes ────────────────────────────────
-        // v1.2 #6: `f` (follow) opens the parent row when the focused
+        // `f` (follow) opens the parent row when the focused
         // cell is a foreign-key column. The IntelliJ / DataGrip
         // binding is gd; we use `f` because the Results pane has no
         // leader layer yet.

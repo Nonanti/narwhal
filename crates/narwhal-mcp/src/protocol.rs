@@ -203,7 +203,7 @@ pub struct ToolsListResult {
     pub tools: Vec<ToolDescriptor>,
 }
 
-/// MR-N3: `Cow<'static, str>` so built-in tools (whose name and
+/// `Cow<'static, str>` so built-in tools (whose name and
 /// description are `&'static str` constants) round-trip without a
 /// `to_owned()` copy on every `tools/list`, while dynamic tools can
 /// still hand over an owned `String` from their `DynamicTool` body.

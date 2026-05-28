@@ -24,7 +24,7 @@ pub struct StreamTuning {
 }
 
 impl Default for StreamTuning {
-    /// Pre-T1-T4-A defaults: 64-row batch, 50 ms flush window.
+    /// Earlier defaults: 64-row batch, 50 ms flush window.
     fn default() -> Self {
         Self {
             batch_size: 64,
@@ -168,12 +168,12 @@ pub enum RunTarget {
 pub struct RunContext {
     pub target: RunTarget,
     pub history: Option<Arc<Journal>>,
-    /// T2-T2-D: optional audit log service. Set from
+    /// optional audit log service. Set from
     /// `SessionState::audit_service`. When present, every dispatched
     /// statement emits an [`AuditEvent::Query`] alongside the history
     /// journal write.
     pub audit: Option<Arc<AuditService>>,
-    /// T2-T2-D: session correlation id for [`AuditEvent::Query`].
+    /// session correlation id for [`AuditEvent::Query`].
     /// Stable for the lifetime of the active connection so a SIEM can
     /// stitch queries back to the originating session.
     pub audit_session_id: Uuid,
@@ -461,7 +461,7 @@ async fn run_stream(
 
     let mut batch: Vec<Row> = Vec::with_capacity(tuning.batch_size.max(1));
     let mut terminal_error: Option<narwhal_core::Error> = None;
-    // T1-T4-A: time-window flush. `last_flush` is reset every time
+    // time-window flush. `last_flush` is reset every time
     // we send a `RowsAppended` so a slow trickle still surfaces
     // rows in the UI within `flush_ms`. When `flush_ms == 0` the
     // time-based flush is disabled and we revert to pure size
@@ -634,7 +634,7 @@ async fn record_history(ctx: &RunContext, sql: &str, outcome: &StatementOutcome)
     }
 }
 
-/// T2-T2-D: project the just-executed statement into the audit log.
+/// project the just-executed statement into the audit log.
 ///
 /// Mirrors [`record_history`] structurally so the two sinks stay in
 /// lock-step: every statement that lands in `history.jsonl` also
@@ -680,7 +680,7 @@ async fn emit_audit_query(ctx: &RunContext, sql: &str, outcome: &StatementOutcom
 mod tests {
     use super::{StreamTuning, is_ddl_statement};
 
-    /// T1-T4-A: `StreamTuning::new` must not let `batch_size = 0`
+    /// `StreamTuning::new` must not let `batch_size = 0`
     /// escape — a zero-sized batch would livelock the worker loop.
     #[test]
     fn stream_tuning_zero_batch_clamped_to_one() {

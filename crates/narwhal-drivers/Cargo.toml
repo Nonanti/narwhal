@@ -14,7 +14,7 @@ authors.workspace = true
 workspace = true
 
 [features]
-# T0-03: by default no driver is wired in. The `narwhaldb` binary turns
+# By default no driver is wired in. The `narwhaldb` binary turns
 # on `all-drivers` so users get the historical full build. Library
 # consumers (narwhal-mcp, narwhal-app, narwhal-pool) opt-in via the
 # specific `postgres` / `mysql` / `sqlite` / `duckdb` / `clickhouse`
@@ -50,7 +50,7 @@ clickhouse = [
     "dep:parking_lot",
     "dep:uuid",
 ]
-# T1-T2-A: Microsoft SQL Server via tiberius (TDS) + tokio-util compat
+# Microsoft SQL Server via tiberius (TDS) + tokio-util compat
 # bridge to lift Tokio's TcpStream into the futures-rs IO traits tiberius
 # expects. `chrono`/`uuid`/`futures` are shared with postgres/mysql.
 mssql = [
@@ -111,6 +111,6 @@ uuid = { workspace = true }
 tempfile = "3.13"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres", "mysql", "mssql_server"] }
-# T2-T2-C: round-trip test wires the schema-diff emit path against a
+# Round-trip test wires the schema-diff emit path against a
 # live Postgres container.
 narwhal-schema-diff.workspace = true

@@ -1,4 +1,4 @@
-//! T1-T3-B — Workspace persistence.
+//! Workspace persistence.
 //!
 //! Snapshots the user's open tabs, cursor/scroll positions, sidebar
 //! state and active connection on clean exit; restores them on the
@@ -19,13 +19,13 @@
 //! ## Save triggers
 //!
 //! - **Clean exit only**: [`save_at_exit`] is called from the event
-//!   loop after the main loop has terminated normally. Panic
-//!   unwinds skip persistence to avoid serialising a half-mutated
-//!   state.
+//! loop after the main loop has terminated normally. Panic
+//! unwinds skip persistence to avoid serialising a half-mutated
+//! state.
 //! - **No throttled background save in v2.0**: the brief suggested
-//!   one every 30s; we defer it until there's evidence of unclean
-//!   shutdowns in the wild. The atomic-rename guarantees the file
-//!   is either pre-snapshot or fully-current — never half-written.
+//! one every 30s; we defer it until there's evidence of unclean
+//! shutdowns in the wild. The atomic-rename guarantees the file
+//! is either pre-snapshot or fully-current — never half-written.
 //!
 //! ## Load triggers
 //!

@@ -1,7 +1,7 @@
 //! DDL emission per dialect.
 //!
 //! The [`DdlEmitter`] trait is the contract every dialect implements.
-//! Step 1 of T2-T2-C only ships the trait and the generic ANSI
+//! Step 1 of only ships the trait and the generic ANSI
 //! fallback; Step 2 fills in postgres / mysql / sqlite / mssql.
 //!
 //! The trait is dyn-safe so the CLI can resolve a dialect by name at

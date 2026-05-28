@@ -1,4 +1,4 @@
-//! Write-confirmation modal handler (v1.1 #2).
+//! Write-confirmation modal handler.
 //!
 //! The modal opens from `dispatch_batch` when the active connection
 //! declared `confirm_writes = true` and at least one statement is

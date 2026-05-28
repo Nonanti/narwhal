@@ -179,7 +179,7 @@ impl AppCore {
         self.session.read_only = on;
     }
 
-    /// Install the audit service (T2-T2-D). Default is `None` — emit
+    /// Install the audit service. Default is `None` — emit
     /// sites become no-ops. The binary constructs the service from
     /// `settings.audit` and calls this method during startup; tests
     /// usually leave it `None`.
@@ -187,7 +187,7 @@ impl AppCore {
         self.session.audit_service = Some(svc);
     }
 
-    /// Swap in a configured [`VaultRegistry`] (T1-T2-B).
+    /// Swap in a configured [`VaultRegistry`].
     ///
     /// Default state after [`Self::with_services`] is an empty
     /// registry, which means `password = "vault:…"` references in
@@ -213,7 +213,7 @@ impl AppCore {
     /// keep working without forcing a `migrate-config` pass.
     pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
         self.ui.diagram_icons = settings.diagram.icons;
-        // T1-T4-A: streaming-result tuning. Defended in StreamTuning::new
+        // streaming-result tuning. Defended in StreamTuning::new
         // so a misconfigured `batch_size = 0` cannot livelock the worker.
         self.session.stream_tuning =
             crate::run::StreamTuning::new(settings.run.batch_size, settings.run.stream_flush_ms);
@@ -249,7 +249,7 @@ impl AppCore {
         self.ui.show_mode_indicator = settings.editor.show_mode_indicator;
         self.ui.key_preset = settings.keybindings.preset;
 
-        // L36: turn the `[keymap.<group>]` TOML sections into a typed
+        // turn the `[keymap.<group>]` TOML sections into a typed
         // override table, apply on top of the built-in defaults, and
         // stash diagnostics so the first render surfaces them.
         //

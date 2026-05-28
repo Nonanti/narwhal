@@ -17,7 +17,7 @@ pub struct RedactorConfig {
     /// Mask password literals in SQL text (default true).
     pub redact_passwords: bool,
     /// Column / parameter names whose values should be replaced with
-    /// `***`. Matching is ASCII-case-insensitive (R3-M4): the rules
+    /// `***`. Matching is ASCII-case-insensitive: the rules
     /// are folded with [`str::to_ascii_lowercase`] and compared via
     /// [`str::eq_ignore_ascii_case`]. **Implication:** a rule with
     /// non-ASCII letters (e.g. `İSIM`) will only match column
@@ -31,13 +31,12 @@ pub struct RedactorConfig {
 #[derive(Debug, Clone, Default)]
 pub struct Redactor {
     redact_passwords: bool,
-    /// MR-N5 (reverted N8): pre-folded column rules in a `Vec`.
-    /// Real-world configs hold 1–10 entries; a linear scan over a
-    /// `Vec<String>` with `eq_ignore_ascii_case` per entry is
-    /// measurably faster than a `BTreeSet` lookup for that range
-    /// and avoids the allocator pressure of building / cloning the
-    /// set on hot paths. R3-M4: folding is
-    /// [`str::to_ascii_lowercase`], not full-Unicode
+    /// Pre-folded column rules in a `Vec`. Real-world configs hold
+    /// 1–10 entries; a linear scan over a `Vec<String>` with
+    /// `eq_ignore_ascii_case` per entry is measurably faster than a
+    /// `BTreeSet` lookup for that range and avoids the allocator
+    /// pressure of building / cloning the set on hot paths. Folding
+    /// is [`str::to_ascii_lowercase`], not full-Unicode
     /// `to_lowercase`, so the rule list and the per-event matcher
     /// agree on the same byte-level case relation.
     redact_columns: Vec<String>,
@@ -49,7 +48,7 @@ impl Redactor {
     /// is alloc-free.
     #[must_use]
     pub fn new(cfg: RedactorConfig) -> Self {
-        // R3-M4: switched from `to_lowercase()` (full Unicode) to
+        // Switched from `to_lowercase()` (full Unicode) to
         // `to_ascii_lowercase()` so the rule keys agree with the
         // matcher (`eq_ignore_ascii_case`). The previous mix would
         // silently miss e.g. a Turkish `İSIM` rule against an
@@ -200,7 +199,7 @@ mod tests {
         assert_eq!(before, evt);
     }
 
-    /// R3-M4: rule keys and the matcher must agree on the same
+    /// Rule keys and the matcher must agree on the same
     /// case relation. Mixing `to_lowercase()` (full Unicode) with
     /// `eq_ignore_ascii_case` previously left a hole where a rule
     /// with non-ASCII upper-case letters wouldn't match its own

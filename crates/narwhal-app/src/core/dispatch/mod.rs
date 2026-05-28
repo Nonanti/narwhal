@@ -42,7 +42,7 @@ impl AppCore {
                 label: label.as_str(),
             })
             .collect();
-        // L24: pre-clamp the scroll offset against the last known
+        // pre-clamp the scroll offset against the last known
         // sidebar viewport so the cached `sidebar_scroll` we keep around
         // (for the next click handler / snapshot test) is always
         // consistent with what the renderer is about to draw. The
@@ -67,7 +67,7 @@ impl AppCore {
         let pending_count = self.ui.tabs[self.ui.active_tab].pending.len();
 
         let tab = &mut self.ui.tabs[self.ui.active_tab];
-        // T1-T3-A: refresh tree-sitter highlights for the editor
+        // refresh tree-sitter highlights for the editor
         // before any immutable borrows further down (search /
         // completion / editor_search) lock the tab. The method only
         // touches `tab.editor`, `tab.ts_parser`, `tab.sql_highlights`
@@ -117,7 +117,7 @@ impl AppCore {
                 None
             };
         let result_count = tab.results.len();
-        // T2-T4-C: derive the chart payload, if a chart is active on
+        // derive the chart payload, if a chart is active on
         // this tab. The owned envelope below outlives the borrow we
         // hand into `RootLayout`; without it the labels / values
         // references would dangle.
@@ -141,7 +141,7 @@ impl AppCore {
                 message: message.as_str(),
             }),
         });
-        // T2-T4-D: derive the pivot payload, if a pivot is active on
+        // derive the pivot payload, if a pivot is active on
         // this tab. Same owned-envelope pattern as the chart slot.
         let pivot_owned: Option<PivotLayoutOwned> = tab
             .pivot
@@ -160,7 +160,7 @@ impl AppCore {
                 message: message.as_str(),
             }),
         });
-        // v1.1 #2: pull the active connection's accent colour, if any.
+        // pull the active connection's accent colour, if any.
         // Lives on `Session.config.params.color`; the conversion to
         // ratatui::Color is in `connection_color_to_ratatui` below.
         let accent_color = self
@@ -169,7 +169,7 @@ impl AppCore {
             .as_ref()
             .and_then(|s| s.config.params.color)
             .map(connection_color_to_ratatui);
-        // MR-M3 / R3-N4: a sticky notification (set via
+        // / a sticky notification (set via
         // `status.notify(...)`) wins over the per-frame `message`
         // slot until its TTL expires, so one-shot warnings like
         // "multi-line paste collapsed secondary cursors" survive
@@ -218,10 +218,10 @@ impl AppCore {
             result: result_display,
             completion: completion_view,
             editor_search: editor_search_view,
-            // T1-T3-A: SQL highlight spans are sourced from the per-tab
+            // SQL highlight spans are sourced from the per-tab
             // tree-sitter Parser. Wiring lives in the tab state
             // (`Tab::sql_highlights()`) and is refreshed lazily on
-            // dirty marks; see docs/dev/t1-t3-a-treesitter.md.
+            // dirty marks; see docs/dev/treesitter.md.
             editor_sql_highlights: tab.sql_highlights.as_deref(),
             chart: chart_layout,
             pivot: pivot_layout,
@@ -317,7 +317,7 @@ impl AppCore {
             render_snippets_modal(frame, area, &modal_state, &self.ui.theme);
         }
 
-        // v1.1 #1: goto fuzzy navigator sits above help/history/snippets
+        // goto fuzzy navigator sits above help/history/snippets
         // but below the confirm modal (write-safety is paramount).
         if let Some(modal) = self.modals.goto.as_ref() {
             // Slice the ranked match list down to what fits the
@@ -357,7 +357,7 @@ impl AppCore {
             render_goto_modal(frame, area, &view, &self.ui.theme);
         }
 
-        // v1.1 #2: write-confirmation modal sits on top of everything
+        // write-confirmation modal sits on top of everything
         // else (above help, history, snippets, goto) so the user can't run
         // a write "through" a help screen they forgot to close.
         if let Some(modal) = self.modals.confirm.as_ref() {
@@ -520,14 +520,14 @@ impl AppCore {
             self.handle_wizard_key(key).await;
             return;
         }
-        // v1.1 #2: write-confirmation modal. Owns the keyboard
+        // write-confirmation modal. Owns the keyboard
         // exclusively while open; either matches the accept keyword
         // and resumes the held batch, or Esc cancels.
         if self.modals.confirm.is_some() {
             self.handle_confirm_key(key).await;
             return;
         }
-        // L36: JSON viewer sits at the very top of the modal stack and
+        // JSON viewer sits at the very top of the modal stack and
         // gets first refusal on every key. Once open, no other handler
         // (help, history, wizard, ...) sees the keypress.
         if self.ui.tabs[self.ui.active_tab].json_viewer.is_some() {
@@ -542,7 +542,7 @@ impl AppCore {
             self.handle_diagram_key(key).await;
             return;
         }
-        // L36: pending preview modal is the next layer down. Owns its
+        // pending preview modal is the next layer down. Owns its
         // own scroll vocabulary; commit/discard/close are forwarded to
         // the regular Results pane handlers so users can keep their
         // muscle memory.
@@ -577,7 +577,7 @@ impl AppCore {
             self.handle_snippets_key(key).await;
             return;
         }
-        // v1.1 #1: goto fuzzy navigator owns the foreground while open.
+        // goto fuzzy navigator owns the foreground while open.
         if self.modals.goto.is_some() {
             self.handle_goto_key(key).await;
             return;
@@ -1078,7 +1078,7 @@ impl AppCore {
             .sidebar
             .contains(ratatui::layout::Position::new(pos.0, pos.1))
         {
-            // L24: mouse wheel over the sidebar pans the viewport by
+            // mouse wheel over the sidebar pans the viewport by
             // 3 rows per tick. The selection stays put so the user can
             // peek at off-screen rows without losing context.
             self.scroll_sidebar(if delta > 0 { 3 } else { -3 }).await;

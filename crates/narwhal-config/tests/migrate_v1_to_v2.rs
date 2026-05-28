@@ -238,7 +238,7 @@ fn settings_migrate_preserves_every_v1_field() {
     );
     // v2 additions land at their defaults — nothing got silently
     // dropped, but no new content appeared either.
-    // T1-T3-B: workspace-state persistence is opt-out, so the
+    // workspace-state persistence is opt-out, so the
     // migrated settings inherit the new `true` defaults. Older
     // assertions used to check `false` here; updated alongside
     // the v2.0 default flip.
@@ -514,7 +514,7 @@ fn validate_reports_invalid_on_malformed_v2() {
     );
 }
 
-/// T1-T4-A additive test: v1 files (no `[run]` section) load with
+/// additive test: v1 files (no `[run]` section) load with
 /// the documented defaults so unconfigured users get v1-equivalent
 /// streaming behaviour.
 #[test]
@@ -530,7 +530,7 @@ fn run_settings_v1_input_uses_default() {
     assert_eq!(settings.run.stream_flush_ms, 50);
 }
 
-/// T1-T4-A additive test: an explicit `[run]` section round-trips
+/// additive test: an explicit `[run]` section round-trips
 /// every field through render + load.
 #[test]
 fn run_settings_explicit_round_trip() {
@@ -550,7 +550,7 @@ fn run_settings_explicit_round_trip() {
     assert_eq!(loaded.run.stream_flush_ms, 25);
 }
 
-/// T1-T4-A additive test: defaults serialise as defaults.
+/// additive test: defaults serialise as defaults.
 #[test]
 fn run_settings_default_is_canonical() {
     let settings = Settings::default();
@@ -558,7 +558,7 @@ fn run_settings_default_is_canonical() {
     assert_eq!(settings.run.stream_flush_ms, 50);
 }
 
-/// T1-T4-A additive test: `narwhal config validate` returns Ok on a
+/// additive test: `narwhal config validate` returns Ok on a
 /// v2 file with an explicit `[settings.run]` block. Regression
 /// guard for the validate path — the previous suite only exercised
 /// validate via the kitchen-sink fixture which omitted `run`.

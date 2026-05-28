@@ -1,6 +1,6 @@
 # Async trait style — `Connection`, `DatabaseDriver`, `RowStream`, `CancelHandle`
 
-> Status: **adopted in v2.0 (T0-02)**. Replaces the v1.x `#[async_trait]`
+> Status: **adopted in v2.0**. Replaces the v1.x `#[async_trait]`
 > macro on the four core traits.
 
 ## Decision
@@ -11,12 +11,12 @@ trait** (RPITIT — *return position impl trait in trait*), with every
 paired with a **dyn-safe sibling** that boxes the returned future so
 the workspace can keep its `Box<dyn ...>` / `Arc<dyn ...>` sites.
 
-| Sized API (RPITIT)        | Dyn-safe sibling           |
+| Sized API (RPITIT)  | Dyn-safe sibling  |
 | ------------------------- | -------------------------- |
-| `Connection`              | `DynConnection`            |
-| `DatabaseDriver`          | `DynDatabaseDriver`        |
-| `RowStream`               | `DynRowStream`             |
-| `CancelHandle`            | `DynCancelHandle`          |
+| `Connection`  | `DynConnection`  |
+| `DatabaseDriver`  | `DynDatabaseDriver`  |
+| `RowStream`  | `DynRowStream`  |
+| `CancelHandle`  | `DynCancelHandle`  |
 
 A blanket `impl<T: Connection + 'static> DynConnection for T { ... }`
 (and the same for the other three) lives in `narwhal-core`, so any
@@ -31,7 +31,7 @@ this is illegal:
 
 ```rust
 pub trait Connection {
-    async fn execute(&mut self, sql: &str) -> Result<QueryResult>;
+  async fn execute(&mut self, sql: &str) -> Result<QueryResult>;
 }
 
 let conn: Box<dyn Connection> = …; // error E0038: not dyn compatible
@@ -57,60 +57,60 @@ shape per use case:
 ```rust
 // narwhal-core/src/connection.rs — sized
 pub trait Connection: Send + Sync {
-    fn execute(
-        &mut self,
-        sql: &str,
-        params: &[Value],
-    ) -> impl Future<Output = Result<QueryResult>> + Send;
-    // …
+  fn execute(
+  &mut self,
+  sql: &str,
+  params: &[Value],
+  ) -> impl Future<Output = Result<QueryResult>> + Send;
+  // …
 }
 
 // narwhal-core/src/connection.rs — dyn
 pub trait DynConnection: Send + Sync {
-    fn execute<'a>(
-        &'a mut self,
-        sql: &'a str,
-        params: &'a [Value],
-    ) -> BoxFuture<'a, Result<QueryResult>>;
-    // …
+  fn execute<'a>(
+  &'a mut self,
+  sql: &'a str,
+  params: &'a [Value],
+  ) -> BoxFuture<'a, Result<QueryResult>>;
+  // …
 }
 
 impl<T> DynConnection for T
 where
-    T: Connection + 'static,
+  T: Connection + 'static,
 {
-    fn execute<'a>(
-        &'a mut self,
-        sql: &'a str,
-        params: &'a [Value],
-    ) -> BoxFuture<'a, Result<QueryResult>> {
-        Box::pin(<Self as Connection>::execute(self, sql, params))
-    }
-    // …
+  fn execute<'a>(
+  &'a mut self,
+  sql: &'a str,
+  params: &'a [Value],
+  ) -> BoxFuture<'a, Result<QueryResult>> {
+  Box::pin(<Self as Connection>::execute(self, sql, params))
+  }
+  // …
 }
 ```
 
 ## Driver authoring rules
 
 1. Implement `Connection` (or `DatabaseDriver`, `RowStream`,
-   `CancelHandle`) directly. Use `async fn` bodies; the compiler
-   handles the `impl Future + Send` desugaring.
+  `CancelHandle`) directly. Use `async fn` bodies; the compiler
+  handles the `impl Future + Send` desugaring.
 2. **Do not** import `DynConnection` / `DynDatabaseDriver` etc. via
-   `use` inside the driver crate. They're in scope as blanket impls
-   anyway. Importing them brings duplicate methods into scope and
-   causes `E0034 multiple applicable items in scope` at every
-   intra-impl call (e.g. `self.execute(...)` inside a default-method
-   override).
+  `use` inside the driver crate. They're in scope as blanket impls
+  anyway. Importing them brings duplicate methods into scope and
+  causes `E0034 multiple applicable items in scope` at every
+  intra-impl call (e.g. `self.execute(...)` inside a default-method
+  override).
 3. Reference the dyn traits by fully-qualified path in return types
-   when you need to hand out a trait object:
+  when you need to hand out a trait object:
 
-   ```rust
-   async fn connect(
-       &self,
-       config: &ConnectionConfig,
-       password: Option<&str>,
-   ) -> Result<Box<dyn narwhal_core::DynConnection>> { … }
-   ```
+  ```rust
+  async fn connect(
+  &self,
+  config: &ConnectionConfig,
+  password: Option<&str>,
+  ) -> Result<Box<dyn narwhal_core::DynConnection>> { … }
+  ```
 
 ## Consumer authoring rules
 
@@ -146,7 +146,7 @@ full API.
   `#[async_trait]` for *their own* unrelated traits
   (`narwhal-plugin`, `narwhal-config::CredentialStore`,
   `narwhal-mcp` tools, …) keep the dep; reshaping those is out of
-  scope for T0-02.
+  scope.
 
 ## Migration note for external implementors
 
@@ -155,8 +155,8 @@ If you previously had
 ```rust
 #[async_trait]
 impl Connection for MyDriver {
-    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> { … }
-    // …
+  async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> { … }
+  // …
 }
 ```
 
@@ -165,14 +165,14 @@ drop the `#[async_trait]` attribute and update the `connect` /
 
 ```rust
 impl Connection for MyDriver {
-    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> { … }
-    async fn stream(
-        &mut self, sql: &str, params: &[Value],
-    ) -> Result<Box<dyn narwhal_core::DynRowStream>> { … }
-    fn cancel_handle(&self) -> Option<Box<dyn narwhal_core::DynCancelHandle>> { … }
-    // …
+  async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<QueryResult> { … }
+  async fn stream(
+  &mut self, sql: &str, params: &[Value],
+  ) -> Result<Box<dyn narwhal_core::DynRowStream>> { … }
+  fn cancel_handle(&self) -> Option<Box<dyn narwhal_core::DynCancelHandle>> { … }
+  // …
 }
 ```
 
-Everything else stays identical. The full diff is in T3-01 (migration
+Everything else stays identical. The full diff is (migration
 guide).

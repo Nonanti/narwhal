@@ -69,6 +69,6 @@ all-drivers = [
     "driver-clickhouse",
     "driver-mssql",
 ]
-# T2-T2-D: optional Linux syslog sink for the audit log. Off by
+# Optional Linux syslog sink for the audit log. Off by
 # default so non-Linux release tarballs don't drag the dependency in.
 audit-syslog = ["narwhal-audit/syslog"]

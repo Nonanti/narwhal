@@ -61,14 +61,14 @@ enum Mode {
     Config(ConfigArgs),
     /// Inspect the audit log.
     ///
-    /// T2-T2-D: read-only viewer for the JSONL audit sink. Resolves
+    /// read-only viewer for the JSONL audit sink. Resolves
     /// the active sink path from `settings.audit.sinks` (the first
     /// `file:` entry) unless `--path` overrides it.
     Audit(AuditArgs),
     /// Diff two connections and emit DDL that migrates target onto
     /// source.
     ///
-    /// T2-T2-C: headless variant of the `:schema-diff` TUI command.
+    /// headless variant of the `:schema-diff` TUI command.
     /// Opens both connections, introspects their schemas, computes
     /// a structural diff, and renders DDL through the chosen
     /// dialect emitter.
@@ -424,7 +424,7 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting narwhal");
 
-    // L20: log instead of silently swallowing a malformed settings file
+    // log instead of silently swallowing a malformed settings file
     // — a user-visible warning beats falling back to defaults blind.
     let settings = load_settings_or_warn(&paths);
     let connections = load_connections_or_warn(&paths);
@@ -439,18 +439,18 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     let registry = AppDriverRegistry::with_defaults();
     let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
     let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
-    // T1-T2-B: build the vault registry from settings.vault.providers.
+    // build the vault registry from settings.vault.providers.
     // A misconfigured provider sub-section here is non-fatal — the
     // TUI still starts so the user can edit settings.toml; only an
     // actual `password = "vault:…"` reference will fail at connect
     // time with a clear NotConfigured error.
     let vault = Arc::new(build_vault_registry(&settings.vault, "TUI"));
-    // T2-T2-D: build the audit service if at least one sink is
+    // build the audit service if at least one sink is
     // configured. Failure to open any individual sink is non-fatal
     // — the TUI still starts; missing sinks are logged. When the
     // resulting service has zero live sinks, audit stays silent.
     let audit = build_audit_service(&settings.audit).await;
-    // T1-T3-B: workspace-state restore. Wired before `with_settings`
+    // workspace-state restore. Wired before `with_settings`
     // so the persist toggles from `[settings.workspace.persist]` are
     // already cached when `with_workspace_state_path` consults them.
     let workspace_state_path = paths.workspace_state_file();
@@ -460,7 +460,7 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
         .with_last_used_path(paths.last_used_file())
         .with_settings(settings)
         .with_workspace_state_path(workspace_state_path);
-    // T2-T2-D: install the audit service *before* auto-loading
+    // install the audit service *before* auto-loading
     // plugins so the `PluginLoaded` event for each startup plugin
     // makes it into the audit log alongside `:plug-load` events.
     if let Some(svc) = audit {
@@ -473,7 +473,7 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     if let Err(error) = app.run().await {
         tracing::error!(error = %error, "fatal error");
         eprintln!("narwhal: fatal: {error:#}");
-        // L40: drop the non-blocking appender guard *before* exiting so
+        // drop the non-blocking appender guard *before* exiting so
         // the final tracing::error reliably reaches disk. `process::exit`
         // skips destructors of in-scope bindings, including `_guard`.
         drop(_guard);
@@ -594,7 +594,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
         // instead of a deep ExportError::NoSourceTable later.
         anyhow::bail!("`insert` is not supported in exec mode — use the TUI's `:export` command");
     }
-    // T1-T4-B: Parquet needs to own the sink for atomic write +
+    // Parquet needs to own the sink for atomic write +
     // footer flush, which the streaming `write_format` path cannot
     // provide. Direct the user at the TUI command (which goes through
     // `export_rows` with a real path).
@@ -636,7 +636,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
 
     let registry = McpDriverRegistry::with_defaults();
     let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
-    // T1-T2-B: load settings just for the vault block. The exec
+    // load settings just for the vault block. The exec
     // path doesn't care about the rest of the settings struct —
     // it has its own CLI flags for everything else.
     let settings = load_settings_or_warn(&paths);
@@ -729,7 +729,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
     Ok(())
 }
 
-/// Credential resolution chain shared with the MCP path: T1-T2-B
+/// Credential resolution chain shared with the MCP path:
 /// vault reference → keyring → `~/.pgpass` / env-var fallback.
 /// Failures are not fatal — drivers that accept passwordless auth
 /// simply receive `None`. Vault failures are logged at warn level so
@@ -789,7 +789,7 @@ fn build_vault_registry(
     }
 }
 
-/// T2-T2-D: build an [`narwhal_audit::AuditService`] from the
+/// build an [`narwhal_audit::AuditService`] from the
 /// `[settings.audit]` block.
 ///
 /// Returns `None` when audit is disabled, no sinks are configured, or
@@ -855,7 +855,7 @@ async fn build_audit_service(
     Some(Arc::new(svc))
 }
 
-/// T2-T2-D: `narwhal audit tail` implementation.
+/// `narwhal audit tail` implementation.
 ///
 /// Resolves the audit file path (CLI override > first `file:` sink
 /// from `settings.audit.sinks`), prints the requested tail, and
@@ -1020,7 +1020,7 @@ fn line_matches_kind(line: &str, expected: &str) -> bool {
     line.to_ascii_lowercase().contains(&needle)
 }
 
-/// T2-T2-C: headless `schema-diff` runner.
+/// headless `schema-diff` runner.
 ///
 /// Opens two connections (source + target) just long enough to walk
 /// their full schema catalogues, computes a structural diff via

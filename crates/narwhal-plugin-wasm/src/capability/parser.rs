@@ -3,10 +3,10 @@
 //! Tokens come in two flavours:
 //!
 //! * **v2.0 explicit form** — `kind.action:argument` where the
-//!   argument shape is variant-specific (path prefix, host:port,
-//!   env var name, command name).
-//! * **T1-T5-A legacy form** — bare keywords (`fs-read`, `net`,
-//!   `env`, `fs-write`) that expand to the widest scope.
+//! argument shape is variant-specific (path prefix, host:port,
+//! env var name, command name).
+//! * **Legacy form** — bare keywords (`fs-read`, `net`, `env`,
+//! `fs-write`) that expand to the widest scope.
 //!
 //! Unknown tokens are rejected here, *before* the runtime ever sees
 //! the manifest, so a typo in a setting like `fs-rea` doesn't
@@ -48,7 +48,7 @@ pub enum CapabilityParseError {
 /// trimmed; everything else is structural.
 pub(crate) fn parse(token: &str) -> Result<Capability, CapabilityParseError> {
     let trimmed = token.trim();
-    // Legacy unit-style tokens carried over from T1-T5-A. Each maps
+    // Legacy unit-style tokens carried over from. Each maps
     // to the widest scope so an existing manifest doesn't silently
     // lose a previously-allowed permission across the upgrade.
     match trimmed {

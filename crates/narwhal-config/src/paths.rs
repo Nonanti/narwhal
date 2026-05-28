@@ -51,7 +51,7 @@ impl ConfigPaths {
         self.data_dir.join("last_used.toml")
     }
 
-    /// T1-T3-B: workspace-state snapshot (open tabs, cursor/scroll,
+    /// workspace-state snapshot (open tabs, cursor/scroll,
     /// sidebar, active connection). Lives in the *config* directory
     /// alongside `settings.toml` and `connections.toml` so users who
     /// version their `~/.config/narwhal` see workspace restore as a

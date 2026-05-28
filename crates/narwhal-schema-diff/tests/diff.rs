@@ -389,7 +389,7 @@ fn change_count_aggregates_across_tables() {
     assert_eq!(d.change_count(), 2);
 }
 
-/// Review fix N1 / MR-M4: when an FK exists on both sides but
+/// Note: when an FK exists on both sides but
 /// differs only in case (`FK_user` vs `fk_user`), the case-
 /// insensitive index treats them as the same logical constraint
 /// and produces no phantom Add/Remove pair.
@@ -410,7 +410,7 @@ fn case_only_fk_name_difference_is_not_a_change() {
     assert_eq!(d.change_count(), 0, "{d:#?}");
 }
 
-/// MR-M4: when *two* FKs on the same table differ only in case,
+/// when *two* FKs on the same table differ only in case,
 /// the case-insensitive index keeps the first and warns. We can't
 /// observe the `tracing::warn` directly here without a subscriber,
 /// but we can prove that the second occurrence is not silently

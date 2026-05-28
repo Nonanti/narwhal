@@ -5,9 +5,9 @@
 //!
 //! 1. Build a [`Runtime`] at startup.
 //! 2. Walk the plugin directory; call [`Runtime::load`] for each
-//!    `plugin.toml`.
+//! `plugin.toml`.
 //! 3. Register the returned [`WasmPlugin`] objects with the
-//!    surrounding `PluginRegistry`.
+//! surrounding `PluginRegistry`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -86,7 +86,7 @@ impl RuntimeConfig {
     /// is for embedders that only have the coarse settings to work
     /// with.
     ///
-    /// The mapping mirrors T1-T5-A's policy match:
+    /// The mapping mirrors's policy match:
     ///
     /// | settings flag      | granted capability                          |
     /// | ------------------ | ------------------------------------------- |
@@ -100,7 +100,7 @@ impl RuntimeConfig {
     #[must_use]
     pub fn grants_from_settings(settings: &WasmPluginSettings) -> Grants {
         // `State` and `Cmd` are host-internal capabilities with no
-        // FS / net / env boundary; T1-T5-A's `check_allowed`
+        // FS / net / env boundary;'s `check_allowed`
         // unconditionally granted them. Preserve that semantic in
         // the settings layer so existing manifests carrying bare
         // `state` / `cmd` keep loading after the upgrade.
@@ -275,7 +275,7 @@ impl Runtime {
     pub async fn load_with_manifest(&self, manifest: Manifest) -> WasmResult<WasmPlugin> {
         // 1. API + capability gates fire *before* we read the binary.
         manifest.check_api_version()?;
-        // Coarse settings gate (T1-T5-A semantics): refuse any
+        // Coarse settings gate: refuse any
         // manifest whose declared capability *kinds* the settings
         // section disallows. We map the manifest set to a Grants
         // shape so the comparison reuses one code path.
@@ -285,7 +285,7 @@ impl Runtime {
                 capability: cap.to_string(),
             });
         }
-        // Fine grants gate (T1-T5-B): refuse manifests whose declared
+        // Fine grants gate: refuse manifests whose declared
         // path/host/var arguments aren't covered by an explicit
         // grant.
         let effective = self
@@ -297,11 +297,11 @@ impl Runtime {
             })?;
 
         // 2. Compile the component. `from_file` mmaps the binary so
-        //    we don't double-buffer the `.wasm` bytes.
+        // we don't double-buffer the `.wasm` bytes.
         //
-        //    A pre-flight `exists()` check converts the file-not-found
-        //    error into a clean [`WasmError::Io`] instead of the raw
-        //    wasmtime anyhow message, so the user sees the missing path.
+        // A pre-flight `exists()` check converts the file-not-found
+        // error into a clean [`WasmError::Io`] instead of the raw
+        // wasmtime anyhow message, so the user sees the missing path.
         if !manifest.component_path.exists() {
             return Err(WasmError::Io {
                 path: manifest.component_path.clone(),

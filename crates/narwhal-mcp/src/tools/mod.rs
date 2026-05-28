@@ -58,7 +58,7 @@ pub fn cap_response(body: String, tool: &str) -> (String, bool) {
     if body.len() <= MAX_RESPONSE_BYTES {
         return (body, false);
     }
-    // MR-C3: keep a UTF-8-safe prefix of the original body so the
+    // keep a UTF-8-safe prefix of the original body so the
     // agent can read the start of the actual error / payload instead
     // of losing it completely behind a generic envelope.
     let snippet_end = floor_to_char_boundary(&body, CAP_SNIPPET_BYTES.min(body.len()));
@@ -82,7 +82,7 @@ pub fn cap_response(body: String, tool: &str) -> (String, bool) {
     )
 }
 
-/// Find the largest char-boundary index `<= idx`. R3-N5: renamed
+/// Find the largest char-boundary index `<= idx`. renamed
 /// from `floor_char_boundary` to avoid colliding with the eventually-
 /// stable `str::floor_char_boundary` API. Once stdlib's stabilises,
 /// this helper can be deleted in favour of the method.
@@ -113,7 +113,7 @@ pub trait Tool: Send + Sync {
     /// JSON Schema for the `arguments` object accepted by this tool.
     fn input_schema(&self) -> Value;
 
-    /// Descriptor name as a `Cow<'static, str>`. MR-N3: built-ins
+    /// Descriptor name as a `Cow<'static, str>`.: built-ins
     /// override this with `Cow::Borrowed("name")` so the descriptor
     /// round-trips without an allocation; the default impl falls
     /// back to an owned clone, which dynamic tools rely on.
@@ -170,7 +170,7 @@ impl ToolOutput {
 /// We avoid a `HashMap` here because the set is tiny and the linear scan is
 /// faster (and gives us deterministic `tools/list` ordering for free).
 ///
-/// T2-T5-C: in addition to the built-ins, the registry now accepts
+/// in addition to the built-ins, the registry now accepts
 /// *dynamic* tools registered at startup via [`Self::register_dynamic`].
 /// These are the host-side hook that plugins use to expose their own
 /// MCP tools — the v2.0 surface is generic over any closure-shaped
@@ -288,7 +288,7 @@ impl ToolRegistry {
             .map(|arc| arc.as_ref() as &dyn Tool)
     }
 
-    /// T2-T5-C: register a dynamic tool sourced from a plugin.
+    /// register a dynamic tool sourced from a plugin.
     ///
     /// Returns a [`RegistrationOutcome`] so the caller can surface a
     /// collision warning (typical pattern: `tracing::warn!`).

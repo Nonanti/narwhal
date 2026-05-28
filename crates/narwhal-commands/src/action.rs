@@ -6,7 +6,7 @@
 //!
 //! - User-defined keybindings (TOML overrides in `config.toml`).
 //! - Unified test fixtures that invoke handlers by name rather than synthesising
-//!   key events.
+//! key events.
 //! - Future plugin commands that bind to the same action vocabulary.
 //!
 //! Actions are **grouped** by the UI surface they affect (see [`KeyGroup`]). The
@@ -129,7 +129,7 @@ pub enum Action {
     OpenJsonViewerCell,
     OpenJsonViewerRow,
 
-    // ─── FK navigation (v1.2 #6) ──────────────────────────────────────
+    // ─── FK navigation ──────────────────────────────────────
     ResultsFkGotoDefinition,
 }
 

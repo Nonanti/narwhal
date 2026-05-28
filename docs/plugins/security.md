@@ -1,28 +1,28 @@
 # Plugin security — threat model and capability list
 
-> Status: **v2.0**. Lands with T1-T5-B (WASM sandbox v2).
+> Status: **v2.0**. Lands with (WASM sandbox v2).
 > Companion to [`docs/plugins/wasm.md`](./wasm.md) (SDK walkthrough)
-> and [`docs/dev/t1-t5-b-sandbox.md`](../dev/t1-t5-b-sandbox.md)
+> and [`docs/dev/wasm-sandbox.md`](../dev/wasm-sandbox.md)
 > (host-side implementation notes).
 
 ## TL;DR for plugin authors
 
 1. Declare every capability you need in `plugin.toml`. Be specific:
-   `fs.read:/etc/my-plugin` is safer than `fs-read`.
+  `fs.read:/etc/my-plugin` is safer than `fs-read`.
 2. Expect every denied call to return a wasmtime trap (for writes)
-   or `None` (for reads). Wrap them in graceful fallbacks.
+  or `None` (for reads). Wrap them in graceful fallbacks.
 3. Targets the host can serve are visible to the user via the
-   `[plugins.wasm]` settings section + the operator's per-plugin
-   grants list. You do not get to enable yourself.
+  `[plugins.wasm]` settings section + the operator's per-plugin
+  grants list. You do not get to enable yourself.
 
 ## TL;DR for operators
 
 1. Default-deny. The shipped settings refuse every FS/net/env
-   capability; you opt in per-plugin.
+  capability; you opt in per-plugin.
 2. Prefer the **fine** grants list (`[[plugins.grants]]`) over the
-   coarse `allow_fs_read = true` flag.
+  coarse `allow_fs_read = true` flag.
 3. Audit log emits under target `narwhal::plugin::audit`. Filter
-   your `tracing-subscriber` config on it to surface denials.
+  your `tracing-subscriber` config on it to surface denials.
 
 ## Threat model
 
@@ -71,17 +71,17 @@ Each manifest token authorises one operation. The host's grants
 list intersects the manifest's requests; the runtime enforces the
 intersection on every host call.
 
-| Token form                          | What it authorises                                  |
+| Token form  | What it authorises  |
 | ----------------------------------- | --------------------------------------------------- |
-| `state`                             | Per-plugin KV via `host.state-get`/`host.state-set`. KV is namespaced to the plugin — one plugin can't read another's keys. |
-| `cmd`                               | **Broad** `host.cmd` — any narwhal `:` command. Legacy; prefer the explicit form. |
-| `cmd.invoke:<name>`                 | Exactly the named `:` command via `host.cmd`. |
-| `fs.read:<absolute-path-prefix>`    | Read access to files under the prefix (component-prefix match). |
-| `fs.write:<absolute-path-prefix>`   | Write access. Does **not** imply read. |
-| `net.connect:<host>`                | TCP connect to any port on the host. |
-| `net.connect:<host>:<port>`         | TCP connect to the specific port. |
-| `env.read:<VAR>`                    | Read the named environment variable. |
-| `env.read:*`                        | Wildcard env read (== legacy bare `env`). |
+| `state`  | Per-plugin KV via `host.state-get`/`host.state-set`. KV is namespaced to the plugin — one plugin can't read another's keys. |
+| `cmd`  | **Broad** `host.cmd` — any narwhal `:` command. Legacy; prefer the explicit form. |
+| `cmd.invoke:<name>`  | Exactly the named `:` command via `host.cmd`. |
+| `fs.read:<absolute-path-prefix>`  | Read access to files under the prefix (component-prefix match). |
+| `fs.write:<absolute-path-prefix>`  | Write access. Does **not** imply read. |
+| `net.connect:<host>`  | TCP connect to any port on the host. |
+| `net.connect:<host>:<port>`  | TCP connect to the specific port. |
+| `env.read:<VAR>`  | Read the named environment variable. |
+| `env.read:*`  | Wildcard env read (== legacy bare `env`). |
 
 ### Path matching rules
 
@@ -116,15 +116,15 @@ Two layers govern what a plugin can request:
 
 ### Coarse — `[plugins.wasm]`
 
-The historical T1-T5-A shape. Bool flags. Refuse-all by default.
+The historical shape. Bool flags. Refuse-all by default.
 
 ```toml
 [plugins.wasm]
-enabled       = true
-allow_fs_read = true       # gates fs.read:* manifests
-allow_fs_write = false     # gates fs.write:* manifests
-allow_net     = false      # gates net.connect:* manifests
-allow_env     = false      # gates env.read:* manifests
+enabled  = true
+allow_fs_read = true  # gates fs.read:* manifests
+allow_fs_write = false  # gates fs.write:* manifests
+allow_net  = false  # gates net.connect:* manifests
+allow_env  = false  # gates env.read:* manifests
 ```
 
 When a coarse flag is `false`, **no** manifest declaring that
@@ -135,10 +135,10 @@ a `CapabilityDenied` error.
 
 ```toml
 [[plugins.grants]]
-plugin       = "fmt-helper"
+plugin  = "fmt-helper"
 capabilities = [
-    "fs.read:${config}/plugins/fmt-helper/",
-    "cmd.invoke:fmt",
+  "fs.read:${config}/plugins/fmt-helper/",
+  "cmd.invoke:fmt",
 ]
 ```
 
@@ -168,8 +168,7 @@ For v2.0 the documented stance is:
 > the install base of historical plugins and assumes operators
 > have vetted the source.
 
-The Lua bridge will tighten its stdlib exposure in a follow-up
-(T1-T5-B sibling task), but the policy boundary stays the same:
+The Lua bridge will tighten its stdlib exposure in a follow-up, but the policy boundary stays the same:
 WASM is sandboxed, Lua is trusted.
 
 ## Operator playbook
@@ -179,17 +178,17 @@ WASM is sandboxed, Lua is trusted.
 ```toml
 # tracing-subscriber config snippet
 [targets]
-narwhal::plugin::audit = "warn"   # emit every denial
+narwhal::plugin::audit = "warn"  # emit every denial
 ```
 
 Every denial carries:
 
 ```text
-plugin    = "fmt-helper"
-kind      = "fs.read"
+plugin  = "fmt-helper"
+kind  = "fs.read"
 operation = "fs.read:/etc/passwd"
-reason    = "no matching fs grant"
-audit_id  = 42                       # per-process monotonic
+reason  = "no matching fs grant"
+audit_id  = 42  # per-process monotonic
 ```
 
 The cache short-circuits repeated denials on the same operation —
@@ -206,24 +205,24 @@ is per-process; restart resets the counter.
 
 1. Identify the noisy operation from the audit log.
 2. Remove the matching `[[plugins.grants]]` entry — or narrow the
-   scope (`fs.read:/etc` → `fs.read:/etc/my-plugin`).
+  scope (`fs.read:/etc` → `fs.read:/etc/my-plugin`).
 3. Restart the host. Grants are loaded once at startup;
-   hot-reload is out of scope for v2.0.
+  hot-reload is out of scope for v2.0.
 
-## Migration from T1-T5-A manifests
+## Migration manifests
 
-Manifests written against T1-T5-A use the bare unit tokens
+Manifests written against use the bare unit tokens
 (`state`, `cmd`, `fs-read`, `fs-write`, `net`, `env`). These keep
 loading — the parser maps each to the widest scope of its kind:
 
-| Legacy bare token | v2.0 equivalent       |
+| Legacy bare token | v2.0 equivalent  |
 | ----------------- | --------------------- |
-| `state`           | `state`               |
-| `cmd`             | `cmd`                 |
-| `fs-read`         | `fs.read:/`           |
-| `fs-write`        | `fs.write:/`          |
-| `net`             | `net.connect:*`       |
-| `env`             | `env.read:*`          |
+| `state`  | `state`  |
+| `cmd`  | `cmd`  |
+| `fs-read`  | `fs.read:/`  |
+| `fs-write`  | `fs.write:/`  |
+| `net`  | `net.connect:*`  |
+| `env`  | `env.read:*`  |
 
 Migrating to the explicit form is **strongly recommended** — the
 legacy tokens grant the *widest possible* scope of their kind, and

@@ -1,4 +1,4 @@
-//! T1-T4-A: streaming-result tuning end-to-end tests.
+//! streaming-result tuning end-to-end tests.
 //!
 //! Verifies that `settings.run.batch_size` and `stream_flush_ms`
 //! actually take effect at the worker layer, and that the new

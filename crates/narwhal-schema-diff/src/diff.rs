@@ -296,7 +296,7 @@ fn diff_one_table(source: &TableSchema, target: &TableSchema) -> Option<TableCha
 }
 
 fn diff_columns(source: &[Column], target: &[Column]) -> Vec<ColumnChange> {
-    // R3-M2: MR-M4 originally only routed FK / unique / index
+    // originally only routed FK / unique / index
     // lookups through `index_by_lower_name`; columns kept the old
     // silent-overwrite `.collect::<BTreeMap>()`. That left a
     // quoted-identifier hole in Postgres (`"Email"` vs `"email"`
@@ -347,7 +347,7 @@ fn diff_columns(source: &[Column], target: &[Column]) -> Vec<ColumnChange> {
 fn diff_indexes(source: &[Index], target: &[Index]) -> Vec<IndexChange> {
     // Indexes are identified by name; we exclude the implicit primary
     // -key index because the diff for that lives on the column /
-    // table-creation level. Review fix N1 / MR-M4: case-insensitive
+    // table-creation level. Note: case-insensitive
     // index with warn-on-collision.
     let source_by_name =
         index_by_lower_name(source.iter().filter(|i| !i.primary), |i| &i.name, "index");
@@ -384,7 +384,7 @@ fn indexes_differ(left: &Index, right: &Index) -> bool {
 }
 
 fn diff_foreign_keys(source: &[ForeignKey], target: &[ForeignKey]) -> Vec<ForeignKeyChange> {
-    // Review fix N1 / MR-M4: case-insensitive FK index. Cross-
+    // Note: case-insensitive FK index. Cross-
     // dialect diffs (Postgres lower-cased vs MSSQL case-preserved)
     // used to surface phantom Add/Remove pairs for the same logical
     // constraint. `index_by_lower_name` emits a `tracing::warn` on
@@ -441,7 +441,7 @@ fn diff_unique(
     source: &[UniqueConstraint],
     target: &[UniqueConstraint],
 ) -> Vec<UniqueConstraintChange> {
-    // Review fix N1 / MR-M4: case-insensitive index, same warning
+    // Note: case-insensitive index, same warning
     // semantics as the FK diff.
     let source_by_name = index_by_lower_name(source.iter(), |u| &u.name, "unique constraint");
     let target_by_name = index_by_lower_name(target.iter(), |u| &u.name, "unique constraint");
@@ -469,7 +469,7 @@ fn diff_unique(
     out
 }
 
-/// MR-M4: build a case-insensitive lookup over `items` keyed by the
+/// build a case-insensitive lookup over `items` keyed by the
 /// lower-cased name returned from `name_of`. Two items whose names
 /// differ only in case both land on the same key; the first one
 /// wins and the conflict is reported via `tracing::warn` so silent

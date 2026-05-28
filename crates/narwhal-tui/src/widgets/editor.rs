@@ -30,9 +30,9 @@ pub fn gutter_width(line_count: usize) -> usize {
     (digits + 3).max(6)
 }
 
-#[allow(clippy::too_many_arguments)] // T1-T3-A: 8 args is the natural
-// shape of the render call; folding them into a config struct would
-// just move the noise to the call site. The single caller (RootLayout)
+#[allow(clippy::too_many_arguments)] // 8 args is the natural shape
+// of the render call; folding them into a config struct would just
+// move the noise to the call site. The single caller (RootLayout)
 // already groups them.
 pub fn render_editor(
     frame: &mut Frame<'_>,
@@ -132,7 +132,7 @@ pub fn render_editor(
                         };
                         spans.push(Span::styled(line_text[start..end].to_owned(), style));
                     }
-                    // L15: search matches always have `end > start`
+                    // search matches always have `end > start`
                     // (zero-length needles are filtered out upstream),
                     // so plain assignment suffices.
                     pos = end;
@@ -166,7 +166,7 @@ pub fn render_editor(
         }
     }
 
-    // T2-T3-D: secondary cursors are rendered as reverse-video cells
+    // secondary cursors are rendered as reverse-video cells
     // so the user can see them at a glance. The terminal can only host
     // one real text cursor; everything else paints over the existing
     // glyph with a 1x1 styled cell.

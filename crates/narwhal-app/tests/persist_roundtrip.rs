@@ -1,22 +1,22 @@
-//! T1-T3-B — Workspace persistence integration tests.
+//! Workspace persistence integration tests.
 //!
 //! Covers:
 //!
 //! - Serde round-trip on the wire-format types (`schema_version`
-//!   pinned to 1, optional fields collapse, kebab-case enums).
+//! pinned to 1, optional fields collapse, kebab-case enums).
 //! - `save_at_exit` → `load_at_start` ABI: write a snapshot, read it
-//!   back, assert struct equality and that the atomic-rename leaves
-//!   no temp files behind.
+//! back, assert struct equality and that the atomic-rename leaves
+//! no temp files behind.
 //! - Per-knob restore: `restore_tabs = false` keeps the default
-//!   tab list; `enabled = false` short-circuits everything.
+//! tab list; `enabled = false` short-circuits everything.
 //! - `AppCore`-derived snapshot reflects live tab/cursor/scroll
-//!   state.
+//! state.
 //! - Forward-version snapshots surface as
-//!   `PersistError::UnsupportedSchema` rather than silently
-//!   replacing user state with defaults.
+//! `PersistError::UnsupportedSchema` rather than silently
+//! replacing user state with defaults.
 //! - Concurrent-instance lock fallback: while one writer holds the
-//!   `.lock` sentinel, a second writer falls through to the per-pid
-//!   path instead of clobbering the canonical file.
+//! `.lock` sentinel, a second writer falls through to the per-pid
+//! path instead of clobbering the canonical file.
 
 use std::path::PathBuf;
 use std::sync::Arc;

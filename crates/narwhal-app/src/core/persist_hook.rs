@@ -1,4 +1,4 @@
-//! T1-T3-B — Bridge between [`AppCore`]'s private state and the
+//! Bridge between [`AppCore`]'s private state and the
 //! `persist` module's wire-format types.
 //!
 //! Lives in `core/` because the projection and restore both need
@@ -17,7 +17,7 @@
 //! fields at their `None` defaults. The first render after restore
 //! triggers a fresh `Tab::sql_highlights` call which re-populates
 //! the cache — exactly the same path a freshly-typed buffer takes.
-//! See `docs/dev/t1-t3-a-treesitter.md`, "Cache policy" — the
+//! See `docs/dev/treesitter.md`, "Cache policy" — the
 //! length-keyed invalidation contract is preserved: spans are
 //! recomputed whenever the buffer length differs from the cached
 //! value, which is trivially true for a freshly-restored tab
@@ -26,16 +26,16 @@
 //! ## What we deliberately don't restore
 //!
 //! - **Result bundles**: per the brief, re-running on demand is
-//!   cheap; persisting 100k cached rows is not.
+//! cheap; persisting 100k cached rows is not.
 //! - **Modal overlays** (wizard, history, snippets picker, json
-//!   viewer, diagram modal, pending-preview): all transient by
-//!   construction — the user invoked them, the user can re-invoke
-//!   them.
+//! viewer, diagram modal, pending-preview): all transient by
+//! construction — the user invoked them, the user can re-invoke
+//! them.
 //! - **Vim transient state** (pending leader keys, command-line
-//!   buffer): mid-input snapshots are user-hostile.
+//! buffer): mid-input snapshots are user-hostile.
 //! - **Plugin pool / pending session opens**: lifecycle state owned
-//!   by `ProcessState`; restoring it would race the fresh
-//!   `AppCore::new` wiring.
+//! by `ProcessState`; restoring it would race the fresh
+//! `AppCore::new` wiring.
 
 use narwhal_config::WorkspacePersistSettings;
 use narwhal_domain::editor::EditorBuffer;
@@ -191,7 +191,7 @@ const fn restore_sidebar(core: &mut AppCore, persisted: &PersistedSidebar) {
 }
 
 impl AppCore {
-    /// T1-T3-B: kick the dispatcher down the same path `:open NAME`
+    /// kick the dispatcher down the same path `:open NAME`
     /// would have taken, on behalf of the workspace-state restore.
     /// Exposed as a `pub(crate)` method so the binary's startup
     /// task (in `App::run`) doesn't have to grow visibility on

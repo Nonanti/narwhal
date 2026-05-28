@@ -42,7 +42,7 @@ impl AppCore {
             state: self.deps.plugin_state.clone(),
         });
         plugin.install_executor(executor)?;
-        // T2-T2-D: capture identity before the move into `register`
+        // capture identity before the move into `register`
         // so the audit emit can carry name + version. Lua plugins do
         // not currently expose a declared version, so the field
         // mirrors the name; a future change can swap in a real

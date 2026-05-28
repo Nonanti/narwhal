@@ -18,21 +18,21 @@ that's the same in every language.
 
 A plugin has three lifecycle hooks:
 
-| Hook              | When the host calls it                                              | Returns                          |
+| Hook  | When the host calls it  | Returns  |
 | ----------------- | ------------------------------------------------------------------- | -------------------------------- |
-| `init`            | Once, immediately after `cargo component`-produced bytes load.       | `result<plugin-info, string>`    |
-| `handle-command`  | Every `:` prompt invocation whose name appears in `plugin.toml`.     | `result<command-outcome, string>`|
-| `on-event`        | Every host lifecycle event (connection open/close, query, buffer).   | `result<_, string>`              |
+| `init`  | Once, immediately after `cargo component`-produced bytes load.  | `result<plugin-info, string>`  |
+| `handle-command`  | Every `:` prompt invocation whose name appears in `plugin.toml`.  | `result<command-outcome, string>`|
+| `on-event`  | Every host lifecycle event (connection open/close, query, buffer).  | `result<_, string>`  |
 
 The host exposes a tiny capability surface via the imported `host`
 interface — see `wit/world.wit` for the canonical IDL. v0.1 ships:
 
-| Host function                  | Capability declared in manifest | Notes                                          |
+| Host function  | Capability declared in manifest | Notes  |
 | ------------------------------ | ------------------------------- | ---------------------------------------------- |
-| `log(level, message)`          | none                            | Always available; goes through host `tracing`. |
-| `cmd(name, args)`              | `cmd`                           | Dispatches a `:` command on the host bus.      |
-| `state-get(key)`               | `state`                         | Returns `none` when the key is unset.          |
-| `state-set(key, value)`        | `state`                         | Per-plugin KV; 256 KiB byte budget.            |
+| `log(level, message)`  | none  | Always available; goes through host `tracing`. |
+| `cmd(name, args)`  | `cmd`  | Dispatches a `:` command on the host bus.  |
+| `state-get(key)`  | `state`  | Returns `none` when the key is unset.  |
+| `state-set(key, value)`  | `state`  | Per-plugin KV; 256 KiB byte budget.  |
 
 Capabilities not granted by the host's `[plugins.wasm]` settings
 make the *manifest* fail to load — by the time the component runs,
@@ -42,13 +42,13 @@ its declared capabilities are guaranteed to be allowed.
 
 ```toml
 # Required: identity and ABI contract.
-name        = "my-plugin"          # KV namespace + log tag + Plugin::name
-version     = "0.1.0"              # informational; not parsed as semver
-api-version = 1                    # narwhal:plugin major; must equal HOST_API_MAJOR
+name  = "my-plugin"  # KV namespace + log tag + Plugin::name
+version  = "0.1.0"  # informational; not parsed as semver
+api-version = 1  # narwhal:plugin major; must equal HOST_API_MAJOR
 
 # Optional: where the .wasm sits relative to this file.
 # Defaults to "<name>.wasm" in the same directory.
-component   = "my_plugin.wasm"
+component  = "my_plugin.wasm"
 
 # Optional: short user-facing line for `:help`.
 description = "Greets connections on open"
@@ -57,22 +57,22 @@ description = "Greets connections on open"
 # `[plugins.wasm]` settings or the plugin is refused at load time.
 # Tokens: state, cmd, fs-read, fs-write, net, env.
 # Defaults to []; v0.1 only `state` and `cmd` are wired host-side
-# (fs-read / fs-write / net / env land with T1-T5-B's sandbox).
+# (fs-read / fs-write / net / env land with the sandbox).
 capabilities = ["state", "cmd"]
 
 # `:` commands the plugin handles. Must not shadow a built-in name.
 [[commands]]
-name        = "say-hi"
+name  = "say-hi"
 description = "Send a greeting log line"
 ```
 
 ## Resource limits (defaults)
 
-| Knob                       | Default      | Source                                 |
+| Knob  | Default  | Source  |
 | -------------------------- | ------------ | -------------------------------------- |
-| Memory                     | 64 MiB       | `RuntimeConfig::memory_limit`          |
-| Fuel per export call       | 100 M ops    | `RuntimeConfig::fuel_per_call`         |
-| KV byte budget             | 256 KiB      | `RuntimeConfig::kv_budget`             |
+| Memory  | 64 MiB  | `RuntimeConfig::memory_limit`  |
+| Fuel per export call  | 100 M ops  | `RuntimeConfig::fuel_per_call`  |
+| KV byte budget  | 256 KiB  | `RuntimeConfig::kv_budget`  |
 
 Exceeding any of these traps the plugin cleanly. The host logs the
 failure but keeps delivering events to every other loaded plugin.
@@ -118,8 +118,8 @@ world = "narwhal-plugin"
 extern crate alloc;
 
 wit_bindgen::generate!({
-    path: "wit",
-    world: "narwhal-plugin",
+  path: "wit",
+  world: "narwhal-plugin",
 });
 
 use alloc::format;
@@ -131,25 +131,25 @@ use narwhal::plugin::host;
 struct Plugin;
 
 impl Guest for Plugin {
-    fn init() -> Result<PluginInfo, String> {
-        host::log("info", "initialising");
-        Ok(PluginInfo {
-            name: String::from("my-plugin"),
-            version: String::from("0.1.0"),
-            api_version: 1,
-        })
-    }
+  fn init -> Result<PluginInfo, String> {
+  host::log("info", "initialising");
+  Ok(PluginInfo {
+  name: String::from("my-plugin"),
+  version: String::from("0.1.0"),
+  api_version: 1,
+  })
+  }
 
-    fn handle_command(input: CommandInput) -> Result<CommandOutcome, String> {
-        Ok(CommandOutcome::Status(format!("hi {}", input.argument)))
-    }
+  fn handle_command(input: CommandInput) -> Result<CommandOutcome, String> {
+  Ok(CommandOutcome::Status(format!("hi {}", input.argument)))
+  }
 
-    fn on_event(event: Event) -> Result<(), String> {
-        if let Event::ConnectionOpened(name) = event {
-            host::log("info", &format!("hello, {name}"));
-        }
-        Ok(())
-    }
+  fn on_event(event: Event) -> Result<, String> {
+  if let Event::ConnectionOpened(name) = event {
+  host::log("info", &format!("hello, {name}"));
+  }
+  Ok()
+  }
 }
 
 export!(Plugin);
@@ -173,19 +173,19 @@ npm i -D @bytecodealliance/componentize-js
 // exact import path. The `host` import is provided by narwhal.
 import { log } from "narwhal:plugin/host@0.1.0";
 
-export function init() {
-    log("info", "initialising");
-    return { name: "my-plugin", version: "0.1.0", apiVersion: 1 };
+export function init {
+  log("info", "initialising");
+  return { name: "my-plugin", version: "0.1.0", apiVersion: 1 };
 }
 
 export function handleCommand(input) {
-    return { tag: "status", val: `hi ${input.argument}` };
+  return { tag: "status", val: `hi ${input.argument}` };
 }
 
 export function onEvent(event) {
-    if (event.tag === "connection-opened") {
-        log("info", `hello, ${event.val}`);
-    }
+  if (event.tag === "connection-opened") {
+  log("info", `hello, ${event.val}`);
+  }
 }
 ```
 
@@ -220,7 +220,7 @@ under the component model; only major bumps reshape the surface.
 
 * The WIT contract: [`crates/narwhal-plugin-wasm/wit/world.wit`][wit]
 * The runtime contract notes:
-  [`docs/dev/t1-t5-a-wasm-runtime.md`](../dev/t1-t5-a-wasm-runtime.md)
+  [`docs/dev/wasm-runtime.md`](../dev/wasm-runtime.md)
 * The Rust example:
   [`crates/narwhal-plugin-wasm/examples/hello-world/`][example]
 

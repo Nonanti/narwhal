@@ -1,4 +1,4 @@
-//! Per-table schema diff and `ALTER TABLE` generation (v1.2 #8).
+//! Per-table schema diff and `ALTER TABLE` generation.
 //!
 //! Inputs are two [`TableSchema`]s describing the same logical table
 //! in two contexts (a stored snapshot vs. live; staging vs. prod;
@@ -8,9 +8,9 @@
 //! Scope for v1.2:
 //!
 //! - Columns: detect adds, drops, type changes, nullability flips,
-//!   default changes.
+//! default changes.
 //! - Indexes: not in scope. PG / `MySQL` syntax diverges too much for
-//!   a one-pass renderer; deferred to v1.3.
+//! a one-pass renderer; deferred to v1.3.
 //! - Foreign keys: not in scope (same reason).
 //!
 //! The renderer quotes identifiers with the dialect's native style
@@ -26,18 +26,18 @@
 //! `ALTER TABLE` text. That means:
 //!
 //! - **No escaping.** A default of `'O''Brien'` lands unchanged in
-//!   the output. The downstream engine re-parses it, so the quoting
-//!   has to round-trip through the same dialect; this is correct
-//!   for a same-engine diff and *can* break across engines (a PG
-//!   `now()` default sent to `SQLite` is meaningless).
+//! the output. The downstream engine re-parses it, so the quoting
+//! has to round-trip through the same dialect; this is correct
+//! for a same-engine diff and *can* break across engines (a PG
+//! `now()` default sent to `SQLite` is meaningless).
 //! - **No sandboxing.** The diff output is meant to be reviewed and
-//!   re-executed by the user, not blindly applied. A malicious
-//!   default like `'); DROP TABLE …; --` smuggled into a source DB
-//!   would replay against the target DB if the migration is
-//!   executed without inspection. The `:diff` command writes the
-//!   output to a new editor buffer specifically so this review
-//!   step is mandatory; do **not** wire the result of
-//!   [`render_alter_statements`] into an automated apply path.
+//! re-executed by the user, not blindly applied. A malicious
+//! default like `'); DROP TABLE …; --` smuggled into a source DB
+//! would replay against the target DB if the migration is
+//! executed without inspection. The `:diff` command writes the
+//! output to a new editor buffer specifically so this review
+//! step is mandatory; do **not** wire the result of
+//! [`render_alter_statements`] into an automated apply path.
 //!
 //! A future revision could tighten this by modelling
 //! `Column::default` as a structured `DefaultExpr { Literal(…),

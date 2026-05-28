@@ -193,7 +193,7 @@ impl SqlTree {
     }
 
     /// Borrow the underlying tree-sitter tree. Intended for the small
-    /// set of advanced callers (e.g. the future T2-T3-D multi-cursor
+    /// set of advanced callers (e.g. the future multi-cursor
     /// task) that need to walk the CST directly. Most callers should
     /// stick to [`highlights`](Self::highlights) /
     /// [`scope_at`](Self::scope_at).

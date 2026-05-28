@@ -2,19 +2,19 @@
 //!
 //! Given a byte offset inside a parsed SQL buffer, return a [`Scope`]
 //! describing the nearest meaningful clause. This is the contract the
-//! Tier-2 LSP (T2-T3-C) and multi-cursor (T2-T3-D) tasks build on top
+//! Tier-2 LSP and multi-cursor tasks build on top
 //! of — they only need the classification, not the raw CST.
 //!
 //! ## Algorithm
 //!
 //! 1. Find the smallest named node whose byte range contains the
-//!    offset (`Node::descendant_for_byte_range`).
+//! offset (`Node::descendant_for_byte_range`).
 //! 2. Walk upwards, mapping each ancestor's kind to a [`ScopeKind`].
-//!    The first match wins, which is naturally the *innermost*
-//!    clause.
+//! The first match wins, which is naturally the *innermost*
+//! clause.
 //! 3. Record the enclosing statement's byte range so downstream
-//!    code can scope its work (e.g. completion limits itself to
-//!    the current statement's CTEs).
+//! code can scope its work (e.g. completion limits itself to
+//! the current statement's CTEs).
 //!
 //! ## Ambiguity
 //!
@@ -194,8 +194,8 @@ fn classify(node: Node<'_>, byte_offset: usize) -> Option<ScopeKind> {
         }
         "list" => {
             // INSERT INTO t (a, b) VALUES (1, 2);
-            //               ^^^^^^  ^^^^^^
-            //               columns  values
+            // ^^^^^^  ^^^^^^
+            // columns  values
             // The grammar uses a generic `list` node for both. We
             // disambiguate by looking at the previous named sibling.
             classify_insert_list(node).or(Some(ScopeKind::Statement))

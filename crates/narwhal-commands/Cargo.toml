@@ -30,7 +30,7 @@ directories.workspace = true
 tracing.workspace = true
 base64.workspace = true
 chrono = { workspace = true }
-# T1-T4-B: Parquet (columnar) export. The `arrow` feature pulls in the
+# Parquet (columnar) export. The `arrow` feature pulls in the
 # arrow ecosystem builders + RecordBatch so we can map narwhal `Value`s
 # onto Arrow arrays before encoding. snap + zstd cover the two most
 # common compression codecs without dragging brotli / lz4 / gzip

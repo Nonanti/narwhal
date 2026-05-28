@@ -101,30 +101,30 @@ pub struct Settings {
     pub keymap: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     // ----- v2 additions ------------------------------------------------
     /// Workspace-state persistence knobs. v2.0 adds the contract; the
-    /// actual restore logic lands in T1-T3-B.
+    /// actual restore logic lands in.
     #[serde(default)]
     pub workspace: WorkspaceSettings,
     /// Secret-vault provider configuration. v2.0 only ships the
     /// schema + a `none` default; concrete providers (`HashiCorp`,
-    /// `1Password`, AWS, Azure) land in T1-T2-B.
+    /// `1Password`, AWS, Azure) land in.
     #[serde(default)]
     pub vault: VaultSettings,
     /// Plugin runtime discovery. The Lua bridge already exists in
     /// v1.x; v2.0 adds the `wasm` sub-section for the upcoming
-    /// `wasmtime` runtime (T1-T5-A).
+    /// `wasmtime` runtime.
     #[serde(default)]
     pub plugins: PluginSettings,
-    /// Streaming-result tuning. T1-T4-A exposes `batch_size` and
+    /// Streaming-result tuning. exposes `batch_size` and
     /// `stream_flush_ms` so users can trade UI redraw traffic
     /// against first-row latency without rebuilding.
     #[serde(default)]
     pub run: RunSettings,
-    /// Append-only JSONL audit log (T2-T2-D). Disabled by default;
+    /// Append-only JSONL audit log. Disabled by default;
     /// enable per deployment for SOC2 / ISO 27001 evidence
     /// collection. See `docs/audit.md` for the SOC2 mapping.
     #[serde(default)]
     pub audit: narwhal_audit::AuditConfig,
-    /// T2-T3-C: embedded LSP client (sqls / sqlls). v2.0 only ships
+    /// embedded LSP client (sqls / sqlls). v2.0 only ships
     /// the schema + the in-process client crate; wiring the client
     /// into the editor pane is deferred to v2.1, so this section is
     /// currently informational only.
@@ -140,7 +140,7 @@ pub struct Settings {
 #[non_exhaustive]
 pub struct LspSettings {
     /// Master enable. `false` keeps the editor on the treesitter
-    /// fallback (T1-T3-A) for completion / scope detection.
+    /// fallback for completion / scope detection.
     pub enabled: bool,
     /// Server token: `"sqls"`, `"sqlls"`, or an absolute path to a
     /// binary that speaks LSP over stdio.
@@ -162,7 +162,7 @@ impl Default for LspSettings {
 
 /// Streaming-result tuning.
 ///
-/// T1-T4-A (v2.0) introduced this section. Defaults match the
+/// (v2.0) introduced this section. Defaults match the
 /// hard-coded v1.x behaviour (`batch_size = 64`) so unconfigured
 /// users see no semantic change; the new `stream_flush_ms` knob
 /// adds the *time*-based flush that v1.x lacked.
@@ -227,7 +227,7 @@ impl Default for SettingsFile {
 /// Workspace persistence knobs. **Stub in v2.0** — the contract is
 /// defined here so users can author their `settings.toml` against
 /// it, but the actual tab/cursor restore loop is implemented by
-/// T1-T3-B.
+///.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 #[non_exhaustive]
@@ -240,7 +240,7 @@ pub struct WorkspaceSettings {
 /// any config-file editing — the only knob users need to flip is
 /// `enabled = false` if they prefer the v1 stateless start-up.
 ///
-/// T1-T3-B (v2.0) wired the actual save/restore loop in
+/// (v2.0) wired the actual save/restore loop in
 /// `narwhal_app::persist`. The defaults landed there too so the disk
 /// shape (`~/.config/narwhal/workspace-state.toml`) only appears for
 /// users who don't explicitly opt out.
@@ -266,7 +266,7 @@ impl Default for WorkspacePersistSettings {
 }
 
 /// Vault provider settings. **Stub in v2.0** — only `default_provider
-/// = "none"` is wired up; T1-T2-B implements the concrete providers.
+/// = "none"` is wired up; implements the concrete providers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 #[non_exhaustive]
@@ -277,7 +277,7 @@ pub struct VaultSettings {
 
 impl VaultSettings {
     /// Builder shim for `#[non_exhaustive]` external construction.
-    /// Mirrors `ConnectionParams::with` (T0-02 convention) so callers
+    /// Mirrors `ConnectionParams::with` so callers
     /// in other crates and integration tests can build a value
     /// without unstable struct-update syntax.
     #[must_use]
@@ -393,7 +393,7 @@ pub struct PluginSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lua_dir: Option<String>,
     /// WASM plugin runtime config. **Stub in v2.0** — `enabled =
-    /// false` until T1-T5-A wires up `wasmtime`.
+    /// false` until wires up `wasmtime`.
     #[serde(default)]
     pub wasm: WasmPluginSettings,
 }
@@ -843,13 +843,13 @@ pub(crate) fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
 ///
 /// - `verify-ca` / `verify-full` requires `ssl_root_cert` to be set.
 /// - sqlite / duckdb drivers reject *explicit* TLS modes that imply an
-///   actual handshake (`require`, `verify-ca`, `verify-full`).  The
-///   defaults (`prefer`) and the explicit `disable` both pass — file-local
-///   drivers ignore the field at the wire layer, and rejecting the
-///   default `prefer` would break every pre-existing sqlite/duckdb
-///   config that landed before TLS fields existed.
+/// actual handshake (`require`, `verify-ca`, `verify-full`).  The
+/// defaults (`prefer`) and the explicit `disable` both pass — file-local
+/// drivers ignore the field at the wire layer, and rejecting the
+/// default `prefer` would break every pre-existing sqlite/duckdb
+/// config that landed before TLS fields existed.
 fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigError> {
-    // L5: catch duplicate UUIDs early. The keyring uses `id` as the key,
+    // catch duplicate UUIDs early. The keyring uses `id` as the key,
     // so two configs sharing an id silently collide on credentials.
     let mut seen_ids: std::collections::HashMap<uuid::Uuid, &str> =
         std::collections::HashMap::with_capacity(connections.len());
@@ -872,7 +872,7 @@ fn validate_connections(connections: &[ConnectionConfig]) -> Result<(), ConfigEr
             )));
         }
 
-        // M3: ssl_mode = disable contradicts having TLS files set.
+        // ssl_mode = disable contradicts having TLS files set.
         let has_tls_files = conn.params.ssl_root_cert.is_some()
             || conn.params.ssl_cert.is_some()
             || conn.params.ssl_key.is_some();

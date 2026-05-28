@@ -116,7 +116,7 @@ impl SettingsModal {
 /// `kind` and a `prompt`.
 #[derive(Debug, Clone)]
 pub enum PendingConfirm {
-    /// v1.1 #2: the user pressed F5/F6 on a connection that declared
+    /// the user pressed F5/F6 on a connection that declared
     /// `confirm_writes = true` and at least one statement classifies
     /// as a write or DDL. Holds the statement batch + mode so the
     /// run can proceed verbatim once confirmed.
@@ -222,11 +222,11 @@ pub struct ModalState {
     /// `F1` / `?` help overlay. Boolean because the overlay has no
     /// internal state — it just dims everything behind it.
     pub help_open: bool,
-    /// v1.1 #2: "type YES to run" confirmation. Opened by the
+    /// "type YES to run" confirmation. Opened by the
     /// write-guard before a mutating batch reaches the driver on a
     /// connection that opted in to `confirm_writes = true`.
     pub confirm: Option<ConfirmModal>,
-    /// v1.1 #1: `:goto` fuzzy schema navigator. Owns the corpus
+    /// `:goto` fuzzy schema navigator. Owns the corpus
     /// snapshot at open time and the user's query state.
     pub goto: Option<GotoModal>,
     /// In-app settings editor (`:settings`). Holds the draft until

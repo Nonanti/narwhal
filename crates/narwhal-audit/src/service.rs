@@ -14,11 +14,11 @@
 //! ## Back-pressure
 //!
 //! - **Lossy mode (default).** When the channel is full, the emitter
-//!   drops the event and bumps a `tracing::warn` counter. Query
-//!   dispatch is never blocked.
+//! drops the event and bumps a `tracing::warn` counter. Query
+//! dispatch is never blocked.
 //! - **Block mode** (`block_on_full = true`). The emitter awaits the
-//!   channel. Query dispatch waits with it. Use this only in
-//!   compliance-first deployments.
+//! channel. Query dispatch waits with it. Use this only in
+//! compliance-first deployments.
 //!
 //! ## Shutdown
 //!
@@ -70,7 +70,7 @@ struct Inner {
     /// receive channel and this notify; on shutdown the worker
     /// closes its receiver, which is what releases parked
     /// `block_on_full=true` emitters with `Closed` instead of the
-    /// deadlock we had before review fix M1 / MR-C1.
+    /// deadlock we had before.
     shutdown: Arc<Notify>,
     /// Worker join handle, taken once on shutdown. `Mutex` because
     /// shutdown is callable from any task.
@@ -186,7 +186,7 @@ impl AuditService {
     /// is full (the event is dropped and a `tracing::warn` is
     /// emitted). In block mode this awaits the channel.
     ///
-    /// Review fix M1 / MR-C1: no per-emit mutex. The shutdown path
+    /// Note: no per-emit mutex. The shutdown path
     /// closes the receiver, so any `block_on_full=true` emitter
     /// parked here wakes up with `SendError::Closed` instead of
     /// deadlocking.
@@ -226,13 +226,13 @@ impl AuditService {
     /// Idempotent: calling shutdown twice from concurrent tasks is
     /// safe — the second call observes `None` and returns immediately.
     ///
-    /// Review fix M1 / MR-C1: the worker calls `rx.close()` as the
+    /// Note: the worker calls `rx.close()` as the
     /// first thing it does on shutdown. That closes the channel
     /// from the receiver side and wakes any `block_on_full=true`
     /// emitter parked on `send().await` with `SendError::Closed` —
     /// no Mutex-wrapped sender required.
     pub async fn shutdown(&self) {
-        // R3-N2: take the join handle inside a tight scope so we
+        // take the join handle inside a tight scope so we
         // release the Mutex before awaiting termination. A second
         // concurrent `shutdown()` call now observes `None`
         // immediately instead of blocking on the live first call.
@@ -264,7 +264,7 @@ async fn worker(
                 process_one(event, &sinks, &redactor).await;
             }
             () = shutdown.notified() => {
-                // MR-C1: close the receiver first so any parked
+                // close the receiver first so any parked
                 // `block_on_full=true` emitter wakes with `Closed`,
                 // then drain whatever is already in the buffer and
                 // exit cleanly.

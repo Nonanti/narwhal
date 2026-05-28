@@ -42,5 +42,5 @@ pub mod snippets;
 pub use snippets::SnippetsModal;
 
 pub mod status;
-pub use status::{Notification, StatusBar};
 pub use schema::SchemaListing;
+pub use status::{Notification, StatusBar};

@@ -1,4 +1,4 @@
-//! T2-T4-D: `:pivot` command dispatch.
+//! `:pivot` command dispatch.
 //!
 //! Activating the pivot pane only sets a [`PivotConfig`] on the active
 //! tab; the actual cell grid is derived inside the render path

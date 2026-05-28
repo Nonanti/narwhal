@@ -1,7 +1,7 @@
-# T1-T4-B — Parquet + Markdown export
+# Parquet and Markdown exporters
 
-> Status: **landed on v2-dev**. Feeds T3-01 (migration guide) with the
-> public-surface delta below.
+Design notes for the Parquet and Markdown export paths introduced in
+v2.0.
 
 ## Headline
 
@@ -15,9 +15,9 @@ unchanged.
 
 ```
 :export parquet  out.parquet  [--compression snappy|zstd|none]
-:export markdown out.md       [--no-truncate]
-:export md       out.md       [--no-truncate]   # alias
-:export pq       out.parquet  [--compression zstd]   # alias
+:export markdown out.md  [--no-truncate]
+:export md  out.md  [--no-truncate]  # alias
+:export pq  out.parquet  [--compression zstd]  # alias
 ```
 
 Default codec is **SNAPPY** (the de-facto Parquet default — every
@@ -35,8 +35,8 @@ Markdown truncates at **1000 rows** by default and appends an italic
 ```
 + pub use format::{ExportOptions, MarkdownOptions, ParquetCompression};
 + export_rows(columns, rows, format, path, source_table, options)
-                                                  ↑
-                                                  &ExportOptions
+  ↑
+  &ExportOptions
 + pub fn write_format_with_options<W: Write>(...)
 + ExportFormat::Parquet
 + ExportFormat::Markdown
@@ -50,7 +50,7 @@ For out-of-tree callers the one-line migration is:
 ```rust
 // v1.x → v2:
 - export_rows(&columns, &rows, fmt, &path, source_table);
-+ export_rows(&columns, &rows, fmt, &path, source_table, &ExportOptions::default());
++ export_rows(&columns, &rows, fmt, &path, source_table, &ExportOptions::default);
 ```
 
 `write_format` keeps its historical signature (defaults applied
@@ -61,26 +61,26 @@ wants to tweak Markdown truncation while streaming to stdout.
 
 ```
 + pub struct ExportArgs {
-      pub compression: Option<ParquetCompression>,
-      pub no_truncate: bool,
+  pub compression: Option<ParquetCompression>,
+  pub no_truncate: bool,
   }
   Command::Export {
-      format: String,
-      path: String,
-+     options: ExportArgs,
+  format: String,
+  path: String,
++  options: ExportArgs,
   }
 ```
 
 `Command::Export` gained one field. This is the second visible
 breaking change. The parser populates `options` from the trailing
-`--compression <codec>` / `--no-truncate` flags; an `ExportArgs::default()`
+`--compression <codec>` / `--no-truncate` flags; an `ExportArgs::default`
 matches the historical zero-flag shape.
 
 ### `narwhal-app`
 
 ```
 + pub use narwhal_commands::export::{ExportOptions, MarkdownOptions,
-                                     ParquetCompression};
+  ParquetCompression};
 ```
 
 No struct or method on `AppCore` changed shape; `export_results`
@@ -92,7 +92,7 @@ the new `Command::Export.options` field.
 ### Why a separate `parquet.rs` for the writer
 
 Parquet needs to own the sink: the file footer + magic bytes are
-written by `ArrowWriter::close()`, which means we cannot stream into
+written by `ArrowWriter::close`, which means we cannot stream into
 a generic `&mut dyn Write`. That's why `write_format(Parquet, ...)`
 returns a typed error directing the caller at `export_rows`, and why
 `narwhal exec --format parquet` is rejected at the CLI layer with a
@@ -105,14 +105,14 @@ The writer walks the first **100 rows** to decide each column's
 `LogicalType`. We collapse the rich narwhal `Value` taxonomy onto a
 small set of physical Arrow types:
 
-| narwhal `Value`                          | Arrow physical                   |
+| narwhal `Value`  | Arrow physical  |
 | ---------------------------------------- | -------------------------------- |
-| `Int` (i64)                              | `Int64`                          |
-| `Float` (f64)                            | `Float64`                        |
-| `Bool`                                   | `Boolean`                        |
+| `Int` (i64)  | `Int64`  |
+| `Float` (f64)  | `Float64`  |
+| `Bool`  | `Boolean`  |
 | `String` / `Uuid` / `Json` / `Bytes` / `Unknown` / `Time` | `Utf8` |
-| `Date` / `DateTime` / `Timestamp`        | `Timestamp(μs, UTC)`             |
-| `Null`                                   | (column-typed null)              |
+| `Date` / `DateTime` / `Timestamp`  | `Timestamp(μs, UTC)`  |
+| `Null`  | (column-typed null)  |
 
 `Time` (wall-clock time without a date) falls back to `Utf8` rather
 than masquerading as `Timestamp(μs, UTC)` — there is no portable
@@ -136,11 +136,11 @@ This matches the pattern `narwhal-config` already uses for
 
 GFM tables are delimited by `|` and split on newlines, so we escape:
 
-| input | output  | why                                       |
+| input | output  | why  |
 | ----- | ------- | ----------------------------------------- |
-| `\|`  | `\|`    | column separator                          |
-| `\n` / `\r` | `<br>` | rows are line-delimited                |
-| `\\`  | `\\\\`  | the previous escape we just emitted       |
+| `\|`  | `\|`  | column separator  |
+| `\n` / `\r` | `<br>` | rows are line-delimited  |
+| `\\`  | `\\\\`  | the previous escape we just emitted  |
 
 Backticks are deliberately **not** escaped — GFM renders them as
 inline code spans inside table cells, which is what users want for
@@ -161,13 +161,13 @@ Both writers materialise the full result in memory:
 
 ## Breaking-change envelope
 
-For T3-01's migration guide:
+For's migration guide:
 
 > v2.0 adds `Parquet` and `Markdown` variants to
 > `narwhal_commands::export::ExportFormat`. `export_rows` gained a
 > trailing `&ExportOptions` parameter and `Command::Export` gained an
 > `options: ExportArgs` field. Every in-tree caller was updated; out-of-tree
-> callers add `&ExportOptions::default()` to existing `export_rows`
+> callers add `&ExportOptions::default` to existing `export_rows`
 > calls and read `Command::Export.options` if they construct or pattern-match
 > the command (most don't).
 >
@@ -181,7 +181,7 @@ For T3-01's migration guide:
 
 - **Streaming Parquet** (v2.2+): would consume `QueryStream` directly,
   flushing row groups as `RowsAppended` batches accumulate.
-  T1-T4-A's `QueryStream::next_row` API is already shaped for this —
+  the `QueryStream::next_row` API is already shaped for this —
   the missing piece is teaching `ArrowWriter` to chunk on row-count
   boundaries. Not in scope for v2.0.
 - **Excel / XLSX**: separate task, deferred.
@@ -190,14 +190,14 @@ For T3-01's migration guide:
 
 ## Acceptance criteria status
 
-| Item                                                  | Status |
+| Item  | Status |
 | ----------------------------------------------------- | :----: |
-| `:export parquet out.parquet` writes valid file       |   ✅   |
-| `:export markdown out.md` renders as GFM table        |   ✅   |
-| All scalar types round-trip through Parquet           |   ✅   |
+| `:export parquet out.parquet` writes valid file  |  ✅  |
+| `:export markdown out.md` renders as GFM table  |  ✅  |
+| All scalar types round-trip through Parquet  |  ✅  |
 | Markdown escape correctness (pipe / newline / backslash) | ✅  |
-| Compression flag works (snappy + zstd verified)       |   ✅   |
-| MCP tool accepts new formats                          |   ⚠   |
+| Compression flag works (snappy + zstd verified)  |  ✅  |
+| MCP tool accepts new formats  |  ⚠  |
 | `cargo clippy --workspace --all-targets -- -D warnings` | ✅ |
 
 The ⚠ item is a documented scope cut: `narwhal-mcp` has no
@@ -230,4 +230,4 @@ Plus **5** new parser tests in `commands.rs` (`parquet`, `markdown`,
 rejection).
 
 All `cargo test --workspace` runs land at **1132+ tests passing**
-(was 1116 pre-task). Tier-0 + every prior Tier-1 baseline preserved.
+(was 1116 pre-task). + every prior baseline preserved.

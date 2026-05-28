@@ -2,11 +2,13 @@
 
 [![CI](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml/badge.svg)](https://github.com/Nonanti/narwhal/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/narwhaldb.svg)](https://crates.io/crates/narwhaldb)
+[![Downloads](https://img.shields.io/crates/d/narwhaldb.svg)](https://crates.io/crates/narwhaldb)
+[![MSRV](https://img.shields.io/badge/rustc-1.85+-blue.svg)](https://blog.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A terminal database client for **Postgres, MySQL, SQLite, DuckDB,
-ClickHouse, and SQL Server** — with a built-in MCP server, three
-editor modes, and a WASM plugin runtime.
+ClickHouse, and SQL Server** with a built-in MCP server, three editor
+modes, and a WASM plugin runtime.
 
 ![narwhal demo](./docs/img/demo.gif)
 
@@ -42,9 +44,9 @@ Inside the TUI:
 - **Schema tooling** — ER diagrams, `:schema-diff`, dialect-aware DDL emit
 - **Streaming results** — rows arrive incrementally; cancel mid-run with `Ctrl-C`
 - **Secret backends** — Vault, 1Password, OS keyring, `~/.pgpass`
-- **Audit log** — append-only JSONL for SOC 2 / ISO 27001
+- **Audit log** — append-only JSONL, suitable for compliance evidence
 - **Headless `exec`** — for cron, CI, shell pipelines
-- **SSH tunnels, inline charts, pivot tables, export to anything** (CSV/JSON/Markdown/Parquet)
+- **SSH tunnels, inline charts, pivot tables, export to anything** (CSV / JSON / Markdown / Parquet)
 
 ## Database support
 

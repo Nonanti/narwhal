@@ -300,8 +300,7 @@ pub fn advance_search(
 /// without changing the cursor inside `matches`. Used after
 /// `refresh_search_matches` finds the first hit.
 pub fn jump_to_current_match(tab_search: Option<&ResultSearch>, bundle: &mut ResultBundle) {
-    let Some(idx) = tab_search
-        .and_then(|s| s.current.and_then(|c| s.matches.get(c).copied()))
+    let Some(idx) = tab_search.and_then(|s| s.current.and_then(|c| s.matches.get(c).copied()))
     else {
         return;
     };
@@ -477,9 +476,7 @@ pub fn start_cell_edit(
             ..
         } => (columns, rows, source),
         ResultState::Rows { source: None, .. } => {
-            return Err(
-                "this result is read-only (no row source); preview a table to edit".into(),
-            );
+            return Err("this result is read-only (no row source); preview a table to edit".into());
         }
         _ => return Err("no editable cell here".into()),
     };
@@ -495,7 +492,9 @@ pub fn start_cell_edit(
     let row_index = selected_row.unwrap_or(0);
     let col_index = view.column_index;
     let row = rows.get(row_index).ok_or("select a row first (j/k)")?;
-    let column = columns.get(col_index).ok_or("select a column first (h/l)")?;
+    let column = columns
+        .get(col_index)
+        .ok_or("select a column first (h/l)")?;
     let cell = row.0.get(col_index);
     let original = cell.map(Value::render).unwrap_or_default();
     let buffer = if matches!(cell, Some(Value::Null) | None) {
@@ -645,7 +644,11 @@ mod tests {
             })
             .collect();
         let body: Vec<Row> = (0..rows)
-            .map(|r| Row((0..cols).map(|c| Value::Int((r * cols + c) as i64)).collect()))
+            .map(|r| {
+                Row((0..cols)
+                    .map(|c| Value::Int((r * cols + c) as i64))
+                    .collect())
+            })
             .collect();
         ResultBundle::single(
             ResultState::Rows {
@@ -690,10 +693,7 @@ mod tests {
     fn apply_sort_command_clear() {
         let mut b = rows_bundle(2, 2);
         b.active_mut().sort = Some((0, SortDir::Asc));
-        assert_eq!(
-            apply_sort_command(&mut b, None, false),
-            "sort: cleared"
-        );
+        assert_eq!(apply_sort_command(&mut b, None, false), "sort: cleared");
         assert!(b.active().sort.is_none());
     }
 
@@ -712,10 +712,7 @@ mod tests {
         let mut b = rows_bundle(2, 2);
 
         // Open prompt.
-        assert!(
-            apply_filter_command(&mut b, None, false)
-                .starts_with("filter: type to filter")
-        );
+        assert!(apply_filter_command(&mut b, None, false).starts_with("filter: type to filter"));
         assert!(b.active().filter_prompt_open);
 
         // Set value.
@@ -831,7 +828,10 @@ mod tests {
     fn start_search_blocked_on_non_rows() {
         let b = ResultBundle::default();
         let mut search = None;
-        assert_eq!(start_search(&mut search, &b), Some("no result to search".into()));
+        assert_eq!(
+            start_search(&mut search, &b),
+            Some("no result to search".into())
+        );
         assert!(search.is_none());
     }
 
@@ -876,7 +876,10 @@ mod tests {
             current: Some(0),
             editing: false,
         });
-        assert_eq!(refresh_search_matches(&mut search, &b), Some("search: ".into()));
+        assert_eq!(
+            refresh_search_matches(&mut search, &b),
+            Some("search: ".into())
+        );
         let s = search.unwrap();
         assert!(s.matches.is_empty());
         assert!(s.current.is_none());
@@ -1007,8 +1010,7 @@ mod tests {
     fn start_cell_edit_needs_row_source_and_pk() {
         let mut b = rows_bundle(2, 1);
         // `rows_bundle` builds a `Rows` with `source: None`.
-        assert!(start_cell_edit(&b, Some(0))
-            .is_err_and(|e| e.contains("read-only")));
+        assert!(start_cell_edit(&b, Some(0)).is_err_and(|e| e.contains("read-only")));
 
         // Patch in a row source without a primary key column.
         if let ResultState::Rows { source, .. } = b.active_state_mut() {
@@ -1026,8 +1028,7 @@ mod tests {
                 limit: 100,
             });
         }
-        assert!(start_cell_edit(&b, Some(0))
-            .is_err_and(|e| e.contains("no primary key")));
+        assert!(start_cell_edit(&b, Some(0)).is_err_and(|e| e.contains("no primary key")));
     }
 
     #[test]
@@ -1105,7 +1106,9 @@ mod tests {
         });
         assert_eq!(
             apply_cell_edit_motion(&mut editing, &mut view, CellEditMotion::Cancel),
-            CellEditOutcome::Cancelled { status: "edit cancelled" },
+            CellEditOutcome::Cancelled {
+                status: "edit cancelled"
+            },
         );
         assert!(editing.is_none());
         assert!(view.is_none());
@@ -1166,9 +1169,18 @@ mod tests {
         let mut s = RowDetailState {
             row_index: 0,
             columns: vec![
-                narwhal_core::ColumnHeader { name: "a".into(), data_type: "int".into() },
-                narwhal_core::ColumnHeader { name: "b".into(), data_type: "int".into() },
-                narwhal_core::ColumnHeader { name: "c".into(), data_type: "int".into() },
+                narwhal_core::ColumnHeader {
+                    name: "a".into(),
+                    data_type: "int".into(),
+                },
+                narwhal_core::ColumnHeader {
+                    name: "b".into(),
+                    data_type: "int".into(),
+                },
+                narwhal_core::ColumnHeader {
+                    name: "c".into(),
+                    data_type: "int".into(),
+                },
             ],
             values: Vec::new(),
             selected_column: 0,

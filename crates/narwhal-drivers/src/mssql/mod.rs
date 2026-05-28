@@ -1,6 +1,6 @@
 //! Microsoft SQL Server driver backed by [tiberius] (pure-Rust TDS).
 //!
-//! T1-T2-A of the v2.0 roadmap. Feature gate: `mssql`. Pulled in by
+//! Feature gate: `mssql`. Pulled in by
 //! `all-drivers` so the `narwhaldb` binary keeps shipping every backend
 //! without consumers having to opt in field-by-field.
 //!
@@ -19,9 +19,9 @@
 //! [`narwhal_core::SslMode`]:
 //!
 //! - [`SslMode::Disable`] → `EncryptionLevel::NotSupported`
-//!   (`DANGER_PLAINTEXT` — only useful on a private trusted network;
-//!   SQL Server still negotiates TLS for the *login* packet by default
-//!   so this mode is rarely what the user wants).
+//! (`DANGER_PLAINTEXT` — only useful on a private trusted network;
+//! SQL Server still negotiates TLS for the *login* packet by default
+//! so this mode is rarely what the user wants).
 //! - [`SslMode::Prefer`] / [`SslMode::Require`] (default) → `On`.
 //! - [`SslMode::VerifyCa`] / [`SslMode::VerifyFull`] → `Required`.
 //!
@@ -73,7 +73,7 @@ pub mod __test_only {
 
     /// Wraps the internal statement classifier. Used by the binding
     /// test suite to lock in the comment / CTE / OUTPUT routing rules
-    /// described in `docs/dev/t1-t2-a-mssql.md`.
+    /// described in `docs/dev/mssql-driver.md`.
     pub fn classify_statement(sql: &str) -> super::StatementShape {
         super::classify_statement(sql)
     }
@@ -339,7 +339,7 @@ pub(crate) fn build_config(config: &ConnectionConfig, password: Option<&str>) ->
         .username
         .as_deref()
         .ok_or_else(|| Error::Config("username missing".into()))?;
-    // M6: explicit warning when an empty password lands at the auth
+    // explicit warning when an empty password lands at the auth
     // layer. SQL Server still accepts empty-password connections when
     // the account is so configured (typically misconfigured dev SAs),
     // and silent acceptance has bitten operators before.
@@ -430,13 +430,13 @@ fn map_tiberius_error_conn(error: tiberius::error::Error) -> Error {
 /// `Arc<Mutex<Option<_>>>` so:
 ///
 /// 1. `&mut self` on the trait surface translates into a single async
-///    mutex lock — tiberius itself requires `&mut Client` for every
-///    call.
+/// mutex lock — tiberius itself requires `&mut Client` for every
+/// call.
 /// 2. `close(self: Box<Self>)` can take the client out of the option
-///    and drop it (tiberius has no explicit close, but dropping the
-///    Client closes the TCP socket).
+/// and drop it (tiberius has no explicit close, but dropping the
+/// Client closes the TCP socket).
 /// 3. The cancel-handle path (had we implemented one) could clone the
-///    `Arc` without holding the mutex.
+/// `Arc` without holding the mutex.
 pub struct MssqlConnection {
     inner: Arc<Mutex<Option<TiberiusClient>>>,
     /// C2: driver-level read-only enforcement. SQL Server has no
@@ -1740,7 +1740,7 @@ mod tests {
 
     #[test]
     fn integrated_security_parses_case_insensitively() {
-        // M2: "True", "TRUE", "YES" must all read as integrated
+        // "True", "TRUE", "YES" must all read as integrated
         // security — the old parser only matched lower-case.
         for raw in ["true", "True", "TRUE", "yes", "YES", "1"] {
             let mut options = std::collections::BTreeMap::new();

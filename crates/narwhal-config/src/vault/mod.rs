@@ -1,4 +1,4 @@
-//! Secret-vault providers — T1-T2-B (v2.0).
+//! Secret-vault providers — (v2.0).
 //!
 //! Connection passwords in `connections.toml` can now express:
 //!
@@ -23,13 +23,13 @@
 //! because:
 //!
 //! 1. Vault providers are *registered into a `HashMap<String, Arc<dyn
-//!    VaultProvider>>`* — there is no zero-cost call site to optimise
-//!    for. The dispatch is always through a trait object.
+//! VaultProvider>>`* — there is no zero-cost call site to optimise
+//! for. The dispatch is always through a trait object.
 //! 2. There's exactly one async method on the trait. The sibling-and-
-//!    blanket-impl machinery doubles the surface for no gain.
+//! blanket-impl machinery doubles the surface for no gain.
 //! 3. `Arc<SecretString>` is the natural return shape because the
-//!    in-flight dedup broadcast must hand the same value to every
-//!    concurrent waiter, and `SecretString` is not itself `Clone`.
+//! in-flight dedup broadcast must hand the same value to every
+//! concurrent waiter, and `SecretString` is not itself `Clone`.
 //!
 //! # Registry
 //!
@@ -37,14 +37,14 @@
 //! the in-flight de-duplication layer. The contract is:
 //!
 //! * Two `resolve` calls for the *same reference* concurrently
-//!   coalesce into one provider call. The brief's acceptance
-//!   criterion ("concurrent resolves of the same reference cause one
-//!   HTTP call, not two") is satisfied by a `broadcast::channel` per
-//!   in-flight reference.
+//! coalesce into one provider call. The brief's acceptance
+//! criterion ("concurrent resolves of the same reference cause one
+//! HTTP call, not two") is satisfied by a `broadcast::channel` per
+//! in-flight reference.
 //! * Cancellation of a waiter does not cancel the in-flight leader.
-//!   The leader continues to completion so the other waiters get a
-//!   result; the cancelled task drops its receiver and the broadcast
-//!   send still succeeds (broadcast tolerates zero receivers).
+//! The leader continues to completion so the other waiters get a
+//! result; the cancelled task drops its receiver and the broadcast
+//! send still succeeds (broadcast tolerates zero receivers).
 //!
 //! # Logging
 //!

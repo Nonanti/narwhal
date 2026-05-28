@@ -1,4 +1,4 @@
-//! T2-T2-D: end-to-end coverage for the audit emit hooks added in
+//! end-to-end coverage for the audit emit hooks added in
 //! step 3/3 — `ConnectionOpened`, `ConnectionClosed`, and
 //! `Configuration` events alongside the `Query` events already
 //! emitted by `run::record_history`.

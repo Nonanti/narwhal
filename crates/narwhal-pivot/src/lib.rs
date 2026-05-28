@@ -1,4 +1,4 @@
-//! T2-T4-D: pivot table aggregation engine.
+//! pivot table aggregation engine.
 //!
 //! A pivot is conceptually
 //!
@@ -283,7 +283,7 @@ fn value_as_label(v: &Value) -> String {
 /// control, `BiDi` overrides (RTL/LTR), zero-width joiners, the
 /// `BOM`, soft hyphens and the line/paragraph separators.
 ///
-/// MR-M6: `pub` so the chart crate (and any other grid renderer in
+/// `pub` so the chart crate (and any other grid renderer in
 /// the workspace) can re-use the same filter without copying the
 /// list and drifting on future updates.
 #[must_use]
@@ -307,7 +307,7 @@ pub fn is_grid_unsafe(ch: char) -> bool {
 mod grid_unsafe_tests {
     use super::is_grid_unsafe;
 
-    /// MR-M5: characters that *must* be redacted because they smear
+    /// characters that *must* be redacted because they smear
     /// the grid (control, zero-width, `BiDi` override, line /
     /// paragraph separators, `BOM`, soft hyphen).
     #[test]
@@ -337,7 +337,7 @@ mod grid_unsafe_tests {
         }
     }
 
-    /// MR-M5: ordinary printable characters and common non-Latin
+    /// ordinary printable characters and common non-Latin
     /// scripts must not be flagged.
     #[test]
     fn passes_through_ordinary_text() {

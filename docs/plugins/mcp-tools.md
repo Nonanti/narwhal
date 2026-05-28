@@ -1,4 +1,4 @@
-# Plugin-defined MCP tools (T2-T5-C)
+# Plugin-defined MCP tools
 
 narwhal v2.0 adds a host-side registration path for MCP tools sourced
 from plugins. Built-in tools and plugin-defined tools share the same
@@ -28,35 +28,35 @@ use narwhal_mcp::tools::{DynamicTool, RegistrationOutcome, ToolOutput, ToolRegis
 use narwhal_mcp::McpServer;
 use std::sync::Arc;
 
-let mut registry = ToolRegistry::with_defaults();
+let mut registry = ToolRegistry::with_defaults;
 
 let tool = DynamicTool {
-    name: "hello_mcp".into(),
-    description: "Echo the agent's `name` arg back".into(),
-    input_schema: serde_json::json!({
-        "type": "object",
-        "properties": { "name": { "type": "string" } },
-        "required": ["name"]
-    }),
-    source: "example-plugin".into(),
-    handler: Arc::new(|_ctx, args| Box::pin(async move {
-        let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("anonymous");
-        Ok(ToolOutput::ok(format!("Hello, {name}")))
-    })),
+  name: "hello_mcp".into,
+  description: "Echo the agent's `name` arg back".into,
+  input_schema: serde_json::json!({
+  "type": "object",
+  "properties": { "name": { "type": "string" } },
+  "required": ["name"]
+  }),
+  source: "example-plugin".into,
+  handler: Arc::new(|_ctx, args| Box::pin(async move {
+  let name = args.get("name").and_then(|v| v.as_str).unwrap_or("anonymous");
+  Ok(ToolOutput::ok(format!("Hello, {name}")))
+  })),
 };
 
 match registry.register_dynamic(tool) {
-    RegistrationOutcome::Registered => {}
-    RegistrationOutcome::CollisionBuiltin => {
-        tracing::warn!("plugin tried to override a built-in tool; ignored");
-    }
-    RegistrationOutcome::CollisionDynamic { existing_source } => {
-        tracing::warn!(?existing_source, "another plugin already registered this tool name");
-    }
+  RegistrationOutcome::Registered => {}
+  RegistrationOutcome::CollisionBuiltin => {
+  tracing::warn!("plugin tried to override a built-in tool; ignored");
+  }
+  RegistrationOutcome::CollisionDynamic { existing_source } => {
+  tracing::warn!(?existing_source, "another plugin already registered this tool name");
+  }
 }
 
 let server = McpServer::with_tools(ctx, registry);
-server.serve_stdio().await?;
+server.serve_stdio.await?;
 ```
 
 ## Collision policy
@@ -75,7 +75,7 @@ table above describes every reachable case.
 - WIT world bump 0.1.0 → 0.2.0: add `interface mcp { register-tools, call-tool }`.
 - WASM runtime invokes `register-tools` at plugin load and forwards
   the result to `register_dynamic`.
-- `call-tool` dispatch path: take the registry's `find()` result,
+- `call-tool` dispatch path: take the registry's `find` result,
   marshal `tool-call-input` into the plugin, marshal the response
   back as MCP `Content`.
 - JSON-schema validation of arguments before dispatch using the

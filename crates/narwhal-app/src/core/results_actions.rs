@@ -3,10 +3,10 @@
 //! Handles every key event that targets the active [`super::ResultBundle`]:
 //! navigation, search, filtering, sort toggling, cell yank/edit, row
 //! detail modal, and the row-popup overlay.
-use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use super::{AppCore, JsonViewerState, ResultSearch, ResultState};
 use crate::action::{Action, KeyGroup};
 use crate::keymap::KeyChord;
+use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 use narwhal_core::Value;
 use narwhal_domain::result::actions::{CellEditMotion, CellEditOutcome, RowDetailMotion};
 
@@ -107,7 +107,7 @@ impl AppCore {
             }
         }
 
-        // L36: route the live chord through the configured keymap.
+        // route the live chord through the configured keymap.
         // Unbound chords are silently dropped — the old hard-coded
         // match did the same, and falling through would risk shadowing
         // legitimate future bindings.
@@ -195,7 +195,7 @@ impl AppCore {
             Action::ResultsCommitPending => self.commit_pending().await,
             Action::ResultsDiscardPending => self.discard_pending().await,
             Action::ResultsOpenPendingPreview => self.toggle_pending_preview().await,
-            // v1.2 #6
+            //
             Action::ResultsFkGotoDefinition => self.fk_goto_definition().await,
             // ─── Metadata tabs (L36) ────────────────────────────────
             Action::MetaTabRecords => self.switch_meta_tab(narwhal_tui::MetaTab::Records).await,
@@ -239,14 +239,14 @@ impl AppCore {
     /// Behaviour depends on what's currently on screen:
     ///
     /// - **Already in `TableDetail`:** swap `active_meta_tab` in place
-    ///   for `Columns`/`Constraints`/`ForeignKeys`/`Indexes`, or run a
-    ///   preview query for `Records`.
+    /// for `Columns`/`Constraints`/`ForeignKeys`/`Indexes`, or run a
+    /// preview query for `Records`.
     /// - **In a `Rows` preview** (sidebar pressed `o` or the user came
-    ///   from `Records`): targeting `Columns`/etc. re-describes the
-    ///   table and lands back in `TableDetail`; targeting `Records`
-    ///   is a no-op (already there).
+    /// from `Records`): targeting `Columns`/etc. re-describes the
+    /// table and lands back in `TableDetail`; targeting `Records`
+    /// is a no-op (already there).
     /// - **Neither:** the action becomes a status hint so the keypress
-    ///   never silently does nothing.
+    /// never silently does nothing.
     pub(super) async fn switch_meta_tab(&mut self, target: narwhal_tui::MetaTab) {
         // Snapshot the current table identity (if any) before borrowing.
         let (current_schema, current_table, in_table_detail) = {
@@ -491,14 +491,14 @@ impl AppCore {
     async fn yank_row(&mut self) {
         let row_idx = self.selected_original_row().await;
         let bundle = &self.ui.tabs[self.ui.active_tab].results;
-        let (text, cells) =
-            match narwhal_domain::result::actions::prepare_yank_row(bundle, row_idx) {
-                Ok(pair) => pair,
-                Err(msg) => {
-                    self.ui.status.message = msg.into();
-                    return;
-                }
-            };
+        let (text, cells) = match narwhal_domain::result::actions::prepare_yank_row(bundle, row_idx)
+        {
+            Ok(pair) => pair,
+            Err(msg) => {
+                self.ui.status.message = msg.into();
+                return;
+            }
+        };
         self.ui.status.message = match self.deps.clipboard.set_text(&text) {
             Ok(()) => format!("yanked row ({cells} cell(s)) to clipboard"),
             Err(error) => format!("yank failed: {error}"),
@@ -547,15 +547,14 @@ impl AppCore {
         }
     }
 
-    // L36: commit_cell_edit was removed when cell edits became staged
+    // commit_cell_edit was removed when cell edits became staged
     // mutations — see `queue_cell_edit_commit` on the pending_actions
     // impl. The optimistic UPDATE generator now lives in
     // `narwhal_commands::pending::compile`.
 
     pub(super) async fn set_edit_error(&mut self, message: String) {
         let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
-        self.ui.status.message =
-            narwhal_domain::result::actions::set_edit_error(bundle, &message);
+        self.ui.status.message = narwhal_domain::result::actions::set_edit_error(bundle, &message);
     }
 
     #[allow(dead_code)]
@@ -582,7 +581,7 @@ impl AppCore {
         self.ui.status.message = msg;
     }
 
-    /// v1.2 #7: command-palette filter setter. `Some("")` clears
+    /// command-palette filter setter. `Some("")` clears
     /// the active filter; `Some(expr)` sets it verbatim; `None`
     /// opens the inline prompt (same as the `f` keybind).
     pub(super) async fn apply_filter_command(&mut self, spec: Option<String>) {
@@ -595,7 +594,7 @@ impl AppCore {
         self.ui.status.message = msg;
     }
 
-    /// v1.2 #7: command-palette sort. `Column(n)` toggles asc → desc
+    /// command-palette sort. `Column(n)` toggles asc → desc
     /// → cleared on column `n` (1-based). `Clear` always drops the
     /// active sort regardless of which column was sorted.
     pub(super) async fn apply_sort_command(&mut self, arg: crate::commands::SortArg) {
@@ -615,10 +614,7 @@ impl AppCore {
 
     async fn open_filter_prompt(&mut self) {
         let bundle = &mut self.ui.tabs[self.ui.active_tab].results;
-        let msg = narwhal_domain::result::actions::open_filter_prompt(
-            bundle,
-            self.process.running,
-        );
+        let msg = narwhal_domain::result::actions::open_filter_prompt(bundle, self.process.running);
         self.ui.status.message = msg;
     }
 
@@ -712,7 +708,7 @@ impl AppCore {
     }
 
     async fn handle_row_detail_key(&mut self, key: KeyEvent) {
-        // L36: try the configured keymap first for chords that
+        // try the configured keymap first for chords that
         // pre-empt the modal's reflexes (today only `Z` to launch the
         // JSON viewer over the focused column).
         let chord = KeyChord::from_event(key);

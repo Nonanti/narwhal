@@ -1,4 +1,4 @@
-//! T2-T4-C integration tests for the `:chart` command.
+//! integration tests for the `:chart` command.
 //!
 //! The chart pane is a render-time projection of the active result;
 //! these tests verify the command flow (`:chart bar` flips a flag on

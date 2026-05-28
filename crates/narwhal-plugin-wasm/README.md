@@ -40,7 +40,7 @@ via `componentize-js`.
 ## Security model
 
 Documented in detail in `docs/plugins/security.md` and
-`docs/dev/t1-t5-b-sandbox.md`. Headlines:
+`docs/dev/wasm-sandbox.md`. Headlines:
 
 - **Default-deny.** Empty settings refuse every FS / net / env
   capability. Operators opt in per-plugin via `[[plugins.grants]]`.
@@ -69,9 +69,9 @@ failure without disturbing other plugins.
 
 ## See also
 
-- `docs/dev/t1-t5-a-wasm-runtime.md` — Tier-2 contract notes (capability
+- `docs/dev/wasm-runtime.md` — Tier-2 contract notes (capability
   boundary, future MCP-tool track, breakage policy).
-- `docs/dev/t1-t5-b-sandbox.md` — host-side implementation notes for the
+- `docs/dev/wasm-sandbox.md` — host-side implementation notes for the
   capability + enforcement model.
 - `docs/plugins/security.md` — threat model + operator playbook.
 - `docs/plugins/wasm.md` — plugin-author SDK walkthrough.

@@ -52,7 +52,7 @@ impl AppCore {
     }
 
     async fn open_connection(&mut self, config: ConnectionConfig) {
-        // H7: keyring lookup + dial + initial schema refresh all run in
+        // keyring lookup + dial + initial schema refresh all run in
         // the background OpenSession meta worker so the event loop is
         // free to draw frames and service the run/meta channels while
         // the (possibly slow) connect proceeds. We do NOT pre-resolve
@@ -136,7 +136,7 @@ impl AppCore {
             state.in_transaction = false;
         }
         let opened_id = session.config.id;
-        // T2-T2-D: stamp a fresh audit session id so every Query
+        // stamp a fresh audit session id so every Query
         // event emitted during this open shares a correlation key,
         // record the wall-clock start so `ConnectionClosed` can
         // compute its `duration_ms`, then emit `ConnectionOpened`.
@@ -164,7 +164,7 @@ impl AppCore {
 
     pub(super) async fn close_session(&mut self) {
         if self.session.active.take().is_some() {
-            // T2-T2-D: emit `ConnectionClosed` with the wall-clock
+            // emit `ConnectionClosed` with the wall-clock
             // duration measured since `apply_opened_session`, then
             // invalidate the correlation id so subsequent emits land
             // outside any session.
@@ -202,9 +202,9 @@ impl AppCore {
             self.ui.status.message = "no active connection".into();
             return;
         };
-        // H11: Offload to the meta channel so the UI stays responsive
+        // Offload to the meta channel so the UI stays responsive
         // during schema refreshes on databases with many schemas/tables.
-        // H8: pass the active session_id so a reply that lands after the
+        // pass the active session_id so a reply that lands after the
         // user switched sessions is dropped instead of clobbering the
         // new session's listing.
         let session_id = session.config.id;
@@ -349,7 +349,7 @@ impl AppCore {
             return;
         };
 
-        // v1.1 #2: connection-level read-only guard. Mirrors MCP's
+        // connection-level read-only guard. Mirrors MCP's
         // syntactic check — if any statement isn't on the read-only
         // allow-list we refuse the batch and surface the reason in
         // the status bar. The driver-side `set_read_only(true)` call
@@ -363,7 +363,7 @@ impl AppCore {
             }
         }
 
-        // v1.1 #2: write-confirmation guard. If the connection opted
+        // write-confirmation guard. If the connection opted
         // in to `confirm_writes = true` and any statement classifies
         // as a Write or DDL, intercept the batch and route through
         // the type-`YES` modal. The modal stores the batch verbatim
@@ -695,7 +695,7 @@ impl AppCore {
                 return;
             }
         }
-        // T2-T2-D: connection list mutation is a configuration
+        // connection list mutation is a configuration
         // change. Emit after the on-disk save succeeds so we do not
         // log a change that was rolled back.
         emit_audit_config_change(
@@ -763,7 +763,7 @@ impl AppCore {
         let name_owned = name.to_owned();
         let meta_tx = self.process.meta_tx.clone();
         self.ui.status.message = format!("forgetting password for '{name}'…");
-        // T2-T2-D: credential rotation is an auditable configuration
+        // credential rotation is an auditable configuration
         // event. We emit before the keyring round-trip starts so the
         // intent is recorded even if the keyring write later fails.
         emit_audit_config_change(

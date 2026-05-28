@@ -26,17 +26,17 @@ use crate::terminal::TerminalGuard;
 
 pub struct App {
     core: AppCore,
-    /// T1-T3-B: workspace-state snapshot file path, if persistence
+    /// workspace-state snapshot file path, if persistence
     /// is wired up. Populated via
     /// [`App::with_workspace_state_path`]; left `None` in headless
     /// tests and the MCP server (neither persists tabs).
     workspace_state_path: Option<std::path::PathBuf>,
-    /// T1-T3-B: cached persist toggles, snapshotted from
+    /// cached persist toggles, snapshotted from
     /// [`Settings::workspace::persist`] when
     /// [`App::with_settings`] is called. Drives whether
     /// [`App::run`] writes a snapshot on clean exit.
     persist_settings: narwhal_config::WorkspacePersistSettings,
-    /// T1-T3-B: connection name surfaced by
+    /// connection name surfaced by
     /// [`crate::persist::apply`] at startup. Re-opened
     /// asynchronously on the first tick of the event loop so the
     /// initial render isn't blocked on a network dial.
@@ -106,7 +106,7 @@ impl App {
         self
     }
 
-    /// T1-T2-B: install the secret-vault provider registry. The
+    /// install the secret-vault provider registry. The
     /// binary builds this from `settings.vault.providers`; tests
     /// usually leave it empty (the default).
     #[must_use]
@@ -115,7 +115,7 @@ impl App {
         self
     }
 
-    /// T2-T2-D: install an [`narwhal_audit::AuditService`]. The
+    /// install an [`narwhal_audit::AuditService`]. The
     /// binary builds this from `settings.audit` and calls this method
     /// when one or more sinks are configured. Without this call, emit
     /// sites short-circuit and the audit log is silent.
@@ -131,7 +131,7 @@ impl App {
     /// will be honoured in a follow-up release (see the v1.0 release
     /// notes for the planned activation timeline).
     pub fn with_settings(mut self, settings: Settings) -> Self {
-        // T1-T3-B: capture the persist toggles before `apply_settings`
+        // capture the persist toggles before `apply_settings`
         // consumes the payload. Clone is cheap (four bools) and
         // keeps the field accessible from `App::run`.
         self.persist_settings = settings.workspace.persist.clone();
@@ -139,7 +139,7 @@ impl App {
         self
     }
 
-    /// T1-T3-B: point the persist layer at a `workspace-state.toml`
+    /// point the persist layer at a `workspace-state.toml`
     /// path and replay any snapshot found there onto the live
     /// [`AppCore`]. Must be called *before* the user has opened a
     /// connection or edited a tab — the binary's entry point
@@ -235,7 +235,7 @@ impl App {
             };
 
         info!(target: "narwhal::app", "event loop started");
-        // T1-T3-B: kick off the restored-connection re-open *before*
+        // kick off the restored-connection re-open *before*
         // the first draw so the initial frame can already show the
         // "connecting to …" status line. The dispatcher handles a
         // missing/renamed connection name gracefully (sets a
@@ -305,7 +305,7 @@ impl App {
         }
 
         info!(target: "narwhal::app", "event loop terminated");
-        // T1-T3-B: clean-exit snapshot. Panic unwinds never reach
+        // clean-exit snapshot. Panic unwinds never reach
         // this point (the run loop would have propagated the
         // panic), which matches the brief's "save on clean exit
         // only" requirement. All failures here are logged but

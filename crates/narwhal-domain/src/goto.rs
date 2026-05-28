@@ -1,4 +1,4 @@
-//! `:goto` fuzzy schema navigator state (v1.1 #1).
+//! `:goto` fuzzy schema navigator state.
 //!
 //! Indexes every visible (schema, table/view) across all currently
 //! loaded sessions and runs the user's query through a Nucleo fuzzy

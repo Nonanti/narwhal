@@ -19,7 +19,7 @@ pub enum CredentialError {
     Keyring(String),
     /// Vault provider error. Wraps a [`VaultError`] so callers can
     /// inspect the specific failure class (unreachable, denied,
-    /// not-found) when deciding whether to retry. Added in T1-T2-B.
+    /// not-found) when deciding whether to retry..
     #[error("vault: {0}")]
     Vault(#[from] VaultError),
 }
@@ -228,18 +228,18 @@ impl CredentialStore for KeyringStore {
 /// Layered resolution, highest priority first:
 ///
 /// 1. **Vault reference**. If [`ConnectionParams::password`] is
-///    `Some(s)` and `s` parses as a `vault:` / `1password:`
-///    reference, the configured [`VaultRegistry`] resolves it.
-///    The keyring is *not* consulted in this branch: the user has
-///    opted in to vault storage and silently falling back to a
-///    stale keyring entry would defeat the security intent.
+/// `Some(s)` and `s` parses as a `vault:` / `1password:`
+/// reference, the configured [`VaultRegistry`] resolves it.
+/// The keyring is *not* consulted in this branch: the user has
+/// opted in to vault storage and silently falling back to a
+/// stale keyring entry would defeat the security intent.
 /// 2. **Inline / `${env:VAR}` literal**. If `password` is
-///    `Some(s)` and is not a reference, `s` is used verbatim
-///    (env-interpolation already ran at file load).
+/// `Some(s)` and is not a reference, `s` is used verbatim
+/// (env-interpolation already ran at file load).
 /// 3. **Keyring**. If `password` is `None`, the credential store
-///    is consulted by `connection.id`.
+/// is consulted by `connection.id`.
 /// 4. **`~/.pgpass` / env fallback**. Last resort for users who
-///    have a libpq-shaped workflow already configured.
+/// have a libpq-shaped workflow already configured.
 ///
 /// The `vault` argument is `Option<&VaultRegistry>` so callers that
 /// have no providers configured can pass `None` and incur zero

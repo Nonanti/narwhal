@@ -1,4 +1,4 @@
-//! T2-T5-C end-to-end test: dynamic plugin tools are listed by
+//! end-to-end test: dynamic plugin tools are listed by
 //! `tools/list` and reachable via `tools/call`.
 //!
 //! No real WASM plugin is involved here \u2014 the WIT bridge is v2.1
@@ -202,7 +202,7 @@ fn collision_with_builtin_is_rejected_at_registration() {
     assert_eq!(outcome, RegistrationOutcome::CollisionBuiltin);
 }
 
-/// Review fix C3 / MR-C3: oversized output from a dynamic tool is
+/// Note: oversized output from a dynamic tool is
 /// truncated by the dispatch layer (not silently forwarded), the
 /// original `is_error` flag is preserved, and a UTF-8-safe snippet
 /// of the original body is kept inside the envelope so the agent
@@ -264,7 +264,7 @@ async fn dynamic_tool_oversized_output_is_capped() {
         .iter()
         .find(|r| r.get("id") == Some(&json!(1)))
         .expect("tools/call response");
-    // MR-C3: is_error survives truncation.
+    // is_error survives truncation.
     assert_eq!(call["result"]["isError"].as_bool(), Some(true));
     let text = call["result"]["content"][0]["text"].as_str().expect("text");
     // Envelope + 4 KiB snippet — well under any reasonable host limit.
@@ -273,7 +273,7 @@ async fn dynamic_tool_oversized_output_is_capped() {
         "capped body unexpectedly large: {}",
         text.len()
     );
-    // MR-N8: parse the envelope as JSON instead of substring-matching
+    // parse the envelope as JSON instead of substring-matching
     // serde's whitespace-sensitive pretty-printer.
     let envelope: Value = serde_json::from_str(text).expect("valid JSON envelope");
     assert_eq!(envelope["truncated"], json!(true));

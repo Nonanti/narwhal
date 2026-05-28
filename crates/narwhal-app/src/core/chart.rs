@@ -1,4 +1,4 @@
-//! T2-T4-C: inline ASCII chart state and data derivation.
+//! inline ASCII chart state and data derivation.
 //!
 //! Chart configuration ([`ChartConfig`]) is sticky per-tab — once the
 //! user types `:chart bar`, every subsequent run derives a fresh
@@ -44,7 +44,7 @@ impl ChartKind {
     }
 }
 
-/// MR-N12: extracted from the inline `match` so the README, the
+/// extracted from the inline `match` so the README, the
 /// chart command parser and any future opt-in CLI flag share one
 /// source of truth.
 pub(super) const DEFAULT_BAR_BOUND: usize = 50;
@@ -152,7 +152,7 @@ pub(super) fn value_as_f64(v: &Value) -> Option<f64> {
 
 /// Best-effort textual rendering of a [`Value`] as a chart label.
 /// Strips control, zero-width and bidi-override characters that
-/// would smear the chart (review fix N9 / MR-M6: shared with
+/// would smear the chart (note: shared with
 /// [`narwhal_pivot::is_grid_unsafe`] so the filter can't drift
 /// between renderers).
 pub(super) fn value_as_label(v: &Value) -> String {
@@ -549,7 +549,7 @@ mod tests {
         assert_eq!(data.title, "My Chart");
     }
 
-    /// Review fix N4 / MR-N6: top-N for a bar chart picks by
+    /// Note: top-N for a bar chart picks by
     /// **absolute magnitude** so a mixed signed series keeps both
     /// the largest positive and the largest negative entries.
     /// Naive descending-by-value sorting (the pre-N4 behaviour)

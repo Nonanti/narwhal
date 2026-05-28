@@ -17,7 +17,7 @@ impl AppCore {
         &self.ui.status.message
     }
 
-    /// T2-T2-D test helper: borrow the installed audit service so
+    /// test helper: borrow the installed audit service so
     /// integration tests can call `shutdown` directly and assert the
     /// flush-on-exit invariant. Hidden from the public API.
     #[doc(hidden)]
@@ -137,9 +137,9 @@ impl AppCore {
     /// Indexing is sound because two invariants are upheld at every
     /// `&mut self` entry point:
     /// - `self.ui.tabs` always contains at least one element. `close_tab`
-    ///   early-returns when `tabs.len() == 1`.
+    /// early-returns when `tabs.len() == 1`.
     /// - `self.ui.active_tab < self.ui.tabs.len()`. `close_tab` clamps after
-    ///   removal; `cycle_tab` uses `rem_euclid(len)`.
+    /// removal; `cycle_tab` uses `rem_euclid(len)`.
     ///
     /// See `active_tab_invariant_holds_after_close` in the test suite.
     fn tab(&self) -> &Tab {

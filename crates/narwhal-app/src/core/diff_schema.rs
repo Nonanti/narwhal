@@ -1,4 +1,4 @@
-//! `:diff <left> <right>` schema diff handler (v1.2 #8).
+//! `:diff <left> <right>` schema diff handler.
 //!
 //! Compares two tables (`schema.table` qualified) inside the active
 //! connection and writes the generated `ALTER TABLE` statements to a
@@ -85,8 +85,8 @@ impl AppCore {
 /// prompt:
 /// - Plain: `public.users`
 /// - Postgres-quoted: `"weird.schema".users` (dots inside the
-///   double-quoted half are part of the identifier, not the
-///   separator).
+/// double-quoted half are part of the identifier, not the
+/// separator).
 /// - MySQL/SQLite-quoted: `` `weird.schema`.users ``.
 ///
 /// The quoting is stripped from the return value so the caller

@@ -1,4 +1,4 @@
-//! T2-T4-C: `:chart` command dispatch.
+//! `:chart` command dispatch.
 //!
 //! Activating the chart pane only sets a [`ChartConfig`] on the active
 //! tab; deriving the actual datapoints happens inside the render path

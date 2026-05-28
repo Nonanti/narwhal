@@ -1,4 +1,4 @@
-/// Parsed flag bag for [`Command::Export`] (T1-T4-B).
+/// Parsed flag bag for [`Command::Export`].
 ///
 /// `compression` is `Some` only when the user explicitly passed
 /// `--compression <codec>`; the dispatch layer falls back to the
@@ -102,7 +102,7 @@ pub enum Command {
     Export {
         format: String,
         path: String,
-        /// T1-T4-B: parsed options for the chosen format (parquet
+        /// parsed options for the chosen format (parquet
         /// `--compression`, markdown `--no-truncate`, etc). Empty
         /// for csv/json/tsv/table/insert, populated for parquet/md.
         options: ExportArgs,
@@ -176,16 +176,16 @@ pub enum Command {
     /// List loaded plugins and the commands they expose.
     PluginList,
     /// Open the Ctrl+R history modal. With `Some(pattern)` pre-fills
-    /// the filter (v1.3 #11).
+    /// the filter.
     History(Option<String>),
     /// L36 #1: open the staged-mutation preview modal. Discoverable
     /// counterpart to the `Ctrl-P` chord for users who live in the
     /// command line.
     Pending,
-    /// v1.2 #5: flush every pending mutation inside one transaction.
+    /// flush every pending mutation inside one transaction.
     /// Equivalent to `Ctrl-S` while the pending preview is open.
     Submit,
-    /// v1.2 #5: throw away every pending mutation without writing.
+    /// throw away every pending mutation without writing.
     /// Equivalent to `Ctrl-X` inside the preview.
     Revert,
     Help(Option<String>),
@@ -213,7 +213,7 @@ pub enum Command {
     },
     /// Open the snippets modal (`:snippets`).
     ListSnippets,
-    /// v1.1 #1: open the fuzzy schema navigator (`:goto` / `:g` / Ctrl-N).
+    /// open the fuzzy schema navigator (`:goto` / `:g` / Ctrl-N).
     /// Lists every table/view across all loaded schemas, picks one
     /// via fuzzy match, inserts `<schema>.<table>` at the cursor on
     /// confirm.
@@ -225,14 +225,14 @@ pub enum Command {
     /// Quick editor-mode switch (`:mode vim|basic|emacs`). Bypasses
     /// the settings modal; persists to disk via the same code path.
     Mode(String),
-    /// v1.2 #7: set the result-pane filter (`:filter <expr>`) or
+    /// set the result-pane filter (`:filter <expr>`) or
     /// clear it (`:filter clear`). Same expression that the inline
     /// `f` prompt accepts; commits immediately.
     Filter(Option<String>),
-    /// v1.2 #7: toggle a sort on a 1-based column number
+    /// toggle a sort on a 1-based column number
     /// (`:sort 3`) or clear the active sort (`:sort clear`).
     Sort(SortArg),
-    /// v1.2 #8: emit ALTER TABLE migration SQL between two tables in
+    /// emit ALTER TABLE migration SQL between two tables in
     /// the active connection. Format: `:diff-schema a.tbl1 b.tbl2`.
     /// The result lands in a fresh editor tab so the user can review
     /// before executing.
@@ -240,7 +240,7 @@ pub enum Command {
         left: String,
         right: String,
     },
-    /// T2-T2-C: full-schema diff between two **connections**
+    /// full-schema diff between two **connections**
     /// (`:schema-diff source target`). Opens both transiently,
     /// introspects every user table, runs `narwhal-schema-diff`,
     /// dumps the emitted DDL into a fresh editor tab. Optional
@@ -263,20 +263,20 @@ pub enum Command {
         /// target-side introspection before diffing.
         schema_map: Vec<(String, String)>,
     },
-    /// v1.3 #9: run the lint rule set over the active buffer and
+    /// run the lint rule set over the active buffer and
     /// dump findings to a fresh tab. `:lint` reuses the active tab's
     /// content; no argument needed.
     Lint,
-    /// T2-T4-C: toggle the inline ASCII chart pane over the active
+    /// toggle the inline ASCII chart pane over the active
     /// result. `:chart bar|line|sparkline` activates the pane;
     /// `:chart off` (or `:chart none`) removes it. Optional flags:
     /// `--x col`, `--y col`, `--col col` (sparkline alias), `--title T`.
     Chart(ChartArg),
-    /// T2-T4-D: toggle the inline pivot-table pane over the active
+    /// toggle the inline pivot-table pane over the active
     /// result. `:pivot rows=col[,col..] [cols=col] [value=col]
     /// [agg=count|sum|avg|min|max]` activates; `:pivot off` removes it.
     Pivot(PivotArg),
-    /// v1.3 #10: insert a built-in SQL template at the cursor.
+    /// insert a built-in SQL template at the cursor.
     /// `:tpl sel` etc.; `:tpl` (no arg) shows the available names.
     Template(Option<String>),
     Unknown(String),
@@ -796,7 +796,7 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "pending" => Command::Pending,
-        // v1.2 #8: `:diff` *without* args still opens the pending
+        // `:diff` *without* args still opens the pending
         // preview (legacy alias). With args it's a schema diff.
         "diff" => {
             let trimmed = arg.trim();
@@ -944,7 +944,7 @@ fn parse_export(arg: &str) -> Command {
             "export: format required (csv|json|tsv|table|insert|parquet|markdown)".into(),
         );
     }
-    // T1-T4-B: the path may be followed by `--compression <codec>` or
+    // the path may be followed by `--compression <codec>` or
     // `--no-truncate`. Strip the trailing flags first so a path with
     // spaces survives; what remains is the path proper. The flags are
     // intentionally trailing-only so `:export markdown out.md` keeps
@@ -1659,7 +1659,7 @@ mod tests {
             }
         );
 
-        // T1-T4-B: parquet + markdown with their flags.
+        // parquet + markdown with their flags.
         use crate::export::ParquetCompression;
         assert_eq!(
             parse("export parquet out.parquet --compression zstd"),
@@ -1726,7 +1726,7 @@ mod tests {
         assert_eq!(parse("zz"), Command::Unknown("zz".into()));
     }
 
-    // T2-T2-C parser coverage.
+    // parser coverage.
     #[test]
     fn schema_diff_minimal() {
         let cmd = parse("schema-diff prod staging");

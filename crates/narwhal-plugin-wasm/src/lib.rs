@@ -10,31 +10,31 @@
 //! ## Architecture at a glance
 //!
 //! ```text
-//!  config + plugin.toml ─┐
-//!                        │
-//!                  Manifest::load        ┌── one Engine per host
-//!                        │               ▼
-//!                  Runtime::load ──► wasmtime::Engine
-//!                        │               │
-//!                        │               ▼
-//!                        │       wasmtime::component::Component
-//!                        │               │
-//!                        ▼               ▼
-//!               WasmPlugin (impl Plugin) Store<HostState>
-//!                        │               │
-//!                        ▼               ▼
-//!         PluginRegistry::register   host functions (cmd/log/state)
+//! config + plugin.toml ─┐
+//! │
+//! Manifest::load        ┌── one Engine per host
+//! │               ▼
+//! Runtime::load ──► wasmtime::Engine
+//! │               │
+//! │               ▼
+//! │       wasmtime::component::Component
+//! │               │
+//! ▼               ▼
+//! WasmPlugin (impl Plugin) Store<HostState>
+//! │               │
+//! ▼               ▼
+//! PluginRegistry::register   host functions (cmd/log/state)
 //! ```
 //!
 //! * One [`Runtime`] per process. It owns the shared
-//!   [`wasmtime::Engine`] and the global host policy (capability +
-//!   resource limits sourced from `Settings::plugins.wasm`).
+//! [`wasmtime::Engine`] and the global host policy (capability +
+//! resource limits sourced from `Settings::plugins.wasm`).
 //! * One [`WasmPlugin`] per loaded component. Each owns its own
-//!   [`wasmtime::Store`], its own KV namespace, its own fuel budget
-//!   and (eventually) its own filesystem capability set.
+//! [`wasmtime::Store`], its own KV namespace, its own fuel budget
+//! and (eventually) its own filesystem capability set.
 //! * The crate implements [`narwhal_plugin::Plugin`] for
-//!   [`WasmPlugin`] so the surrounding `PluginRegistry` machinery
-//!   does not care which runtime produced the trait object.
+//! [`WasmPlugin`] so the surrounding `PluginRegistry` machinery
+//! does not care which runtime produced the trait object.
 //!
 //! ## v0.1 scope and what comes later
 //!
@@ -42,25 +42,25 @@
 //!
 //! * Component loading + manifest validation + capability matching.
 //! * Memory + fuel limits enforced (default 64 MiB / 100 M fuel per
-//!   event invocation, configurable per plugin via the manifest).
+//! event invocation, configurable per plugin via the manifest).
 //! * Host functions for logging and per-plugin KV. `cmd` is wired
-//!   through an injectable [`CommandBus`] trait — the binary
-//!   provides the implementation; this crate ships a no-op stub so
-//!   non-app consumers still compile.
+//! through an injectable [`CommandBus`] trait — the binary
+//! provides the implementation; this crate ships a no-op stub so
+//! non-app consumers still compile.
 //! * Lifecycle hook: every loaded plugin receives `on-event` for the
-//!   events listed in `wit/world.wit`. Errors are isolated; one bad
-//!   plugin can't crash the host.
+//! events listed in `wit/world.wit`. Errors are isolated; one bad
+//! plugin can't crash the host.
 //!
 //! What is *deliberately* deferred to follow-up tasks:
 //!
-//! * Filesystem / network / env capability enforcement (T1-T5-B).
-//!   The manifest can declare these; the runtime today only stores
-//!   the set on the [`HostState`] for T1-T5-B to read.
-//! * MCP-tool plugin track (T2-T5-C).
+//! * Filesystem / network / env capability enforcement.
+//! The manifest can declare these; the runtime today only stores
+//! the set on the [`HostState`] for to read.
+//! * MCP-tool plugin track.
 //! * Hot reload — restart is required to load or unload a plugin.
 //! * Persistent KV; today's store is an in-memory `HashMap`.
 //!
-//! See `docs/dev/t1-t5-a-wasm-runtime.md` for the full Tier 2
+//! See `docs/dev/wasm-runtime.md` for the full Tier 2
 //! contract and roadmap deltas.
 //!
 //! [lua]: ../narwhal_plugin_lua/index.html

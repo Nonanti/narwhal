@@ -1,4 +1,4 @@
-//! `:goto` fuzzy schema navigator overlay (v1.1 #1).
+//! `:goto` fuzzy schema navigator overlay.
 //!
 //! Centred picker. Top line is the query input; below is a scrolling
 //! list of `connection.schema.table` strings ranked by fuzzy score.

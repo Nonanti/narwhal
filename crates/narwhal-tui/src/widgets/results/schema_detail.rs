@@ -15,8 +15,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use narwhal_domain::result::MetaTab;
 use crate::theme::Theme;
+use narwhal_domain::result::MetaTab;
 
 pub(super) fn draw_table_detail(
     frame: &mut Frame<'_>,

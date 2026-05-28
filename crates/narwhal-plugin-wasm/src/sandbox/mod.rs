@@ -4,23 +4,23 @@
 //! ## Design at a glance
 //!
 //! ```text
-//!  host fn entry ─► Enforcer::check(plugin, op)
-//!                        │
-//!                        ▼
-//!             ┌──────────────────────────┐
-//!             │  decision cache (RwLock) │  ← O(1) on the steady state
-//!             └──────────────────────────┘
-//!                        │  miss
-//!                        ▼
-//!             ┌──────────────────────────┐
-//!             │  CapabilitySet::covers   │  ← walk the granted set
-//!             └──────────────────────────┘
-//!                        │
-//!                        ▼
-//!             ┌──────────────────────────┐
-//!             │  audit emit (denial)     │  ← tracing target
-//!             │                          │    narwhal::plugin::audit
-//!             └──────────────────────────┘
+//! host fn entry ─► Enforcer::check(plugin, op)
+//! │
+//! ▼
+//! ┌──────────────────────────┐
+//! │  decision cache (RwLock) │  ← O(1) on the steady state
+//! └──────────────────────────┘
+//! │  miss
+//! ▼
+//! ┌──────────────────────────┐
+//! │  CapabilitySet::covers   │  ← walk the granted set
+//! └──────────────────────────┘
+//! │
+//! ▼
+//! ┌──────────────────────────┐
+//! │  audit emit (denial)     │  ← tracing target
+//! │                          │    narwhal::plugin::audit
+//! └──────────────────────────┘
 //! ```
 //!
 //! The cache is keyed on `(plugin name, operation cache key)` —
@@ -33,13 +33,13 @@
 //!
 //! * `host.state-{get,set}` → hard trap when `State` is missing.
 //! * `host.cmd(name, …)` → hard trap unless either
-//!   `Cmd` (broad) or `CmdInvoke(name)` (exact) is in the
-//!   effective set.
+//! `Cmd` (broad) or `CmdInvoke(name)` (exact) is in the
+//! effective set.
 //! * Manifest-load time check for `FsRead`/`FsWrite`/`NetConnect`/
-//!   `EnvRead` against host grants. (Per-call FS/net/env enforcement
-//!   piggy-backs on WASI preview-2 — wired in T1-T5-A on the WIT
-//!   surface; the host-side syscall surface for them lands as a
-//!   follow-up once WIT exposes the imports.)
+//! `EnvRead` against host grants. (Per-call FS/net/env enforcement
+//! piggy-backs on WASI preview-2 — on the WIT
+//! surface; the host-side syscall surface for them lands as a
+//! follow-up once WIT exposes the imports.)
 //!
 //! ## Audit trail
 //!

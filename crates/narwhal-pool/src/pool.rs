@@ -342,9 +342,7 @@ impl DerefMut for PooledConnection {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // `Box::as_mut()` already produces `&mut dyn DynConnection`
         // from `Box<dyn DynConnection>` — no coercion gymnastics
-        // needed. Target type changed from `dyn Connection` to
-        // `dyn DynConnection` in T0-02 (RPITIT migration); the body
-        // here is unchanged from v1.x.
+        // needed.
         let conn = self
             .connection
             .as_mut()

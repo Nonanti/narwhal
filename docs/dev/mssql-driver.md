@@ -1,32 +1,30 @@
-# T1-T2-A — MSSQL driver (tiberius)
+# MSSQL driver (tiberius)
 
-> Status: **landed in v2.0**. Tier-1, Theme T2 (enterprise depth).
-> Branch: `v2/T1-T2-A-mssql`. Merged into `v2-dev` with `--no-ff`.
->
-> Downstream consumers: T2-T2-C (schema diff) and T2-T2-D (audit)
-> ingest the connection / schema introspection shapes documented in
-> [§ Connection introspection format](#connection-introspection-format).
+Design notes for the Microsoft SQL Server backend (added in v2.0).
+The schema diff and audit subsystems consume the connection and
+schema introspection shapes documented in
+[§ Connection introspection format](#connection-introspection-format).
 
 ## What landed
 
 Microsoft SQL Server is now a first-class engine alongside
 PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse. The driver follows
-the post-T0-03 layout — a single `mssql` cargo feature inside the
-`narwhal-drivers` umbrella — and the post-T0-02 trait convention
+the post- layout — a single `mssql` cargo feature inside the
+`narwhal-drivers` umbrella — and the post- trait convention
 (native `async fn` in trait, `Box<dyn DynConnection>` at trait-object
 sites, no `#[async_trait]`).
 
-| Item                                       | Where                                                  |
+| Item  | Where  |
 | ------------------------------------------ | ------------------------------------------------------ |
-| Feature flag                               | `narwhal-drivers/Cargo.toml` → `mssql`                 |
-| Driver module                              | `crates/narwhal-drivers/src/mssql/{mod,ddl,types}.rs`  |
-| Registry entry                             | `narwhal-drivers/src/registry.rs` (cfg-gated)          |
-| URL scheme                                 | `narwhal-config/src/url.rs` (`mssql://`, `sqlserver://`) |
-| Workspace deps                             | `tiberius` 0.12, `tokio-util` 0.7 (compat)             |
-| Unit + binding tests                       | `tests/mssql_binding.rs`                               |
-| Integration tests (`#[ignore]`)            | `tests/mssql_smoke.rs`                                 |
-| Docker-compose fixture                     | `tests/fixtures/mssql/docker-compose.yml`              |
-| User docs                                  | `docs/drivers/mssql.md`                                |
+| Feature flag  | `narwhal-drivers/Cargo.toml` → `mssql`  |
+| Driver module  | `crates/narwhal-drivers/src/mssql/{mod,ddl,types}.rs`  |
+| Registry entry  | `narwhal-drivers/src/registry.rs` (cfg-gated)  |
+| URL scheme  | `narwhal-config/src/url.rs` (`mssql://`, `sqlserver://`) |
+| Workspace deps  | `tiberius` 0.12, `tokio-util` 0.7 (compat)  |
+| Unit + binding tests  | `tests/mssql_binding.rs`  |
+| Integration tests (`#[ignore]`)  | `tests/mssql_smoke.rs`  |
+| Docker-compose fixture  | `tests/fixtures/mssql/docker-compose.yml`  |
+| User docs  | `docs/drivers/mssql.md`  |
 
 The umbrella `all-drivers` feature pulls `mssql` in, so the
 `narwhaldb` binary keeps shipping every backend out of the box.
@@ -47,19 +45,18 @@ for the full rationale.
 `list_all_tables` returns the workspace's canonical
 `SchemaCatalog = Vec<(Schema, Vec<Table>)>` alias. Order is
 deterministic: schema order from `list_schemas`, table order from
-`sys.tables` joined with `sys.schemas` (ASCII collation). Tier-2
-schema diff and audit tools that snapshot the catalogue can rely on
+`sys.tables` joined with `sys.schemas` (ASCII collation). schema diff and audit tools that snapshot the catalogue can rely on
 this stability.
 
 ### Cargo-feature gating
 
 ```toml
 mssql = [
-    "dep:tiberius",
-    "dep:tokio-util",
-    "dep:futures",
-    "dep:chrono",
-    "dep:uuid",
+  "dep:tiberius",
+  "dep:tokio-util",
+  "dep:futures",
+  "dep:chrono",
+  "dep:uuid",
 ]
 all-drivers = ["postgres", "mysql", "sqlite", "duckdb", "clickhouse", "mssql"]
 ```
@@ -73,37 +70,37 @@ SQL DB) speaks TDS 7.3 or newer.
 
 ## Connection introspection format
 
-> T2-T2-C and T2-T2-D snapshot the schema/connection shape produced by
+> and snapshot the schema/connection shape produced by
 > this driver. The serialisations below are what those tools should
 > expect to see on disk.
 
 ### `ConnectionParams` for MSSQL
 
 ```toml
-host                    = "sql.prod.example.com"
-port                    = 1433        # default; can be omitted
-database                = "appdb"     # SQL Server "master" default if omitted
-username                = "appuser"
-ssl_mode                = "verify-full"   # → EncryptionLevel::Required
+host  = "sql.prod.example.com"
+port  = 1433  # default; can be omitted
+database  = "appdb"  # SQL Server "master" default if omitted
+username  = "appuser"
+ssl_mode  = "verify-full"  # → EncryptionLevel::Required
 
 # Optional, MSSQL-specific:
 [connections.appdb.options]
-application_name         = "narwhal-tui"   # APP_NAME() on the server
-trust_server_certificate = "true"          # dev/test only
-encrypt                  = "true"          # overrides ssl_mode
-instance_name            = "SQLEXPRESS"    # SQL Browser instance
-integrated_security      = "false"         # see note
+application_name  = "narwhal-tui"  # APP_NAME on the server
+trust_server_certificate = "true"  # dev/test only
+encrypt  = "true"  # overrides ssl_mode
+instance_name  = "SQLEXPRESS"  # SQL Browser instance
+integrated_security  = "false"  # see note
 ```
 
 Recognised option keys (the whitelist enforced at connect time):
 
-| Key                        | Maps to                                  |
+| Key  | Maps to  |
 | -------------------------- | ---------------------------------------- |
-| `application_name`         | `Config::application_name`               |
-| `trust_server_certificate` | `Config::trust_cert()`                   |
-| `instance_name`            | `Config::instance_name` (port required)  |
-| `encrypt`                  | `Config::encryption(…)` override         |
-| `integrated_security`      | Reserved; currently rejected, see below  |
+| `application_name`  | `Config::application_name`  |
+| `trust_server_certificate` | `Config::trust_cert`  |
+| `instance_name`  | `Config::instance_name` (port required)  |
+| `encrypt`  | `Config::encryption(…)` override  |
+| `integrated_security`  | Reserved; currently rejected, see below  |
 
 Anything else is rejected with `Error::Config("unsupported connection
 option: …")` — the same hardening pattern the PostgreSQL driver uses,
@@ -122,7 +119,7 @@ MSSQL-specific knobs surface like this:
   `nvarchar(max)`, `decimal(18,4)`, `datetime2`, `uniqueidentifier`.
 - `Column::default`: copied verbatim from
   `sys.default_constraints.definition`, which is already parenthesised
-  (`((0))`, `(getdate())`, `(N'literal')`). The DDL emitter replays it
+  (`((0))`, `(getdate)`, `(N'literal')`). The DDL emitter replays it
   as-is so the round-trip is byte-stable.
 - `Index::primary` mirrors `sys.indexes.is_primary_key`.
 - `ForeignKey::on_update` / `on_delete` map the
@@ -139,12 +136,12 @@ MSSQL-specific knobs surface like this:
 CREATE TABLE [dbo].[customers] (
   [id] int IDENTITY(1,1) PRIMARY KEY,
   [email] nvarchar(255) NOT NULL,
-  [created_at] datetime2 DEFAULT (sysutcdatetime()) NOT NULL
+  [created_at] datetime2 DEFAULT (sysutcdatetime) NOT NULL
 );
 ```
 
 - Identifiers are quoted with brackets, doubling any embedded `]`
-  (matches `QUOTENAME()`).
+  (matches `QUOTENAME`).
 - IDENTITY seed/increment are read from `sys.identity_columns` and
   replayed; missing values default to `(1,1)`.
 - Composite primary keys are emitted as a trailing
@@ -163,7 +160,7 @@ CREATE TABLE [dbo].[customers] (
   `trust_server_certificate` is the only way to talk to the official
   Docker image without setting up a CA.
 - **No out-of-band cancellation.** Tiberius offers no equivalent of
-  the PostgreSQL CancelRequest message. `cancel_handle()` returns
+  the PostgreSQL CancelRequest message. `cancel_handle` returns
   `None`, `Capabilities::cancellation` is `false`. A `KILL SESSION`
   shim was considered and rejected — sessions outlive individual
   queries, so we would have killed unrelated traffic. Future v2.x
@@ -203,16 +200,14 @@ CREATE TABLE [dbo].[customers] (
   rendering an incremental cursor. Real server-side cursoring
   (FAST_FORWARD) is a v2.x follow-up.
 
-## Statement routing
-
-T1-T2-A code review (C1) discovered four real failure modes in the
+## Statement routing code review (C1) discovered four real failure modes in the
 first draft of the keyword classifier. The replacement is a small
 state machine:
 
 ```
 classify_statement(sql) -> StatementShape
-  Read              → Client::query           (preserves rows)
-  Mutating          → Client::execute         (captures rows_affected)
+  Read  → Client::query  (preserves rows)
+  Mutating  → Client::execute  (captures rows_affected)
   MutatingWithRows  → Client::query + synth rows_affected for DML+OUTPUT
 ```
 
@@ -227,40 +222,38 @@ The routing-vs-classifier split lets the binding test suite
 without a network round-trip; the docker-backed suite
 (`tests/mssql_smoke.rs`) covers the wire-level outcome.
 
-| Input pattern                                  | Shape              | `rows_affected` |
+| Input pattern  | Shape  | `rows_affected` |
 | ---------------------------------------------- | ------------------ | --------------- |
-| `SELECT …` / `WITH cte AS (SELECT) SELECT …`   | `Read`             | `None`          |
-| `-- comment\nINSERT …`                         | `Mutating`         | `Some(n)`       |
-| `INSERT … OUTPUT inserted.id VALUES (…)`       | `MutatingWithRows` | `Some(rows.len())` |
-| `DELETE FROM t OUTPUT deleted.* WHERE …`        | `MutatingWithRows` | `Some(rows.len())` |
-| `WITH src AS (…) INSERT INTO t SELECT …`        | `MutatingWithRows` | `None`          |
-| `EXEC sp_who`                                  | `MutatingWithRows` | `None`          |
-| `CREATE TABLE` / `DROP` / `GRANT`              | `Mutating`         | `Some(0)`       |
+| `SELECT …` / `WITH cte AS (SELECT) SELECT …`  | `Read`  | `None`  |
+| `-- comment\nINSERT …`  | `Mutating`  | `Some(n)`  |
+| `INSERT … OUTPUT inserted.id VALUES (…)`  | `MutatingWithRows` | `Some(rows.len)` |
+| `DELETE FROM t OUTPUT deleted.* WHERE …`  | `MutatingWithRows` | `Some(rows.len)` |
+| `WITH src AS (…) INSERT INTO t SELECT …`  | `MutatingWithRows` | `None`  |
+| `EXEC sp_who`  | `MutatingWithRows` | `None`  |
+| `CREATE TABLE` / `DROP` / `GRANT`  | `Mutating`  | `Some(0)`  |
 
-Downstream Tier-2 audit (T2-T2-D) can rely on:
+Downstream audit can rely on:
 
-- `result.rows_affected.is_some()` whenever the user executed a
+- `result.rows_affected.is_some` whenever the user executed a
   classic DML or a DML+OUTPUT (the latter via row count, which is
   exact for OUTPUT clauses);
 - `result.rows` being non-empty whenever the engine produced rows,
   regardless of routing.
 
-## Read-only enforcement
-
-T1-T2-A code review (C2) flagged the original `set_read_only(true)`
+## Read-only enforcement code review (C2) flagged the original `set_read_only(true)`
 as misleading: it issued `SET TRANSACTION ISOLATION LEVEL SNAPSHOT`,
-returned `Ok(())`, and the engine still accepted every write. The
+returned `Ok()`, and the engine still accepted every write. The
 replacement is a driver-layer guard:
 
 1. `MssqlConnection` holds an `Arc<AtomicBool>`.
-2. `set_read_only(b)` stores `b` into the atomic. `Ok(())` is
-   returned only after the flag is durable for subsequent reads.
+2. `set_read_only(b)` stores `b` into the atomic. `Ok()` is
+  returned only after the flag is durable for subsequent reads.
 3. `execute` consults the atomic *before* classify→route; any
-   non-`Read` shape returns `Error::Unsupported` and the SQL never
-   reaches the wire.
+  non-`Read` shape returns `Error::Unsupported` and the SQL never
+  reaches the wire.
 4. `ConnectionParams.read_only = true` from the on-disk config is
-   honoured from the **first** statement (driver-construction time),
-   not just after a manual `set_read_only` call.
+  honoured from the **first** statement (driver-construction time),
+  not just after a manual `set_read_only` call.
 
 This matches the trait contract that "the driver instructs the
 database engine to refuse writes for the lifetime of the session":
@@ -269,9 +262,7 @@ the enforcement chain. The TUI's syntactic guard
 (`narwhal_sql::guard_read_only`) remains the first layer of
 defence.
 
-## Connect-time budget
-
-T1-T2-A code review (M1): `TcpStream::connect` to a black-holed
+## Connect-time budget code review (M1): `TcpStream::connect` to a black-holed
 host previously inherited the OS-default SYN retransmit budget
 (~127s on Linux), which would freeze the TUI on any typo'd hostname.
 The driver now wraps the entire handshake (TCP + TLS + LOGIN7) in a
@@ -287,10 +278,10 @@ finished.
 
 1. Add the key to `OPTIONS_WHITELIST` in `mssql/mod.rs`.
 2. Handle it inside `build_config` *before* the whitelist loop's
-   final `else` (rejection path).
+  final `else` (rejection path).
 3. Update the table in this doc and `docs/drivers/mssql.md`.
 4. Add a unit test in `mssql::tests` (`build_config_*`) that
-   exercises both the accepted and rejected paths.
+  exercises both the accepted and rejected paths.
 
 ### Adding a new `Value` variant binding
 
@@ -300,11 +291,11 @@ finished.
 in v3.x. The conventional landing pattern is:
 
 1. Pick the right `ColumnData` arm (use `ColumnData::String` if it's
-   text, `ColumnData::Binary` if it's bytes).
+  text, `ColumnData::Binary` if it's bytes).
 2. Add the matching arm in `column_to_value` so the round-trip is
-   symmetric.
+  symmetric.
 3. Cover both directions in `tests/mssql_smoke.rs` — pick a wire
-   type the server supports natively for byte-accuracy.
+  type the server supports natively for byte-accuracy.
 
 ## Out of scope
 

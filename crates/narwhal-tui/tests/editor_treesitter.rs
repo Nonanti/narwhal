@@ -1,4 +1,4 @@
-//! Smoke test for the T1-T3-A editor → tree-sitter render path.
+//! Smoke test for the editor → tree-sitter render path.
 //!
 //! Renders the editor into an off-screen `ratatui` `TestBackend` and
 //! asserts that SQL keywords land on a styled span rather than the

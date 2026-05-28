@@ -126,7 +126,7 @@ impl FileSink {
             outgoing.sync_data().await?;
             drop(outgoing);
         }
-        // MR-M1: rename + create-target atomically inside the same
+        // rename + create-target atomically inside the same
         // probe loop. Each iteration tries `OpenOptions::create_new`
         // on the candidate path; only if that succeeds do we
         // `rename(active -> candidate)`. The transient empty file
@@ -134,7 +134,7 @@ impl FileSink {
         // hole the previous `metadata().is_err() -> rename` pattern
         // had against concurrent writers.
         let rotated = self.pick_rotated_name_atomic(&state.active_path).await?;
-        // R3-N1: clean up the placeholder if the rename fails so a
+        // clean up the placeholder if the rename fails so a
         // permission / disk-full failure doesn't leak an empty
         // file named like a real rotated artefact (which would
         // confuse log shippers and inflate next-stamp suffix probes).
@@ -160,7 +160,7 @@ impl FileSink {
         Ok(())
     }
 
-    /// MR-M1: pick a free rotated path *atomically*. Tries the
+    /// pick a free rotated path *atomically*. Tries the
     /// millisecond stamp first (common case), then numeric suffixes,
     /// then a nanosecond stamp as a final hail-Mary; gives up after
     /// [`MAX_ROTATION_ATTEMPTS`] with [`SinkError::Path`] so the

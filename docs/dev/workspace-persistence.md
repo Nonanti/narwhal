@@ -1,10 +1,9 @@
-# T1-T3-B — Workspace persistence
+# Workspace persistence
 
-> Status: **landed on `v2/T1-T3-B-persist`**, awaiting merge into
-> `v2-dev`. Feeds T3-01 (migration guide) with the public-surface
-> delta below. The Tier-2 backlog item "collapsible sidebar schemas"
-> consumes the `PersistedSidebar::expanded_schemas` forward-compat
-> slot already wired here.
+Design notes for the workspace-state restore path (open tabs, cursor
+position, sidebar expansion) introduced in v2.0. A forward-compat
+slot `PersistedSidebar::expanded_schemas` is reserved for upcoming
+collapsible-sidebar support.
 
 ## Headline
 
@@ -26,14 +25,14 @@ config-file editing; the only switch users need to flip is
 crates/narwhal-app:
 + pub mod persist;
 + pub use persist::{
-+     CURRENT_SCHEMA_VERSION, PersistError, PersistResult,
-+     PersistedSidebar, PersistedTab, PersistedTabKind,
-+     PersistedWorkspace, SaveOutcome,
-+     load_at_start, save_at_exit, snapshot, apply,
++  CURRENT_SCHEMA_VERSION, PersistError, PersistResult,
++  PersistedSidebar, PersistedTab, PersistedTabKind,
++  PersistedWorkspace, SaveOutcome,
++  load_at_start, save_at_exit, snapshot, apply,
 + };
 
 crates/narwhal-config:
-+ ConfigPaths::workspace_state_file()       // ~/.config/narwhal/workspace-state.toml
++ ConfigPaths::workspace_state_file  // ~/.config/narwhal/workspace-state.toml
 ~ impl Default for WorkspacePersistSettings // every knob defaults to true (v1 had no opinion)
 ```
 
@@ -42,32 +41,32 @@ Concrete shapes (all `#[non_exhaustive]` per
 
 ```rust
 pub struct PersistedWorkspace {
-    pub schema_version: u32,                // 1 for v2.0
-    pub narwhal_version: Option<String>,
-    pub saved_at: Option<String>,
-    pub active_connection: Option<String>,
-    pub tabs: Vec<PersistedTab>,
-    pub active_tab: usize,
-    pub sidebar: PersistedSidebar,
+  pub schema_version: u32,  // 1 for v2.0
+  pub narwhal_version: Option<String>,
+  pub saved_at: Option<String>,
+  pub active_connection: Option<String>,
+  pub tabs: Vec<PersistedTab>,
+  pub active_tab: usize,
+  pub sidebar: PersistedSidebar,
 }
 impl PersistedWorkspace {
-    pub fn empty() -> Self;
-    pub fn with(f: impl FnOnce(&mut Self)) -> Self;
+  pub fn empty -> Self;
+  pub fn with(f: impl FnOnce(&mut Self)) -> Self;
 }
 
 pub struct PersistedTab {
-    pub name: String,
-    pub buffer: String,
-    pub cursor_row: usize,
-    pub cursor_col: usize,
-    pub scroll: usize,
-    pub kind: PersistedTabKind,             // SqlEditor (only variant in v2.0)
+  pub name: String,
+  pub buffer: String,
+  pub cursor_row: usize,
+  pub cursor_col: usize,
+  pub scroll: usize,
+  pub kind: PersistedTabKind,  // SqlEditor (only variant in v2.0)
 }
 
 pub struct PersistedSidebar {
-    pub selected_index: usize,
-    pub scroll: usize,
-    pub expanded_schemas: Vec<String>,      // reserved for collapsible-schemas follow-up
+  pub selected_index: usize,
+  pub scroll: usize,
+  pub expanded_schemas: Vec<String>,  // reserved for collapsible-schemas follow-up
 }
 
 pub enum PersistedTabKind { SqlEditor }
@@ -80,7 +79,7 @@ pub fn load_at_start(path: &Path) -> PersistResult<Option<PersistedWorkspace>>;
 pub fn save_at_exit(snapshot: &PersistedWorkspace, path: &Path) -> PersistResult<SaveOutcome>;
 pub fn snapshot(core: &AppCore) -> PersistedWorkspace;
 pub fn apply(core: &mut AppCore, snapshot: PersistedWorkspace,
-             settings: &WorkspacePersistSettings) -> Option<String>;
+  settings: &WorkspacePersistSettings) -> Option<String>;
 ```
 
 No removals. The existing `Tab`, `UiState`, `SessionState` types
@@ -122,8 +121,7 @@ scroll = 2
 
 - `schema_version = 1` is always the very first key (matches the
   precedent set by `settings.toml` / `connections.toml`). The
-  `Settings::peek_schema_version` cheap-path-first scanner from
-  T0-04 isn't reused here because the file is tiny — the full TOML
+  `Settings::peek_schema_version` cheap-path-first scanner isn't reused here because the file is tiny — the full TOML
   parse runs in microseconds on the snapshots we produce.
 - Empty optionals (`narwhal_version`, `active_connection`,
   `sidebar.expanded_schemas`) collapse on serialisation. A
@@ -134,14 +132,14 @@ scroll = 2
 
 ## Save / load triggers
 
-| Trigger              | Where                                  | Notes                                            |
+| Trigger  | Where  | Notes  |
 | -------------------- | -------------------------------------- | ------------------------------------------------ |
-| **Load** at startup  | `App::with_workspace_state_path`       | Builder step, before `run()`. Restored tabs land in `AppCore` before the first frame draws. |
-| **Re-open** connection | `App::run`, before first draw         | Async `:open NAME` equivalent. Missing connection silently degrades to status-bar warning. |
+| **Load** at startup  | `App::with_workspace_state_path`  | Builder step, before `run`. Restored tabs land in `AppCore` before the first frame draws. |
+| **Re-open** connection | `App::run`, before first draw  | Async `:open NAME` equivalent. Missing connection silently degrades to status-bar warning. |
 | **Save** at clean exit | `App::run`, after the loop terminates | Panic unwinds skip this — the `Result` would have propagated and never reached the save call. |
 
 The brief mentioned a throttled save every 30s while running. That
-**deferred** to a Tier-2 follow-up: the atomic-rename guarantees the
+**deferred** to a follow-up: the atomic-rename guarantees the
 file is either pre-snapshot or fully-current — never half-written
 — and a clean-exit-only save reproduces the user mental model
 ("`:q` is what saved my session"). A 30s background save would
@@ -153,18 +151,18 @@ needs additional coordination we'd rather not invent on this branch.
 The `[settings.workspace.persist]` block has four bools, all
 default-true:
 
-| Field             | What happens when `false`                                    |
+| Field  | What happens when `false`  |
 | ----------------- | ------------------------------------------------------------ |
-| `enabled`         | Save *and* restore are no-ops. The file isn't created on exit; an existing file is left untouched on launch. |
-| `restore_tabs`    | Default tab list (`untitled-1`) stays put. The active connection still re-opens (it's the single most-valuable restore item). |
+| `enabled`  | Save *and* restore are no-ops. The file isn't created on exit; an existing file is left untouched on launch. |
+| `restore_tabs`  | Default tab list (`untitled-1`) stays put. The active connection still re-opens (it's the single most-valuable restore item). |
 | `restore_cursor`  | Buffer text restores; every tab reopens at `(row 0, col 0, scroll 0)`. Users who want "reopen my queries but start me at the top of each" pick this. |
 | `restore_sidebar` | Sidebar selection and scroll start at zero on launch instead of replaying the saved offsets. |
 
-`apply()` returns the saved connection name (or `None`) so the
+`apply` returns the saved connection name (or `None`) so the
 binary can fire `:open NAME` once the event loop is alive — keeping
 the connection re-open off the critical path of the first frame.
 
-## Treesitter cache interaction (T1-T3-A contract)
+## Treesitter cache interaction
 
 The persist module **never touches** `Tab::ts_parser` or
 `Tab::sql_highlights`. Those fields stay `None` on a restored tab,
@@ -172,12 +170,12 @@ which means the first render after restore re-runs the treesitter
 parse — exactly the same path a freshly-typed buffer takes.
 
 This satisfies the
-`docs/dev/t1-t3-a-treesitter.md::"Cache policy"` invariant
+`docs/dev/treesitter.md::"Cache policy"` invariant
 (length-keyed cache, recompute on length mismatch): a freshly-restored
 tab has `sql_highlights_buf_len = 0`, the loaded buffer has length
 > 0 in 99 % of cases, so the cache is correctly invalidated on
 first use. A restored *empty* buffer also re-computes because
-`sql_highlights.is_none()` short-circuits the cache-hit branch.
+`sql_highlights.is_none` short-circuits the cache-hit branch.
 
 Raw `tree_sitter::Parser` handles wouldn't round-trip anyway — they
 hold a C pointer through `tree_sitter::Parser` — so the policy of
@@ -191,14 +189,14 @@ would race the rename. We coordinate them with a `.lock` sibling
 file using POSIX-atomic `OpenOptions::create_new`:
 
 1. Writer A takes the lock, writes the canonical file via
-   atomic-rename, removes the lock.
+  atomic-rename, removes the lock.
 2. Writer B sees the lock, falls back to
-   `workspace-state.${pid}.toml` so neither instance loses its
-   snapshot.
+  `workspace-state.${pid}.toml` so neither instance loses its
+  snapshot.
 3. A subsequent clean exit that acquires the lock takes over the
-   canonical slot; the per-pid file stays on disk as a recoverable
-   last-resort copy. The Tier-2 backlog has an item to age-out
-   per-pid files at startup; v2.0 leaves them indefinitely.
+  canonical slot; the per-pid file stays on disk as a recoverable
+  last-resort copy. The backlog has an item to age-out
+  per-pid files at startup; v2.0 leaves them indefinitely.
 
 Stale-lock recovery: lock files older than 60 seconds on disk are
 treated as orphans from a crashed earlier run and reaped on the
@@ -239,8 +237,7 @@ get those secrets written to disk in plaintext. Mitigations:
   restore path; `set_cursor` snaps the column to a char boundary
   and clamps the row, so a malformed snapshot can't panic the
   restore.
-- **`WorkspacePersistSettings::default()` used to be all-false**.
-  T0-04 shipped the struct as a stub with derived `Default`, and
+- **`WorkspacePersistSettings::default` used to be all-false**. shipped the struct as a stub with derived `Default`, and
   the migration test asserted `!loaded.workspace.persist.enabled`.
   Flipping the defaults to "all true" needed a manual `Default`
   impl plus the matching assertion update in
@@ -267,18 +264,18 @@ get those secrets written to disk in plaintext. Mitigations:
 
 ## Acceptance criteria status
 
-| Item                                                          | Status |
+| Item  | Status |
 | ------------------------------------------------------------- | :----: |
-| `PersistedWorkspace` serde round-trips (golden TOML fixture)  |   ✅   |
-| Clean exit writes the file atomically (rename, no temp left)  |   ✅   |
-| Throttled save every 30s while running                        |   ⏸ deferred to Tier 2 (see *Save / load triggers*) |
-| Restore reopens the last active connection                    |   ✅   |
-| Restore rebuilds all tabs with correct cursor + scroll        |   ✅   |
-| Sidebar viewport state restored                               |   ✅   |
+| `PersistedWorkspace` serde round-trips (golden TOML fixture)  |  ✅  |
+| Clean exit writes the file atomically (rename, no temp left)  |  ✅  |
+| Throttled save every 30s while running  |  ⏸ deferred to Tier 2 (see *Save / load triggers*) |
+| Restore reopens the last active connection  |  ✅  |
+| Restore rebuilds all tabs with correct cursor + scroll  |  ✅  |
+| Sidebar viewport state restored  |  ✅  |
 | Concurrent narwhal instances handled (lock fallback to per-pid) | ✅ |
-| `settings.workspace.persist.enabled = false` → no file written |   ✅   |
-| Schema version mismatch returns `UnsupportedSchema` and skips |   ✅   |
-| `--all-targets` clippy + rustdoc + tests pass                 |   ✅   |
+| `settings.workspace.persist.enabled = false` → no file written |  ✅  |
+| Schema version mismatch returns `UnsupportedSchema` and skips |  ✅  |
+| `--all-targets` clippy + rustdoc + tests pass  |  ✅  |
 
 ## Out of scope
 
@@ -287,7 +284,7 @@ get those secrets written to disk in plaintext. Mitigations:
   persisting 100k cached rows is not. `PersistedTabKind` is
   `non_exhaustive` so a future task that wants this can land it
   without a schema bump (just a new variant + projection arm).
-- **Selection / multi-cursor state**: T2-T3-D will extend the
+- **Selection / multi-cursor state**: will extend the
   schema once `narwhal-vim` surfaces a stable selection model.
 - **Plugin state**: plugins do their own storage by convention.
 - **Cross-machine sync** (git-of-dotfiles style): users can symlink
@@ -301,7 +298,7 @@ get those secrets written to disk in plaintext. Mitigations:
 
 - `docs/dev/api-surface.md` — `non_exhaustive` + `with(|p| …)`
   builder pattern.
-- `docs/dev/t1-t3-a-treesitter.md` — `Tab::sql_highlights` cache
+- `docs/dev/treesitter.md` — `Tab::sql_highlights` cache
   policy that persist must not violate.
 - `narwhal_config::settings::atomic_write` — the precedent we
   mirror in `persist::paths::atomic_write`.
@@ -318,7 +315,5 @@ when settings.workspace.persist.enabled = true (the v2.0 default).
 
 File: ~/.config/narwhal/workspace-state.toml — plaintext TOML,
 0o600 on Unix, atomic-rename writes, .lock sentinel for concurrent
-instances (per-pid fallback on contention).
-
-T1-T3-B of v2.0 roadmap.
+instances (per-pid fallback on contention). of v2.0 roadmap.
 ```

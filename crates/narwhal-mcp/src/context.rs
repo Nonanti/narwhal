@@ -30,7 +30,7 @@ pub struct ServerContext {
     drivers: Arc<DriverRegistry>,
     connections: Arc<ConnectionsFile>,
     credentials: Arc<dyn DynCredentialStore>,
-    /// Secret-vault provider registry (T1-T2-B). Defaults to
+    /// Secret-vault provider registry. Defaults to
     /// [`VaultRegistry::empty`] when [`Self::new`] runs; replaced
     /// via [`Self::with_vault`] before the server accepts requests.
     /// `password = "vault:…"` references in `connections.toml` go
@@ -71,7 +71,7 @@ impl ServerContext {
         }
     }
 
-    /// Install a configured [`VaultRegistry`] (T1-T2-B).
+    /// Install a configured [`VaultRegistry`].
     ///
     /// The binary builds this from `settings.vault.providers`
     /// before calling `serve_stdio()`. The registry holds the
@@ -183,7 +183,7 @@ impl ServerContext {
         let driver = self.drivers.get(&config.driver)?;
         let password = self.resolve_password(&config).await?;
         let mut connection = driver.connect(&config, password.as_deref()).await?;
-        // H13: when `--read-only` is in force, push the constraint down
+        // when `--read-only` is in force, push the constraint down
         // to the engine so the trip wire fires at the server even if
         // a statement-level guard misclassifies a write. Driver-side
         // `Unsupported` is non-fatal here — the upper layers still

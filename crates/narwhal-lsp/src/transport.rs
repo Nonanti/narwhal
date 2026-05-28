@@ -130,7 +130,7 @@ where
 /// a stub server can be implemented as a few `enqueue_response` calls
 /// without spawning a subprocess.
 ///
-/// MR-N10: this type implements [`Clone`] and exposes
+/// this type implements [`Clone`] and exposes
 /// [`push_inbound`] / [`pop_sent`] *only* for the test harness;
 /// production transports ([`StdioTransport`], future TCP / Unix-
 /// socket variants) intentionally do not. If you find yourself

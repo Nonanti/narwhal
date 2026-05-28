@@ -22,7 +22,7 @@ impl AppCore {
     pub(super) fn spawn_cancel(&mut self) {
         let slot = self.process.cancel_slot.clone();
         tokio::spawn(async move {
-            // H6: Take the handle out of the slot under a short-lived
+            // Take the handle out of the slot under a short-lived
             // guard so the mutex is NOT held across `.await` on
             // `cancel()`. Holding a tokio `Mutex` across an await
             // serialises concurrent cancel attempts and violates the
@@ -285,7 +285,7 @@ impl AppCore {
                 session_id,
                 schemas,
             } => {
-                // H8: drop the reply if the user switched sessions since
+                // drop the reply if the user switched sessions since
                 // the refresh was dispatched; otherwise we'd overwrite
                 // the new session's listing with stale data.
                 let current = self.session.active.as_ref().map(|s| s.config.id);
@@ -306,7 +306,7 @@ impl AppCore {
                 self.ui.status.message = format!("schema refreshed · {table_count} tables");
             }
             MetaUpdate::SessionOpened { config_id, result } => {
-                // H7: drop the reply if the user opened another
+                // drop the reply if the user opened another
                 // connection in the meantime (or hit `:close`).
                 if !self.session.pending_session_opens.remove(&config_id) {
                     tracing::debug!(
@@ -331,7 +331,7 @@ impl AppCore {
                     self.ui.status.message = "no history entries".into();
                     return;
                 }
-                // v1.3 #11: apply a pre-set filter if `:history <pat>`
+                // apply a pre-set filter if `:history <pat>`
                 // queued one. Cleared regardless of whether matches
                 // exist so a subsequent open starts fresh.
                 let filter = self
@@ -447,10 +447,10 @@ impl AppCore {
     /// caller's responsibility:
     ///
     /// - `LoadHistory` succeeds even without a session (handled by
-    ///   the meta worker's own "no history journal" branch).
+    /// the meta worker's own "no history journal" branch).
     /// - `RefreshSchemas` / `DumpSchemaAll` need a pool; the worker
-    ///   surfaces `MetaFailed { message: "no active connection" }` if
-    ///   the session disappeared between dispatch and execution.
+    /// surfaces `MetaFailed { message: "no active connection" }` if
+    /// the session disappeared between dispatch and execution.
     /// - `OpenSession` always succeeds at dispatch time.
     ///
     /// Callers that need pre-dispatch validation should check
@@ -472,7 +472,7 @@ impl AppCore {
     /// Drive the worker channel to completion. Useful from tests after
     /// dispatching a batch: pumps every [`RunUpdate`] until `AllDone`.
     ///
-    /// H7: also drains any pending `SessionOpened` meta replies
+    /// also drains any pending `SessionOpened` meta replies
     /// up-front so tests that call `:open` and then expect the session
     /// to be live continue to work without an extra `drain_meta`
     /// step on every call site.
@@ -654,7 +654,7 @@ impl AppCore {
         } else if is_explain_result(&columns) {
             match extract_explain_plan(&rows) {
                 Ok(plan) => {
-                    // v1.1 #3: prefer the structured tree (with cost
+                    // prefer the structured tree (with cost
                     // bars, hot-path colouring, divergence badges).
                     // Fall back to the flat line list when the
                     // structured form isn't available (older callers,

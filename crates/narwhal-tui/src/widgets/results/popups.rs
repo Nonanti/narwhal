@@ -8,8 +8,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use super::cells::sanitize_for_display;
-use narwhal_domain::result::{CellEditView, CellPopup, ExplainPlanLine};
 use crate::theme::Theme;
+use narwhal_domain::result::{CellEditView, CellPopup, ExplainPlanLine};
 
 use crate::widgets::centred_rect;
 
@@ -107,7 +107,7 @@ pub(super) fn draw_cell_popup(frame: &mut Frame<'_>, area: Rect, popup: &CellPop
     frame.render_widget(paragraph, inner);
 }
 
-/// v1.1 #3: width (in cells) reserved for the cost bar to the right
+/// width (in cells) reserved for the cost bar to the right
 /// of each node label. Eight cells gives 12.5 % granularity which
 /// reads well at typical terminal sizes.
 const COST_BAR_WIDTH: usize = 8;
@@ -129,7 +129,7 @@ pub(super) fn draw_explain(
         rendered.push(Line::from(""));
     }
     for line in lines {
-        // Tree connector. New callers (v1.1 #3) pass a pre-formatted
+        // Tree connector. New callers pass a pre-formatted
         // box-drawing prefix; legacy callers use indent + glyph.
         let prefix = if line.connector.is_empty() {
             let indent = "  ".repeat(line.depth);
@@ -162,7 +162,7 @@ pub(super) fn draw_explain(
             Span::styled(line.text.clone(), label_style),
         ];
 
-        // Cost bar (v1.1 #3). Drawn to the right of the label so the
+        // Cost bar. Drawn to the right of the label so the
         // tree column stays visually aligned. Filled with full block
         // characters; the unfilled portion uses light shade so the
         // bar's full width is always visible.

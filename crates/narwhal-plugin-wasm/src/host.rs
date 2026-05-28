@@ -3,15 +3,15 @@
 //! Three concerns live here:
 //!
 //! 1. The [`HostState`] struct stored in every plugin's `wasmtime::Store`,
-//!    along with the [`bindings::narwhal::plugin::host::Host`] impl that
-//!    bridges WASM calls to host data.
+//! along with the [`bindings::narwhal::plugin::host::Host`] impl that
+//! bridges WASM calls to host data.
 //! 2. The [`CommandBus`] / [`LogSink`] traits the host injects so the
-//!    crate stays free of a hard `narwhal-app` dependency.
+//! crate stays free of a hard `narwhal-app` dependency.
 //! 3. A wasmtime [`ResourceLimiter`] wrapper that caps a misbehaving
-//!    plugin's memory growth (the `StoreLimits` themselves live in
-//!    [`crate::limits::memory`]).
+//! plugin's memory growth (the `StoreLimits` themselves live in
+//! [`crate::limits::memory`]).
 //!
-//! ## Capability enforcement (T1-T5-B)
+//! ## Capability enforcement
 //!
 //! Each host fn entry point translates its inputs to an
 //! [`crate::sandbox::Operation`], asks the per-plugin
@@ -19,15 +19,15 @@
 //! and converts denial into:
 //!
 //! * **hard trap** for `host.cmd` and `host.state-set` — the call
-//!   never observes its effect, the plugin sees a
-//!   [`wasmtime::Trap`]. T1-T5-A returned a polite
-//!   `command-result{ok:false}` and silently dropped state-set;
-//!   T1-T5-B raises both to traps so a hostile plugin cannot ignore
-//!   the denial.
+//! never observes its effect, the plugin sees a
+//! [`wasmtime::Trap`]. returned a polite
+//! `command-result{ok:false}` and silently dropped state-set;
+//! raises both to traps so a hostile plugin cannot ignore
+//! the denial.
 //! * **`None` return** for `host.state-get` — read traffic is
-//!   information-disclosure adjacent; the safer default is to look
-//!   like the key never existed. The audit log still records the
-//!   denial.
+//! information-disclosure adjacent; the safer default is to look
+//! like the key never existed. The audit log still records the
+//! denial.
 //!
 //! Every denial emits a structured [`crate::sandbox::AuditEvent`]
 //! through the runtime's configured [`crate::sandbox::AuditSink`].
@@ -174,13 +174,13 @@ impl LogSink for RecordingLogSink {
 /// Wraps:
 ///
 /// * `name` — used as the plugin namespace in audit logs and the
-///   `LogLine::plugin` field.
+/// `LogLine::plugin` field.
 /// * `enforcer` — the per-call policy guard. The runtime
-///   constructs a [`StandardEnforcer`] from the manifest's
-///   intersected capability set; tests can swap in their own
-///   [`Enforcer`] impl via [`HostState::with_enforcer`].
+/// constructs a [`StandardEnforcer`] from the manifest's
+/// intersected capability set; tests can swap in their own
+/// [`Enforcer`] impl via [`HostState::with_enforcer`].
 /// * `kv` — in-memory KV map serialised behind a `std::sync::Mutex`
-///   so concurrent host calls can't corrupt it.
+/// so concurrent host calls can't corrupt it.
 /// * `kv_account` — byte budget tracker, see [`crate::limits::KvAccount`].
 /// * `log_sink` / `command_bus` — runtime-injected service delegates.
 /// * `limits` — wasmtime memory cap.
@@ -350,7 +350,7 @@ impl Host for HostState {
                 );
                 // KV-budget overruns trap so the plugin can adapt
                 // (catch it and write smaller payloads) rather than
-                // silently lose data. Matches the T1-T5-A boundary
+                // silently lose data. Matches the boundary
                 // table promise of "trap upgrade".
                 Err(wasmtime::Error::msg(format!(
                     "plugin '{}' KV budget exhausted: {projected}/{budget} bytes",

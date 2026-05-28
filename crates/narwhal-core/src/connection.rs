@@ -86,23 +86,23 @@ pub struct ConnectionParams {
     /// Optional password material declared *in the configuration file*.
     ///
     /// v1.x stored passwords exclusively in the OS keyring (or fell
-    /// back to `~/.pgpass` / env vars). v2.0 (T1-T2-B) accepts an
+    /// back to `~/.pgpass` / env vars). v2.0 accepts an
     /// optional in-file value so users can express:
     ///
     /// * a literal password (discouraged, but supported for parity);
     /// * an `${env:VAR}` placeholder, expanded by
-    ///   `narwhal_config::interpolate` at load time — same vocabulary
-    ///   as every other string field;
+    /// `narwhal_config::interpolate` at load time — same vocabulary
+    /// as every other string field;
     /// * a vault reference: `vault:hashicorp/<path>#<field>` or
-    ///   `1password:op://Vault/Item/field`, resolved at connect time
-    ///   by `narwhal_config::vault::VaultRegistry`.
+    /// `1password:op://Vault/Item/field`, resolved at connect time
+    /// by `narwhal_config::vault::VaultRegistry`.
     ///
     /// Resolution order at runtime is:
     ///
     /// 1. If `password` is present and parses as a vault reference →
-    ///    the configured provider returns the secret.
+    /// the configured provider returns the secret.
     /// 2. If `password` is present and is *not* a reference → it is
-    ///    used verbatim (after env interpolation).
+    /// used verbatim (after env interpolation).
     /// 3. Else, the keyring is consulted by `connection.id`.
     /// 4. Else, the `~/.pgpass` / env-var fallback runs.
     ///
@@ -140,19 +140,19 @@ pub struct ConnectionParams {
     /// kubectl pod IP before the driver dials in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_connect: Vec<PreConnectStep>,
-    /// v1.1 #2: optional accent colour for the TUI border + status
+    /// optional accent colour for the TUI border + status
     /// bar while this connection is active. `None` keeps the theme
     /// default. Production users typically set `color = "red"` so
     /// "am I on prod?" is answered by a glance at the screen edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<ConnectionColor>,
-    /// v1.1 #2: when `true`, mutating statements (`INSERT`, `UPDATE`,
+    /// when `true`, mutating statements (`INSERT`, `UPDATE`,
     /// `DELETE`, DDL, …) prompt for a confirmation modal before they
     /// reach the driver. Bare reads run without confirmation.
     /// Recommended on every connection that touches production data.
     #[serde(default, skip_serializing_if = "is_false")]
     pub confirm_writes: bool,
-    /// v1.1 #2: when `true`, the session is opened in driver-enforced
+    /// when `true`, the session is opened in driver-enforced
     /// read-only mode (`SET default_transaction_read_only TO ON` on
     /// PG, `PRAGMA query_only = ON` on `SQLite`, etc.) **and** the TUI
     /// applies the same syntactic guard MCP uses
@@ -180,8 +180,8 @@ impl ConnectionParams {
     /// ```
     /// use narwhal_core::ConnectionParams;
     /// let p = ConnectionParams::with(|p| {
-    ///     p.host = Some("db.local".into());
-    ///     p.port = Some(5432);
+    /// p.host = Some("db.local".into());
+    /// p.port = Some(5432);
     /// });
     /// assert_eq!(p.port, Some(5432));
     /// ```
@@ -191,12 +191,12 @@ impl ConnectionParams {
     /// ```
     /// use narwhal_core::{ConnectionColor, ConnectionParams};
     /// let p = ConnectionParams::with(|p| {
-    ///     p.host = Some("prod-db.example.com".into());
-    ///     p.port = Some(5432);
-    ///     p.database = Some("appdb".into());
-    ///     p.color = Some(ConnectionColor::Red);
-    ///     p.confirm_writes = true;
-    ///     p.read_only = true;
+    /// p.host = Some("prod-db.example.com".into());
+    /// p.port = Some(5432);
+    /// p.database = Some("appdb".into());
+    /// p.color = Some(ConnectionColor::Red);
+    /// p.confirm_writes = true;
+    /// p.read_only = true;
     /// });
     /// assert_eq!(p.color, Some(ConnectionColor::Red));
     /// assert!(p.read_only);
@@ -378,12 +378,12 @@ pub trait Connection: Send + Sync {
     /// a latency win; the trait contract is
     ///
     /// 1. `columns()` returns the final column list before the first
-    ///    `next_row()` resolves.
+    /// `next_row()` resolves.
     /// 2. Dropping the [`QueryStream`] releases driver-side cursor /
-    ///    portal state.
+    /// portal state.
     /// 3. [`QueryStream::close`] is awaitable so drivers that must
-    ///    flush a server-side close (PG portals, `ClickHouse` HTTP
-    ///    bodies) can surface release errors.
+    /// flush a server-side close (PG portals, `ClickHouse` HTTP
+    /// bodies) can surface release errors.
     ///
     /// `QueryStream` is the canonical entry point for the TUI run
     /// worker, the MCP query tool's bounded drain, and the v2.0
@@ -503,13 +503,13 @@ pub trait Connection: Send + Sync {
     /// called again with `false`). Mapping per driver:
     ///
     /// - `PostgreSQL`: `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`
-    ///   + `SET default_transaction_read_only TO ON`.
+    /// + `SET default_transaction_read_only TO ON`.
     /// - `MySQL`/`MariaDB`: `SET SESSION TRANSACTION READ ONLY`.
     /// - `SQLite`: `PRAGMA query_only = ON`.
     /// - `ClickHouse`: `SET readonly = 2` (allow SELECT + SET).
     /// - `DuckDB`: opens are file-mode driven; per-session flip is
-    ///   reported as [`crate::Error::Unsupported`] so callers can fall
-    ///   back to the connection-string toggle.
+    /// reported as [`crate::Error::Unsupported`] so callers can fall
+    /// back to the connection-string toggle.
     ///
     /// The default implementation reports the feature as unsupported so
     /// driver authors are forced to make an explicit choice (and so a

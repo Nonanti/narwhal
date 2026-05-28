@@ -1,17 +1,17 @@
-//! Integration tests for T1-T2-B vault providers.
+//! Integration tests for vault providers.
 //!
 //! Two providers, two test surfaces:
 //!
 //! * **`HashiCorp`**: stand up a minimal HTTP mock server on a
-//!   loopback `TcpListener` that responds with a canned KV v2 JSON
-//!   payload, and point `HashicorpVault` at it. No external network,
-//!   no docker dependency — the test runs anywhere `tokio` does.
+//! loopback `TcpListener` that responds with a canned KV v2 JSON
+//! payload, and point `HashicorpVault` at it. No external network,
+//! no docker dependency — the test runs anywhere `tokio` does.
 //!
 //! * **1Password**: write a shell script that prints a canned secret
-//!   to stdout, and set
-//!   [`OnePasswordVaultSettings::op_binary`](narwhal_config::OnePasswordVaultSettings::op_binary)
-//!   to its path. This is exactly the "mock mode" the brief's
-//!   acceptance criterion calls for.
+//! to stdout, and set
+//! [`OnePasswordVaultSettings::op_binary`](narwhal_config::OnePasswordVaultSettings::op_binary)
+//! to its path. This is exactly the "mock mode" the brief's
+//! acceptance criterion calls for.
 //!
 //! Plus the end-to-end orchestrator test:
 //! [`narwhal_config::resolve_connection_password`] dispatches to the

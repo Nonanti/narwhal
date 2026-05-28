@@ -1,18 +1,18 @@
-//! Foreign-key navigation (v1.2 #6).
+//! Foreign-key navigation.
 //!
 //! `gd` (go-to-definition) on a cell whose column is part of a foreign
 //! key opens the referenced row in a new run. Implementation:
 //!
 //! 1. Identify the focused (column, value) in the active result.
 //! 2. Look up the source table's `TableSchema` (via `describe_table`
-//!    on the active session). Skipped if not in a `Rows` result with
-//!    a `RowSource`.
+//! on the active session). Skipped if not in a `Rows` result with
+//! a `RowSource`.
 //! 3. Find any `ForeignKey` whose `columns` includes the focused
-//!    column. If multiple FKs reference the same column the first
-//!    one wins (rare in practice; a composite FK still picks the
-//!    first column-to-column mapping).
+//! column. If multiple FKs reference the same column the first
+//! one wins (rare in practice; a composite FK still picks the
+//! first column-to-column mapping).
 //! 4. Build `SELECT * FROM <ref_schema>.<ref_table> WHERE <ref_col> = <value>`
-//!    and dispatch it as a regular execute batch.
+//! and dispatch it as a regular execute batch.
 //!
 //! `gr` (go-to-references) \u2014 finding tables that reference *this*
 //! row \u2014 is a v1.2 follow-up; it requires walking every table's

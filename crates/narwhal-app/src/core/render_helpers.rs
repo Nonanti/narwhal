@@ -12,16 +12,16 @@ use narwhal_tui::{ExplainPlanLine, ResultDisplay, SearchHighlight, SidebarRowKin
 
 use crate::explain::ExplainNode;
 
-/// v1.1 #3: flatten an [`ExplainNode`] tree into the line list the
+/// flatten an [`ExplainNode`] tree into the line list the
 /// renderer consumes. Computes per-line metadata:
 ///
 /// - `connector` — unicode box-drawing prefix that produces a real
-///   tree visual (`├─`, `└─`, `│ `) instead of indented bullets.
+/// tree visual (`├─`, `└─`, `│ `) instead of indented bullets.
 /// - `cost_ratio` — normalised against the plan's max cost so each
-///   node's bar reflects its relative weight.
+/// node's bar reflects its relative weight.
 /// - `hot` — `true` for the chain root → highest-cost child → …
 /// - `divergent` — forwarded from
-///   [`ExplainNode::rows_divergent`].
+/// [`ExplainNode::rows_divergent`].
 #[must_use]
 pub(super) fn explain_tree_lines(root: &ExplainNode) -> Vec<ExplainPlanLine> {
     let max_cost = root.max_cost().max(1.0);
@@ -100,7 +100,7 @@ fn mark_hot_path(node: &ExplainNode, hot: &mut std::collections::HashSet<*const 
     }
 }
 
-/// v1.1 #2: project [`ConnectionColor`] (config domain) onto the
+/// project [`ConnectionColor`] (config domain) onto the
 /// `ratatui::Color` palette so the renderer doesn't depend on
 /// `narwhal-core`. The fixed six-colour mapping is intentional —
 /// hex/RGB introduces terminal-compat surprises we'd rather not
@@ -128,7 +128,7 @@ use super::chart::{ChartConfig, ChartData, ChartError, derive_chart_data};
 use super::{ResultState, SidebarItem};
 use crate::explain::{ExplainPlan, parse as parse_plan};
 
-/// T2-T4-C: owned envelope handed from `render` into `RootLayout`.
+/// owned envelope handed from `render` into `RootLayout`.
 /// The labels / values inside `ChartData` outlive the borrowed view
 /// the layout receives, so the chart pane survives the render call
 /// without dangling references.
@@ -173,7 +173,7 @@ fn chart_error_message(err: &ChartError) -> String {
         .unwrap_or(raw)
 }
 
-/// T2-T4-D: owned envelope handed from `render` into `RootLayout`.
+/// owned envelope handed from `render` into `RootLayout`.
 /// The labels / cell strings inside `PivotTable` outlive the borrowed
 /// view the layout receives, so the pivot pane survives the render
 /// call without dangling references.

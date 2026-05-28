@@ -12,7 +12,7 @@ pub struct Theme {
     /// Used for CMD mode highlight and transaction badge.
     pub warning: Color,
     /// Used by the SQL syntax highlighter for string literals — added
-    /// in T1-T3-A. Most themes paint strings green; the existing
+    /// in. Most themes paint strings green; the existing
     /// palette had no "success"-y slot.
     pub success: Color,
 }
@@ -112,7 +112,7 @@ impl Theme {
     /// Map a tree-sitter SQL [`HighlightKind`] to a ratatui [`Style`]
     /// using the theme palette.
     ///
-    /// Added in T1-T3-A. The mapping is intentionally conservative —
+    ///. The mapping is intentionally conservative —
     /// every kind gets a foreground colour pulled from the existing
     /// palette so a custom theme that overrides the named slots also
     /// re-skins the syntax highlighter for free.

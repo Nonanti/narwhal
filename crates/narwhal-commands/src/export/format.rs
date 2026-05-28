@@ -17,11 +17,11 @@ pub enum ExportFormat {
     /// `INSERT INTO ... VALUES (...)` statements, requires a known
     /// source table.
     Insert,
-    /// T1-T4-B: Apache Parquet columnar format. The writer materialises
+    /// Apache Parquet columnar format. The writer materialises
     /// the entire result in memory before encoding (streaming Parquet
     /// is a v2.2+ concern).
     Parquet,
-    /// T1-T4-B: GitHub-Flavoured Markdown table — pipe-separated cells
+    /// GitHub-Flavoured Markdown table — pipe-separated cells
     /// with a header separator line. Rows truncate at
     /// [`MarkdownOptions::row_limit`] by default; pass `--no-truncate`
     /// to dump everything.
@@ -36,7 +36,7 @@ impl ExportFormat {
             "tsv" => Some(Self::Tsv),
             "table" | "tbl" => Some(Self::Table),
             "insert" | "sql" => Some(Self::Insert),
-            // T1-T4-B: `pq` is the common shorthand on the Python /
+            // `pq` is the common shorthand on the Python /
             // pandas side; accept it so muscle memory works.
             "parquet" | "pq" => Some(Self::Parquet),
             // `md` is the GFM extension; both spellings land here.

@@ -30,7 +30,7 @@ pub struct AppDeps {
     /// Credential store. Backed by libsecret / Windows DPAPI /
     /// macOS Keychain in production; `InMemoryStore` in tests.
     pub credentials: Arc<dyn DynCredentialStore>,
-    /// Secret-vault provider registry (T1-T2-B). Empty by default;
+    /// Secret-vault provider registry. Empty by default;
     /// the binary swaps in a populated [`VaultRegistry`] built from
     /// `settings.vault.providers`. Cheap to clone (every provider
     /// is an `Arc<dyn VaultProvider>`).

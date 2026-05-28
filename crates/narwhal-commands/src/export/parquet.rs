@@ -1,4 +1,4 @@
-//! Apache Parquet writer (T1-T4-B).
+//! Apache Parquet writer.
 //!
 //! Strategy: walk the first 100 rows to infer an Arrow `DataType` per
 //! column, then build typed `ArrayBuilder`s for the full result, push
@@ -11,7 +11,7 @@
 //! Memory: the full result is materialised twice (once as `&[Row]`
 //! from the caller, once as Arrow arrays inside the builders). The
 //! brief explicitly defers a streaming writer to v2.2+ — see
-//! `docs/dev/t1-t4-b-parquet-markdown.md`. The 64k-row default row
+//! `docs/dev/exporters.md`. The 64k-row default row
 //! group size means Parquet itself doesn't add memory pressure on
 //! top of the builders.
 

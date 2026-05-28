@@ -2,11 +2,11 @@
 //!
 //! Three command handlers that don't really fit anywhere else:
 //! - `:dump-schema {all|current|<name>}` produces DDL into the editor
-//!   buffer (offloaded to the meta channel for the `all` target).
+//! buffer (offloaded to the meta channel for the `all` target).
 //! - `:explain` rewrites the statement under the cursor with
-//!   `EXPLAIN (FORMAT JSON)` and dispatches it through `:run`.
+//! `EXPLAIN (FORMAT JSON)` and dispatches it through `:run`.
 //! - `:export csv|json|insert <path>` flushes the *visible* rows of
-//!   the active result to disk.
+//! the active result to disk.
 use narwhal_core::Row;
 
 use super::{AppCore, ResultState};
@@ -25,7 +25,7 @@ impl AppCore {
 
         match target {
             DumpTarget::All => {
-                // H11: Offload to the meta channel so the UI stays
+                // Offload to the meta channel so the UI stays
                 // responsive during long-running dump_schema all.
                 self.dispatch_meta(MetaRequest::DumpSchemaAll {
                     tab_id: self.ui.tabs[self.ui.active_tab].id(),
@@ -158,7 +158,7 @@ impl AppCore {
             );
             return;
         };
-        // T1-T4-B: reject flag/format mismatches up-front — the
+        // reject flag/format mismatches up-front — the
         // dispatch layer surfaces these as a status message so the
         // user fixes the typo before a partial file is created.
         if args.compression.is_some() && format != ExportFormat::Parquet {

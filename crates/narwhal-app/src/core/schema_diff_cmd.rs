@@ -1,6 +1,6 @@
 //! `:schema-diff source target` handler.
 //!
-//! T2-T2-C of the v2.0 roadmap. Opens two saved connections
+//! Opens two saved connections
 //! transiently, walks each catalogue via `list_all_tables` +
 //! `describe_table`, runs the `narwhal-schema-diff` algorithm, and
 //! dumps the emitted DDL into a fresh editor tab so the operator

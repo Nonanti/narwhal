@@ -1,4 +1,4 @@
-# LSP integration (T2-T3-C)
+# LSP integration
 
 narwhal v2.0 ships an embedded LSP client in the
 [`narwhal-lsp`](../crates/narwhal-lsp) crate. It speaks JSON-RPC 2.0
@@ -33,8 +33,8 @@ client is not yet spawned at startup.
 ```toml
 [settings.lsp]
 enabled = false
-server = "sqls"             # "sqls" | "sqlls" | /path/to/binary
-config_file = ""            # leave empty to let the server use its own default
+server = "sqls"  # "sqls" | "sqlls" | /path/to/binary
+config_file = ""  # leave empty to let the server use its own default
 ```
 
 ## Installing the upstream server

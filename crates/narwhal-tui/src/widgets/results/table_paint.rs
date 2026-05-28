@@ -12,8 +12,8 @@ use ratatui::widgets::Paragraph;
 use super::cells::{compute_column_widths, render_for_grid};
 use super::model::{ResultHitRegions, SearchHighlight};
 use super::popups::{draw_cell_edit, draw_cell_popup};
-use narwhal_domain::result::{ResultView, SortDir};
 use crate::theme::Theme;
+use narwhal_domain::result::{ResultView, SortDir};
 
 pub(super) fn draw_table(
     frame: &mut Frame<'_>,

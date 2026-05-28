@@ -3,9 +3,9 @@
 //! Two forms are supported:
 //!
 //! * `${env:NAME}` — fail with [`InterpolateError::MissingVar`] when
-//!   the variable is unset.
+//! the variable is unset.
 //! * `${env:NAME:fallback}` — substitute `fallback` (a literal string,
-//!   `:` allowed inside) when the variable is unset.
+//! `:` allowed inside) when the variable is unset.
 //!
 //! Substitution is recursive: a fallback may itself contain another
 //! `${env:…}` reference up to a small fixed depth so users can chain
@@ -78,7 +78,7 @@ where
         interpolate_optional(&mut conn.params.database, lookup)?;
         interpolate_optional(&mut conn.params.username, lookup)?;
         interpolate_optional(&mut conn.params.path, lookup)?;
-        // T1-T2-B: env interpolation applies to in-file password
+        // env interpolation applies to in-file password
         // material too. Vault references (`vault:` / `1password:`)
         // are opaque tokens that contain neither `${env:` nor any
         // other `${...}` shape, so the loop is a no-op for them.

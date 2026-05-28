@@ -50,7 +50,7 @@ pub fn export_rows(
         return Ok(());
     }
 
-    // T1-T4-B: Parquet manages its own staging+rename atomically and
+    // Parquet manages its own staging+rename atomically and
     // takes a path rather than a `Write` (the writer needs to own the
     // file so it can flush the footer on close).
     if format == ExportFormat::Parquet {
@@ -77,7 +77,7 @@ pub fn export_rows(
         ExportFormat::Markdown => {
             markdown::write_markdown(&mut writer, columns, rows, options.markdown)?;
         }
-        // Sprint 6 (M10) / T1-T4-B: `Insert` and `Parquet` are handled
+        //: `Insert` and `Parquet` are handled
         // by early returns above; reaching this arm means a refactor
         // missed wiring a new format. Convert the impossible-state
         // into a typed error so a future bug surfaces as `Err`.
@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(ExportFormat::from_token("tbl"), Some(ExportFormat::Table));
         assert_eq!(ExportFormat::from_token("sql"), Some(ExportFormat::Insert));
         assert_eq!(ExportFormat::from_token("unknown"), None);
-        // T1-T4-B: parquet + markdown aliases
+        // parquet + markdown aliases
         assert_eq!(
             ExportFormat::from_token("parquet"),
             Some(ExportFormat::Parquet)
@@ -743,7 +743,7 @@ mod tests {
         assert_eq!(ExportFormat::from_token("MD"), Some(ExportFormat::Markdown));
     }
 
-    // -- T1-T4-B Markdown writer --------------------------------------------
+    // -- Markdown writer --------------------------------------------
 
     #[test]
     fn markdown_emits_gfm_table_with_header_and_alignment() {
@@ -893,7 +893,7 @@ mod tests {
         assert_eq!(body, "_no result to export_\n");
     }
 
-    // -- T1-T4-B Parquet writer ---------------------------------------------
+    // -- Parquet writer ---------------------------------------------
 
     #[test]
     fn parquet_round_trip_scalar_types() {

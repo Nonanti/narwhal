@@ -83,7 +83,7 @@ pub fn parse(url: &str) -> Result<ParsedUrl, UrlError> {
     match scheme.to_ascii_lowercase().as_str() {
         "postgres" | "postgresql" => parse_server("postgres", rest),
         "mysql" | "mariadb" => parse_server("mysql", rest),
-        // T1-T2-A: accept both `mssql://` (libpq-style, matches our other
+        // accept both `mssql://` (libpq-style, matches our other
         // schemes) and `sqlserver://` (matches the JDBC convention SQL
         // Server users are already familiar with).
         "mssql" | "sqlserver" => parse_server("mssql", rest),
@@ -266,7 +266,7 @@ fn parse_query(qs: &str) -> Result<BTreeMap<String, String>, UrlError> {
         };
         let key = percent_decode(k)?;
         if key.is_empty() {
-            // L7: silently dropping `?=v` was a footgun — reject it so
+            // silently dropping `?=v` was a footgun — reject it so
             // typos surface instead of disappearing.
             return Err(UrlError::EmptyQueryKey(pair.to_owned()));
         }

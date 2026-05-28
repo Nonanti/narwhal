@@ -1,4 +1,4 @@
-//! `:goto` fuzzy schema navigator (v1.1 #1).
+//! `:goto` fuzzy schema navigator.
 //!
 //! Opens a centred modal that lists every table/view across every
 //! loaded session. The user types to fuzzy-match, Up/Down (or

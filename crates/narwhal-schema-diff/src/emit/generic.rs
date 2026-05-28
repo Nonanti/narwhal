@@ -7,7 +7,7 @@
 //! the operator sees the intent and can hand-craft the engine-specific
 //! statement.
 //!
-//! Step 2 of T2-T2-C replaces this with engine-aware emitters; the
+//! Step 2 of replaces this with engine-aware emitters; the
 //! generic dialect stays as a safety net for engines without first
 //! -party support and as a regression target for the integration
 //! tests.

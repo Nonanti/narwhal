@@ -87,7 +87,7 @@ pub enum LspError {
     ChannelClosed,
     #[error("server stream closed before response arrived")]
     ServerClosed,
-    /// MR-N9: carries the method name so status-bar surfacing has
+    /// carries the method name so status-bar surfacing has
     /// the context the operator needs ("completion timed out" vs
     /// "hover timed out").
     #[error("LSP request '{0}' timed out waiting for server response")]
@@ -121,7 +121,7 @@ enum Outbound {
         method: String,
         params: Value,
     },
-    /// MR-C2: abandon a previously-issued request. The run-loop
+    /// abandon a previously-issued request. The run-loop
     /// drops the matching `pending` entry so a late server response
     /// is ignored and the `HashMap` doesn't leak under repeated
     /// timeouts.
@@ -199,14 +199,14 @@ impl ClientHandle {
             Ok(Ok(payload)) => payload?,
             Ok(Err(_)) => return Err(LspError::ChannelClosed),
             Err(_) => {
-                // MR-C2: tell the run-loop to drop the pending
+                // tell the run-loop to drop the pending
                 // entry so a late response can't keep the slot
                 // alive. The id may not have been allocated yet
                 // (request still queued); in that case the slot is
                 // empty and the worker will skip dispatch when it
                 // dequeues a request whose responder is gone.
                 if let Some(id) = id_slot.get().copied() {
-                    // M9: fire-and-forget cancel. A saturated
+                    // fire-and-forget cancel. A saturated
                     // channel must not block the timeout path
                     // — try_send drops the cancel with a warning
                     // instead of defeating the timeout itself.
@@ -228,7 +228,7 @@ impl ClientHandle {
     /// Read the dropped-notification counter. Useful for surfacing
     /// "LSP notifications dropping" diagnostics in the status bar.
     ///
-    /// MR-N2: `Relaxed` is the correct ordering here — the counter
+    /// `Relaxed` is the correct ordering here — the counter
     /// is monotonic and read for diagnostic purposes only; we do
     /// not synchronise other memory with this value. Strengthening
     /// to `Acquire` would not improve correctness and would cost a
@@ -324,7 +324,7 @@ impl Client {
     {
         let (tx, mut rx) = mpsc::channel::<Outbound>(64);
         let (notif_tx, notif_rx) = mpsc::channel::<ServerNotification>(NOTIFICATION_QUEUE_CAPACITY);
-        // R3-N6: the run-loop is the only owner of the id allocator
+        // the run-loop is the only owner of the id allocator
         // now that `ClientHandle::next_id()` was removed (review fix
         // N5). No outer binding required.
         let next_id_loop = Arc::new(AtomicI64::new(1));
@@ -341,7 +341,7 @@ impl Client {
                     Some(message) = rx.recv() => {
                         match message {
                             Outbound::Request { method, params, responder, id_slot } => {
-                                // R3-M1: residual leak path MR-C2
+                                // residual leak path
                                 // left open. If the caller's
                                 // timeout fired while this request
                                 // was still queued, the
@@ -356,7 +356,7 @@ impl Client {
                                     continue;
                                 }
                                 let id = next_id_loop.fetch_add(1, Ordering::SeqCst);
-                                // MR-C2: publish the id back to the
+                                // publish the id back to the
                                 // caller before the await so a
                                 // `Cancel(id)` from a timeout path
                                 // can find this entry.
@@ -389,7 +389,7 @@ impl Client {
                                 pending.insert(id, responder);
                             }
                             Outbound::Cancel(id) => {
-                                // MR-C2: caller gave up; drop the
+                                // caller gave up; drop the
                                 // responder so a late server
                                 // response is silently discarded.
                                 pending.remove(&id);
@@ -436,7 +436,7 @@ impl Client {
                                     continue;
                                 };
                                 match (message.id, message.method) {
-                                    // M10: accept both Id::Number and
+                                    // accept both Id::Number and
                                     // Id::String responses. The client
                                     // always emits numeric ids, but a
                                     // proxy/replay layer may echo them
@@ -744,7 +744,7 @@ mod tests {
             });
             mirror.push_inbound(serde_json::to_vec(&payload).expect("ser"));
         }
-        // MR-M2: poll up to 2 s for the loop to drain the inbound
+        // poll up to 2 s for the loop to drain the inbound
         // queue. A flat `sleep(30ms)` was flaky on loaded CI runners
         // where the spawned task hadn't been scheduled yet.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -761,7 +761,7 @@ mod tests {
         let _ = client.join.await;
     }
 
-    /// MR-C2: a timed-out request must not leave a dangling entry
+    /// a timed-out request must not leave a dangling entry
     /// in the run-loop's `pending` map. We can't peek at `pending`
     /// from out here, but we can prove the cancel path is wired by
     /// timing out a request and then driving a follow-up request
@@ -829,7 +829,7 @@ mod tests {
         assert!(text_doc.get("definition").is_some());
     }
 
-    /// M9: when the outbound channel is saturated, the cancel
+    /// when the outbound channel is saturated, the cancel
     /// fire-and-forget path (`try_send`) must return immediately
     /// rather than blocking the timeout cleanup.
     #[tokio::test]
@@ -859,7 +859,7 @@ mod tests {
         assert!(deadline.is_ok(), "cancel must complete without blocking");
     }
 
-    /// M10: a response carrying `Id::String` must be routed to the
+    /// a response carrying `Id::String` must be routed to the
     /// pending request just like `Id::Number`.
     #[tokio::test]
     async fn string_id_responses_are_routed() {
