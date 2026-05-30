@@ -155,6 +155,10 @@ pub enum Command {
     /// The result lands in a fresh editor tab so the user can review
     /// before executing.
     DiffSchema { left: String, right: String },
+    /// v1.3 #9: run the lint rule set over the active buffer and
+    /// dump findings to a fresh tab. `:lint` reuses the active tab's
+    /// content; no argument needed.
+    Lint,
     Unknown(String),
     Empty,
 }
@@ -561,6 +565,7 @@ pub fn parse(input: &str) -> Command {
                 }
             }
         }
+        "lint" => Command::Lint,
         "diff-schema" => {
             let mut parts = arg.split_whitespace();
             match (parts.next(), parts.next()) {

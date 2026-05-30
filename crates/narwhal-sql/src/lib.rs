@@ -10,8 +10,10 @@
 
 pub mod formatter;
 pub mod guard;
+pub mod lint;
 pub mod splitter;
 
 pub use formatter::{format, format_for_driver};
 pub use guard::{classify_statement, guard_read_only, StatementKind};
+pub use lint::{lint, LintFinding, LintSeverity};
 pub use splitter::{split, split_with, Dialect, Statement};

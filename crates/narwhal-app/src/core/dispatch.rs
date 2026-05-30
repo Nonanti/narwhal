@@ -703,6 +703,7 @@ impl AppCore {
             Command::Filter(spec) => self.apply_filter_command(spec).await,
             Command::Sort(arg) => self.apply_sort_command(arg).await,
             Command::DiffSchema { left, right } => self.diff_schema_command(left, right).await,
+            Command::Lint => self.lint_buffer_command().await,
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the
