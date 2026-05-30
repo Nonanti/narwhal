@@ -4,16 +4,18 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
-    render_help_modal, render_history_modal, render_root, render_row_detail, render_snippets_modal,
-    render_wizard, CompletionItemView, CompletionPopupView, EditorSearchHighlight,
-    HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout, RowDetailView,
-    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,
-    WizardView,
+    render_confirm_modal, render_help_modal, render_history_modal, render_root,
+    render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
+    CompletionPopupView, ConfirmModalView, EditorSearchHighlight, HistoryModalState, HistoryRow,
+    HistoryRowOutcome, Pane, RootLayout, RowDetailView, SearchHighlight, SidebarRow, SidebarView,
+    SnippetsModalState, StatusBarView, WizardFieldView, WizardView,
 };
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use super::render_helpers::{display_from_state, sidebar_depth, sidebar_kind, sidebar_label};
+use super::render_helpers::{
+    connection_color_to_ratatui, display_from_state, sidebar_depth, sidebar_kind, sidebar_label,
+};
 use super::text_utils::split_head_arg;
 use super::{AppCore, ResultState};
 use crate::commands::{parse, Command};
@@ -104,6 +106,15 @@ impl AppCore {
                 None
             };
         let result_count = tab.results.len();
+        // v1.1 #2: pull the active connection's accent colour, if any.
+        // Lives on `Session.config.params.color`; the conversion to
+        // ratatui::Color is in `connection_color_to_ratatui` below.
+        let accent_color = self
+            .session
+            .active
+            .as_ref()
+            .and_then(|s| s.config.params.color)
+            .map(connection_color_to_ratatui);
         let mut layout = RootLayout {
             mode: self.ui.vim.mode(),
             focus: self.ui.focus,
@@ -125,6 +136,7 @@ impl AppCore {
             editor_search: editor_search_view,
             result_count,
             active_result: active_idx,
+            accent_color,
         };
         self.ui.last_layout = render_root(frame, area, &mut layout);
 
@@ -209,6 +221,19 @@ impl AppCore {
             render_snippets_modal(frame, area, &modal_state, &self.ui.theme);
         }
 
+        // v1.1 #2: write-confirmation modal sits on top of everything
+        // else (above help, history, snippets) so the user can't run
+        // a write "through" a help screen they forgot to close.
+        if let Some(modal) = self.modals.confirm.as_ref() {
+            let view = ConfirmModalView {
+                prompt: &modal.prompt,
+                accept_keyword: &modal.accept_keyword,
+                buffer: &modal.buffer,
+                satisfied: modal.is_satisfied(),
+            };
+            render_confirm_modal(frame, area, &view, &self.ui.theme);
+        }
+
         // Row detail modal — same layer as cell popup, rendered on
         // top of the result pane.
         if let Some(state) = self.ui.tabs[self.ui.active_tab].row_detail.as_ref() {
@@ -271,6 +296,13 @@ impl AppCore {
         }
         if self.modals.wizard.is_some() {
             self.handle_wizard_key(key).await;
+            return;
+        }
+        // v1.1 #2: write-confirmation modal. Owns the keyboard
+        // exclusively while open; either matches the accept keyword
+        // and resumes the held batch, or Esc cancels.
+        if self.modals.confirm.is_some() {
+            self.handle_confirm_key(key).await;
             return;
         }
         // L36: JSON viewer sits at the very top of the modal stack and

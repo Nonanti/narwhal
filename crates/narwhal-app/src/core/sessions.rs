@@ -14,12 +14,13 @@ use uuid::Uuid;
 
 use narwhal_tui::ResultView;
 
-use super::{AppCore, ResultBundle, ResultState, SidebarItem};
+use super::{AppCore, ConfirmModal, PendingConfirm, ResultBundle, ResultState, SidebarItem};
 use crate::meta::{MetaRequest, MetaUpdate};
 use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
 use crate::session::Session;
 use crate::statements::{all_statements, statement_at_cursor};
 use crate::wizard::ConnectionWizard;
+use narwhal_sql::{classify_statement, guard_read_only};
 
 impl AppCore {
     pub(super) async fn open_named(&mut self, target: &str) {
@@ -246,6 +247,21 @@ impl AppCore {
     }
 
     pub(super) async fn dispatch_batch(&mut self, statements: Vec<String>, mode: RunMode) {
+        self.dispatch_batch_with_guards(statements, mode, /* bypass_confirm */ false)
+            .await;
+    }
+
+    /// Internal entry point that lets the confirmation-modal resume
+    /// path skip the second pass of `confirm_writes` (which would
+    /// loop forever). The `read_only` guard always runs — the modal
+    /// can never bypass it because a read-only connection refuses
+    /// the statement at every layer.
+    pub(super) async fn dispatch_batch_with_guards(
+        &mut self,
+        statements: Vec<String>,
+        mode: RunMode,
+        bypass_confirm: bool,
+    ) {
         if self.process.running {
             self.ui.status.message = "a query is already running".into();
             return;
@@ -253,6 +269,49 @@ impl AppCore {
         let Some(session) = self.session.active.as_ref() else {
             return;
         };
+
+        // v1.1 #2: connection-level read-only guard. Mirrors MCP's
+        // syntactic check — if any statement isn't on the read-only
+        // allow-list we refuse the batch and surface the reason in
+        // the status bar. The driver-side `set_read_only(true)` call
+        // (applied at session open) is the second layer.
+        if session.config.params.read_only {
+            for sql in &statements {
+                if let Err(reason) = guard_read_only(sql) {
+                    self.ui.status.message =
+                        format!("read-only connection rejected: {reason}");
+                    return;
+                }
+            }
+        }
+
+        // v1.1 #2: write-confirmation guard. If the connection opted
+        // in to `confirm_writes = true` and any statement classifies
+        // as a Write or DDL, intercept the batch and route through
+        // the type-`YES` modal. The modal stores the batch verbatim
+        // so a confirm resumes exactly the same call.
+        if !bypass_confirm
+            && session.config.params.confirm_writes
+            && statements.iter().any(|s| classify_statement(s).is_mutating())
+        {
+            let first = statements
+                .iter()
+                .find(|s| classify_statement(s).is_mutating())
+                .cloned()
+                .unwrap_or_default();
+            let conn_name = session.config.name.clone();
+            self.modals.confirm = Some(ConfirmModal::write_confirm(
+                &conn_name,
+                &first,
+                PendingConfirm::RunMutatingBatch {
+                    statements,
+                    stream: matches!(mode, RunMode::Stream),
+                },
+            ));
+            self.ui.status.message =
+                format!("confirm writes on '{conn_name}': type YES, Esc to cancel");
+            return;
+        }
         let target = match session.transaction.as_ref() {
             Some(txn) => RunTarget::Pinned(txn.conn.clone()),
             None => RunTarget::Pool(session.pool.clone()),

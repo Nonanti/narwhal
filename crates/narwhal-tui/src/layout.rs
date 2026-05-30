@@ -115,6 +115,12 @@ pub struct RootLayout<'a> {
     pub result_count: usize,
     /// Index of the active result (0-based).
     pub active_result: usize,
+    /// v1.1 #2: optional accent colour pulled from the active
+    /// connection's `color = "…"` field. When `Some`, the connection
+    /// slot in the status bar is tinted to give the user a constant
+    /// peripheral cue about which database they're on (`red` = prod
+    /// is the canonical use).
+    pub accent_color: Option<ratatui::style::Color>,
 }
 
 pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>) -> LayoutRegions {
@@ -256,11 +262,19 @@ fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view: &RootLayout<'_>) {
     // Left slot: mode + focus pane
     frame.render_widget(Paragraph::new(left_text).style(mode_style), parts[0]);
 
-    // Center slot: connection (sticky)
-    frame.render_widget(
-        Paragraph::new(conn_text).style(view.theme.status_bar()),
-        parts[1],
-    );
+    // Center slot: connection (sticky). When the connection declared
+    // an accent colour (v1.1 #2), tint the slot so the user has a
+    // constant peripheral cue about which database they're on.
+    let conn_style = match view.accent_color {
+        Some(c) => view
+            .theme
+            .status_bar()
+            .bg(c)
+            .fg(ratatui::style::Color::Black)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+        None => view.theme.status_bar(),
+    };
+    frame.render_widget(Paragraph::new(conn_text).style(conn_style), parts[1]);
 
     // L36 #11: read-only badge sits between the connection and the
     // transaction slot so it's the very first thing the eye picks up

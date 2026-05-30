@@ -7,8 +7,30 @@
 //! Keeping them in their own module makes the main file easier to scan
 //! and lets the renderer evolve without dragging the entire event loop
 //! along.
-use narwhal_core::{ColumnHeader, Row, TableKind};
+use narwhal_core::{ColumnHeader, ConnectionColor, Row, TableKind};
 use narwhal_tui::{ResultDisplay, SearchHighlight, SidebarRowKind};
+
+/// v1.1 #2: project [`ConnectionColor`] (config domain) onto the
+/// `ratatui::Color` palette so the renderer doesn't depend on
+/// `narwhal-core`. The fixed six-colour mapping is intentional —
+/// hex/RGB introduces terminal-compat surprises we'd rather not
+/// carry in v1.
+#[must_use]
+pub(super) const fn connection_color_to_ratatui(c: ConnectionColor) -> ratatui::style::Color {
+    use ratatui::style::Color;
+    match c {
+        ConnectionColor::Red => Color::Red,
+        ConnectionColor::Yellow => Color::Yellow,
+        ConnectionColor::Green => Color::Green,
+        ConnectionColor::Blue => Color::Blue,
+        ConnectionColor::Magenta => Color::Magenta,
+        ConnectionColor::Cyan => Color::Cyan,
+        // `ConnectionColor` is #[non_exhaustive] so future variants
+        // (added by a downstream crate or a v2 feature) fall back to
+        // a neutral grey rather than panicking.
+        _ => Color::Gray,
+    }
+}
 
 use super::{ResultState, SidebarItem};
 use crate::explain::{parse as parse_plan, ExplainPlan};

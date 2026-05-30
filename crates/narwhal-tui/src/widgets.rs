@@ -15,6 +15,7 @@ pub(crate) fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
+pub mod confirm;
 pub mod editor;
 pub mod help;
 pub mod history;
@@ -29,6 +30,7 @@ pub mod wizard;
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
 };
+pub use confirm::{render_confirm_modal, ConfirmModalView};
 pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
 pub use history::{render_history_modal, HistoryModalState, HistoryRow, HistoryRowOutcome};
 pub use json_viewer::{render_json_viewer, JsonViewerView};
