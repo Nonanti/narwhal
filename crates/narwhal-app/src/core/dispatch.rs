@@ -4,11 +4,12 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
-    render_confirm_modal, render_help_modal, render_history_modal, render_root,
-    render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
-    CompletionPopupView, ConfirmModalView, EditorSearchHighlight, HistoryModalState, HistoryRow,
-    HistoryRowOutcome, Pane, RootLayout, RowDetailView, SearchHighlight, SidebarRow, SidebarView,
-    SnippetsModalState, StatusBarView, WizardFieldView, WizardView,
+    render_confirm_modal, render_goto_modal, render_help_modal, render_history_modal,
+    render_root, render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
+    CompletionPopupView, ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView,
+    HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout, RowDetailView,
+    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,
+    WizardView,
 };
 use ratatui::layout::Rect;
 use ratatui::Frame;
@@ -221,8 +222,48 @@ impl AppCore {
             render_snippets_modal(frame, area, &modal_state, &self.ui.theme);
         }
 
+        // v1.1 #1: goto fuzzy navigator sits above help/history/snippets
+        // but below the confirm modal (write-safety is paramount).
+        if let Some(modal) = self.modals.goto.as_ref() {
+            // Slice the ranked match list down to what fits the
+            // viewport (~20 rows max). Selection is mirrored into
+            // the slice offset so the highlighted row is always
+            // visible.
+            const ROW_BUDGET: usize = 20;
+            let total = modal.matches.len();
+            let cursor = modal.cursor;
+            // Centre the visible window on the cursor when the
+            // corpus exceeds the budget.
+            let start = cursor.saturating_sub(ROW_BUDGET / 2);
+            let end = (start + ROW_BUDGET).min(total);
+            let visible: Vec<GotoRowView<'_>> = (start..end)
+                .filter_map(|i| {
+                    let m = modal.matches.get(i)?;
+                    let entry = modal.corpus.get(m.entry_idx)?;
+                    let badge = match entry.kind {
+                        narwhal_core::TableKind::Table => "T",
+                        narwhal_core::TableKind::View => "V",
+                        narwhal_core::TableKind::MaterializedView => "M",
+                        narwhal_core::TableKind::SystemTable => "S",
+                        _ => "",
+                    };
+                    Some(GotoRowView {
+                        qualified: entry.qualified.as_str(),
+                        badge,
+                    })
+                })
+                .collect();
+            let view = GotoModalView {
+                query: &modal.query,
+                selected: cursor.saturating_sub(start),
+                rows: visible,
+                total,
+            };
+            render_goto_modal(frame, area, &view, &self.ui.theme);
+        }
+
         // v1.1 #2: write-confirmation modal sits on top of everything
-        // else (above help, history, snippets) so the user can't run
+        // else (above help, history, snippets, goto) so the user can't run
         // a write "through" a help screen they forgot to close.
         if let Some(modal) = self.modals.confirm.as_ref() {
             let view = ConfirmModalView {
@@ -345,6 +386,11 @@ impl AppCore {
         // When the snippets modal is open, it intercepts all keys.
         if self.modals.snippets.is_some() {
             self.handle_snippets_key(key).await;
+            return;
+        }
+        // v1.1 #1: goto fuzzy navigator owns the foreground while open.
+        if self.modals.goto.is_some() {
+            self.handle_goto_key(key).await;
             return;
         }
         if self.handle_global_key(key).await {
@@ -651,6 +697,7 @@ impl AppCore {
             Command::LoadSnippet { name } => self.load_snippet_by_name(&name).await,
             Command::RemoveSnippet { name } => self.remove_snippet(&name).await,
             Command::ListSnippets => self.open_snippets_modal().await,
+            Command::Goto => self.open_goto_modal().await,
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the

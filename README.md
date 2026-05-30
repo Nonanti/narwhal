@@ -318,6 +318,7 @@ error, and the agent retries against the visible set automatically.
 | F4 / Ctrl-C | Cancel running query |
 | Ctrl-W | Cycle pane focus |
 | Ctrl-T | New editor tab |
+| Ctrl-N / :goto / :g | Fuzzy navigator — jump to any table/view |
 | Ctrl-Tab / Ctrl-Shift-Tab | Cycle tabs |
 | ? / F1 | Help |
 | :q | Quit |
