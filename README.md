@@ -319,6 +319,13 @@ error, and the agent retries against the visible set automatically.
 | Ctrl-W | Cycle pane focus |
 | Ctrl-T | New editor tab |
 | Ctrl-N / :goto / :g | Fuzzy navigator — jump to any table/view |
+| :diff `<a>` `<b>` | Schema diff: emit ALTER TABLE migration SQL |
+| :lint | Run linter (SELECT *, UPDATE/DELETE no WHERE, cartesian …) |
+| :tpl `<name>` | Insert a built-in template: sel / ins / upd / del / join / with |
+| :history `[pattern]` | Open Ctrl-R modal (optionally pre-filtered) |
+| :submit / :revert | Flush / drop the pending-mutation queue |
+| :filter `[expr\|clear]` | Set / clear the result filter |
+| :sort `<N\|clear>` | Toggle the result sort on column N |
 | Ctrl-Tab / Ctrl-Shift-Tab | Cycle tabs |
 | ? / F1 | Help |
 | :q | Quit |

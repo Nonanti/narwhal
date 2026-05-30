@@ -636,7 +636,7 @@ impl AppCore {
             Command::Forget(name) => self.forget_password(&name).await,
             Command::PluginLoad(path) => self.load_plugin(&path).await,
             Command::PluginList => self.list_plugins().await,
-            Command::History => self.open_history().await,
+            Command::History(filter) => self.open_history_with_filter(filter).await,
             Command::Pending => self.toggle_pending_preview().await,
             Command::Submit => self.commit_pending().await,
             Command::Revert => self.discard_pending().await,
@@ -704,6 +704,7 @@ impl AppCore {
             Command::Sort(arg) => self.apply_sort_command(arg).await,
             Command::DiffSchema { left, right } => self.diff_schema_command(left, right).await,
             Command::Lint => self.lint_buffer_command().await,
+            Command::Template(name) => self.insert_template_command(name).await,
             Command::Empty => {}
             Command::Unknown(text) => {
                 // Before reporting the command as unknown, give the

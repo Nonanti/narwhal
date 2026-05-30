@@ -25,10 +25,19 @@ impl AppCore {
     /// Open the Ctrl+R history modal. Dispatches a background
     /// load via the meta channel (H11) so the UI stays responsive.
     pub async fn open_history(&mut self) {
+        self.open_history_with_filter(None).await;
+    }
+
+    /// v1.3 #11: pre-fill the filter so `:history /pattern` lands the
+    /// user directly on the matching subset.
+    pub async fn open_history_with_filter(&mut self, filter: Option<String>) {
         let Some(_journal) = &self.session.history_journal else {
             self.ui.status.message = "history disabled".into();
             return;
         };
+        // Store the desired filter so the meta-channel completion
+        // handler can apply it when the entries arrive.
+        self.session.pending_history_filter = filter;
         self.dispatch_meta(MetaRequest::LoadHistory {
             limit: narwhal_tui::constants::HISTORY_LOAD_LIMIT,
         })

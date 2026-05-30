@@ -101,8 +101,9 @@ pub enum Command {
     PluginLoad(String),
     /// List loaded plugins and the commands they expose.
     PluginList,
-    /// Open the Ctrl+R history modal.
-    History,
+    /// Open the Ctrl+R history modal. With `Some(pattern)` pre-fills
+    /// the filter (v1.3 #11).
+    History(Option<String>),
     /// L36 #1: open the staged-mutation preview modal. Discoverable
     /// counterpart to the `Ctrl-P` chord for users who live in the
     /// command line.
@@ -159,6 +160,9 @@ pub enum Command {
     /// dump findings to a fresh tab. `:lint` reuses the active tab's
     /// content; no argument needed.
     Lint,
+    /// v1.3 #10: insert a built-in SQL template at the cursor.
+    /// `:tpl sel` etc.; `:tpl` (no arg) shows the available names.
+    Template(Option<String>),
     Unknown(String),
     Empty,
 }
@@ -543,7 +547,17 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "plug-list" | "pluglist" | "plugins" => Command::PluginList,
-        "history" => Command::History,
+        "history" => {
+            let p = arg.trim();
+            if p.is_empty() {
+                Command::History(None)
+            } else {
+                // Allow `:history /pattern` (drop the leading slash)
+                // for symmetry with vim's reverse search.
+                let stripped = p.strip_prefix('/').unwrap_or(p);
+                Command::History(Some(stripped.to_owned()))
+            }
+        }
         "pending" => Command::Pending,
         // v1.2 #8: `:diff` *without* args still opens the pending
         // preview (legacy alias). With args it's a schema diff.
@@ -566,6 +580,14 @@ pub fn parse(input: &str) -> Command {
             }
         }
         "lint" => Command::Lint,
+        "tpl" | "template" => {
+            let trimmed = arg.trim();
+            if trimmed.is_empty() {
+                Command::Template(None)
+            } else {
+                Command::Template(Some(trimmed.to_owned()))
+            }
+        }
         "diff-schema" => {
             let mut parts = arg.split_whitespace();
             match (parts.next(), parts.next()) {

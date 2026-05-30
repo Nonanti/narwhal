@@ -68,6 +68,10 @@ pub struct SessionState {
     /// `row_level_dml` capability. Driven by the `--read-only`
     /// CLI flag (and by the MCP server's audit gate).
     pub read_only: bool,
+    /// v1.3 #11: filter string captured by `:history <pattern>` that
+    /// the meta-channel completion handler applies once the journal
+    /// entries arrive. Cleared on apply.
+    pub pending_history_filter: Option<String>,
 }
 
 impl SessionState {
@@ -86,6 +90,7 @@ impl SessionState {
             snippet_store: SnippetStore::new(SnippetStore::default_root()),
             pending_session_opens: HashSet::new(),
             read_only: false,
+            pending_history_filter: None,
         }
     }
 }
