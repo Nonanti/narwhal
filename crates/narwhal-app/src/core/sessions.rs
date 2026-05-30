@@ -260,9 +260,23 @@ impl AppCore {
         items: Vec<(String, Vec<narwhal_core::Value>)>,
         mode: RunMode,
     ) {
-        let statements: Vec<String> = items.iter().map(|(s, _)| s.clone()).collect();
-        let params: Vec<Vec<narwhal_core::Value>> = items.into_iter().map(|(_, p)| p).collect();
+        let (statements, params): (Vec<_>, Vec<_>) = items.into_iter().unzip();
         self.dispatch_batch_inner(statements, params, mode, /* bypass_confirm */ false)
+            .await;
+    }
+
+    /// Resume entry point used by the confirm-modal resolver: the
+    /// `YES` typed by the user already passed the write-confirmation
+    /// guard, so the inner call sets `bypass_confirm = true`. The
+    /// `read_only` guard always runs (it is never bypassed). CR-1
+    /// reaches here when the original batch was parametric.
+    pub(super) async fn dispatch_batch_inner_bypassing_confirm(
+        &mut self,
+        statements: Vec<String>,
+        params: Vec<Vec<narwhal_core::Value>>,
+        mode: RunMode,
+    ) {
+        self.dispatch_batch_inner(statements, params, mode, /* bypass_confirm */ true)
             .await;
     }
 
@@ -332,6 +346,12 @@ impl AppCore {
                 &first,
                 PendingConfirm::RunMutatingBatch {
                     statements,
+                    // CR-1: hand the bound parameters through the
+                    // modal so a resumed parametric batch still
+                    // carries its bindings. Empty for the
+                    // interactive editor path; populated for the
+                    // FK / programmatic / templating paths.
+                    params_per_statement: params,
                     stream: matches!(mode, RunMode::Stream),
                 },
             ));
@@ -353,11 +373,16 @@ impl AppCore {
         let request = if params.is_empty() {
             RunRequest::new(statements, mode)
         } else {
-            assert_eq!(
-                params.len(),
-                statements.len(),
-                "dispatch_batch_with_params: params/statements length mismatch"
-            );
+            // M-1: in debug, assert the caller-side invariant; in
+            // release, fail-soft with a status message instead of
+            // panicking inside the TUI event loop (raw-mode panic
+            // wrecks the terminal).
+            debug_assert_eq!(params.len(), statements.len());
+            if params.len() != statements.len() {
+                self.ui.status.message =
+                    "internal: params/statements length mismatch, batch aborted".into();
+                return;
+            }
             RunRequest::with_params(statements.into_iter().zip(params).collect(), mode)
         };
         self.process.running = true;

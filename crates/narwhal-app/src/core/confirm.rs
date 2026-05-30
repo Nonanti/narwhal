@@ -77,7 +77,11 @@ impl AppCore {
     /// same call stack as the key that satisfied the prompt.
     async fn resume_confirmed(&mut self, action: PendingConfirm) {
         match action {
-            PendingConfirm::RunMutatingBatch { statements, stream } => {
+            PendingConfirm::RunMutatingBatch {
+                statements,
+                params_per_statement,
+                stream,
+            } => {
                 let mode = if stream {
                     RunMode::Stream
                 } else {
@@ -86,7 +90,14 @@ impl AppCore {
                 // Bypass the confirm-writes branch on resume —
                 // otherwise we'd just re-open the modal. The
                 // read-only guard still runs (it never bypasses).
-                self.dispatch_batch_with_guards(statements, mode, /* bypass_confirm */ true)
+                //
+                // CR-1: route through the parametric inner path so
+                // bound parameters (FK navigation, programmatic
+                // templating, …) survive the modal round-trip. The
+                // non-parametric path strips them; sending
+                // placeholder SQL without bindings to the driver
+                // would fail at the prepared-statement layer.
+                self.dispatch_batch_inner_bypassing_confirm(statements, params_per_statement, mode)
                     .await;
             }
         }
