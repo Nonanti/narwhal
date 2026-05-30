@@ -107,7 +107,18 @@ impl AppCore {
                 }
                 // v1.1 #1: Ctrl-N opens the goto fuzzy navigator from
                 // any focus. Mirrors the DataGrip / IntelliJ binding.
+                //
+                // M1: defer to the editor's completion popup when it's
+                // open and the editor pane is focused. Vim and most
+                // IDE-style editors bind Ctrl-N to "next completion";
+                // intercepting it while the popup is visible would
+                // strand the user with no way to advance the list.
                 CtKey::Char('n') => {
+                    if self.ui.focus == Pane::Editor
+                        && self.ui.tabs[self.ui.active_tab].completion.is_some()
+                    {
+                        return false;
+                    }
                     self.open_goto_modal().await;
                     return true;
                 }

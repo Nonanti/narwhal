@@ -17,6 +17,15 @@ const fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
+const fn ctrl_key(code: KeyCode) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    }
+}
+
 async fn type_str(core: &mut AppCore, text: &str) {
     for ch in text.chars() {
         core.handle_key(key(KeyCode::Char(ch))).await;
@@ -89,6 +98,30 @@ async fn multiple_matches_open_popup_and_enter_inserts() {
     // The exact ordering depends on lexicographic sort; assert the
     // buffer grew beyond the original prefix and the popup is closed.
     assert!(text.len() > "ord".len(), "buffer: {text:?}");
+    assert!(!core.editor_completion_is_open().await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_n_advances_completion_popup_when_open() {
+    // M1 regression: Ctrl-N must drive the completion popup down
+    // when it's open, not open the :goto modal. The goto modal
+    // would steal focus and strand the user mid-completion.
+    let mut core = open_with_tables(&["orders", "order_items", "owners"]).await;
+    core.handle_key(key(KeyCode::Char('i'))).await;
+    type_str(&mut core, "ord").await;
+    assert!(core.editor_completion_is_open().await);
+
+    core.handle_key(ctrl_key(KeyCode::Char('n'))).await;
+    // Popup must still be open (goto modal would have closed it).
+    assert!(
+        core.editor_completion_is_open().await,
+        "Ctrl-N closed the completion popup or opened the goto modal"
+    );
+    // Accept the now-second item; the buffer must have changed beyond
+    // the original prefix, confirming Ctrl-N did move the highlight.
+    core.handle_key(key(KeyCode::Enter)).await;
+    let text = core.editor().entire_text();
+    assert!(text.len() > "ord".len(), "buffer after enter: {text:?}");
     assert!(!core.editor_completion_is_open().await);
 }
 
