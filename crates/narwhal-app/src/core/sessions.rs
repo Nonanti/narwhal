@@ -251,6 +251,21 @@ impl AppCore {
             .await;
     }
 
+    /// Parametric dispatch: each item is `(sql, bound_params)`. Used
+    /// by internal callers that need to bind values without string
+    /// interpolation — foreign-key navigation, programmatic
+    /// templating, etc. (C2).
+    pub(super) async fn dispatch_batch_with_params(
+        &mut self,
+        items: Vec<(String, Vec<narwhal_core::Value>)>,
+        mode: RunMode,
+    ) {
+        let statements: Vec<String> = items.iter().map(|(s, _)| s.clone()).collect();
+        let params: Vec<Vec<narwhal_core::Value>> = items.into_iter().map(|(_, p)| p).collect();
+        self.dispatch_batch_inner(statements, params, mode, /* bypass_confirm */ false)
+            .await;
+    }
+
     /// Internal entry point that lets the confirmation-modal resume
     /// path skip the second pass of `confirm_writes` (which would
     /// loop forever). The `read_only` guard always runs — the modal
@@ -259,6 +274,17 @@ impl AppCore {
     pub(super) async fn dispatch_batch_with_guards(
         &mut self,
         statements: Vec<String>,
+        mode: RunMode,
+        bypass_confirm: bool,
+    ) {
+        self.dispatch_batch_inner(statements, Vec::new(), mode, bypass_confirm)
+            .await;
+    }
+
+    async fn dispatch_batch_inner(
+        &mut self,
+        statements: Vec<String>,
+        params: Vec<Vec<narwhal_core::Value>>,
         mode: RunMode,
         bypass_confirm: bool,
     ) {
@@ -324,7 +350,16 @@ impl AppCore {
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
         };
-        let request = RunRequest { statements, mode };
+        let request = if params.is_empty() {
+            RunRequest::new(statements, mode)
+        } else {
+            assert_eq!(
+                params.len(),
+                statements.len(),
+                "dispatch_batch_with_params: params/statements length mismatch"
+            );
+            RunRequest::with_params(statements.into_iter().zip(params).collect(), mode)
+        };
         self.process.running = true;
         self.process.run_tab = Some(self.ui.active_tab);
         self.ui.pending_result_entries_states.clear();

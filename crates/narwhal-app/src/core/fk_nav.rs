@@ -19,6 +19,7 @@
 //! FK list looking for back-references, which is fine on PG but
 //! prohibitively expensive on schemas with hundreds of tables.
 
+use narwhal_commands::cell_edit::{placeholder, quote_ident, quote_qualified};
 use narwhal_core::Value;
 
 use super::{AppCore, ResultState};
@@ -109,17 +110,32 @@ impl AppCore {
             .clone()
             .unwrap_or_else(|| schema.clone());
         let ref_table = fk.referenced_table.clone();
-        let Some(ref_col) = fk.referenced_columns.get(col_pos) else {
+        let Some(ref_col) = fk.referenced_columns.get(col_pos).cloned() else {
             self.ui.status.message =
                 "fk: composite FK with mismatched arity (parent column missing)".into();
             return;
         };
-        let sql = format!(
-            "SELECT * FROM {ref_schema}.{ref_table} WHERE {ref_col} = {}",
-            render_literal(&value)
-        );
+
+        // C2: identifier quoting + bound parameter. The previous
+        // implementation interpolated schema/table/column straight
+        // into the SQL and inlined the cell value via
+        // `render_literal`, so a malicious value (or a quirky
+        // identifier with a `"` in it) could break out of the
+        // string literal and inject DDL. Now every identifier is
+        // dialect-quoted and the cell value rides through the
+        // driver's prepared-statement path.
+        let dialect = self
+            .session
+            .active
+            .as_ref()
+            .map_or_else(narwhal_sql::splitter::Dialect::default, |s| s.dialect());
+        let qualified = quote_qualified(&ref_schema, &ref_table, dialect);
+        let quoted_col = quote_ident(&ref_col, dialect);
+        let ph = placeholder(1, dialect);
+        let sql = format!("SELECT * FROM {qualified} WHERE {quoted_col} = {ph}");
         self.ui.status.message = format!("fk: -> {ref_schema}.{ref_table}");
-        self.dispatch_batch(vec![sql], RunMode::Execute).await;
+        self.dispatch_batch_with_params(vec![(sql, vec![value])], RunMode::Execute)
+            .await;
     }
 
     /// Wrapper that lets the `fk_nav` module call into the private
@@ -136,38 +152,28 @@ impl AppCore {
     }
 }
 
-/// Render `value` as a SQL literal for the constructed WHERE clause.
-///
-/// Intentionally narrow: handles the integer / string / null path
-/// FKs almost always take. Other types render via [`Value::render`]
-/// which approximates the right form but isn't guaranteed safe for
-/// every driver. The caller should treat the resulting SQL as
-/// driver-best-effort, not as a parameterised query \u2014 a future
-/// pass should route FK navigation through bound parameters.
-fn render_literal(v: &Value) -> String {
-    match v {
-        Value::Null => "NULL".to_owned(),
-        Value::Int(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::String(s) => format!("'{}'", s.replace('\'', "''")),
-        other => format!("'{}'", other.render().replace('\'', "''")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use narwhal_commands::cell_edit::{placeholder, quote_ident, quote_qualified};
+    use narwhal_sql::splitter::Dialect;
+
+    /// C2 regression: malicious identifiers and cell values used to
+    /// reach the driver as raw SQL. Verify the building blocks now
+    /// produce a parametric statement with quoted identifiers.
+    #[test]
+    fn fk_query_uses_quoted_identifiers_and_placeholder() {
+        let qualified = quote_qualified("pub\"lic", "us\"ers", Dialect::Postgres);
+        assert_eq!(qualified, r#""pub""lic"."us""ers""#);
+        let col = quote_ident("id", Dialect::Postgres);
+        let ph = placeholder(1, Dialect::Postgres);
+        let sql = format!("SELECT * FROM {qualified} WHERE {col} = {ph}");
+        assert_eq!(sql, r#"SELECT * FROM "pub""lic"."us""ers" WHERE "id" = $1"#);
+    }
 
     #[test]
-    fn render_literal_quotes_text_and_escapes() {
-        assert_eq!(render_literal(&Value::Int(7)), "7");
-        assert_eq!(render_literal(&Value::String("foo".into())), "'foo'");
-        assert_eq!(
-            render_literal(&Value::String("O'Brien".into())),
-            "'O''Brien'"
-        );
-        assert_eq!(render_literal(&Value::Null), "NULL");
-        assert_eq!(render_literal(&Value::Bool(true)), "true");
+    fn fk_query_placeholder_dialect_aware() {
+        assert_eq!(placeholder(1, Dialect::Postgres), "$1");
+        assert_eq!(placeholder(1, Dialect::MySql), "?");
+        assert_eq!(placeholder(1, Dialect::Sqlite), "?");
     }
 }

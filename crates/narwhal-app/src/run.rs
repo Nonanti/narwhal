@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use narwhal_core::{CancelHandle, ColumnHeader, Connection, Row};
+use narwhal_core::{CancelHandle, ColumnHeader, Connection, Row, Value};
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_pool::{Pool, PooledConnection};
 use tokio::sync::{mpsc, Mutex};
@@ -65,10 +65,53 @@ pub enum RunMode {
 }
 
 /// Batch of statements queued for execution against a single connection.
+///
+/// `params_per_statement[i]` carries the bound parameters for
+/// `statements[i]`; when empty (the common interactive case) the worker
+/// invokes `execute(sql, &[])`. Internal callsites that need parametric
+/// dispatch (e.g. foreign-key navigation, where the cell value must not
+/// be interpolated as SQL) build the request via
+/// [`RunRequest::with_params`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RunRequest {
     pub statements: Vec<String>,
     pub mode: RunMode,
+    /// Bound parameters per statement. Length 0 means “no bindings for any
+    /// statement”; otherwise `params_per_statement.len() == statements.len()`.
+    pub params_per_statement: Vec<Vec<Value>>,
+}
+
+impl RunRequest {
+    /// Plain batch with no bound parameters. The interactive editor path.
+    #[must_use]
+    pub const fn new(statements: Vec<String>, mode: RunMode) -> Self {
+        Self {
+            statements,
+            mode,
+            params_per_statement: Vec::new(),
+        }
+    }
+
+    /// Parametric batch. `items[i].0` is the SQL, `items[i].1` is the
+    /// bound parameter vector for that statement.
+    #[must_use]
+    pub fn with_params(items: Vec<(String, Vec<Value>)>, mode: RunMode) -> Self {
+        let (statements, params_per_statement) = items.into_iter().unzip();
+        Self {
+            statements,
+            mode,
+            params_per_statement,
+        }
+    }
+
+    /// Bound parameters for `index`, or an empty slice when none.
+    #[must_use]
+    pub fn params_for(&self, index: usize) -> &[Value] {
+        self.params_per_statement
+            .get(index)
+            .map_or(&[][..], Vec::as_slice)
+    }
 }
 
 /// Where the worker should source the connection from.
@@ -225,9 +268,10 @@ pub fn spawn_run(
                 *cancel_slot.lock().await = Some(handle);
             }
 
+            let params = request.params_for(i);
             let outcome = match request.mode {
-                RunMode::Execute => run_execute(holder.conn(), sql, &tx).await,
-                RunMode::Stream => run_stream(holder.conn(), sql, &tx).await,
+                RunMode::Execute => run_execute(holder.conn(), sql, params, &tx).await,
+                RunMode::Stream => run_stream(holder.conn(), sql, params, &tx).await,
             };
 
             *cancel_slot.lock().await = None;
@@ -274,10 +318,11 @@ enum StatementOutcome {
 async fn run_execute(
     conn: &mut dyn narwhal_core::Connection,
     sql: &str,
+    params: &[Value],
     tx: &mpsc::Sender<RunUpdate>,
 ) -> StatementOutcome {
     let started = Instant::now();
-    match conn.execute(sql, &[]).await {
+    match conn.execute(sql, params).await {
         Ok(qr) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
             let _ = tx
@@ -321,10 +366,11 @@ async fn run_execute(
 async fn run_stream(
     conn: &mut dyn narwhal_core::Connection,
     sql: &str,
+    params: &[Value],
     tx: &mpsc::Sender<RunUpdate>,
 ) -> StatementOutcome {
     let started = Instant::now();
-    let mut stream = match conn.stream(sql, &[]).await {
+    let mut stream = match conn.stream(sql, params).await {
         Ok(s) => s,
         Err(error) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
