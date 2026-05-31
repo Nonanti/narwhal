@@ -92,6 +92,14 @@ pub struct SessionState {
     /// (`connection_id` differs) or `:refresh` bumps
     /// `Session::schemas_version`.
     pub goto_corpus_cache: Option<GotoCorpusCache>,
+    /// Discovered `.narwhal/workspace.toml` root, cached at startup.
+    ///
+    /// Resolved once from `std::env::current_dir()` so `:diagram` and
+    /// other workspace-aware features see a stable view of the
+    /// project boundary regardless of process-time `chdir`s. `None`
+    /// when the binary was launched outside any workspace, or when
+    /// `current_dir()` itself failed (rare; usually a deleted CWD).
+    pub workspace_root: Option<PathBuf>,
 }
 
 impl SessionState {
@@ -112,6 +120,15 @@ impl SessionState {
             read_only: false,
             pending_history_filter: None,
             goto_corpus_cache: None,
+            // Discover the workspace root once at startup so every
+            // subsequent call sees the same boundary. The cwd at
+            // launch time *is* the user's project root in 99% of
+            // cases; anyone running narwhal from a subdirectory still
+            // benefits from the walk-up performed by
+            // `discover_workspace_root`.
+            workspace_root: std::env::current_dir()
+                .ok()
+                .and_then(|cwd| narwhal_config::discover_workspace_root(&cwd)),
         }
     }
 }

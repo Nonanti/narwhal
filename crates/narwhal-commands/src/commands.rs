@@ -780,15 +780,21 @@ fn parse_export(arg: &str) -> Command {
 /// ```text
 /// export <format> [path] [--table NAME] [--schema NAME]
 /// impact <table>
-/// <table>                       # bare form, opens Focused modal
+/// focus  <table>                # explicit Focused modal
+/// -- <table>                    # bare-table escape (when table is `export` / `impact` / `focus`)
+/// <table>                       # implicit Focused modal (muscle-memory form)
 /// ```
 ///
 /// `format` is one of `mermaid|mmd|mer|dot|gv|graphviz`. `path` is the
 /// first positional argument that is not a flag; if absent, the rendered
 /// diagram goes to the system clipboard. `--table` / `-t` restricts the
-/// diagram to a single table and its 1-hop FK neighbours. The bare
-/// `<table>` form is intentionally positional so muscle-memory like
-/// `:diagram users` works without remembering a subcommand.
+/// diagram to a single table and its 1-hop FK neighbours.
+///
+/// The bare `<table>` form is intentionally positional so muscle-memory
+/// like `:diagram users` works without remembering a subcommand. If
+/// the table is literally named `export`, `impact`, or `focus` (rare
+/// but legal), use `:diagram -- export` to force the focused-modal path
+/// or `:diagram focus export` for the same effect spelled out.
 fn parse_diagram(arg: &str) -> Command {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
@@ -802,17 +808,25 @@ fn parse_diagram(arg: &str) -> Command {
     };
     match sub {
         "export" => parse_diagram_export(rest),
-        "impact" => {
+        "impact" => parse_diagram_table_subcommand("impact", rest, Command::DiagramImpact),
+        "focus" => parse_diagram_table_subcommand("focus", rest, Command::DiagramFocus),
+        // `:diagram -- <table>` escapes a literal table named
+        // `export`, `impact` or `focus`. The escape must be followed
+        // by exactly one argument; otherwise the user almost certainly
+        // meant something else.
+        "--" => {
             if rest.is_empty() {
-                Command::Unknown("diagram impact: table name required".into())
-            } else if rest.split_whitespace().count() > 1 {
-                Command::Unknown(format!(
-                    "diagram impact: unexpected extra arguments after '{}'",
-                    rest.split_whitespace().next().unwrap_or("")
-                ))
-            } else {
-                Command::DiagramImpact(rest.to_owned())
+                return Command::Unknown(
+                    "diagram --: table name required after the escape".into(),
+                );
             }
+            if rest.split_whitespace().count() > 1 {
+                return Command::Unknown(format!(
+                    "diagram --: unexpected extra arguments after '{}'",
+                    rest.split_whitespace().next().unwrap_or("")
+                ));
+            }
+            Command::DiagramFocus(rest.to_owned())
         }
         // Bare positional: sub *is* the table name.
         table => {
@@ -824,6 +838,26 @@ fn parse_diagram(arg: &str) -> Command {
             Command::DiagramFocus(table.to_owned())
         }
     }
+}
+
+/// Shared body for `:diagram impact <table>` and `:diagram focus <table>`.
+/// Both subcommands take exactly one positional argument; reject every
+/// other shape with a friendly error.
+fn parse_diagram_table_subcommand(
+    sub: &str,
+    rest: &str,
+    builder: fn(String) -> Command,
+) -> Command {
+    if rest.is_empty() {
+        return Command::Unknown(format!("diagram {sub}: table name required"));
+    }
+    if rest.split_whitespace().count() > 1 {
+        return Command::Unknown(format!(
+            "diagram {sub}: unexpected extra arguments after '{}'",
+            rest.split_whitespace().next().unwrap_or("")
+        ));
+    }
+    builder(rest.to_owned())
 }
 
 fn parse_diagram_export(rest: &str) -> Command {
@@ -1025,6 +1059,39 @@ mod tests {
         }
         match parse("diagram users extra") {
             Command::Unknown(msg) => assert!(msg.contains("unexpected argument")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        // `:diagram focus <table>` spells out the implicit form so
+        // tables literally named `export` / `impact` / `focus` are
+        // reachable.
+        assert_eq!(
+            parse("diagram focus export"),
+            Command::DiagramFocus("export".into())
+        );
+        assert_eq!(
+            parse("diagram focus public.impact"),
+            Command::DiagramFocus("public.impact".into())
+        );
+        match parse("diagram focus") {
+            Command::Unknown(msg) => assert!(msg.contains("table name required")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        // `:diagram -- <table>` escape for the muscle-memory form when
+        // the table literally collides with a subcommand name.
+        assert_eq!(
+            parse("diagram -- export"),
+            Command::DiagramFocus("export".into())
+        );
+        assert_eq!(
+            parse("diagram -- impact"),
+            Command::DiagramFocus("impact".into())
+        );
+        match parse("diagram --") {
+            Command::Unknown(msg) => assert!(msg.contains("table name required")),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match parse("diagram -- a b") {
+            Command::Unknown(msg) => assert!(msg.contains("unexpected extra")),
             other => panic!("expected Unknown, got {other:?}"),
         }
         match parse("diagram export mermaid --table") {

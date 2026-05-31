@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Diagram renderers** now escape control characters in edge
+  labels: a column or table identifier containing a literal `\n`
+  (legal in PostgreSQL via quoted identifiers) used to break Mermaid
+  parsing with an "unexpected token" and silently mangle DOT edges.
+  Mermaid downgrades newlines / tabs to spaces; DOT escapes them as
+  the literal `\n` / `\r` / `\t` glyphs the Graphviz parser expects.
+- **Mermaid title sanitiser** strips the `---` token so a title
+  containing the YAML front-matter delimiter cannot close the block
+  early and inject a bogus `erDiagram` opener.
+- **`${env:VAR}` interpolation** now covers `[[logical_relation]]`
+  blocks (`from`, `to`, `note`, `from_columns`, `to_columns`) so the
+  multi-tenant pattern `from = "${env:SCHEMA_PREFIX}_events.user_id"`
+  works the same way it does for `[[connection]]` host / database
+  fields. Missing env vars surface at start-up as a clean
+  `InterpolateError` instead of a confusing "unknown table" warning
+  later on.
+- **Workspace discovery is now cached at startup** in
+  `SessionState::workspace_root`. Previously every `:diagram` call
+  re-walked the file tree from `current_dir()`, so a CWD change
+  (e.g. a child process chdir-ing) could silently lose the project
+  boundary. The MCP server already cached its workspace; the TUI now
+  matches.
+
+### Changed
+
+- **`:diagram <table>` subcommand parser**: tables literally named
+  `export`, `impact`, or `focus` used to be unreachable through the
+  muscle-memory positional form. Two new escapes resolve the
+  collision: `:diagram focus <table>` spells out the implicit
+  Focused-modal form, and `:diagram -- <table>` is a positional
+  escape (mirrors `--` in POSIX option parsing). The bare
+  `:diagram users` form still works for every other name.
+
 ### Added
 
 - **ER diagrams (v1.2)**: schema-diagram support spanning TUI, CLI
