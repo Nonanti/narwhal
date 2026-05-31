@@ -16,6 +16,7 @@ pub(crate) fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 pub mod confirm;
+pub mod diagram;
 pub mod editor;
 pub mod goto;
 pub mod help;
@@ -29,6 +30,7 @@ pub mod snippets;
 pub mod wizard;
 
 pub use confirm::{render_confirm_modal, ConfirmModalView};
+pub use diagram::{render_diagram, DiagramView, DiagramViewMode};
 pub use editor::{
     editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
 };

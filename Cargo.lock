@@ -3088,6 +3088,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "narwhal-core",
+ "narwhal-diagram",
  "narwhal-domain",
  "narwhal-vim",
  "ratatui",
