@@ -30,6 +30,31 @@ pub enum Theme {
     HighContrast,
 }
 
+/// Icon set used by the in-terminal diagram widget.
+///
+/// Mirrors `narwhal_diagram::IconSet` but lives here so the config
+/// crate does not have to depend on `narwhal-diagram`. The host app
+/// converts at the seam.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum DiagramIcons {
+    /// Safe everywhere; `[PK]`, `[FK]`, `[UK]`, `(!)` markers.
+    #[default]
+    Ascii,
+    /// Nerd Font glyphs — requires a patched terminal font.
+    Nerdfont,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiagramSettings {
+    /// Glyph set used inside the TUI diagram modal. Has no effect on
+    /// `:diagram export` output (Mermaid / DOT renderers always use
+    /// ASCII since their downstream viewers do not render Nerd Font).
+    pub icons: DiagramIcons,
+}
+
 /// User-facing settings persisted to `config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -37,6 +62,7 @@ pub struct Settings {
     pub theme: Theme,
     pub editor: EditorSettings,
     pub keybindings: KeybindingSettings,
+    pub diagram: DiagramSettings,
     /// Per-group keymap overrides. Keys are group names
     /// (`results`, `row-detail`, ...), values map a chord string
     /// (`"ctrl+s"`, `"K"`, ...) to an action name

@@ -19,6 +19,7 @@ pub use pgpass::{
 };
 pub use secrecy::SecretString;
 pub use settings::{
-    ConfigError, ConnectionsFile, EditorSettings, KeybindingSettings, Settings, Theme,
+    ConfigError, ConnectionsFile, DiagramIcons, DiagramSettings, EditorSettings,
+    KeybindingSettings, Settings, Theme,
 };
 pub use url::{parse as parse_url, ParsedUrl, UrlError};
