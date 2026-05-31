@@ -167,8 +167,29 @@ fn sanitize_port(name: &str) -> String {
     node_id(name)
 }
 
+/// Escape a string for a DOT *quoted* label (`[label="..."]`).
+///
+/// Two contexts exist in DOT and they must not be mixed: quoted
+/// strings (this helper) and HTML records (`html_escape`). Inside a
+/// quoted string the parser interprets `\n`, `\r`, `\t`, `\l`, `\r`
+/// as control escapes — a raw `\n` in a column name (legal in
+/// `PostgreSQL` via quoted identifiers) would otherwise break the edge
+/// label across lines. We collapse those to their escape form so
+/// downstream Graphviz sees a literal `\n` glyph instead of a newline.
 fn escape_dq(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn html_escape(s: &str) -> String {
