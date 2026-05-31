@@ -85,9 +85,16 @@ impl Renderer for DotRenderer {
             } else {
                 format!("{to_id}:{to_port}")
             };
+            // Logical relations render dashed + grey so they read as
+            // "informational, not engine-enforced" at a glance.
+            let extra = if edge.kind.is_logical() {
+                ", style=dashed, color=\"#888888\""
+            } else {
+                ""
+            };
             writeln!(
                 &mut out,
-                "  {from_ref} -> {to_ref} [label=\"{label}\", arrowhead={head}];",
+                "  {from_ref} -> {to_ref} [label=\"{label}\", arrowhead={head}{extra}];",
                 label = escape_dq(&edge.label()),
                 head = edge.cardinality.dot_arrowhead(),
             )
