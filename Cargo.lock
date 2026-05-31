@@ -2792,6 +2792,7 @@ dependencies = [
  "narwhal-commands",
  "narwhal-config",
  "narwhal-core",
+ "narwhal-diagram",
  "narwhal-domain",
  "narwhal-driver-registry",
  "narwhal-history",
@@ -2870,6 +2871,16 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "narwhal-diagram"
+version = "1.1.0"
+dependencies = [
+ "insta",
+ "narwhal-core",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

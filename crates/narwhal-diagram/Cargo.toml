@@ -1,0 +1,22 @@
+[package]
+name = "narwhal-diagram"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+readme = "README.md"
+license.workspace = true
+repository.workspace = true
+description = "Headless schema-diagram model and renderers (Mermaid / DOT) for narwhal."
+
+[dependencies]
+narwhal-core.workspace = true
+
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta = "1"
+
+[lints]
+workspace = true

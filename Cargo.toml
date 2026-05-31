@@ -17,6 +17,7 @@ members = [
     "crates/narwhal-plugin",
     "crates/narwhal-plugin-lua",
     "crates/narwhal-vim",
+    "crates/narwhal-diagram",
     "crates/narwhal-tui",
     "crates/narwhal-app",
     "crates/narwhal-mcp",
@@ -124,6 +125,7 @@ narwhal-plugin = { path = "crates/narwhal-plugin", version = "1.0.0" }
 narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "1.0.0" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }
 narwhal-vim = { path = "crates/narwhal-vim", version = "1.0.0" }
+narwhal-diagram = { path = "crates/narwhal-diagram", version = "1.0.0" }
 narwhal-tui = { path = "crates/narwhal-tui", version = "1.0.0" }
 narwhal-app = { path = "crates/narwhal-app", version = "1.0.0" }
 narwhal-mcp = { path = "crates/narwhal-mcp", version = "1.0.0" }
