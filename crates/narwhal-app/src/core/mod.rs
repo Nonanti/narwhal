@@ -9,6 +9,7 @@
 //! part of the L21 split. They never touch [`AppCore`] state directly.
 
 mod confirm;
+mod diagram;
 mod diff_schema;
 mod dump_export;
 mod editor_dispatch;
