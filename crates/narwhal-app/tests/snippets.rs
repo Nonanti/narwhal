@@ -25,6 +25,7 @@ const fn key(code: KeyCode) -> KeyEvent {
 fn empty_core_with_snippet_store(dir: &TempDir) -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: Vec::new(),
     };
     let mut core = AppCore::new(registry, connections, None);

@@ -15,7 +15,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use narwhal_diagram::{
-    Cardinality, DiagramModel, IconSet, ImpactNode, ImpactTree, Node, NodeColumn, QualifiedName,
+    Cardinality, DiagramModel, EdgeKind, IconSet, ImpactNode, ImpactTree, Node, NodeColumn,
+    QualifiedName,
 };
 
 use crate::theme::Theme;
@@ -203,8 +204,15 @@ fn focused_lines<'a>(view: &DiagramView<'_>, theme: &'a Theme) -> Vec<Line<'a>> 
                 edge.cardinality,
                 Direction::Outbound,
                 active,
+                edge.kind.is_logical(),
                 theme,
             ));
+            if let EdgeKind::Logical { note: Some(note) } = &edge.kind {
+                lines.push(Line::from(Span::styled(
+                    format!("        ↳ {note}"),
+                    Style::default().fg(theme.muted),
+                )));
+            }
         }
     }
     lines.push(Line::raw(""));
@@ -229,8 +237,15 @@ fn focused_lines<'a>(view: &DiagramView<'_>, theme: &'a Theme) -> Vec<Line<'a>> 
                 edge.cardinality,
                 Direction::Inbound,
                 active,
+                edge.kind.is_logical(),
                 theme,
             ));
+            if let EdgeKind::Logical { note: Some(note) } = &edge.kind {
+                lines.push(Line::from(Span::styled(
+                    format!("        ↳ {note}"),
+                    Style::default().fg(theme.muted),
+                )));
+            }
         }
     }
 
@@ -249,12 +264,18 @@ fn neighbour_line<'a>(
     card: Cardinality,
     dir: Direction,
     active: bool,
+    logical: bool,
     theme: &'a Theme,
 ) -> Line<'a> {
-    let arrow = match dir {
-        Direction::Outbound => "\u{2500}\u{2500}\u{25b6}", // ──▶
-        Direction::Inbound => "\u{25c0}\u{2500}\u{2500}",  // ◀──
+    // Logical edges use a dashed-style arrow + a `[L]` prefix so they
+    // visually read as "informational" against the FK arrows.
+    let arrow = match (dir, logical) {
+        (Direction::Outbound, false) => "\u{2500}\u{2500}\u{25b6}", // ──▶
+        (Direction::Inbound, false) => "\u{25c0}\u{2500}\u{2500}",  // ◀──
+        (Direction::Outbound, true) => "\u{254c}\u{254c}\u{25b7}",  // ╌╌▷
+        (Direction::Inbound, true) => "\u{25c1}\u{254c}\u{254c}",   // ◁╌╌
     };
+    let tag = if logical { "[L] " } else { "    " };
     let nullable_hint = matches!(
         card,
         Cardinality::ZeroOrOneToMany | Cardinality::ZeroOrOneToOne
@@ -267,7 +288,7 @@ fn neighbour_line<'a>(
 
     let cursor = if active { "  > " } else { "    " };
     let row = format!(
-        "{cursor}{name:<32}  via {via:<20} {arrow}{one_to_one}{nullable_hint}",
+        "{cursor}{tag}{name:<28}  via {via:<20} {arrow}{one_to_one}{nullable_hint}",
         name = other.display(),
     );
     let style = if active {
@@ -275,6 +296,8 @@ fn neighbour_line<'a>(
             .fg(theme.background)
             .bg(theme.accent)
             .add_modifier(Modifier::BOLD)
+    } else if logical {
+        Style::default().fg(theme.muted)
     } else {
         Style::default().fg(theme.foreground)
     };

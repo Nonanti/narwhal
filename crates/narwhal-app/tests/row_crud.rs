@@ -45,6 +45,7 @@ const fn shift(c: char) -> KeyEvent {
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "crud".into(),

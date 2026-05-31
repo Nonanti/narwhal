@@ -62,7 +62,8 @@ fn empty_state() -> AppCore {
 
 fn configured_state(db_path: PathBuf) -> ConnectionsFile {
     ConnectionsFile {
-        connections: vec![ConnectionConfig {
+            logical_relations: Vec::new(),
+            connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "demo".into(),
             driver: "sqlite".into(),

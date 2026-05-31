@@ -33,6 +33,7 @@ fn two_sqlite_fixtures(dir: &std::path::Path) -> (DriverRegistry, ConnectionsFil
     };
     let ids = [a.id, b.id];
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![a, b],
     };
     rusqlite::Connection::open(dir.join("a.db")).unwrap();

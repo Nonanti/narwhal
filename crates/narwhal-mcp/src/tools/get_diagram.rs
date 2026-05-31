@@ -12,8 +12,10 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
+use narwhal_config::collect_logical_relations_for;
 use narwhal_diagram::{
-    build, focused as diagram_focused, DotRenderer, MermaidRenderer, QualifiedName, Renderer,
+    build_with_logical, focused as diagram_focused, DotRenderer, MermaidRenderer, QualifiedName,
+    Renderer,
 };
 
 use crate::context::ServerContext;
@@ -196,7 +198,25 @@ impl Tool for GetDiagramTool {
         }
         let _ = conn.close().await;
 
-        let model = build(&described);
+        // Logical relations come from `.narwhal/workspace.toml` (when
+        // the MCP server was launched inside a workspace) and from
+        // user-level `connections.toml`. Bad entries log to stderr but
+        // do not fail the call — the diagram is still useful with the
+        // valid subset.
+        let workspace_root = ctx.workspace().map(|w| w.root.clone());
+        let (logical, warnings) = collect_logical_relations_for(
+            conn_name,
+            ctx.connections(),
+            workspace_root.as_deref(),
+        );
+        for w in &warnings {
+            tracing::warn!(target: "narwhal::mcp::get_diagram", "{w}");
+        }
+
+        let (model, build_diags) = build_with_logical(&described, &logical);
+        for d in &build_diags {
+            tracing::warn!(target: "narwhal::mcp::get_diagram", "{d}");
+        }
         let model = match resolved_target.as_ref() {
             Some((s, t)) => {
                 let target = QualifiedName::new(s.clone(), t.clone());

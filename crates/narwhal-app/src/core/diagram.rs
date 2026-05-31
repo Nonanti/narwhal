@@ -13,10 +13,10 @@
 
 use std::path::PathBuf;
 
-use narwhal_config::DiagramIcons;
+use narwhal_config::{collect_logical_relations_for, discover_workspace_root, DiagramIcons};
 use narwhal_diagram::{
-    build, focused as diagram_focused, impact as diagram_impact, DiagramModel, DotRenderer,
-    IconSet, MermaidRenderer, QualifiedName, Renderer,
+    build_with_logical, focused as diagram_focused, impact as diagram_impact, DiagramModel,
+    DotRenderer, IconSet, LogicalRelation, MermaidRenderer, QualifiedName, Renderer,
 };
 use narwhal_pool::Pool;
 
@@ -79,7 +79,24 @@ impl AppCore {
             }
         };
 
-        let model = build(&tables);
+        let (logical, relation_warnings) = self.collect_logical_for_active();
+        let (model, build_diags) = build_with_logical(&tables, &logical);
+        // Surface logical-relation diagnostics first so the user sees
+        // typos in their config before the success message overwrites
+        // the status bar.
+        for w in relation_warnings.iter().chain(
+            build_diags
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .iter(),
+        ) {
+            tracing::warn!(target: "narwhal::app::diagram", "{w}");
+        }
+        if !build_diags.is_empty() {
+            self.ui.status.message =
+                format!("diagram: {} logical-relation issue(s); see log", build_diags.len());
+        }
         let center = QualifiedName::new(target_schema, target_name);
         if model.node(&center).is_none() {
             self.ui.status.message = format!(
@@ -226,6 +243,24 @@ impl AppCore {
             (state.selected + total - 1) % total
         };
         state.selected = new_sel;
+    }
+
+    /// Collect logical relations for the currently-active session from
+    /// `connections.toml` and (when present) `.narwhal/workspace.toml`.
+    /// Returns an empty vec + empty warnings when no session is active
+    /// so callers never have to special-case the disconnected state.
+    fn collect_logical_for_active(&self) -> (Vec<LogicalRelation>, Vec<String>) {
+        let Some(session) = self.session.active.as_ref() else {
+            return (Vec::new(), Vec::new());
+        };
+        let workspace_root = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| discover_workspace_root(&cwd));
+        collect_logical_relations_for(
+            &session.config.name,
+            &self.session.connections,
+            workspace_root.as_deref(),
+        )
     }
 
     /// Close the diagram modal (Esc / q).
@@ -383,7 +418,14 @@ impl AppCore {
             }
         };
 
-        let model = build(&tables);
+        let (logical, relation_warnings) = self.collect_logical_for_active();
+        let (model, build_diags) = build_with_logical(&tables, &logical);
+        for w in &relation_warnings {
+            tracing::warn!(target: "narwhal::app::diagram", "{w}");
+        }
+        for d in &build_diags {
+            tracing::warn!(target: "narwhal::app::diagram", "{d}");
+        }
         let model = match focus {
             Some(target) => diagram_focused(&model, &target, 1),
             None => model,

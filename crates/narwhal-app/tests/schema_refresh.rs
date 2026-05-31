@@ -21,6 +21,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "headless".into(),
@@ -37,6 +38,7 @@ fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
 fn fixture_pair(db_a: PathBuf, db_b: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![
             ConnectionConfig {
                 id: Uuid::from_u128(1),

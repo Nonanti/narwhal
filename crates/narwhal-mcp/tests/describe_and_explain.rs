@@ -49,6 +49,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
     ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {
+            logical_relations: Vec::new(),
             connections: vec![config],
         }),
         credentials,

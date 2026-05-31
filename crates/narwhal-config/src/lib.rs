@@ -18,8 +18,13 @@ pub use pgpass::{
     password_from_env, password_from_pgpass, resolve_password as resolve_fallback_password,
 };
 pub use secrecy::SecretString;
+pub mod logical_relations;
+pub use logical_relations::{
+    collect_logical_relations_for, discover_workspace_root, read_workspace_logical_relations,
+    WORKSPACE_FILE,
+};
 pub use settings::{
     ConfigError, ConnectionsFile, DiagramIcons, DiagramSettings, EditorSettings,
-    KeybindingSettings, Settings, Theme,
+    KeybindingSettings, LogicalRelationConfig, Settings, Theme,
 };
 pub use url::{parse as parse_url, ParsedUrl, UrlError};

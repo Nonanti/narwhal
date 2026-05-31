@@ -54,6 +54,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
     ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {
+            logical_relations: Vec::new(),
             connections: vec![config],
         }),
         credentials,
@@ -288,6 +289,89 @@ async fn empty_schema_filter_is_tool_error() {
         .as_str()
         .expect("error text");
     assert!(text.contains("no tables"));
+}
+
+#[tokio::test]
+async fn workspace_logical_relation_renders_dashed() {
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+
+    // Drop a workspace.toml next to the DB declaring a logical FK
+    // from `audit.actor_id` to `users.id` (the FK is already in the
+    // fixture; this exercises the orthogonal path — logical edge
+    // added against a brand-new pair).
+    let ws_dir = dir.path().join(".narwhal");
+    std::fs::create_dir_all(&ws_dir).unwrap();
+    std::fs::write(
+        ws_dir.join("workspace.toml"),
+        r#"
+[[logical_relation]]
+connection  = "demo"
+from        = "audit.id"
+to          = "orders.id"
+cardinality = "many-to-one"
+note        = "reconciled async"
+"#,
+    )
+    .unwrap();
+
+    // ServerContext must be told about the workspace root so the
+    // logical-relation collector can find it.
+    let mut ctx = ctx_for(&db_path);
+    let ws = narwhal_mcp::Workspace::discover(dir.path())
+        .expect("discover ok")
+        .expect("workspace must be found");
+    ctx = ctx.with_workspace(Arc::new(ws));
+
+    let response = rpc_one(ctx, call("demo", json!({}))).await;
+    assert_ne!(response["result"]["isError"], true);
+
+    let payload = body(&response);
+    let source = payload["source"].as_str().expect("source");
+    // 4 tables + 1 extra logical edge.
+    assert_eq!(payload["edges"], 4, "payload: {payload}");
+    // Dashed `..` notation + `[logical]` suffix on the label.
+    assert!(
+        source.contains("main_orders }o..|| main_audit : \"id [logical]\""),
+        "logical edge missing:\n{source}"
+    );
+}
+
+#[tokio::test]
+async fn workspace_logical_relation_unknown_table_is_warned() {
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("db.sqlite");
+    seed_sqlite(&db_path);
+
+    let ws_dir = dir.path().join(".narwhal");
+    std::fs::create_dir_all(&ws_dir).unwrap();
+    std::fs::write(
+        ws_dir.join("workspace.toml"),
+        r#"
+[[logical_relation]]
+connection  = "demo"
+from        = "ghost.x"
+to          = "users.id"
+cardinality = "many-to-one"
+"#,
+    )
+    .unwrap();
+
+    let mut ctx = ctx_for(&db_path);
+    let ws = narwhal_mcp::Workspace::discover(dir.path())
+        .expect("discover ok")
+        .expect("workspace must be found");
+    ctx = ctx.with_workspace(Arc::new(ws));
+
+    let response = rpc_one(ctx, call("demo", json!({}))).await;
+    // Bad logical relation only logs; the call still succeeds with
+    // the valid subset (here: 0 logical edges = the original 3).
+    assert_ne!(response["result"]["isError"], true);
+    let payload = body(&response);
+    assert_eq!(payload["edges"], 3, "unknown-table logical must be dropped");
 }
 
 #[tokio::test]

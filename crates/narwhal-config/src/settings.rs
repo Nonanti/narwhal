@@ -107,11 +107,64 @@ impl Default for KeybindingSettings {
     }
 }
 
-/// Container for the persisted connection list.
+/// One user-declared logical relation between two tables.
+///
+/// Parsed from `[[logical_relation]]` blocks in either
+/// `connections.toml` (under the top level) or
+/// `.narwhal/workspace.toml`. Host code converts these into
+/// `narwhal_diagram::LogicalRelation` after validating the table /
+/// column references against the live schema.
+///
+/// ```toml
+/// [[logical_relation]]
+/// connection  = "prod-db"           # required
+/// from        = "events.user_id"    # qualified: [schema.]table.column
+/// to          = "users.id"
+/// cardinality = "many-to-one"       # default: "many-to-one"
+/// note        = "no FK because of cross-shard pruning"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LogicalRelationConfig {
+    /// Connection name (must match a `[[connection]]` entry).
+    pub connection: String,
+    /// Child / referencing side. `[schema.]table.column`. Composite
+    /// relations use `from_columns`/`to_columns` instead (V1.1).
+    #[serde(default)]
+    pub from: Option<String>,
+    /// Parent / referenced side. `[schema.]table.column`.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Cardinality token (`one-to-many`, `many-to-one`, ...). Default
+    /// `many-to-one` — the most common case for logical FK-less joins.
+    #[serde(default = "default_cardinality")]
+    pub cardinality: String,
+    /// Optional human note shown in the TUI Impact view and in
+    /// rendered diagrams as part of the edge label.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Composite-relation support (reserved for V1.1). Empty in V1.
+    #[serde(default)]
+    pub from_columns: Vec<String>,
+    #[serde(default)]
+    pub to_columns: Vec<String>,
+}
+
+fn default_cardinality() -> String {
+    "many-to-one".into()
+}
+
+/// Container for the persisted connection list and any global
+/// logical-relation declarations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConnectionsFile {
     #[serde(rename = "connection", default)]
     pub connections: Vec<ConnectionConfig>,
+    /// Logical relations declared at the user level. Each entry
+    /// carries its own `connection` field so a single file can
+    /// describe relations across several connections.
+    #[serde(rename = "logical_relation", default)]
+    pub logical_relations: Vec<LogicalRelationConfig>,
 }
 
 impl Settings {

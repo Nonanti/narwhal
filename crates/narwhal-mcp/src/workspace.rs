@@ -75,6 +75,12 @@ pub struct WorkspaceFile {
     /// When `false`, every write-capable code path refuses to proceed.
     #[serde(default = "default_allow_writes")]
     pub allow_writes: bool,
+    /// User-declared logical (FK-less) relations. Each entry targets
+    /// a connection by name; entries for other connections are
+    /// ignored by `get_diagram`. Commit this file to git so the team
+    /// shares the same logical schema view.
+    #[serde(rename = "logical_relation", default)]
+    pub logical_relations: Vec<narwhal_config::LogicalRelationConfig>,
 }
 
 const fn default_allow_writes() -> bool {
@@ -185,6 +191,7 @@ mod tests {
             file: WorkspaceFile {
                 allowed_connections: vec!["a".into(), "b".into()],
                 allow_writes: true,
+            logical_relations: Vec::new(),
             },
         };
         assert!(ws.connection_allowed("a"));

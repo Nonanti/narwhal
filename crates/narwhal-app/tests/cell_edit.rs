@@ -45,6 +45,7 @@ async fn type_str(core: &mut AppCore, text: &str) {
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "edit".into(),

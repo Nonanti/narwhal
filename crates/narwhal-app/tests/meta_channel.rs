@@ -18,6 +18,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "meta-test".into(),
@@ -138,6 +139,7 @@ async fn open_history_does_not_block_ui() {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
             name: "meta-test".into(),
@@ -246,6 +248,7 @@ async fn refresh_schemas_drops_reply_when_session_changed() {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        logical_relations: Vec::new(),
         connections: vec![
             ConnectionConfig {
                 id: Uuid::new_v4(),
