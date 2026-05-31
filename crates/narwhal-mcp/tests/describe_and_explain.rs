@@ -276,7 +276,7 @@ async fn explain_query_unknown_connection_is_tool_error() {
 }
 
 #[tokio::test]
-async fn tools_list_now_advertises_five_tools() {
+async fn tools_list_advertises_full_tool_surface() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
@@ -298,9 +298,10 @@ async fn tools_list_now_advertises_five_tools() {
             "describe_schema",
             "describe_table",
             "explain_query",
+            "get_diagram",
             "list_connections",
             "run_query",
         ],
-        "v0 tool surface frozen at five tools"
+        "v1 tool surface: 5 v0 tools plus get_diagram"
     );
 }

@@ -3016,6 +3016,7 @@ dependencies = [
  "chrono",
  "narwhal-config",
  "narwhal-core",
+ "narwhal-diagram",
  "narwhal-driver-registry",
  "narwhal-history",
  "narwhal-sql",

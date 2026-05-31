@@ -17,6 +17,7 @@ workspace = true
 [dependencies]
 narwhal-core.workspace = true
 narwhal-config.workspace = true
+narwhal-diagram.workspace = true
 narwhal-history.workspace = true
 narwhal-sql.workspace = true
 narwhal-driver-registry = { workspace = true }

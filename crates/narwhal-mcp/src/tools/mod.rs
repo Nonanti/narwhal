@@ -14,12 +14,14 @@ use crate::protocol::ToolDescriptor;
 mod describe_schema;
 mod describe_table;
 mod explain_query;
+mod get_diagram;
 mod list_connections;
 mod run_query;
 
 pub use describe_schema::DescribeSchemaTool;
 pub use describe_table::DescribeTableTool;
 pub use explain_query::ExplainQueryTool;
+pub use get_diagram::GetDiagramTool;
 pub use list_connections::ListConnectionsTool;
 pub use run_query::RunQueryTool;
 
@@ -138,6 +140,7 @@ impl ToolRegistry {
                 Box::new(DescribeTableTool),
                 Box::new(RunQueryTool),
                 Box::new(ExplainQueryTool),
+                Box::new(GetDiagramTool),
             ],
         }
     }
