@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ER diagrams (v1.2)**: schema-diagram support spanning TUI, CLI
+  export and MCP. A new headless `narwhal-diagram` crate builds a
+  `DiagramModel` from `TableSchema` slices and renders Mermaid
+  (`erDiagram`) or Graphviz `dot`. Cardinality is computed from FK
+  nullability and uniqueness (1-to-many → `||--o{`, nullable FK →
+  `|o--o{`, FK with UNIQUE → `||--||`); junction tables fall out
+  naturally as two 1-to-many edges. Cross-schema FKs are dropped in
+  V1 so renderers never emit dangling edges.
+  - **TUI modal**: `:diagram <table>` opens *Focused* mode (centre
+    table with PK/FK/UK markers + 1-hop FK neighbour list).
+    `:diagram impact <table>` opens *Impact* mode (reverse-FK tree
+    with `ON DELETE` annotations; a warning glyph flags `NO ACTION`
+    references that would block a delete). Keys inside the modal:
+    `Tab`/`Shift-Tab` cycle neighbours, `Enter` re-centres on the
+    selected one (instant — the model is cached), `i` toggles
+    Focused↔Impact, `y` yanks the current subset as Mermaid to the
+    clipboard, `q`/`Esc` close.
+  - **Sidebar shortcut**: `gd` (vim-style chord) or `D` opens the
+    Focused modal on the highlighted table.
+  - **Export command**: `:diagram export mermaid|dot [path]`
+    — with no path the rendered source is copied to the system
+    clipboard, with a path it goes to disk (extension added if
+    omitted). `--table T` restricts to a 1-hop focused subset;
+    `--schema S` restricts candidates before the describe round-trips
+    fire. Aliases: `:diag`, `mmd`, `gv`, `graphviz`.
+  - **MCP tool**: `get_diagram` lets agents render the same
+    diagrams. Returns a JSON envelope with node/edge counts plus
+    the rendered `source`. Qualified `schema.name` targets override
+    the `schema` argument; bare names consult `schema` as a hint.
+    Body goes through the 512 KiB `cap_response` like every other
+    tool.
+  - **Config**: `[diagram] icons = "ascii" | "nerdfont"`. Default
+    `ascii` keeps the modal safe in stock terminals; Nerd Font
+    glyphs (key, link, star, warning) are opt-in. Mermaid / DOT
+    exports always use ASCII because their downstream viewers
+    (mermaid.live, Graphviz HTML labels) don't reliably ship Nerd
+    Font glyphs.
+
 ## [1.1.0] - 2026-05-29
 
 ### Added
