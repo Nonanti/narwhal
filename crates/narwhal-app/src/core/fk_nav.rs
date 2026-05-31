@@ -199,6 +199,25 @@ struct FkLeg {
     value: Value,
 }
 
+/// True when `value` binds to `PostgreSQL` as `text` and so needs a
+/// matching `column::text` cast to compare against a non-text FK
+/// column (uuid / numeric / inet / json / …). Variants the
+/// driver binds at their native type (`Int` → `int8`, `Uuid` →
+/// `uuid`, `Json` → `jsonb`, `Date`/`Time`/`DateTime`/`Timestamp`
+/// → the matching chrono type, `Bytes` → `bytea`, `Bool` → `bool`)
+/// keep the direct equality path so the FK index can still be
+/// used. `Null` never reaches here — the snapshot bails before
+/// composing the SQL.
+///
+/// CR-2 originally cast only `Value::String`; that missed
+/// `Value::Unknown` which is the fallback the drivers fall back to
+/// for unmapped types. An `Unknown("…")` cell against a `uuid` FK
+/// column hit the same `operator does not exist: uuid = text`
+/// planner error CR-2 was meant to fix.
+const fn needs_pg_text_cast(value: &Value) -> bool {
+    matches!(value, Value::String(_) | Value::Unknown(_))
+}
+
 /// Compose the FK navigation SELECT for one or more bound legs.
 ///
 /// `qualified` is the dialect-quoted parent `schema.table`,
@@ -245,7 +264,7 @@ fn build_fk_select_sql(
         }
         let ph = placeholder(i + 1, dialect);
         let cast_text = matches!(dialect, narwhal_sql::splitter::Dialect::Postgres)
-            && matches!(leg.value, Value::String(_));
+            && needs_pg_text_cast(&leg.value);
         if cast_text {
             sql.push_str(&format!("{}::text = {ph}", leg.parent_col_quoted));
         } else {
@@ -379,6 +398,45 @@ mod tests {
             r#"SELECT * FROM "public"."order_items" WHERE "order_id" = $1 AND "sku"::text = $2"#
         );
         assert_eq!(values.len(), 2);
+    }
+
+    /// m-1 regression: `Value::Unknown` is the driver's fallback
+    /// for unmapped types and also binds as text on `PostgreSQL`.
+    /// It needs the same `::text` cast as `Value::String` for the
+    /// planner to accept the comparison against a non-text column.
+    #[test]
+    fn pg_unknown_value_casts_column_to_text() {
+        let (sql, _) = build_fk_select_sql(
+            r#""public"."users""#,
+            &[leg(r#""id""#, Value::Unknown("opaque".into()))],
+            Dialect::Postgres,
+        );
+        assert_eq!(
+            sql,
+            r#"SELECT * FROM "public"."users" WHERE "id"::text = $1"#
+        );
+    }
+
+    /// PG native-typed values stay on the direct equality path so
+    /// the FK index is usable. Uuid / Bool / Float / Json /
+    /// Date / Bytes all bind at their native type.
+    #[test]
+    fn pg_native_typed_values_keep_direct_equality() {
+        for v in [
+            Value::Bool(true),
+            Value::Float(1.5),
+            Value::Bytes(vec![0, 1, 2]),
+        ] {
+            let (sql, _) = build_fk_select_sql(
+                r#""public"."t""#,
+                &[leg(r#""c""#, v.clone())],
+                Dialect::Postgres,
+            );
+            assert!(
+                !sql.contains("::text"),
+                "value {v:?} should not trigger ::text cast (got {sql})"
+            );
+        }
     }
 
     /// `MySQL` composite FK uses `?` placeholders without casts.
