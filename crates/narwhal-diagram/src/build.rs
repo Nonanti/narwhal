@@ -52,7 +52,11 @@ impl std::fmt::Display for BuildDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownTable { side, table } => {
-                write!(f, "logical relation: unknown {side} table `{}`", table.display())
+                write!(
+                    f,
+                    "logical relation: unknown {side} table `{}`",
+                    table.display()
+                )
             }
             Self::UnknownColumn { table, column } => {
                 write!(
@@ -403,7 +407,8 @@ fn fk_is_unique(table: &TableSchema, fk_columns: &[String]) -> bool {
     if index_match {
         return true;
     }
-    table.unique_constraints.iter().any(|u| {
-        u.columns.iter().map(String::as_str).collect::<HashSet<_>>() == fk_set
-    })
+    table
+        .unique_constraints
+        .iter()
+        .any(|u| u.columns.iter().map(String::as_str).collect::<HashSet<_>>() == fk_set)
 }

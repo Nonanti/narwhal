@@ -3,8 +3,8 @@
 use narwhal_tui::EditorBuffer;
 
 use super::result::{
-    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState,
-    ResultBundle, ResultSearch, RowDetailState, RowSource,
+    CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState, ResultBundle,
+    ResultSearch, RowDetailState, RowSource,
 };
 use crate::pending::PendingChanges;
 

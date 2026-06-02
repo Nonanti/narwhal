@@ -155,7 +155,10 @@ fn focused_lines<'a>(view: &DiagramView<'_>, theme: &'a Theme) -> Vec<Line<'a>> 
         push_table_box(&mut lines, node, theme, view.icons);
     } else {
         lines.push(Line::from(Span::styled(
-            format!("(table not found in cached model: {})", view.center.display()),
+            format!(
+                "(table not found in cached model: {})",
+                view.center.display()
+            ),
             Style::default().fg(theme.error),
         )));
         return lines;

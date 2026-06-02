@@ -92,12 +92,9 @@ fn fixture() -> Vec<TableSchema> {
             col("bio", "text", false, true),
         ],
     );
-    profile.foreign_keys.push(fk(
-        "user_profile_user_fk",
-        &["user_id"],
-        "users",
-        &["id"],
-    ));
+    profile
+        .foreign_keys
+        .push(fk("user_profile_user_fk", &["user_id"], "users", &["id"]));
     profile.unique_constraints.push(UniqueConstraint {
         name: "user_profile_user_uq".into(),
         columns: vec!["user_id".into()],
@@ -166,11 +163,18 @@ fn focused_keeps_one_hop_neighbours_in_both_directions() {
     let model = build(&fixture());
     let view = focused(&model, &qn("orders"), 1);
 
-    let names: Vec<_> = view.nodes.iter().map(|n| n.qualified.name.clone()).collect();
+    let names: Vec<_> = view
+        .nodes
+        .iter()
+        .map(|n| n.qualified.name.clone())
+        .collect();
     assert!(names.contains(&"orders".into()));
     assert!(names.contains(&"users".into()), "out-edge target");
     assert!(names.contains(&"order_items".into()), "in-edge source");
-    assert!(!names.contains(&"audit".into()), "2 hops away, must be excluded");
+    assert!(
+        !names.contains(&"audit".into()),
+        "2 hops away, must be excluded"
+    );
 }
 
 #[test]
@@ -214,7 +218,8 @@ fn impact_tree_does_not_loop_on_cycles() {
             col("parent_id", "bigint", false, true),
         ],
     );
-    t.foreign_keys.push(fk("node_parent_fk", &["parent_id"], "node", &["id"]));
+    t.foreign_keys
+        .push(fk("node_parent_fk", &["parent_id"], "node", &["id"]));
 
     let model = build(&[t]);
     let tree = impact(&model, &qn("node"));
@@ -288,8 +293,14 @@ fn logical_relation_with_unknown_column_is_dropped_with_diagnostic() {
 
 #[test]
 fn cardinality_parse_accepts_kebab_and_aliases() {
-    assert_eq!(Cardinality::parse("one-to-many"), Some(Cardinality::OneToMany));
-    assert_eq!(Cardinality::parse("1-to-many"), Some(Cardinality::OneToMany));
+    assert_eq!(
+        Cardinality::parse("one-to-many"),
+        Some(Cardinality::OneToMany)
+    );
+    assert_eq!(
+        Cardinality::parse("1-to-many"),
+        Some(Cardinality::OneToMany)
+    );
     assert_eq!(
         Cardinality::parse("many-to-one"),
         Some(Cardinality::ManyToOne)
@@ -315,7 +326,11 @@ fn logical_edge_participates_in_focused_and_impact() {
 
     // Focused: orders — 1-hop must include audit through the logical edge.
     let view = focused(&model, &qn("orders"), 1);
-    let names: Vec<_> = view.nodes.iter().map(|n| n.qualified.name.clone()).collect();
+    let names: Vec<_> = view
+        .nodes
+        .iter()
+        .map(|n| n.qualified.name.clone())
+        .collect();
     assert!(
         names.contains(&"audit".into()),
         "logical edge should connect audit to orders"

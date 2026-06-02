@@ -54,9 +54,21 @@ impl Renderer for DotRenderer {
 
         writeln!(&mut out, "digraph schema {{").ok();
         writeln!(&mut out, "  rankdir={};", self.rankdir).ok();
-        writeln!(&mut out, "  graph [splines=ortho, nodesep=0.6, ranksep=0.8];").ok();
-        writeln!(&mut out, "  node  [shape=plaintext, fontname=\"JetBrainsMono,Menlo,monospace\"];").ok();
-        writeln!(&mut out, "  edge  [fontname=\"JetBrainsMono,Menlo,monospace\", fontsize=10];").ok();
+        writeln!(
+            &mut out,
+            "  graph [splines=ortho, nodesep=0.6, ranksep=0.8];"
+        )
+        .ok();
+        writeln!(
+            &mut out,
+            "  node  [shape=plaintext, fontname=\"JetBrainsMono,Menlo,monospace\"];"
+        )
+        .ok();
+        writeln!(
+            &mut out,
+            "  edge  [fontname=\"JetBrainsMono,Menlo,monospace\", fontsize=10];"
+        )
+        .ok();
         out.push('\n');
 
         for node in &model.nodes {
@@ -109,12 +121,12 @@ impl Renderer for DotRenderer {
 fn write_node(out: &mut String, node: &Node, include_columns: bool) {
     let id = node_id(&node.qualified.display());
     let title = html_escape(&node.qualified.display());
-    write!(out, "  {id} [label=<<table border=\"0\" cellborder=\"1\" cellspacing=\"0\">").ok();
     write!(
         out,
-        "<tr><td bgcolor=\"#cfe2ff\"><b>{title}</b></td></tr>"
+        "  {id} [label=<<table border=\"0\" cellborder=\"1\" cellspacing=\"0\">"
     )
     .ok();
+    write!(out, "<tr><td bgcolor=\"#cfe2ff\"><b>{title}</b></td></tr>").ok();
     if include_columns {
         for col in &node.columns {
             write!(

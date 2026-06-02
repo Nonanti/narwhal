@@ -93,7 +93,9 @@ fn mermaid_basic_shape() {
 #[test]
 fn mermaid_title_front_matter() {
     let model = build(&fixture());
-    let out = MermaidRenderer::new().with_title("Public schema").render(&model);
+    let out = MermaidRenderer::new()
+        .with_title("Public schema")
+        .render(&model);
     assert!(out.starts_with("---\ntitle: Public schema\n---\nerDiagram\n"));
 }
 

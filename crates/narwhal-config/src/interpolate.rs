@@ -397,6 +397,9 @@ mod tests {
         // Bubble-up so the user sees a clean error at startup instead
         // of a confusing "unknown table" downstream.
         let msg = err.to_string();
-        assert!(msg.contains("MISSING"), "error must name the missing var: {msg}");
+        assert!(
+            msg.contains("MISSING"),
+            "error must name the missing var: {msg}"
+        );
     }
 }

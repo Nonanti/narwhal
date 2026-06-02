@@ -148,11 +148,7 @@ async fn dot_format_returns_digraph() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"format": "dot"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"format": "dot"}))).await;
     assert_ne!(response["result"]["isError"], true);
 
     let payload = body(&response);
@@ -168,11 +164,7 @@ async fn focused_table_limits_to_one_hop() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"table": "orders"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"table": "orders"}))).await;
     assert_ne!(response["result"]["isError"], true);
 
     let payload = body(&response);
@@ -212,11 +204,7 @@ async fn schema_filter_restricts_candidates() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"schema": "main"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"schema": "main"}))).await;
     assert_ne!(response["result"]["isError"], true);
     let payload = body(&response);
     assert_eq!(payload["schema_filter"], "main");
@@ -229,11 +217,7 @@ async fn unknown_format_is_tool_error() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"format": "svg"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"format": "svg"}))).await;
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
         .as_str()
@@ -247,11 +231,7 @@ async fn unknown_table_is_tool_error() {
     let path = dir.path().join("db.sqlite");
     seed_sqlite(&path);
 
-    let response = rpc_one(
-        ctx_for(&path),
-        call("demo", json!({"table": "ghost"})),
-    )
-    .await;
+    let response = rpc_one(ctx_for(&path), call("demo", json!({"table": "ghost"}))).await;
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
         .as_str()

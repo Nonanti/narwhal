@@ -816,9 +816,7 @@ fn parse_diagram(arg: &str) -> Command {
         // meant something else.
         "--" => {
             if rest.is_empty() {
-                return Command::Unknown(
-                    "diagram --: table name required after the escape".into(),
-                );
+                return Command::Unknown("diagram --: table name required after the escape".into());
             }
             if rest.split_whitespace().count() > 1 {
                 return Command::Unknown(format!(
@@ -878,17 +876,13 @@ fn parse_diagram_export(rest: &str) -> Command {
         match tok {
             "--table" | "-t" => {
                 let Some(value) = tokens.next() else {
-                    return Command::Unknown(
-                        "diagram: --table requires a table name".into(),
-                    );
+                    return Command::Unknown("diagram: --table requires a table name".into());
                 };
                 table = Some(value.to_owned());
             }
             "--schema" | "-s" => {
                 let Some(value) = tokens.next() else {
-                    return Command::Unknown(
-                        "diagram: --schema requires a schema name".into(),
-                    );
+                    return Command::Unknown("diagram: --schema requires a schema name".into());
                 };
                 schema = Some(value.to_owned());
             }
@@ -897,9 +891,7 @@ fn parse_diagram_export(rest: &str) -> Command {
             }
             other => {
                 if path.is_some() {
-                    return Command::Unknown(format!(
-                        "diagram: unexpected argument '{other}'"
-                    ));
+                    return Command::Unknown(format!("diagram: unexpected argument '{other}'"));
                 }
                 path = Some(other.to_owned());
             }
@@ -1040,10 +1032,7 @@ mod tests {
             parse("diagram public.orders"),
             Command::DiagramFocus("public.orders".into())
         );
-        assert_eq!(
-            parse("diag orders"),
-            Command::DiagramFocus("orders".into())
-        );
+        assert_eq!(parse("diag orders"), Command::DiagramFocus("orders".into()));
         // `:diagram impact <table>` opens Impact modal.
         assert_eq!(
             parse("diagram impact users"),

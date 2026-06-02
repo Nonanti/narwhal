@@ -57,8 +57,8 @@ pub fn read_workspace_logical_relations(
     if !path.is_file() {
         return Ok(Vec::new());
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
 
     #[derive(Deserialize, Default)]
     struct Wrapper {
@@ -66,8 +66,8 @@ pub fn read_workspace_logical_relations(
         logical_relations: Vec<LogicalRelationConfig>,
     }
 
-    let parsed: Wrapper = toml::from_str(&text)
-        .map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let parsed: Wrapper =
+        toml::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))?;
     Ok(parsed.logical_relations)
 }
 

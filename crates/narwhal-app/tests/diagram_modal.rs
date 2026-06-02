@@ -169,16 +169,10 @@ async fn i_toggles_between_focused_and_impact() {
     core.execute_command("diagram orders").await;
 
     core.handle_key(key(KeyCode::Char('i'))).await;
-    assert_eq!(
-        core.diagram_for_test().unwrap().mode,
-        DiagramMode::Impact
-    );
+    assert_eq!(core.diagram_for_test().unwrap().mode, DiagramMode::Impact);
 
     core.handle_key(key(KeyCode::Char('i'))).await;
-    assert_eq!(
-        core.diagram_for_test().unwrap().mode,
-        DiagramMode::Focused
-    );
+    assert_eq!(core.diagram_for_test().unwrap().mode, DiagramMode::Focused);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -261,7 +255,9 @@ async fn sidebar_shift_d_also_opens_focused_modal() {
     core.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))
         .await;
 
-    let state = core.diagram_for_test().expect("Shift+D should open the modal");
+    let state = core
+        .diagram_for_test()
+        .expect("Shift+D should open the modal");
     assert_eq!(state.center.name, "users");
 }
 
