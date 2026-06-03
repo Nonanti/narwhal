@@ -89,7 +89,7 @@ keyring = { version = "3.0", features = [
     "sync-secret-service",
     "crypto-rust",
 ] }
-uuid = { version = "1.10", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
 unicode-segmentation = "1"
