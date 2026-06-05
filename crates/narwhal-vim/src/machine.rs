@@ -55,6 +55,7 @@ impl Vim {
             Mode::Command => self.handle_command(key),
             Mode::Visual | Mode::VisualLine => self.handle_visual(key),
             Mode::OperatorPending(_) => self.handle_operator_pending(key),
+            Mode::WaitingForSecondG => self.handle_waiting_for_second_g(key),
         }
     }
 
@@ -170,6 +171,10 @@ impl Vim {
                 motion: Motion::LineEnd,
                 count: 1,
             },
+            KeyCode::Char('g') => {
+                self.mode = Mode::WaitingForSecondG;
+                Action::Pending
+            }
             KeyCode::Char('G') => Action::Move {
                 motion: Motion::FileEnd,
                 count: 1,
@@ -256,27 +261,40 @@ impl Vim {
         }
     }
 
-    const fn handle_visual(&mut self, key: Key) -> Action {
+    fn handle_visual(&mut self, key: Key) -> Action {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
                 Action::EnterMode(Mode::Normal)
             }
+            KeyCode::Char(c @ '0'..='9') if !(c == '0' && self.pending_count.is_none()) => {
+                let digit = c.to_digit(10).unwrap_or(0) as usize;
+                self.push_count_digit(digit);
+                Action::Pending
+            }
             KeyCode::Char('h') => Action::Move {
                 motion: Motion::Left,
-                count: 1,
+                count: self.take_count(),
             },
             KeyCode::Char('l') => Action::Move {
                 motion: Motion::Right,
-                count: 1,
+                count: self.take_count(),
             },
             KeyCode::Char('j') => Action::Move {
                 motion: Motion::Down,
-                count: 1,
+                count: self.take_count(),
             },
             KeyCode::Char('k') => Action::Move {
                 motion: Motion::Up,
-                count: 1,
+                count: self.take_count(),
+            },
+            KeyCode::Char('w') => Action::Move {
+                motion: Motion::WordForward,
+                count: self.take_count(),
+            },
+            KeyCode::Char('b') => Action::Move {
+                motion: Motion::WordBackward,
+                count: self.take_count(),
             },
             // Operators in visual mode apply to the selection
             KeyCode::Char('d' | 'x') => {
@@ -307,6 +325,24 @@ impl Vim {
                 }
             }
             _ => Action::Pending,
+        }
+    }
+
+    /// Handle keys in `WaitingForSecondG` mode. After the first `g` is
+    /// pressed in Normal mode, we wait for a second `g` to produce a
+    /// `Motion::FileStart` action. Any other key resets back to Normal.
+    fn handle_waiting_for_second_g(&mut self, key: Key) -> Action {
+        if key.code == KeyCode::Char('g') {
+            let count = self.take_count();
+            self.mode = Mode::Normal;
+            Action::Move {
+                motion: Motion::FileStart,
+                count,
+            }
+        } else {
+            self.mode = Mode::Normal;
+            self.pending_count = None;
+            Action::Pending
         }
     }
 
@@ -476,6 +512,20 @@ impl Vim {
                     op,
                     motion: Motion::FileEnd,
                     count: 1,
+                }
+            }
+            KeyCode::Char('g') => {
+                let count = self.take_count();
+                let next_mode = if op == Operator::Change {
+                    Mode::Insert
+                } else {
+                    Mode::Normal
+                };
+                self.mode = next_mode;
+                Action::Operate {
+                    op,
+                    motion: Motion::FileStart,
+                    count,
                 }
             }
             // Escape cancels the operator
@@ -791,5 +841,84 @@ mod tests {
             vim.handle(Key::char('9'));
         }
         assert_eq!(vim.pending_count, Some(MAX_COUNT));
+    }
+
+    // -- M3.1: gg motion ---------------------------------------------------
+
+    #[test]
+    fn gg_goes_to_file_start() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('g')), Action::Pending);
+        assert_eq!(vim.mode(), Mode::WaitingForSecondG);
+        assert_eq!(
+            vim.handle(Key::char('g')),
+            Action::Move {
+                motion: Motion::FileStart,
+                count: 1,
+            }
+        );
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn g_followed_by_unrelated_resets() {
+        let mut vim = Vim::new();
+        assert_eq!(vim.handle(Key::char('g')), Action::Pending);
+        assert_eq!(vim.mode(), Mode::WaitingForSecondG);
+        // 'z' is not 'g' — should reset to Normal
+        assert_eq!(vim.handle(Key::char('z')), Action::Pending);
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn gg_respects_count_prefix() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('5'));
+        vim.handle(Key::char('g'));
+        assert_eq!(
+            vim.handle(Key::char('g')),
+            Action::Move {
+                motion: Motion::FileStart,
+                count: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn g_then_esc_resets() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('g'));
+        assert_eq!(vim.mode(), Mode::WaitingForSecondG);
+        vim.handle(Key::special(KeyCode::Esc));
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    // -- M3.1: visual count prefix -----------------------------------------
+
+    #[test]
+    fn visual_mode_respects_count_prefix() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('v')); // enter visual
+        vim.handle(Key::char('3')); // count
+        vim.handle(Key::char('j')); // should move 3 down
+        assert_eq!(
+            vim.mode(),
+            Mode::Visual,
+            "visual mode should persist after counted motion"
+        );
+    }
+
+    #[test]
+    fn visual_count_j_motion() {
+        let mut vim = Vim::new();
+        vim.handle(Key::char('v'));
+        vim.handle(Key::char('2'));
+        assert_eq!(
+            vim.handle(Key::char('j')),
+            Action::Move {
+                motion: Motion::Down,
+                count: 2,
+            }
+        );
     }
 }
