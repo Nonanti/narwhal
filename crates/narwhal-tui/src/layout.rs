@@ -7,9 +7,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::theme::Theme;
 use crate::widgets::{
     ChartPlaceholder, ChartView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
-    PivotPlaceholder, PivotTableView, ResultDisplay, ResultView, SidebarView,
-    editor_cursor_anchor, render_chart, render_chart_placeholder, render_completion_popup,
-    render_editor, render_pivot, render_pivot_placeholder, render_results, render_sidebar,
+    PivotPlaceholder, PivotTableView, ResultDisplay, ResultView, SidebarView, editor_cursor_anchor,
+    render_chart, render_chart_placeholder, render_completion_popup, render_editor, render_pivot,
+    render_pivot_placeholder, render_results, render_sidebar,
 };
 
 /// Hit-test regions computed during the last render. Stored on `AppCore`

@@ -32,7 +32,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.2.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Nonantiy <nonantiy1@gmail.com>"]
@@ -133,34 +133,34 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # `cargo publish` produces a manifest the registry accepts — path is
 # used for local development, version for the published artefact.
 # Keep these in lock-step with `workspace.package.version`.
-narwhal-core = { path = "crates/narwhal-core", version = "1.0.0" }
-narwhal-config = { path = "crates/narwhal-config", version = "1.0.0" }
-narwhal-sql = { path = "crates/narwhal-sql", version = "1.0.0" }
-narwhal-pool = { path = "crates/narwhal-pool", version = "1.0.0" }
-narwhal-history = { path = "crates/narwhal-history", version = "1.0.0" }
-narwhal-audit = { path = "crates/narwhal-audit", version = "1.0.0" }
-narwhal-drivers = { path = "crates/narwhal-drivers", version = "1.0.0", default-features = false }
-narwhal-domain = { path = "crates/narwhal-domain", version = "1.0.0" }
-narwhal-commands = { path = "crates/narwhal-commands", version = "1.0.0" }
-narwhal-schema-diff = { path = "crates/narwhal-schema-diff", version = "1.0.0" }
-narwhal-plugin = { path = "crates/narwhal-plugin", version = "1.0.0" }
-narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "1.0.0" }
-narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "1.0.0" }
+narwhal-core = { path = "crates/narwhal-core", version = "2.0.0" }
+narwhal-config = { path = "crates/narwhal-config", version = "2.0.0" }
+narwhal-sql = { path = "crates/narwhal-sql", version = "2.0.0" }
+narwhal-pool = { path = "crates/narwhal-pool", version = "2.0.0" }
+narwhal-history = { path = "crates/narwhal-history", version = "2.0.0" }
+narwhal-audit = { path = "crates/narwhal-audit", version = "2.0.0" }
+narwhal-drivers = { path = "crates/narwhal-drivers", version = "2.0.0", default-features = false }
+narwhal-domain = { path = "crates/narwhal-domain", version = "2.0.0" }
+narwhal-commands = { path = "crates/narwhal-commands", version = "2.0.0" }
+narwhal-schema-diff = { path = "crates/narwhal-schema-diff", version = "2.0.0" }
+narwhal-plugin = { path = "crates/narwhal-plugin", version = "2.0.0" }
+narwhal-plugin-lua = { path = "crates/narwhal-plugin-lua", version = "2.0.0" }
+narwhal-plugin-wasm = { path = "crates/narwhal-plugin-wasm", version = "2.0.0" }
 mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }
 # T1-T5-A: WASM runtime — pinned so plugin SDK and host agree on the
 # component-model ABI. wasmtime 45 ships the stable component model
 # wired below; `wat` is dev-only for in-tree fixture components.
 wasmtime = { version = "45", default-features = false, features = ["runtime", "component-model", "cranelift", "parallel-compilation", "async"] }
 wat = "1.0"
-narwhal-vim = { path = "crates/narwhal-vim", version = "1.0.0" }
-narwhal-diagram = { path = "crates/narwhal-diagram", version = "1.0.0" }
+narwhal-vim = { path = "crates/narwhal-vim", version = "2.0.0" }
+narwhal-diagram = { path = "crates/narwhal-diagram", version = "2.0.0" }
 # T2-T3-C: embedded LSP client.
-narwhal-lsp = { path = "crates/narwhal-lsp", version = "1.0.0" }
+narwhal-lsp = { path = "crates/narwhal-lsp", version = "2.0.0" }
 # T2-T4-D: pivot table aggregation.
-narwhal-pivot = { path = "crates/narwhal-pivot", version = "1.0.0" }
-narwhal-tui = { path = "crates/narwhal-tui", version = "1.0.0" }
-narwhal-app = { path = "crates/narwhal-app", version = "1.0.0" }
-narwhal-mcp = { path = "crates/narwhal-mcp", version = "1.0.0" }
+narwhal-pivot = { path = "crates/narwhal-pivot", version = "2.0.0" }
+narwhal-tui = { path = "crates/narwhal-tui", version = "2.0.0" }
+narwhal-app = { path = "crates/narwhal-app", version = "2.0.0" }
+narwhal-mcp = { path = "crates/narwhal-mcp", version = "2.0.0" }
 
 # Tree-sitter SQL parser (T1-T3-A). Pinned to 0.26 / 0.3 — the SQL
 # grammar tracks the parser ABI in lockstep, so bumping either side

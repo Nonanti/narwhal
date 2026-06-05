@@ -11,9 +11,17 @@ use serde_json::{Value, json};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{Tool, ToolOutput, cap_response};
+use crate::tools::{Tool, ToolOutput};
 
 pub struct DescribeSchemaTool;
+
+impl DescribeSchemaTool {
+    const NAME: &'static str = "describe_schema";
+    const DESCRIPTION: &'static str = "Return the schema tree (schemas and their tables/views) of a \
+         named connection. Use `list_connections` first to discover valid \
+         names. The call opens a short-lived connection — no persistent \
+         session is kept open between MCP calls.";
+}
 
 #[derive(Serialize)]
 struct SchemaView {
@@ -29,15 +37,20 @@ struct TableView {
 
 #[async_trait]
 impl Tool for DescribeSchemaTool {
-    fn name(&self) -> &'static str {
-        "describe_schema"
+    fn name(&self) -> &str {
+        Self::NAME
     }
 
-    fn description(&self) -> &'static str {
-        "Return the schema tree (schemas and their tables/views) of a \
-         named connection. Use `list_connections` first to discover valid \
-         names. The call opens a short-lived connection — no persistent \
-         session is kept open between MCP calls."
+    fn description(&self) -> &str {
+        Self::DESCRIPTION
+    }
+
+    fn descriptor_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::NAME)
+    }
+
+    fn descriptor_description(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(Self::DESCRIPTION)
     }
 
     fn input_schema(&self) -> Value {
@@ -108,7 +121,6 @@ impl Tool for DescribeSchemaTool {
 
         // H2: clamp the response body so a catalog with tens of
         // thousands of tables cannot blow the agent's context budget.
-        let (text, _truncated) = cap_response(text, "describe_schema");
         Ok(ToolOutput::ok(text))
     }
 }

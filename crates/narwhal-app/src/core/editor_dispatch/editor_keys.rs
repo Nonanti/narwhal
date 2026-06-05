@@ -233,7 +233,23 @@ impl AppCore {
                     .apply_motion(domain_motion(motion), count);
             }
             Action::InsertText(text) => {
-                self.ui.tabs[self.ui.active_tab].editor.insert_str(&text);
+                // Review fix M7 / MR-M3: warn the user when a
+                // multi-line paste collapses the secondary-cursor
+                // set. The buffer drops them silently (paste-into-
+                // multi-cursor is v2.1 scope); using
+                // `status.notify()` gives the warning a TTL so it
+                // isn't overwritten by the very next keystroke's
+                // status update.
+                let tab = &mut self.ui.tabs[self.ui.active_tab];
+                let had_secondaries = !tab.editor.secondary_cursors().is_empty();
+                let multi_line = text.contains('\n');
+                tab.editor.insert_str(&text);
+                if had_secondaries && multi_line {
+                    self.ui.status.notify(
+                        "multi-line paste collapsed secondary cursors",
+                        std::time::Duration::from_secs(3),
+                    );
+                }
             }
             Action::DeleteChar => {
                 self.ui.tabs[self.ui.active_tab].editor.delete_char();

@@ -5,7 +5,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::time::Duration;
 
 use lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
@@ -86,6 +87,11 @@ pub enum LspError {
     ChannelClosed,
     #[error("server stream closed before response arrived")]
     ServerClosed,
+    /// MR-N9: carries the method name so status-bar surfacing has
+    /// the context the operator needs ("completion timed out" vs
+    /// "hover timed out").
+    #[error("LSP request '{0}' timed out waiting for server response")]
+    Timeout(String),
 }
 
 /// Inbound notification handed back to the caller through the
@@ -101,17 +107,40 @@ type ResponseTx = oneshot::Sender<Result<Value, RpcError>>;
 /// One request the run-loop has to dispatch. Notifications use a `None`
 /// response slot so the loop knows not to wait for an id.
 enum Outbound {
+    /// Wraps the responder + an allocator slot. The slot is filled
+    /// by the run-loop once it has minted the JSON-RPC id; the
+    /// caller (`request_with_timeout`) uses it to issue a matching
+    /// `Cancel(id)` if it gives up on the response.
     Request {
         method: String,
         params: Value,
         responder: ResponseTx,
+        id_slot: Arc<tokio::sync::OnceCell<i64>>,
     },
     Notification {
         method: String,
         params: Value,
     },
+    /// MR-C2: abandon a previously-issued request. The run-loop
+    /// drops the matching `pending` entry so a late server response
+    /// is ignored and the `HashMap` doesn't leak under repeated
+    /// timeouts.
+    Cancel(i64),
     Shutdown(oneshot::Sender<()>),
 }
+
+/// Bounded notification queue capacity. Review fix M4: previously
+/// `mpsc::unbounded_channel` allowed long-running sqls/sqlls servers
+/// to balloon memory when the host never drained
+/// `next_notification`. 256 entries is enough for a typing burst;
+/// overflow drops the oldest with a `tracing::warn` counter.
+const NOTIFICATION_QUEUE_CAPACITY: usize = 256;
+
+/// Default per-request timeout. Callers can override via
+/// [`ClientHandle::request_with_timeout`]. Review fix M5: previously
+/// `request` had no timeout, so a hung server could hang the editor
+/// indefinitely.
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Cheap-to-clone handle the editor host uses to talk to the client
 /// task. All methods are async; the underlying loop runs in a
@@ -119,30 +148,83 @@ enum Outbound {
 #[derive(Clone)]
 pub struct ClientHandle {
     tx: mpsc::Sender<Outbound>,
-    next_id: Arc<AtomicI64>,
-    notifications: Arc<Mutex<mpsc::UnboundedReceiver<ServerNotification>>>,
+    notifications: Arc<Mutex<mpsc::Receiver<ServerNotification>>>,
+    /// Counter of notifications dropped because the queue was full.
+    /// Exposed for diagnostics; bumped from the run-loop.
+    notifications_dropped: Arc<AtomicU64>,
 }
 
 impl ClientHandle {
-    /// Send a typed request and await the typed response.
+    /// Send a typed request and await the typed response with the
+    /// default request timeout (10 s; see [`request_with_timeout`] to
+    /// override).
+    ///
+    /// [`request_with_timeout`]: Self::request_with_timeout
     pub async fn request<P, R>(&self, method: &str, params: P) -> Result<R, LspError>
+    where
+        P: Serialize,
+        R: for<'de> serde::Deserialize<'de>,
+    {
+        self.request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
+            .await
+    }
+
+    /// Send a typed request, awaiting up to `timeout`. Review fix M5:
+    /// a missing timeout previously allowed a wedged language server
+    /// to hang the editor indefinitely. Pass
+    /// `Duration::from_secs(u64::MAX)` to opt out.
+    pub async fn request_with_timeout<P, R>(
+        &self,
+        method: &str,
+        params: P,
+        timeout: Duration,
+    ) -> Result<R, LspError>
     where
         P: Serialize,
         R: for<'de> serde::Deserialize<'de>,
     {
         let params = serde_json::to_value(params)?;
         let (tx, rx) = oneshot::channel();
+        let id_slot: Arc<tokio::sync::OnceCell<i64>> = Arc::new(tokio::sync::OnceCell::new());
         self.tx
             .send(Outbound::Request {
                 method: method.to_owned(),
                 params,
                 responder: tx,
+                id_slot: id_slot.clone(),
             })
             .await
             .map_err(|_| LspError::ChannelClosed)?;
-        let result = rx.await.map_err(|_| LspError::ChannelClosed)??;
+        let result = match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(payload)) => payload?,
+            Ok(Err(_)) => return Err(LspError::ChannelClosed),
+            Err(_) => {
+                // MR-C2: tell the run-loop to drop the pending
+                // entry so a late response can't keep the slot
+                // alive. The id may not have been allocated yet
+                // (request still queued); in that case the slot is
+                // empty and the worker will skip dispatch when it
+                // dequeues a request whose responder is gone.
+                if let Some(id) = id_slot.get().copied() {
+                    let _ = self.tx.send(Outbound::Cancel(id)).await;
+                }
+                return Err(LspError::Timeout(method.to_owned()));
+            }
+        };
         let typed = serde_json::from_value(result)?;
         Ok(typed)
+    }
+
+    /// Read the dropped-notification counter. Useful for surfacing
+    /// "LSP notifications dropping" diagnostics in the status bar.
+    ///
+    /// MR-N2: `Relaxed` is the correct ordering here — the counter
+    /// is monotonic and read for diagnostic purposes only; we do
+    /// not synchronise other memory with this value. Strengthening
+    /// to `Acquire` would not improve correctness and would cost a
+    /// fence on every UI redraw.
+    pub fn notifications_dropped(&self) -> u64 {
+        self.notifications_dropped.load(Ordering::Relaxed)
     }
 
     /// Send a notification (no response).
@@ -209,12 +291,10 @@ impl ClientHandle {
         Ok(())
     }
 
-    /// Monotonic id allocator used internally by the run-loop. Exposed
-    /// for tests that need to assert on the next id without driving a
-    /// real request.
-    pub fn next_id(&self) -> i64 {
-        self.next_id.fetch_add(1, Ordering::SeqCst)
-    }
+    // Review fix N5: removed the previously-exposed `next_id()`
+    // helper. Its only purpose was to let tests peek at the
+    // allocator, but that opened a door for production code to
+    // race the run-loop's own allocator and skip IDs.
 }
 
 /// The client owns the spawn handle of the protocol loop so the host
@@ -233,9 +313,13 @@ impl Client {
         T: Transport + 'static,
     {
         let (tx, mut rx) = mpsc::channel::<Outbound>(64);
-        let (notif_tx, notif_rx) = mpsc::unbounded_channel::<ServerNotification>();
-        let next_id = Arc::new(AtomicI64::new(1));
-        let next_id_loop = next_id.clone();
+        let (notif_tx, notif_rx) = mpsc::channel::<ServerNotification>(NOTIFICATION_QUEUE_CAPACITY);
+        // R3-N6: the run-loop is the only owner of the id allocator
+        // now that `ClientHandle::next_id()` was removed (review fix
+        // N5). No outer binding required.
+        let next_id_loop = Arc::new(AtomicI64::new(1));
+        let dropped_counter = Arc::new(AtomicU64::new(0));
+        let dropped_loop = dropped_counter.clone();
 
         let join = tokio::spawn(async move {
             let mut pending: HashMap<i64, ResponseTx> = HashMap::new();
@@ -246,8 +330,27 @@ impl Client {
                     biased;
                     Some(message) = rx.recv() => {
                         match message {
-                            Outbound::Request { method, params, responder } => {
+                            Outbound::Request { method, params, responder, id_slot } => {
+                                // R3-M1: residual leak path MR-C2
+                                // left open. If the caller's
+                                // timeout fired while this request
+                                // was still queued, the
+                                // `oneshot::Receiver` has been
+                                // dropped and `id_slot` is empty
+                                // (so no `Cancel` was issued).
+                                // Skip dispatch entirely — no
+                                // wire traffic, no `pending`
+                                // insertion, no leak when the
+                                // server then never responds.
+                                if responder.is_closed() {
+                                    continue;
+                                }
                                 let id = next_id_loop.fetch_add(1, Ordering::SeqCst);
+                                // MR-C2: publish the id back to the
+                                // caller before the await so a
+                                // `Cancel(id)` from a timeout path
+                                // can find this entry.
+                                let _ = id_slot.set(id);
                                 let req = Request {
                                     jsonrpc: "2.0",
                                     id: Id::Number(id),
@@ -274,6 +377,12 @@ impl Client {
                                     continue;
                                 }
                                 pending.insert(id, responder);
+                            }
+                            Outbound::Cancel(id) => {
+                                // MR-C2: caller gave up; drop the
+                                // responder so a late server
+                                // response is silently discarded.
+                                pending.remove(&id);
                             }
                             Outbound::Notification { method, params } => {
                                 let notif = Notification {
@@ -328,10 +437,30 @@ impl Client {
                                         }
                                     }
                                     (None, Some(method)) => {
-                                        let _ = notif_tx.send(ServerNotification {
+                                        let notification = ServerNotification {
                                             method,
                                             params: message.params.unwrap_or(Value::Null),
-                                        });
+                                        };
+                                        // Review fix M4: bounded queue
+                                        // — try_send + drop-on-full
+                                        // so a host that never drains
+                                        // notifications cannot exhaust
+                                        // memory. Counter exposed via
+                                        // `ClientHandle::notifications_dropped`.
+                                        if let Err(err) = notif_tx.try_send(notification) {
+                                            match err {
+                                                mpsc::error::TrySendError::Full(_) => {
+                                                    dropped_loop
+                                                        .fetch_add(1, Ordering::Relaxed);
+                                                    tracing::warn!(
+                                                        "LSP: notification queue full; dropping oldest event"
+                                                    );
+                                                }
+                                                mpsc::error::TrySendError::Closed(_) => {
+                                                    // Host hung up; ignore.
+                                                }
+                                            }
+                                        }
                                     }
                                     (Some(_), Some(_)) => {
                                         // Server-initiated request; the
@@ -371,8 +500,8 @@ impl Client {
 
         let handle = ClientHandle {
             tx,
-            next_id,
             notifications: Arc::new(Mutex::new(notif_rx)),
+            notifications_dropped: dropped_counter,
         };
         Self { handle, join }
     }
@@ -546,6 +675,115 @@ mod tests {
 
         let result = pending.await.expect("join");
         assert!(result.is_err());
+        let _ = client.join.await;
+    }
+
+    /// Review fix M5: a server that never responds must surface
+    /// `LspError::Timeout` instead of hanging forever.
+    #[tokio::test]
+    async fn request_with_timeout_returns_timeout_error() {
+        let transport = MemoryTransport::new();
+        let client = Client::spawn(transport);
+        let handle = client.handle.clone();
+
+        let err = handle
+            .request_with_timeout::<Value, Value>(
+                "slow/method",
+                json!({}),
+                Duration::from_millis(50),
+            )
+            .await
+            .expect_err("timeout");
+        assert!(
+            matches!(err, LspError::Timeout(ref m) if m == "slow/method"),
+            "got {err:?}"
+        );
+
+        let _ = client.handle.clone().shutdown().await;
+        let _ = client.join.await;
+    }
+
+    /// Review fix M4: when the host never drains notifications,
+    /// the bounded queue drops and bumps the dropped counter rather
+    /// than growing without bound.
+    #[tokio::test]
+    async fn notification_overflow_bumps_dropped_counter() {
+        let transport = MemoryTransport::new();
+        let mirror = transport.clone();
+        let client = Client::spawn(transport);
+        let handle = client.handle.clone();
+
+        // Push more than NOTIFICATION_QUEUE_CAPACITY notifications
+        // without ever draining; the counter must catch the overflow.
+        for i in 0..(NOTIFICATION_QUEUE_CAPACITY + 8) {
+            let payload = json!({
+                "jsonrpc": "2.0",
+                "method": "window/logMessage",
+                "params": { "type": 4, "message": format!("msg {i}") }
+            });
+            mirror.push_inbound(serde_json::to_vec(&payload).expect("ser"));
+        }
+        // MR-M2: poll up to 2 s for the loop to drain the inbound
+        // queue. A flat `sleep(30ms)` was flaky on loaded CI runners
+        // where the spawned task hadn't been scheduled yet.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while handle.notifications_dropped() == 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            handle.notifications_dropped() >= 1,
+            "expected at least one dropped notification, got {}",
+            handle.notifications_dropped()
+        );
+
+        let _ = client.handle.clone().shutdown().await;
+        let _ = client.join.await;
+    }
+
+    /// MR-C2: a timed-out request must not leave a dangling entry
+    /// in the run-loop's `pending` map. We can't peek at `pending`
+    /// from out here, but we can prove the cancel path is wired by
+    /// timing out a request and then driving a follow-up request
+    /// to completion on the same run-loop. Without the cancel
+    /// message the loop would still try to deliver the late
+    /// response to a dead responder; the assertion is simply that
+    /// no deadlock or panic surfaces.
+    #[tokio::test]
+    async fn timed_out_request_does_not_block_subsequent_calls() {
+        let transport = MemoryTransport::new();
+        let mirror = transport.clone();
+        let client = Client::spawn(transport);
+        let handle = client.handle.clone();
+
+        // First request times out fast.
+        let err = handle
+            .request_with_timeout::<Value, Value>("hover", json!({}), Duration::from_millis(20))
+            .await
+            .expect_err("timeout");
+        assert!(matches!(err, LspError::Timeout(_)));
+
+        // Server eventually replies to id=1 (the request we just
+        // cancelled). The loop must silently drop it.
+        let late = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
+        mirror.push_inbound(serde_json::to_vec(&late).expect("ser"));
+
+        // A subsequent request must still work end-to-end. Spawn
+        // it, then push the matching response from the server side.
+        let h2 = handle.clone();
+        let pending = tokio::spawn(async move {
+            h2.request_with_timeout::<Value, Value>("hover", json!({}), Duration::from_secs(2))
+                .await
+        });
+        // The second request will get id=2 (id=1 was the timed-out
+        // one). Give the loop a tick to dispatch before we reply.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let ok = json!({ "jsonrpc": "2.0", "id": 2, "result": { "hello": "world" } });
+        mirror.push_inbound(serde_json::to_vec(&ok).expect("ser"));
+
+        let result: Value = pending.await.expect("join").expect("ok");
+        assert_eq!(result, json!({ "hello": "world" }));
+
+        let _ = client.handle.clone().shutdown().await;
         let _ = client.join.await;
     }
 

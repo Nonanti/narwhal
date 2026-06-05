@@ -3107,7 +3107,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-app"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-audit"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "narwhal-history",
@@ -3168,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-commands"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3197,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-config"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "directories",
@@ -3221,7 +3221,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-core"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "serde",
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-diagram"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "insta",
  "narwhal-core",
@@ -3244,7 +3244,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-domain"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "narwhal-core",
  "serde",
@@ -3252,7 +3252,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-drivers"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -3286,7 +3286,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-history"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -3304,7 +3304,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-lsp"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "futures",
  "lsp-types",
@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-mcp"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-pivot"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "narwhal-core",
  "thiserror 1.0.69",
@@ -3350,7 +3350,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-plugin"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "narwhal-core",
@@ -3363,7 +3363,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-plugin-lua"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "mlua",
@@ -3376,7 +3376,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-plugin-wasm"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "narwhal-config",
@@ -3395,7 +3395,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-pool"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "narwhal-core",
  "narwhal-drivers",
@@ -3408,17 +3408,18 @@ dependencies = [
 
 [[package]]
 name = "narwhal-schema-diff"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "narwhal-core",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
 name = "narwhal-sql"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "criterion",
  "memchr",
@@ -3431,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "narwhal-tui"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "criterion",
  "crossterm",
@@ -3449,14 +3450,14 @@ dependencies = [
 
 [[package]]
 name = "narwhal-vim"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "narwhaldb"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "chrono",

@@ -67,8 +67,10 @@ struct Inner {
     block_on_full: bool,
     sink_count: usize,
     /// Cross-clone shutdown signal. The worker selects on both the
-    /// receive channel and this notify; a single `notify_one` is
-    /// enough because the worker exits as soon as it observes it.
+    /// receive channel and this notify; on shutdown the worker
+    /// closes its receiver, which is what releases parked
+    /// `block_on_full=true` emitters with `Closed` instead of the
+    /// deadlock we had before review fix M1 / MR-C1.
     shutdown: Arc<Notify>,
     /// Worker join handle, taken once on shutdown. `Mutex` because
     /// shutdown is callable from any task.
@@ -183,6 +185,11 @@ impl AuditService {
     /// In lossy mode this returns immediately even when the channel
     /// is full (the event is dropped and a `tracing::warn` is
     /// emitted). In block mode this awaits the channel.
+    ///
+    /// Review fix M1 / MR-C1: no per-emit mutex. The shutdown path
+    /// closes the receiver, so any `block_on_full=true` emitter
+    /// parked here wakes up with `SendError::Closed` instead of
+    /// deadlocking.
     pub async fn emit(&self, event: AuditEvent) {
         if self.inner.block_on_full {
             if let Err(err) = self.inner.tx.send(event).await {
@@ -218,9 +225,22 @@ impl AuditService {
     ///
     /// Idempotent: calling shutdown twice from concurrent tasks is
     /// safe — the second call observes `None` and returns immediately.
+    ///
+    /// Review fix M1 / MR-C1: the worker calls `rx.close()` as the
+    /// first thing it does on shutdown. That closes the channel
+    /// from the receiver side and wakes any `block_on_full=true`
+    /// emitter parked on `send().await` with `SendError::Closed` —
+    /// no Mutex-wrapped sender required.
     pub async fn shutdown(&self) {
-        let mut guard = self.inner.join.lock().await;
-        let Some(join) = guard.take() else {
+        // R3-N2: take the join handle inside a tight scope so we
+        // release the Mutex before awaiting termination. A second
+        // concurrent `shutdown()` call now observes `None`
+        // immediately instead of blocking on the live first call.
+        let join = {
+            let mut guard = self.inner.join.lock().await;
+            guard.take()
+        };
+        let Some(join) = join else {
             return;
         };
         self.inner.shutdown.notify_one();
@@ -244,8 +264,12 @@ async fn worker(
                 process_one(event, &sinks, &redactor).await;
             }
             () = shutdown.notified() => {
-                // Drain any events already buffered, then exit.
-                while let Ok(event) = rx.try_recv() {
+                // MR-C1: close the receiver first so any parked
+                // `block_on_full=true` emitter wakes with `Closed`,
+                // then drain whatever is already in the buffer and
+                // exit cleanly.
+                rx.close();
+                while let Some(event) = rx.recv().await {
                     process_one(event, &sinks, &redactor).await;
                 }
                 break;
@@ -374,6 +398,45 @@ mod tests {
     #[tokio::test]
     async fn no_sinks_returns_none() {
         assert!(AuditService::builder().start().is_none());
+    }
+
+    /// Review fix M1: a shutdown that races with a block-mode
+    /// `emit` must close the channel rather than deadlock. Without
+    /// the fix this test hangs indefinitely.
+    #[tokio::test]
+    async fn block_on_full_shutdown_does_not_deadlock() {
+        let s = Arc::new(CapturingSink::default());
+        let svc = AuditService::builder()
+            .with_sink(s.clone())
+            .block_on_full(true)
+            .channel_capacity(1)
+            .start()
+            .unwrap();
+        // Fill the channel; the worker is still draining so capacity
+        // is racy, but with channel_capacity=1 we're guaranteed to
+        // hit `Full` quickly. Spawn a couple of emitters parked on
+        // the channel, then shut down.
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let svc = svc.clone();
+            handles.push(tokio::spawn(async move {
+                svc.emit(AuditEvent::Configuration {
+                    change: "x".into(),
+                    by: "x".into(),
+                })
+                .await;
+            }));
+        }
+        // Give the emitters time to park inside `sender.send().await`.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        // The shutdown call must return without waiting on the
+        // parked emitters.
+        tokio::time::timeout(std::time::Duration::from_secs(2), svc.shutdown())
+            .await
+            .expect("shutdown deadlocked despite block_on_full");
+        for handle in handles {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
+        }
     }
 
     #[tokio::test]

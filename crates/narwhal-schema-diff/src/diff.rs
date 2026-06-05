@@ -12,6 +12,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use tracing::warn;
+
 use narwhal_core::schema::{
     Column, ForeignKey, Index, ReferentialAction, Table, TableSchema, UniqueConstraint,
 };
@@ -294,14 +296,15 @@ fn diff_one_table(source: &TableSchema, target: &TableSchema) -> Option<TableCha
 }
 
 fn diff_columns(source: &[Column], target: &[Column]) -> Vec<ColumnChange> {
-    let source_by_name: BTreeMap<String, &Column> = source
-        .iter()
-        .map(|c| (c.name.to_ascii_lowercase(), c))
-        .collect();
-    let target_by_name: BTreeMap<String, &Column> = target
-        .iter()
-        .map(|c| (c.name.to_ascii_lowercase(), c))
-        .collect();
+    // R3-M2: MR-M4 originally only routed FK / unique / index
+    // lookups through `index_by_lower_name`; columns kept the old
+    // silent-overwrite `.collect::<BTreeMap>()`. That left a
+    // quoted-identifier hole in Postgres (`"Email"` vs `"email"`
+    // are distinct columns) and a `COLLATE`-sensitive hole in
+    // MSSQL. Route through the same helper so collisions emit
+    // `tracing::warn` for diagnostic visibility.
+    let source_by_name = index_by_lower_name(source.iter(), |c| &c.name, "column");
+    let target_by_name = index_by_lower_name(target.iter(), |c| &c.name, "column");
 
     let mut keys: BTreeSet<String> = BTreeSet::new();
     keys.extend(source_by_name.keys().cloned());
@@ -344,17 +347,12 @@ fn diff_columns(source: &[Column], target: &[Column]) -> Vec<ColumnChange> {
 fn diff_indexes(source: &[Index], target: &[Index]) -> Vec<IndexChange> {
     // Indexes are identified by name; we exclude the implicit primary
     // -key index because the diff for that lives on the column /
-    // table-creation level.
-    let source_by_name: BTreeMap<String, &Index> = source
-        .iter()
-        .filter(|i| !i.primary)
-        .map(|i| (i.name.clone(), i))
-        .collect();
-    let target_by_name: BTreeMap<String, &Index> = target
-        .iter()
-        .filter(|i| !i.primary)
-        .map(|i| (i.name.clone(), i))
-        .collect();
+    // table-creation level. Review fix N1 / MR-M4: case-insensitive
+    // index with warn-on-collision.
+    let source_by_name =
+        index_by_lower_name(source.iter().filter(|i| !i.primary), |i| &i.name, "index");
+    let target_by_name =
+        index_by_lower_name(target.iter().filter(|i| !i.primary), |i| &i.name, "index");
 
     let mut keys: BTreeSet<String> = BTreeSet::new();
     keys.extend(source_by_name.keys().cloned());
@@ -386,10 +384,14 @@ fn indexes_differ(left: &Index, right: &Index) -> bool {
 }
 
 fn diff_foreign_keys(source: &[ForeignKey], target: &[ForeignKey]) -> Vec<ForeignKeyChange> {
-    let source_by_name: BTreeMap<String, &ForeignKey> =
-        source.iter().map(|f| (f.name.clone(), f)).collect();
-    let target_by_name: BTreeMap<String, &ForeignKey> =
-        target.iter().map(|f| (f.name.clone(), f)).collect();
+    // Review fix N1 / MR-M4: case-insensitive FK index. Cross-
+    // dialect diffs (Postgres lower-cased vs MSSQL case-preserved)
+    // used to surface phantom Add/Remove pairs for the same logical
+    // constraint. `index_by_lower_name` emits a `tracing::warn` on
+    // case-only collisions so silent overwrites can't hide a real
+    // duplicate-name bug in the source catalog.
+    let source_by_name = index_by_lower_name(source.iter(), |f| &f.name, "foreign key");
+    let target_by_name = index_by_lower_name(target.iter(), |f| &f.name, "foreign key");
 
     let mut keys: BTreeSet<String> = BTreeSet::new();
     keys.extend(source_by_name.keys().cloned());
@@ -439,10 +441,10 @@ fn diff_unique(
     source: &[UniqueConstraint],
     target: &[UniqueConstraint],
 ) -> Vec<UniqueConstraintChange> {
-    let source_by_name: BTreeMap<String, &UniqueConstraint> =
-        source.iter().map(|u| (u.name.clone(), u)).collect();
-    let target_by_name: BTreeMap<String, &UniqueConstraint> =
-        target.iter().map(|u| (u.name.clone(), u)).collect();
+    // Review fix N1 / MR-M4: case-insensitive index, same warning
+    // semantics as the FK diff.
+    let source_by_name = index_by_lower_name(source.iter(), |u| &u.name, "unique constraint");
+    let target_by_name = index_by_lower_name(target.iter(), |u| &u.name, "unique constraint");
 
     let mut keys: BTreeSet<String> = BTreeSet::new();
     keys.extend(source_by_name.keys().cloned());
@@ -465,4 +467,38 @@ fn diff_unique(
         }
     }
     out
+}
+
+/// MR-M4: build a case-insensitive lookup over `items` keyed by the
+/// lower-cased name returned from `name_of`. Two items whose names
+/// differ only in case both land on the same key; the first one
+/// wins and the conflict is reported via `tracing::warn` so silent
+/// overwrites don't hide an upstream catalog bug.
+fn index_by_lower_name<'a, T, I, F>(
+    items: I,
+    name_of: F,
+    kind: &'static str,
+) -> BTreeMap<String, &'a T>
+where
+    T: 'a,
+    I: IntoIterator<Item = &'a T>,
+    F: Fn(&T) -> &str,
+{
+    let mut map: BTreeMap<String, &'a T> = BTreeMap::new();
+    for item in items {
+        let original = name_of(item).to_owned();
+        let key = original.to_ascii_lowercase();
+        if let Some(prev) = map.insert(key.clone(), item) {
+            let prev_name = name_of(prev).to_owned();
+            // Restore the original entry; "first-wins" is a deliberate
+            // policy choice so callers get a deterministic result.
+            map.insert(key.clone(), prev);
+            warn!(
+                target: "narwhal::schema_diff",
+                kind, key, prev_name, dropped_name = original,
+                "case-only {kind} name collision; keeping first occurrence"
+            );
+        }
+    }
+    map
 }

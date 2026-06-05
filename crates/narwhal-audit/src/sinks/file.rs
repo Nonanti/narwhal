@@ -66,8 +66,10 @@ pub struct FileSink {
 struct State {
     /// The resolved (post-strftime) path the active handle points at.
     active_path: PathBuf,
-    /// Open append handle. Recreated after rotation.
-    file: File,
+    /// Open append handle. `Option` so [`FileSink::rotate`] can
+    /// `take()` it during the rename window (review fix M2). Outside
+    /// rotation the handle is always `Some`.
+    file: Option<File>,
     /// Bytes written since last open. Tracked locally to avoid an
     /// fstat per write.
     bytes: u64,
@@ -98,30 +100,47 @@ impl FileSink {
             cfg,
             state: Mutex::new(State {
                 active_path,
-                file,
+                file: Some(file),
                 bytes,
             }),
         })
     }
 
+    /// Review fix M2: drop the outgoing handle via `Option::take`
+    /// instead of swapping in a placeholder `/dev/null` file opened
+    /// with sync `std::fs`. The previous placeholder pattern blocked
+    /// the tokio executor on the `open()` syscall while holding the
+    /// state mutex.
+    ///
+    /// Review fix M3: stamp is millisecond-granularity and probes
+    /// for an existing rotated file, falling back to a monotonic
+    /// suffix. This protects high-throughput audit deployments from
+    /// silently losing a rotated file when two rotations happen
+    /// inside the same second.
     async fn rotate(&self, state: &mut State) -> Result<(), SinkError> {
-        // Suffix the active file with a UTC timestamp, then reopen
-        // the original template. We sync_data the outgoing handle so
-        // operators can ship the rotated artefact safely.
-        state.file.sync_data().await?;
-        drop(std::mem::replace(
-            &mut state.file,
-            // Placeholder; replaced before the next read.
-            tokio::fs::File::from_std(
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(devnull_path())
-                    .map_err(SinkError::Io)?,
-            ),
-        ));
-        let stamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let rotated = rotated_name(&state.active_path, &stamp);
-        tokio::fs::rename(&state.active_path, &rotated).await?;
+        // Sync + drop the outgoing handle so the rename below sees a
+        // closed file on Windows (which forbids renaming open files)
+        // and operators can ship the rotated artefact safely.
+        if let Some(outgoing) = state.file.take() {
+            outgoing.sync_data().await?;
+            drop(outgoing);
+        }
+        // MR-M1: rename + create-target atomically inside the same
+        // probe loop. Each iteration tries `OpenOptions::create_new`
+        // on the candidate path; only if that succeeds do we
+        // `rename(active -> candidate)`. The transient empty file
+        // is removed immediately on success. This closes the TOCTOU
+        // hole the previous `metadata().is_err() -> rename` pattern
+        // had against concurrent writers.
+        let rotated = self.pick_rotated_name_atomic(&state.active_path).await?;
+        // R3-N1: clean up the placeholder if the rename fails so a
+        // permission / disk-full failure doesn't leak an empty
+        // file named like a real rotated artefact (which would
+        // confuse log shippers and inflate next-stamp suffix probes).
+        if let Err(e) = tokio::fs::rename(&state.active_path, &rotated).await {
+            let _ = tokio::fs::remove_file(&rotated).await;
+            return Err(SinkError::Io(e));
+        }
 
         let fresh_path = resolve_path(&self.cfg.path)?;
         if let Some(parent) = fresh_path.parent() {
@@ -135,11 +154,69 @@ impl FileSink {
             .open(&fresh_path)
             .await?;
         state.active_path = fresh_path;
-        state.file = fresh;
+        state.file = Some(fresh);
         state.bytes = 0;
         Ok(())
     }
+
+    /// MR-M1: pick a free rotated path *atomically*. Tries the
+    /// millisecond stamp first (common case), then numeric suffixes,
+    /// then a nanosecond stamp as a final hail-Mary; gives up after
+    /// [`MAX_ROTATION_ATTEMPTS`] with [`SinkError::Path`] so the
+    /// caller sees a real error instead of silently overwriting a
+    /// previous artefact.
+    async fn pick_rotated_name_atomic(&self, active: &Path) -> Result<PathBuf, SinkError> {
+        let stamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ").to_string();
+
+        async fn try_claim(candidate: &Path) -> std::io::Result<bool> {
+            match tokio::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(candidate)
+                .await
+            {
+                Ok(file) => {
+                    drop(file);
+                    // We only needed proof we could create the
+                    // path; the imminent `rename(active -> here)`
+                    // will replace this empty placeholder.
+                    Ok(true)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+                Err(e) => Err(e),
+            }
+        }
+
+        let primary = rotated_name(active, &stamp);
+        if try_claim(&primary).await? {
+            return Ok(primary);
+        }
+        for n in 1u32..MAX_ROTATION_ATTEMPTS {
+            let candidate = rotated_name(active, &format!("{stamp}-{n}"));
+            if try_claim(&candidate).await? {
+                return Ok(candidate);
+            }
+        }
+        // Last resort: nanosecond stamp. Still bounded — if even
+        // this fails we bail with a real error rather than
+        // overwrite.
+        let nano = Utc::now().format("%Y%m%dT%H%M%S%9fZ").to_string();
+        let candidate = rotated_name(active, &nano);
+        if try_claim(&candidate).await? {
+            return Ok(candidate);
+        }
+        Err(SinkError::Path(format!(
+            "audit log rotation suffix exhausted after {MAX_ROTATION_ATTEMPTS} attempts; \
+             stamp={stamp}, active={}",
+            active.display()
+        )))
+    }
 }
+
+/// Cap on how many `.<stamp>-<n>` suffixes we'll probe before bailing
+/// out. 1024 is generous — a process would have to perform that many
+/// rotations inside one millisecond to reach it.
+const MAX_ROTATION_ATTEMPTS: u32 = 1024;
 
 impl AuditSink for FileSink {
     fn write<'a>(
@@ -155,11 +232,17 @@ impl AuditSink for FileSink {
             if state.bytes.saturating_add(line_bytes) > self.cfg.rotate_bytes {
                 self.rotate(&mut state).await?;
             }
-            state.file.write_all(line.as_bytes()).await?;
-            state.file.write_all(b"\n").await?;
+            let file = state
+                .file
+                .as_mut()
+                .ok_or_else(|| SinkError::Path("file handle missing post-rotation".into()))?;
+            file.write_all(line.as_bytes()).await?;
+            file.write_all(b"\n").await?;
             state.bytes += line_bytes;
             if self.cfg.fsync_each_write {
-                state.file.sync_data().await?;
+                if let Some(file) = state.file.as_mut() {
+                    file.sync_data().await?;
+                }
             }
             Ok(())
         })
@@ -170,8 +253,10 @@ impl AuditSink for FileSink {
     ) -> Pin<Box<dyn std::future::Future<Output = Result<(), SinkError>> + Send + 'a>> {
         Box::pin(async move {
             let mut state = self.state.lock().await;
-            state.file.flush().await?;
-            state.file.sync_data().await?;
+            if let Some(file) = state.file.as_mut() {
+                file.flush().await?;
+                file.sync_data().await?;
+            }
             Ok(())
         })
     }
@@ -197,16 +282,6 @@ fn rotated_name(active: &Path, stamp: &str) -> PathBuf {
     s.push(".");
     s.push(stamp);
     PathBuf::from(s)
-}
-
-#[cfg(unix)]
-const fn devnull_path() -> &'static str {
-    "/dev/null"
-}
-
-#[cfg(windows)]
-const fn devnull_path() -> &'static str {
-    "NUL"
 }
 
 #[cfg(test)]

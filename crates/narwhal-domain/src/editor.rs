@@ -391,14 +391,21 @@ impl EditorBuffer {
             .map(|&(r, col)| (r, col, false))
             .collect();
         positions.push((self.cursor_row, self.cursor_col, true));
-        positions.sort_by_key(|&(r, c, _)| (r, c));
+        positions.sort_unstable_by_key(|&(r, c, _)| (r, c));
 
-        let mut shifts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        // Review fix N7 / MR-N7: per-row insert shift accumulated
+        // in a flat `Vec<usize>` indexed by row. Allocating once is
+        // cheaper than a `HashMap::new()` per keystroke. We use
+        // `.get(row)` / `.get_mut(row)` everywhere so a row beyond
+        // the snapshot length (would only happen on a future
+        // multi-line insert) is silently ignored instead of
+        // panicking.
+        let mut shifts: Vec<usize> = vec![0; self.lines.len()];
         let mut new_secondaries: Vec<(usize, usize)> = Vec::with_capacity(positions.len());
         let mut new_primary: (usize, usize) = (self.cursor_row, self.cursor_col);
 
         for (row, col_orig, is_primary) in positions {
-            let row_shift = *shifts.get(&row).unwrap_or(&0);
+            let row_shift = shifts.get(row).copied().unwrap_or(0);
             let col = col_orig + row_shift;
             if row >= self.lines.len() {
                 continue;
@@ -406,7 +413,9 @@ impl EditorBuffer {
             let line = &mut self.lines[row];
             let col = col.min(line.len());
             line.insert(col, c);
-            *shifts.entry(row).or_insert(0) += ch_len;
+            if let Some(slot) = shifts.get_mut(row) {
+                *slot += ch_len;
+            }
             let new_col = col + ch_len;
             if is_primary {
                 new_primary = (row, new_col);
@@ -434,11 +443,18 @@ impl EditorBuffer {
     }
 
     pub fn insert_str(&mut self, text: &str) {
-        // Multi-cursor insert_str collapses to the primary so callers
-        // pasting large blobs / newlines don't end up duplicating the
-        // payload at every secondary. The brief defers paste-into-
-        // multi-cursor behaviour to v2.1; for now we explicitly clear
-        // the secondary set so it's not silently desynced.
+        // MR-N11: paste-into-multi-cursor is intentionally out of
+        // scope for the T2-T3-D MVP. A multi-line `insert_str`
+        // collapses to the primary cursor so callers pasting large
+        // blobs / newlines don't end up duplicating the payload at
+        // every secondary. The dispatch layer
+        // (`Action::InsertText` in `editor_keys.rs`) surfaces a
+        // sticky `status.notify("multi-line paste collapsed
+        // secondary cursors", ...)` so the user sees why the set
+        // vanished. A proper paste-into-multi-cursor design (split
+        // the clipboard on newlines and route each chunk to one
+        // cursor, or replicate the full payload at every cursor)
+        // is tracked outside this milestone.
         if !self.secondary_cursors.is_empty() && text.contains('\n') {
             self.secondary_cursors.clear();
         }
@@ -486,14 +502,17 @@ impl EditorBuffer {
             .map(|&(r, col)| (r, col, false))
             .collect();
         positions.push((self.cursor_row, self.cursor_col, true));
-        positions.sort_by_key(|&(r, c, _)| (r, c));
+        positions.sort_unstable_by_key(|&(r, c, _)| (r, c));
 
-        let mut shifts: std::collections::HashMap<usize, isize> = std::collections::HashMap::new();
+        // Review fix N7 / MR-N7: flat `Vec` shift map; same
+        // reasoning as the insert path. Out-of-range rows are
+        // ignored via `.get()` / `.get_mut()` rather than panicking.
+        let mut shifts: Vec<isize> = vec![0; self.lines.len()];
         let mut new_secondaries: Vec<(usize, usize)> = Vec::with_capacity(positions.len());
         let mut new_primary: (usize, usize) = (self.cursor_row, self.cursor_col);
 
         for (row, col_orig, is_primary) in positions {
-            let row_shift = *shifts.get(&row).unwrap_or(&0);
+            let row_shift = shifts.get(row).copied().unwrap_or(0);
             let signed_col = col_orig as isize + row_shift;
             if signed_col <= 0 || row >= self.lines.len() {
                 // At the start of the line — cannot delete prev. Keep
@@ -525,7 +544,9 @@ impl EditorBuffer {
                 continue;
             }
             line.replace_range(start..col, "");
-            *shifts.entry(row).or_insert(0) -= removed as isize;
+            if let Some(slot) = shifts.get_mut(row) {
+                *slot -= removed as isize;
+            }
             let new_col = start;
             if is_primary {
                 new_primary = (row, new_col);
