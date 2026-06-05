@@ -105,7 +105,7 @@ impl DatabaseDriver for PostgresDriver {
                 let (client, connection) = pg_config
                     .connect(NoTls)
                     .await
-                    .map_err(|e| Error::Connection(e.to_string()))?;
+                    .map_err(|e| Error::connection_with("tokio-postgres connect", e))?;
                 spawn_connection(connection);
                 client
             }
@@ -114,7 +114,7 @@ impl DatabaseDriver for PostgresDriver {
                 let (client, connection) = pg_config
                     .connect(connector)
                     .await
-                    .map_err(|e| Error::Connection(e.to_string()))?;
+                    .map_err(|e| Error::connection_with("tokio-postgres connect", e))?;
                 spawn_connection(connection);
                 client
             }
@@ -246,7 +246,7 @@ fn map_pg_error(error: tokio_postgres::Error) -> Error {
             return Error::Cancelled;
         }
     }
-    Error::Query(error.to_string())
+    Error::query_with("tokio-postgres query failed", error)
 }
 
 fn quote_ident(name: &str) -> String {
@@ -860,7 +860,7 @@ impl Connection for PostgresConnection {
             .simple_query("SELECT 1")
             .await
             .map(|_| ())
-            .map_err(|e| Error::Connection(e.to_string()))
+            .map_err(|e| Error::connection_with("tokio-postgres ping", e))
     }
 
     /// Postgres has both a session-scoped *and* a transaction-scoped
@@ -880,7 +880,7 @@ impl Connection for PostgresConnection {
         self.client
             .batch_execute(&sql)
             .await
-            .map_err(|e| Error::Connection(e.to_string()))
+            .map_err(|e| Error::connection_with("tokio-postgres set_read_only", e))
     }
 
     fn cancel_handle(&self) -> Option<Box<dyn narwhal_core::DynCancelHandle>> {
@@ -956,7 +956,7 @@ impl CancelHandle for PostgresCancelHandle {
             self.token
                 .cancel_query::<NoTls>(NoTls)
                 .await
-                .map_err(|e| Error::Connection(e.to_string()))
+                .map_err(|e| Error::connection_with("tokio-postgres cancel", e))
         } else {
             let connector = (self.tls_factory)().map_err(|e| {
                 Error::Connection(format!("failed to create TLS connector for cancel: {e}"))
@@ -964,7 +964,7 @@ impl CancelHandle for PostgresCancelHandle {
             self.token
                 .cancel_query(connector)
                 .await
-                .map_err(|e| Error::Connection(e.to_string()))
+                .map_err(|e| Error::connection_with("tokio-postgres cancel", e))
         }
     }
 }

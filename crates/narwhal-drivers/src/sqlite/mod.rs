@@ -101,8 +101,8 @@ impl DatabaseDriver for SqliteDriver {
         );
         let conn = task::spawn_blocking(move || rusqlite::Connection::open(path_buf))
             .await
-            .map_err(|e| Error::Other(e.to_string()))?
-            .map_err(|e| Error::Connection(e.to_string()))?;
+            .map_err(|e| Error::connection_with("sqlite spawn_blocking join", e))?
+            .map_err(|e| Error::connection_with("sqlite open", e))?;
 
         info!(
             target: "narwhal::sqlite",
@@ -111,13 +111,17 @@ impl DatabaseDriver for SqliteDriver {
             "database opened"
         );
         Ok(Box::new(SqliteConnection {
-            inner: Arc::new(Mutex::new(conn)),
+            inner: Arc::new(Mutex::new(Some(conn))),
         }))
     }
 }
 
 pub struct SqliteConnection {
-    inner: Arc<Mutex<rusqlite::Connection>>,
+    /// M2.2: wrapped in `Option` so `close()` can `guard.take()` the
+    /// `rusqlite::Connection`, which drops it and releases any file
+    /// locks. All access sites check for `None` and return
+    /// `Error::Connection("connection closed")`.
+    inner: Arc<Mutex<Option<rusqlite::Connection>>>,
 }
 
 impl SqliteConnection {
@@ -228,38 +232,43 @@ impl SqliteConnection {
 
         task::spawn_blocking(move || run_blocking(&inner, &sql, params))
             .await
-            .map_err(|e| Error::Other(e.to_string()))?
+            .map_err(|e| Error::connection_with("sqlite spawn_blocking join", e))?
     }
 
     async fn execute_batch(&self, sql: &'static str) -> Result<()> {
         let inner = self.inner.clone();
         task::spawn_blocking(move || {
-            inner
-                .blocking_lock()
-                .execute_batch(sql)
-                .map_err(|e| Error::Query(e.to_string()))
+            let mut guard = inner.blocking_lock();
+            let conn = guard
+                .as_mut()
+                .ok_or_else(|| Error::Connection("connection closed".into()))?;
+            conn.execute_batch(sql)
+                .map_err(|e| Error::query_with("sqlite execute_batch", e))
         })
         .await
-        .map_err(|e| Error::Other(e.to_string()))?
+        .map_err(|e| Error::connection_with("sqlite spawn_blocking join", e))?
     }
 }
 
 fn run_blocking(
-    inner: &Arc<Mutex<rusqlite::Connection>>,
+    inner: &Arc<Mutex<Option<rusqlite::Connection>>>,
     sql: &str,
     params: Vec<rusqlite::types::Value>,
 ) -> Result<QueryResult> {
     let started = Instant::now();
     let guard = inner.blocking_lock();
-    let mut statement = guard
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| Error::Connection("connection closed".into()))?;
+    let mut statement = conn
         .prepare(sql)
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("sqlite prepare", e))?;
 
     let column_count = statement.column_count();
     if column_count == 0 {
         let affected = statement
             .execute(params_from_iter(params.iter()))
-            .map_err(|e| Error::Query(e.to_string()))?;
+            .map_err(|e| Error::query_with("sqlite execute", e))?;
         return Ok(QueryResult {
             columns: Vec::new(),
             rows: Vec::new(),
@@ -279,13 +288,18 @@ fn run_blocking(
 
     let mut rows = statement
         .query(params_from_iter(params.iter()))
-        .map_err(|e| Error::Query(e.to_string()))?;
+        .map_err(|e| Error::query_with("sqlite query", e))?;
 
     let mut collected = Vec::new();
-    while let Some(row) = rows.next().map_err(|e| Error::Query(e.to_string()))? {
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| Error::query_with("sqlite fetch", e))?
+    {
         let mut values = Vec::with_capacity(column_count);
         for idx in 0..column_count {
-            let v = row.get_ref(idx).map_err(|e| Error::Query(e.to_string()))?;
+            let v = row
+                .get_ref(idx)
+                .map_err(|e| Error::query_with("sqlite get_ref", e))?;
             values.push(value_from_ref(v));
         }
         collected.push(CoreRow(values));
@@ -317,10 +331,16 @@ impl Connection for SqliteConnection {
 
         task::spawn_blocking(move || {
             let guard = inner.blocking_lock();
-            let mut statement = match guard.prepare(&sql) {
+            let conn = if let Some(c) = guard.as_ref() {
+                c
+            } else {
+                let _ = header_tx.send(Err(Error::Connection("connection closed".into())));
+                return;
+            };
+            let mut statement = match conn.prepare(&sql) {
                 Ok(stmt) => stmt,
                 Err(error) => {
-                    let _ = header_tx.send(Err(Error::Query(error.to_string())));
+                    let _ = header_tx.send(Err(Error::query_with("sqlite stream prepare", error)));
                     return;
                 }
             };
@@ -346,7 +366,8 @@ impl Connection for SqliteConnection {
             let mut rows = match statement.query(params_from_iter(bound.iter())) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    let _ = row_tx.blocking_send(Err(Error::Query(error.to_string())));
+                    let _ =
+                        row_tx.blocking_send(Err(Error::query_with("sqlite stream query", error)));
                     return;
                 }
             };
@@ -360,7 +381,8 @@ impl Connection for SqliteConnection {
                             match row.get_ref(idx) {
                                 Ok(v) => values.push(value_from_ref(v)),
                                 Err(error) => {
-                                    failure = Some(Error::Query(error.to_string()));
+                                    failure =
+                                        Some(Error::query_with("sqlite stream get_ref", error));
                                     break;
                                 }
                             }
@@ -376,7 +398,8 @@ impl Connection for SqliteConnection {
                     }
                     Ok(None) => break,
                     Err(error) => {
-                        let _ = row_tx.blocking_send(Err(Error::Query(error.to_string())));
+                        let _ = row_tx
+                            .blocking_send(Err(Error::query_with("sqlite stream fetch", error)));
                         break;
                     }
                 }
@@ -599,7 +622,7 @@ impl Connection for SqliteConnection {
         self.execute_batch("SELECT 1").await
     }
 
-    /// `PRAGMA query_only` is per-connection in `SQLite` and survives
+    /// `PrAGMA query_only` is per-connection in `SQLite` and survives
     /// until explicitly cleared. Toggling to `false` re-enables writes;
     /// callers driving the global `--read-only` flag should never
     /// re-enable.
@@ -620,7 +643,12 @@ impl Connection for SqliteConnection {
         SqliteDriver::capabilities()
     }
 
+    // M2.2: explicitly drop the connection handle via guard.take() so
+    // the SQLite file lock is released immediately. After this call
+    // all subsequent operations return Error::Connection("connection closed").
     async fn close(self: Box<Self>) -> Result<()> {
+        let mut guard = self.inner.lock().await;
+        guard.take();
         Ok(())
     }
 }
@@ -858,6 +886,72 @@ mod tests {
                 .unique_constraints
                 .iter()
                 .any(|u| u.columns == vec!["customer_id", "placed_at"])
+        );
+    }
+
+    /// M2.2: `close()` must drop the `rusqlite::Connection` via `guard.take()`,
+    /// releasing any file lock held by `SQLite`. A connection that has been
+    /// closed must refuse further queries with "connection closed".
+    #[tokio::test]
+    async fn close_drops_connection_and_releases_file_lock() {
+        let tmp = tempfile::Builder::new()
+            .suffix(".db")
+            .tempdir()
+            .expect("tempdir");
+        let db_path = tmp.path().join("close_test.db");
+
+        let config = ConnectionConfig {
+            id: Uuid::nil(),
+            name: "close-test".into(),
+            driver: SqliteDriver::NAME.into(),
+            params: ConnectionParams::with(|p| {
+                p.path = Some(db_path.display().to_string());
+            }),
+        };
+
+        // Open and close — after close the file lock must be released so
+        // a second connection can open the same file.
+        let conn = SqliteDriver::new()
+            .connect(&config, None)
+            .await
+            .expect("first open");
+        conn.close().await.expect("close");
+
+        // If close() didn't drop the Connection, this second open will
+        // fail with a lock error on some platforms.
+        let conn2 = SqliteDriver::new()
+            .connect(&config, None)
+            .await
+            .expect("reopen after close");
+        conn2.close().await.expect("close2");
+    }
+
+    /// M2.2: after `close()`, any query must return
+    /// `Error::Connection("connection closed")` rather than panicking.
+    ///
+    /// Because `close(self: Box<Self>)` consumes the connection, we
+    /// simulate the post-close state by constructing a
+    /// `SqliteConnection` whose inner has already been taken (set to
+    /// `None`), matching the `DuckDB` driver's test pattern.
+    #[tokio::test]
+    async fn close_then_query_returns_connection_closed_error() {
+        let conn = SqliteConnection {
+            inner: Arc::new(Mutex::new(None::<rusqlite::Connection>)),
+        };
+
+        // run() and execute_batch() must both surface "connection closed".
+        let err = conn.run("SELECT 1", &[]).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("connection closed"),
+            "expected 'connection closed' in error, got: {msg}"
+        );
+
+        let err = conn.execute_batch("SELECT 1").await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("connection closed"),
+            "expected 'connection closed' in error, got: {msg}"
         );
     }
 }
