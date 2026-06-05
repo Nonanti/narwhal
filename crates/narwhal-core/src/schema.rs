@@ -11,7 +11,7 @@ pub type SchemaCatalog = Vec<(Schema, Vec<Table>)>;
 use crate::value::Value;
 
 /// Logical schema or namespace inside a database.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schema {
     pub name: String,
 }
@@ -25,14 +25,14 @@ pub enum TableKind {
     SystemTable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Table {
     pub schema: String,
     pub name: String,
     pub kind: TableKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     /// Native type name as reported by the engine (e.g. `int4`, `varchar(255)`).
@@ -42,7 +42,7 @@ pub struct Column {
     pub default: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableSchema {
     pub table: Table,
     pub columns: Vec<Column>,
@@ -55,7 +55,7 @@ pub struct TableSchema {
 }
 
 /// Index defined on a table.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Index {
     pub name: String,
     pub columns: Vec<String>,
@@ -70,7 +70,7 @@ pub struct Index {
 ///
 /// Composite foreign keys are represented by parallel entries in
 /// [`Self::columns`] and [`Self::referenced_columns`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForeignKey {
     pub name: String,
     pub columns: Vec<String>,
@@ -118,7 +118,7 @@ impl ReferentialAction {
 /// Multi-column unique constraint.
 ///
 /// Single-column unique constraints are exposed through [`Index::unique`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UniqueConstraint {
     pub name: String,
     pub columns: Vec<String>,

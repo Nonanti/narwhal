@@ -8,6 +8,8 @@
 //! Submodules under `core/` host pure helpers extracted from this file as
 //! part of the L21 split. They never touch [`AppCore`] state directly.
 
+mod chart;
+mod chart_cmd;
 mod confirm;
 mod diagram;
 mod diff_schema;
@@ -20,11 +22,13 @@ mod lint_cmd;
 mod modals;
 mod pending_actions;
 pub(crate) mod persist_hook;
+mod pivot_cmd;
 mod plugin_executor;
 mod plugins;
 mod render_helpers;
 mod results_actions;
 mod run_loop;
+mod schema_diff_cmd;
 mod sessions;
 mod tabs;
 pub(super) mod text_utils;

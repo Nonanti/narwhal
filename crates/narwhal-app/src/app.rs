@@ -115,6 +115,16 @@ impl App {
         self
     }
 
+    /// T2-T2-D: install an [`narwhal_audit::AuditService`]. The
+    /// binary builds this from `settings.audit` and calls this method
+    /// when one or more sinks are configured. Without this call, emit
+    /// sites short-circuit and the audit log is silent.
+    #[must_use]
+    pub fn with_audit_service(mut self, svc: Arc<narwhal_audit::AuditService>) -> Self {
+        self.core.set_audit_service(svc);
+        self
+    }
+
     /// Apply a user-supplied [`Settings`] payload. Currently the only
     /// field that takes effect at runtime is `theme`; the remaining
     /// `editor` / `keybindings` fields are accepted and persisted but

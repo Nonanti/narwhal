@@ -8,6 +8,7 @@
 //! - wizard (`:add`)
 use crossterm::event::{KeyCode as CtKey, KeyEvent, KeyModifiers};
 
+use super::sessions::emit_audit_config_change;
 use super::{AppCore, SidebarItem, SnippetsModal};
 use crate::meta::MetaRequest;
 use crate::run::RunMode;
@@ -316,6 +317,18 @@ impl AppCore {
                         ));
                     }
                 }
+                // T2-T2-D: a successful wizard commit is a
+                // configuration change. Emit *after* the disk save
+                // succeeded so a rolled-back save (handled above)
+                // never produces an audit line.
+                emit_audit_config_change(
+                    self.session.audit_service.as_ref(),
+                    if existing_id.is_some() {
+                        format!("connection updated: {}", built.config.name)
+                    } else {
+                        format!("connection added: {}", built.config.name)
+                    },
+                );
                 self.modals.wizard = None;
                 self.modals.wizard_error = None;
                 self.rebuild_sidebar();

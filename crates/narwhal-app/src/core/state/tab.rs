@@ -1,7 +1,10 @@
 //! One editor tab: name, buffer, run state, results.
 
+use narwhal_pivot::PivotConfig;
 use narwhal_sql::treesitter::{HighlightSpan, Parser as TsParser};
 use narwhal_tui::EditorBuffer;
+
+use crate::core::chart::ChartConfig;
 
 use super::result::{
     CellEdit, CompletionState, DiagramModalState, EditorSearchState, JsonViewerState, ResultBundle,
@@ -66,6 +69,15 @@ pub struct Tab {
     /// computed against. A mismatch with the current buffer length
     /// invalidates the cache.
     pub(crate) sql_highlights_buf_len: usize,
+    /// T2-T4-C: sticky chart configuration. When `Some`, the result
+    /// pane splits horizontally and the top half renders an inline
+    /// ASCII chart derived from the active result. `None` means the
+    /// chart pane is hidden (default).
+    pub(crate) chart: Option<ChartConfig>,
+    /// T2-T4-D: sticky pivot configuration. When `Some`, the result
+    /// pane splits (chart on top, pivot middle, table bottom). `None`
+    /// keeps the pivot pane hidden.
+    pub(crate) pivot: Option<PivotConfig>,
 }
 
 /// Lightweight modal state for the pending-preview overlay. Only
@@ -98,6 +110,8 @@ impl Tab {
             ts_parser: None,
             sql_highlights: None,
             sql_highlights_buf_len: 0,
+            chart: None,
+            pivot: None,
         }
     }
 

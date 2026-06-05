@@ -16,6 +16,16 @@ impl AppCore {
         &self.ui.status.message
     }
 
+    /// T2-T2-D test helper: borrow the installed audit service so
+    /// integration tests can call `shutdown` directly and assert the
+    /// flush-on-exit invariant. Hidden from the public API.
+    #[doc(hidden)]
+    pub const fn audit_service_for_test(
+        &self,
+    ) -> Option<&std::sync::Arc<narwhal_audit::AuditService>> {
+        self.session.audit_service.as_ref()
+    }
+
     /// Read-only accessor for the full [`StatusBar`] struct.
     pub const fn status_bar(&self) -> &StatusBar {
         &self.ui.status

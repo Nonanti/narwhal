@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use narwhal_audit::{AuditEvent, AuditService};
 use narwhal_core::{ColumnHeader, DynCancelHandle, DynConnection, Row, Value};
 use narwhal_history::{HistoryEntry, Journal};
 use narwhal_pool::{Pool, PooledConnection};
@@ -167,6 +168,15 @@ pub enum RunTarget {
 pub struct RunContext {
     pub target: RunTarget,
     pub history: Option<Arc<Journal>>,
+    /// T2-T2-D: optional audit log service. Set from
+    /// `SessionState::audit_service`. When present, every dispatched
+    /// statement emits an [`AuditEvent::Query`] alongside the history
+    /// journal write.
+    pub audit: Option<Arc<AuditService>>,
+    /// T2-T2-D: session correlation id for [`AuditEvent::Query`].
+    /// Stable for the lifetime of the active connection so a SIEM can
+    /// stitch queries back to the originating session.
+    pub audit_session_id: Uuid,
     pub connection_id: Uuid,
     pub connection_name: String,
     pub driver: String,
@@ -318,6 +328,7 @@ pub fn spawn_run(
             *cancel_slot.lock().await = None;
 
             record_history(&ctx, sql, &outcome).await;
+            emit_audit_query(&ctx, sql, &outcome).await;
 
             match &outcome {
                 StatementOutcome::Ok { .. } => {
@@ -621,6 +632,48 @@ async fn record_history(ctx: &RunContext, sql: &str, outcome: &StatementOutcome)
     if let Err(error) = journal.append(&entry).await {
         warn!(target: "narwhal::run", error = %error, "history append failed");
     }
+}
+
+/// T2-T2-D: project the just-executed statement into the audit log.
+///
+/// Mirrors [`record_history`] structurally so the two sinks stay in
+/// lock-step: every statement that lands in `history.jsonl` also
+/// lands in the configured audit sinks (when audit is enabled).
+///
+/// Bind parameters are not currently threaded through `RunContext`
+/// — the run worker collapses them into the SQL text upstream of
+/// this site. The empty `params` vector is therefore intentional;
+/// the field is kept on the wire-format so future parameterised
+/// dispatch paths can fill it without a schema bump.
+async fn emit_audit_query(ctx: &RunContext, sql: &str, outcome: &StatementOutcome) {
+    let Some(audit) = ctx.audit.as_ref() else {
+        return;
+    };
+    let event = match outcome {
+        StatementOutcome::Ok {
+            elapsed_ms,
+            rows_returned,
+            rows_affected,
+        } => AuditEvent::Query {
+            session_id: ctx.audit_session_id,
+            sql: sql.to_owned(),
+            params: Vec::new(),
+            rows: rows_affected.or(Some(*rows_returned as u64)),
+            elapsed_ms: *elapsed_ms,
+            succeeded: true,
+            error: None,
+        },
+        StatementOutcome::Err { error, elapsed_ms } => AuditEvent::Query {
+            session_id: ctx.audit_session_id,
+            sql: sql.to_owned(),
+            params: Vec::new(),
+            rows: None,
+            elapsed_ms: *elapsed_ms,
+            succeeded: false,
+            error: Some(error.to_string()),
+        },
+    };
+    audit.emit(event).await;
 }
 
 #[cfg(test)]

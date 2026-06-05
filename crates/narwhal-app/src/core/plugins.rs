@@ -5,6 +5,7 @@
 //! [`PluginRegistry::dispatch`].
 use std::sync::Arc;
 
+use narwhal_audit::AuditEvent;
 use narwhal_plugin::{
     CommandContext as PluginCommandContext, CommandOutcome as PluginCommandOutcome, Plugin,
     PluginError, PluginRegistry, PluginResult, SqlExecutor,
@@ -41,7 +42,25 @@ impl AppCore {
             state: self.deps.plugin_state.clone(),
         });
         plugin.install_executor(executor)?;
-        Arc::make_mut(&mut self.deps.plugins).register(plugin)
+        // T2-T2-D: capture identity before the move into `register`
+        // so the audit emit can carry name + version. Lua plugins do
+        // not currently expose a declared version, so the field
+        // mirrors the name; a future change can swap in a real
+        // version string without breaking the wire format.
+        let plugin_name = plugin.name().to_owned();
+        let registered = Arc::make_mut(&mut self.deps.plugins).register(plugin)?;
+        if let Some(audit) = self.session.audit_service.clone() {
+            tokio::spawn(async move {
+                audit
+                    .emit(AuditEvent::PluginLoaded {
+                        plugin: plugin_name.clone(),
+                        version: "lua".to_owned(),
+                        capabilities: Vec::new(),
+                    })
+                    .await;
+            });
+        }
+        Ok(registered)
     }
 
     /// Scan `dir` for top-level `*.lua` files and register each as a

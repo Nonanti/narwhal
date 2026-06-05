@@ -122,8 +122,107 @@ pub(super) const fn connection_color_to_ratatui(c: ConnectionColor) -> ratatui::
     }
 }
 
+use narwhal_pivot::{PivotConfig, PivotError, PivotTable, derive_pivot_table};
+
+use super::chart::{ChartConfig, ChartData, ChartError, derive_chart_data};
 use super::{ResultState, SidebarItem};
 use crate::explain::{ExplainPlan, parse as parse_plan};
+
+/// T2-T4-C: owned envelope handed from `render` into `RootLayout`.
+/// The labels / values inside `ChartData` outlive the borrowed view
+/// the layout receives, so the chart pane survives the render call
+/// without dangling references.
+pub(super) enum ChartLayoutOwned {
+    Ok(ChartData),
+    Err { title: String, message: String },
+}
+
+/// Build the chart payload (or a placeholder explaining why it could
+/// not be built) from the active result state. Returns `None` when
+/// the chart pane should stay hidden entirely — i.e. the result is
+/// not a row-shaped result and there is nothing to chart yet.
+pub(super) fn chart_payload(config: &ChartConfig, state: &ResultState) -> Option<ChartLayoutOwned> {
+    let (columns, rows): (&[ColumnHeader], &[Row]) = match state {
+        ResultState::Rows { columns, rows, .. } | ResultState::Running { columns, rows, .. } => {
+            (columns, rows)
+        }
+        ResultState::Empty => {
+            return Some(ChartLayoutOwned::Err {
+                title: config.kind.label().to_owned(),
+                message: "no data yet — run a query".to_owned(),
+            });
+        }
+        _ => return None,
+    };
+    match derive_chart_data(config, columns, rows) {
+        Ok(data) => Some(ChartLayoutOwned::Ok(data)),
+        Err(err) => Some(ChartLayoutOwned::Err {
+            title: config.kind.label().to_owned(),
+            message: chart_error_message(&err),
+        }),
+    }
+}
+
+fn chart_error_message(err: &ChartError) -> String {
+    // Strip the leading `chart: ` prefix the data layer adds — the
+    // placeholder already carries a `chart · <kind>` title so the
+    // duplicated word would look stuttery.
+    let raw = err.message();
+    raw.strip_prefix("chart: ")
+        .map(str::to_owned)
+        .unwrap_or(raw)
+}
+
+/// T2-T4-D: owned envelope handed from `render` into `RootLayout`.
+/// The labels / cell strings inside `PivotTable` outlive the borrowed
+/// view the layout receives, so the pivot pane survives the render
+/// call without dangling references.
+pub(super) enum PivotLayoutOwned {
+    Ok {
+        table: PivotTable,
+        agg_label: String,
+    },
+    Err {
+        title: String,
+        message: String,
+    },
+}
+
+/// Build the pivot payload (or a placeholder explaining why it could
+/// not be built) from the active result state. Returns `None` when
+/// the pivot pane should stay hidden entirely — i.e. the result is
+/// not a row-shaped result.
+pub(super) fn pivot_payload(config: &PivotConfig, state: &ResultState) -> Option<PivotLayoutOwned> {
+    let (columns, rows): (&[ColumnHeader], &[Row]) = match state {
+        ResultState::Rows { columns, rows, .. } | ResultState::Running { columns, rows, .. } => {
+            (columns, rows)
+        }
+        ResultState::Empty => {
+            return Some(PivotLayoutOwned::Err {
+                title: config.agg.label().to_owned(),
+                message: "no data yet — run a query".to_owned(),
+            });
+        }
+        _ => return None,
+    };
+    match derive_pivot_table(config, columns, rows) {
+        Ok(table) => Some(PivotLayoutOwned::Ok {
+            table,
+            agg_label: config.agg.label().to_owned(),
+        }),
+        Err(err) => Some(PivotLayoutOwned::Err {
+            title: config.agg.label().to_owned(),
+            message: pivot_error_message(&err),
+        }),
+    }
+}
+
+fn pivot_error_message(err: &PivotError) -> String {
+    let raw = err.to_string();
+    raw.strip_prefix("pivot: ")
+        .map(str::to_owned)
+        .unwrap_or(raw)
+}
 
 /// Postgres `EXPLAIN (FORMAT JSON)` returns a single `"QUERY PLAN"`
 /// column of `Value::Json`. Detect that shape so the run loop can

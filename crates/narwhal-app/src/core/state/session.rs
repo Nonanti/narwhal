@@ -19,7 +19,9 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
+use narwhal_audit::AuditService;
 use narwhal_config::{ConnectionsFile, LastUsedStore};
 use narwhal_history::Journal;
 use uuid::Uuid;
@@ -70,6 +72,22 @@ pub struct SessionState {
     /// tests). All writes are best-effort \u2014 a broken journal does
     /// not block query execution.
     pub history_journal: Option<Arc<Journal>>,
+    /// T2-T2-D: append-only audit log service. `None` when audit is
+    /// disabled in settings or no sinks are configured. Emit sites
+    /// (currently: query dispatch via `run::record_history`) check
+    /// this option and call `emit` when present.
+    pub audit_service: Option<Arc<AuditService>>,
+    /// T2-T2-D: correlation id for the active session, stamped fresh
+    /// on every successful `apply_opened_session`. Cleared (reset to
+    /// `Uuid::nil`) when the user closes the session. A SIEM can
+    /// stitch every `AuditEvent::Query` back to the originating
+    /// connection-open using this id.
+    pub audit_session_id: Uuid,
+    /// T2-T2-D: wall-clock start of the active audit session. Used to
+    /// compute `duration_ms` on the `ConnectionClosed` event emitted
+    /// by `close_session`. `None` when no session is open or audit is
+    /// disabled.
+    pub audit_session_started_at: Option<Instant>,
     /// On-disk snippet catalogue. The modal that picks from this
     /// lives in `ModalState::snippets`; this is the data source.
     pub snippet_store: SnippetStore,
@@ -122,6 +140,9 @@ impl SessionState {
             last_used: LastUsedStore::default(),
             last_used_path: None,
             history_journal,
+            audit_service: None,
+            audit_session_id: Uuid::nil(),
+            audit_session_started_at: None,
             snippet_store: SnippetStore::new(SnippetStore::default_root()),
             pending_session_opens: HashSet::new(),
             read_only: false,

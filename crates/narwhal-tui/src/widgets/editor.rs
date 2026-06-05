@@ -161,6 +161,53 @@ pub fn render_editor(
             }
         }
     }
+
+    // T2-T3-D: secondary cursors are rendered as reverse-video cells
+    // so the user can see them at a glance. The terminal can only host
+    // one real text cursor; everything else paints over the existing
+    // glyph with a 1x1 styled cell.
+    for &(sec_row, sec_col) in buffer.secondary_cursors() {
+        if sec_row < buffer.scroll() {
+            continue;
+        }
+        let cursor_y = (sec_row - buffer.scroll()) as u16;
+        if cursor_y >= inner.height {
+            continue;
+        }
+        let line = buffer.lines().get(sec_row).map_or("", String::as_str);
+        let mut col = sec_col.min(line.len());
+        while col > 0 && !line.is_char_boundary(col) {
+            col -= 1;
+        }
+        let display_col = line[..col].width();
+        let cursor_x = (gutter_w + display_col) as u16;
+        if cursor_x >= inner.width {
+            continue;
+        }
+        // Paint the cell with the glyph at that position so the
+        // underlying character is still readable; reverse style picks
+        // it out against the rest of the line.
+        let glyph = line[col..]
+            .chars()
+            .next()
+            .map_or_else(|| " ".to_owned(), |c| c.to_string());
+        let cell_rect = Rect {
+            x: inner.x + cursor_x,
+            y: inner.y + cursor_y,
+            width: 1,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                glyph,
+                Style::default()
+                    .fg(theme.background)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            cell_rect,
+        );
+    }
 }
 
 /// Paint one editor row using the SQL highlight spans that intersect

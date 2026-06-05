@@ -40,8 +40,11 @@ narwhal-commands.workspace = true
 narwhal-config.workspace = true
 narwhal-core.workspace = true
 narwhal-history.workspace = true
+narwhal-audit.workspace = true
 narwhal-mcp.workspace = true
+narwhal-schema-diff.workspace = true
 
+chrono.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true
@@ -66,3 +69,6 @@ all-drivers = [
     "driver-clickhouse",
     "driver-mssql",
 ]
+# T2-T2-D: optional Linux syslog sink for the audit log. Off by
+# default so non-Linux release tarballs don't drag the dependency in.
+audit-syslog = ["narwhal-audit/syslog"]

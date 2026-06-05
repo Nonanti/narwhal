@@ -2229,6 +2229,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-link",
+]
+
+[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2876,6 +2887,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lsp-types"
+version = "0.95.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e34d33a8e9b006cd3fc4fe69a921affa097bae4bb65f76271f4644f9a334365"
+dependencies = [
+ "bitflags 1.3.2",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "url",
+]
+
+[[package]]
 name = "lua-src"
 version = "547.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3093,6 +3117,7 @@ dependencies = [
  "directories",
  "futures",
  "insta",
+ "narwhal-audit",
  "narwhal-commands",
  "narwhal-config",
  "narwhal-core",
@@ -3100,9 +3125,11 @@ dependencies = [
  "narwhal-domain",
  "narwhal-drivers",
  "narwhal-history",
+ "narwhal-pivot",
  "narwhal-plugin",
  "narwhal-plugin-lua",
  "narwhal-pool",
+ "narwhal-schema-diff",
  "narwhal-sql",
  "narwhal-tui",
  "narwhal-vim",
@@ -3120,6 +3147,23 @@ dependencies = [
  "tracing",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "narwhal-audit"
+version = "1.0.0"
+dependencies = [
+ "chrono",
+ "narwhal-history",
+ "serde",
+ "serde_json",
+ "syslog",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3159,6 +3203,7 @@ dependencies = [
  "directories",
  "futures",
  "keyring",
+ "narwhal-audit",
  "narwhal-core",
  "narwhal-diagram",
  "reqwest",
@@ -3218,6 +3263,7 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "narwhal-core",
+ "narwhal-schema-diff",
  "parking_lot",
  "reqwest",
  "rusqlite",
@@ -3257,6 +3303,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "narwhal-lsp"
+version = "1.2.0"
+dependencies = [
+ "futures",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "narwhal-mcp"
 version = "1.2.0"
 dependencies = [
@@ -3279,6 +3338,14 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "narwhal-pivot"
+version = "1.2.0"
+dependencies = [
+ "narwhal-core",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3340,6 +3407,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "narwhal-schema-diff"
+version = "1.2.0"
+dependencies = [
+ "narwhal-core",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "narwhal-sql"
 version = "1.2.0"
 dependencies = [
@@ -3382,13 +3459,16 @@ name = "narwhaldb"
 version = "1.2.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "narwhal-app",
+ "narwhal-audit",
  "narwhal-commands",
  "narwhal-config",
  "narwhal-core",
  "narwhal-history",
  "narwhal-mcp",
+ "narwhal-schema-diff",
  "secrecy",
  "tokio",
  "tracing",
@@ -3516,6 +3596,15 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -5234,6 +5323,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "syslog"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "019f1500a13379b7d051455df397c75770de6311a7a188a699499502704d9f10"
+dependencies = [
+ "hostname",
+ "libc",
+ "log",
+ "time",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5433,7 +5534,9 @@ checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
+ "libc",
  "num-conv",
+ "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",

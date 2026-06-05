@@ -6,9 +6,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 use crate::widgets::{
-    CompletionPopupView, EditorBuffer, EditorSearchHighlight, ResultDisplay, ResultView,
-    SidebarView, editor_cursor_anchor, render_completion_popup, render_editor, render_results,
-    render_sidebar,
+    ChartPlaceholder, ChartView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
+    PivotPlaceholder, PivotTableView, ResultDisplay, ResultView, SidebarView,
+    editor_cursor_anchor, render_chart, render_chart_placeholder, render_completion_popup,
+    render_editor, render_pivot, render_pivot_placeholder, render_results, render_sidebar,
 };
 
 /// Hit-test regions computed during the last render. Stored on `AppCore`
@@ -116,6 +117,17 @@ pub struct RootLayout<'a> {
     /// keeps the underlying [`narwhal_sql::treesitter::Parser`] per
     /// tab and refreshes the slice each render tick.
     pub editor_sql_highlights: Option<&'a [narwhal_sql::treesitter::HighlightSpan]>,
+    /// T2-T4-C: when `Some(Ok(view))`, an inline ASCII chart is rendered
+    /// in the top half of the result pane; `Some(Err(placeholder))`
+    /// shows the error message inside an otherwise-empty chart block;
+    /// `None` leaves the chart pane hidden (full-table layout).
+    pub chart: Option<Result<ChartView<'a>, ChartPlaceholder<'a>>>,
+    /// T2-T4-D: when `Some(Ok(view))`, an inline pivot table is
+    /// rendered in the top half of the result pane;
+    /// `Some(Err(placeholder))` shows the error message inside an
+    /// otherwise-empty pivot block; `None` leaves the pivot pane
+    /// hidden (full-table layout).
+    pub pivot: Option<Result<PivotTableView<'a>, PivotPlaceholder<'a>>>,
     /// Number of results in the bundle. >1 means the tab strip renders.
     pub result_count: usize,
     /// Index of the active result (0-based).
@@ -164,9 +176,48 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.editor_sql_highlights,
     );
 
+    // T2-T4-C / T2-T4-D: when chart or pivot is active, split the
+    // result pane area horizontally so the overlay panes stack above
+    // the regular table. Chart takes priority when both are active
+    // (the more frequent case in demos); pivot takes the same slot
+    // when chart is hidden. Allocating both simultaneously is left to
+    // a v2.1 follow-up.
+    let (chart_area, pivot_area, results_area) = if main[1].height >= 8 {
+        if view.chart.is_some() {
+            let parts = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .split(main[1]);
+            (Some(parts[0]), None, parts[1])
+        } else if view.pivot.is_some() {
+            let parts = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .split(main[1]);
+            (None, Some(parts[0]), parts[1])
+        } else {
+            (None, None, main[1])
+        }
+    } else {
+        (None, None, main[1])
+    };
+
+    if let (Some(area), Some(chart)) = (chart_area, view.chart.as_ref()) {
+        match chart {
+            Ok(chart_view) => render_chart(frame, area, chart_view, view.theme),
+            Err(placeholder) => render_chart_placeholder(frame, area, placeholder, view.theme),
+        }
+    }
+    if let (Some(area), Some(pivot)) = (pivot_area, view.pivot.as_ref()) {
+        match pivot {
+            Ok(pivot_view) => render_pivot(frame, area, pivot_view, view.theme),
+            Err(placeholder) => render_pivot_placeholder(frame, area, placeholder, view.theme),
+        }
+    }
+
     let result_regions = render_results(
         frame,
-        main[1],
+        results_area,
         &view.result,
         view.result_view,
         view.theme,
@@ -194,7 +245,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
     LayoutRegions {
         sidebar: body[0],
         editor: editor_area,
-        results: main[1],
+        results: results_area,
         status: outer[1],
         completion: completion_regions.as_ref().and_then(|r| r.popup_rect),
         sidebar_tables,

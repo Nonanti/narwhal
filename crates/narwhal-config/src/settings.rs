@@ -119,6 +119,45 @@ pub struct Settings {
     /// against first-row latency without rebuilding.
     #[serde(default)]
     pub run: RunSettings,
+    /// Append-only JSONL audit log (T2-T2-D). Disabled by default;
+    /// enable per deployment for SOC2 / ISO 27001 evidence
+    /// collection. See `docs/audit.md` for the SOC2 mapping.
+    #[serde(default)]
+    pub audit: narwhal_audit::AuditConfig,
+    /// T2-T3-C: embedded LSP client (sqls / sqlls). v2.0 only ships
+    /// the schema + the in-process client crate; wiring the client
+    /// into the editor pane is deferred to v2.1, so this section is
+    /// currently informational only.
+    #[serde(default)]
+    pub lsp: LspSettings,
+}
+
+/// LSP client configuration. **Stub in v2.0** — the contract is
+/// defined here so users can author `settings.toml` against it, but
+/// the actual wiring into completion / hover lands in v2.1.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct LspSettings {
+    /// Master enable. `false` keeps the editor on the treesitter
+    /// fallback (T1-T3-A) for completion / scope detection.
+    pub enabled: bool,
+    /// Server token: `"sqls"`, `"sqlls"`, or an absolute path to a
+    /// binary that speaks LSP over stdio.
+    pub server: String,
+    /// Optional server-config path (e.g. `~/.config/sqls/config.yml`).
+    /// Empty string means "server reads its own default location".
+    pub config_file: String,
+}
+
+impl Default for LspSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server: "sqls".to_owned(),
+            config_file: String::new(),
+        }
+    }
 }
 
 /// Streaming-result tuning.
