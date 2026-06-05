@@ -9,11 +9,11 @@
 //! only ever sees the four detail tabs.
 
 use narwhal_core::{Column, ForeignKey, Index, TableSchema, UniqueConstraint};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use super::model::MetaTab;
 use crate::theme::Theme;

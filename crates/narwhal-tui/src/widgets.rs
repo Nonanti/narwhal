@@ -29,24 +29,24 @@ pub mod sidebar;
 pub mod snippets;
 pub mod wizard;
 
-pub use confirm::{render_confirm_modal, ConfirmModalView};
-pub use diagram::{render_diagram, DiagramView, DiagramViewMode};
+pub use confirm::{ConfirmModalView, render_confirm_modal};
+pub use diagram::{DiagramView, DiagramViewMode, render_diagram};
 pub use editor::{
-    editor_cursor_anchor, render_completion_popup, render_editor, CompletionHitRegions,
+    CompletionHitRegions, editor_cursor_anchor, render_completion_popup, render_editor,
 };
-pub use goto::{render_goto_modal, GotoModalView, GotoRowView};
-pub use help::{render_help_modal, CheatsheetEntry, CheatsheetSection, CHEATSHEET};
-pub use history::{render_history_modal, HistoryModalState, HistoryRow, HistoryRowOutcome};
-pub use json_viewer::{render_json_viewer, JsonViewerView};
+pub use goto::{GotoModalView, GotoRowView, render_goto_modal};
+pub use help::{CHEATSHEET, CheatsheetEntry, CheatsheetSection, render_help_modal};
+pub use history::{HistoryModalState, HistoryRow, HistoryRowOutcome, render_history_modal};
+pub use json_viewer::{JsonViewerView, render_json_viewer};
 pub use narwhal_domain::editor::{
     CompletionItemView, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
 };
-pub use pending_preview::{render_pending_preview, PendingPreviewView};
+pub use pending_preview::{PendingPreviewView, render_pending_preview};
 pub use results::{
-    compare_values, render_results, sanitize_for_display, CellEditView, CellPopup, ExplainPlanLine,
-    MetaTab, ResultDisplay, ResultHitRegions, ResultView, SearchHighlight, SortDir,
+    CellEditView, CellPopup, ExplainPlanLine, MetaTab, ResultDisplay, ResultHitRegions, ResultView,
+    SearchHighlight, SortDir, compare_values, render_results, sanitize_for_display,
 };
-pub use row_detail::{render_row_detail, RowDetailView};
-pub use sidebar::{render_sidebar, SchemaListing, SidebarRow, SidebarRowKind, SidebarView};
-pub use snippets::{render_snippets_modal, SnippetsModalState};
-pub use wizard::{render_wizard, WizardFieldView, WizardView};
+pub use row_detail::{RowDetailView, render_row_detail};
+pub use sidebar::{SchemaListing, SidebarRow, SidebarRowKind, SidebarView, render_sidebar};
+pub use snippets::{SnippetsModalState, render_snippets_modal};
+pub use wizard::{WizardFieldView, WizardView, render_wizard};

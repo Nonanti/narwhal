@@ -5,8 +5,8 @@
 //! the resulting command-buffer contents.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_vim::Mode;
@@ -25,6 +25,7 @@ const fn key(code: KeyCode) -> KeyEvent {
 fn core_with_connections(names: &[&str]) -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: names
             .iter()
@@ -44,6 +45,7 @@ fn core_with_connections(names: &[&str]) -> AppCore {
 fn empty_core() -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: Vec::new(),
     };

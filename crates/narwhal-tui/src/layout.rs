@@ -1,14 +1,14 @@
 use narwhal_vim::Mode;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 use crate::widgets::{
-    editor_cursor_anchor, render_completion_popup, render_editor, render_results, render_sidebar,
     CompletionPopupView, EditorBuffer, EditorSearchHighlight, ResultDisplay, ResultView,
-    SidebarView,
+    SidebarView, editor_cursor_anchor, render_completion_popup, render_editor, render_results,
+    render_sidebar,
 };
 
 /// Hit-test regions computed during the last render. Stored on `AppCore`
@@ -111,6 +111,11 @@ pub struct RootLayout<'a> {
     pub completion: Option<CompletionPopupView<'a>>,
     /// When `Some`, editor search matches are highlighted.
     pub editor_search: Option<EditorSearchHighlight<'a>>,
+    /// T1-T3-A: when `Some`, treesitter SQL highlight spans for the
+    /// editor buffer are overlaid on the visible rows. The host app
+    /// keeps the underlying [`narwhal_sql::treesitter::Parser`] per
+    /// tab and refreshes the slice each render tick.
+    pub editor_sql_highlights: Option<&'a [narwhal_sql::treesitter::HighlightSpan]>,
     /// Number of results in the bundle. >1 means the tab strip renders.
     pub result_count: usize,
     /// Index of the active result (0-based).
@@ -156,6 +161,7 @@ pub fn render_root(frame: &mut Frame<'_>, area: Rect, view: &mut RootLayout<'_>)
         view.focus == Pane::Editor,
         view.editor_title,
         view.editor_search.as_ref(),
+        view.editor_sql_highlights,
     );
 
     let result_regions = render_results(

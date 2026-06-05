@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use narwhal_core::{
-    Capabilities, ColumnHeader, ConnectionConfig, DatabaseDriver, Error, IsolationLevel, Result,
+    Capabilities, ColumnHeader, ConnectionConfig, DynDatabaseDriver, Error, IsolationLevel, Result,
     Schema, SshTunnel, TableSchema,
 };
 use narwhal_domain::SchemaListing;
@@ -29,7 +29,7 @@ pub struct TxnHandle {
 /// driver / pool internals into the format output.
 pub struct Session {
     pub config: ConnectionConfig,
-    pub driver: Arc<dyn DatabaseDriver>,
+    pub driver: Arc<dyn DynDatabaseDriver>,
     /// Snapshot of the driver's [`Capabilities`] taken at session
     /// open. Cached here so the host doesn't have to acquire a pool
     /// connection on every capability check (notably the L36 row-CRUD
@@ -96,7 +96,7 @@ pub struct SessionOpenOptions {
 
 impl Session {
     pub async fn open(
-        driver: Arc<dyn DatabaseDriver>,
+        driver: Arc<dyn DynDatabaseDriver>,
         config: ConnectionConfig,
         password: Option<String>,
     ) -> Result<Self> {
@@ -107,7 +107,7 @@ impl Session {
     /// Existing callers stay on the three-arg shortcut; the TUI's
     /// read-only path threads its CLI flag through this entry point.
     pub async fn open_with(
-        driver: Arc<dyn DatabaseDriver>,
+        driver: Arc<dyn DynDatabaseDriver>,
         config: ConnectionConfig,
         password: Option<String>,
         opts: SessionOpenOptions,

@@ -14,10 +14,7 @@
 /// All built-in templates by name. Order is the discovery order
 /// `:tpl ?` lists them in (alphabetical for stability).
 pub const BUILTINS: &[(&str, &str)] = &[
-    (
-        "del",
-        "DELETE FROM $table$\nWHERE $condition$;\n",
-    ),
+    ("del", "DELETE FROM $table$\nWHERE $condition$;\n"),
     (
         "ins",
         "INSERT INTO $table$ ($columns$)\nVALUES ($values$);\n",
@@ -26,10 +23,7 @@ pub const BUILTINS: &[(&str, &str)] = &[
         "join",
         "SELECT $cols$\nFROM $left$ AS l\nINNER JOIN $right$ AS r ON l.$lkey$ = r.$rkey$\nWHERE $condition$;\n",
     ),
-    (
-        "sel",
-        "SELECT $cols$\nFROM $table$\nWHERE $condition$;\n",
-    ),
+    ("sel", "SELECT $cols$\nFROM $table$\nWHERE $condition$;\n"),
     (
         "upd",
         "UPDATE $table$\nSET $column$ = $value$\nWHERE $condition$;\n",

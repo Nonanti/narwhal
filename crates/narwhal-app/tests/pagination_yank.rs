@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use narwhal_app::DriverRegistry;
 use narwhal_app::clipboard::{Clipboard, InMemoryClipboard};
 use narwhal_app::core::{AppCore, ResultState};
-use narwhal_app::DriverRegistry;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_tui::Pane;
@@ -53,6 +53,7 @@ async fn seeded(count: usize) -> (AppCore, Arc<InMemoryClipboard>, TempDir) {
 
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),

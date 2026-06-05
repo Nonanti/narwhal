@@ -57,10 +57,12 @@ driver-sqlite = ["narwhal-app/driver-sqlite", "narwhal-mcp/driver-sqlite"]
 driver-mysql = ["narwhal-app/driver-mysql", "narwhal-mcp/driver-mysql"]
 driver-duckdb = ["narwhal-app/driver-duckdb", "narwhal-mcp/driver-duckdb"]
 driver-clickhouse = ["narwhal-app/driver-clickhouse", "narwhal-mcp/driver-clickhouse"]
+driver-mssql = ["narwhal-app/driver-mssql", "narwhal-mcp/driver-mssql"]
 all-drivers = [
     "driver-postgres",
     "driver-sqlite",
     "driver-mysql",
     "driver-duckdb",
     "driver-clickhouse",
+    "driver-mssql",
 ]

@@ -107,7 +107,7 @@ fn check_select_star(sql: &str) -> Vec<LintFinding> {
                 .as_bytes()
                 .first()
                 .copied()
-                .map_or(true, |b| !b.is_ascii_alphanumeric() && b != b'_');
+                .is_none_or(|b| !b.is_ascii_alphanumeric() && b != b'_');
             if !before_ok || !after_ok {
                 continue;
             }
@@ -364,7 +364,7 @@ fn begins_with_keyword(s: &str, kw: &str) -> bool {
     s.as_bytes().starts_with(kw.as_bytes())
         && s.as_bytes()
             .get(kw.len())
-            .map_or(true, |b| !b.is_ascii_alphanumeric() && *b != b'_')
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_')
 }
 
 /// Advance past ASCII whitespace.
@@ -446,11 +446,7 @@ fn contains_top_level_byte(haystack: &[u8], needle: u8) -> bool {
     for &b in haystack {
         match b {
             b'(' => depth += 1,
-            b')' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-            }
+            b')' if depth > 0 => depth -= 1,
             _ if depth == 0 && b == needle => return true,
             _ => {}
         }

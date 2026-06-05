@@ -9,14 +9,14 @@
 
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::protocol::{
-    Content, InitializeParams, InitializeResult, Request, Response, RpcError, ServerCapabilities,
-    ServerInfo, ToolsCallParams, ToolsCallResult, ToolsListResult, MCP_PROTOCOL_VERSION,
+    Content, InitializeParams, InitializeResult, MCP_PROTOCOL_VERSION, Request, Response, RpcError,
+    ServerCapabilities, ServerInfo, ToolsCallParams, ToolsCallResult, ToolsListResult,
 };
 use crate::tools::ToolRegistry;
 

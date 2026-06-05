@@ -1,0 +1,113 @@
+[package]
+name = "narwhal-drivers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bundled database drivers for narwhal (PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse) + driver registry"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# T0-03: by default no driver is wired in. The `narwhaldb` binary turns
+# on `all-drivers` so users get the historical full build. Library
+# consumers (narwhal-mcp, narwhal-app, narwhal-pool) opt-in via the
+# specific `postgres` / `mysql` / `sqlite` / `duckdb` / `clickhouse`
+# features.
+default = []
+postgres = [
+    "dep:tokio-postgres",
+    "dep:bytes",
+    "dep:rustls",
+    "dep:tokio-postgres-rustls",
+    "dep:rustls-native-certs",
+    "dep:rustls-pemfile",
+    "dep:lru",
+    "dep:futures",
+    "dep:chrono",
+    "dep:serde_json",
+    "dep:uuid",
+]
+mysql = [
+    "dep:mysql_async",
+    "dep:mysql_common",
+    "dep:futures",
+    "dep:chrono",
+    "dep:serde_json",
+]
+sqlite = ["dep:rusqlite"]
+duckdb = ["dep:duckdb", "dep:chrono"]
+clickhouse = [
+    "dep:reqwest",
+    "dep:futures-util",
+    "dep:bytes",
+    "dep:url",
+    "dep:parking_lot",
+    "dep:uuid",
+]
+# T1-T2-A: Microsoft SQL Server via tiberius (TDS) + tokio-util compat
+# bridge to lift Tokio's TcpStream into the futures-rs IO traits tiberius
+# expects. `chrono`/`uuid`/`futures` are shared with postgres/mysql.
+mssql = [
+    "dep:tiberius",
+    "dep:tokio-util",
+    "dep:futures",
+    "dep:chrono",
+    "dep:uuid",
+]
+all-drivers = ["postgres", "mysql", "sqlite", "duckdb", "clickhouse", "mssql"]
+
+[dependencies]
+narwhal-core.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Optional driver dependencies — only pulled in when the matching
+# feature is enabled. Keeps `cargo tree --no-default-features` empty
+# of TLS stacks, libduckdb, libsqlite3, etc.
+tokio-postgres = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+duckdb = { workspace = true, optional = true }
+mysql_async = { workspace = true, optional = true }
+mysql_common = { workspace = true, optional = true }
+tiberius = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+bytes = { version = "1.7", optional = true }
+rustls = { version = "0.23", optional = true }
+tokio-postgres-rustls = { version = "0.14", optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+rustls-pemfile = { version = "2.1", optional = true }
+lru = { version = "0.12", optional = true }
+# `default-features = false` zorunlu: reqwest'in default-tls özelliği
+# native-tls → openssl-sys çekiyor. Workspace `keyring` `crypto-rust`
+# kullanırken burada da rustls hattını saf tutmak gerek; aksi takdirde
+# audit yüzeyi, binary boyutu ve Linux'ta `libssl-dev` zorunluluğu
+# geri gelir.
+reqwest = { version = "0.12", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+    "charset",
+    "http2",
+    "system-proxy",
+], optional = true }
+futures-util = { version = "0.3", default-features = false, features = [
+    "std",
+], optional = true }
+url = { version = "2.5", optional = true }
+parking_lot = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+uuid = { workspace = true }
+tempfile = "3.13"
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres", "mysql", "mssql_server"] }

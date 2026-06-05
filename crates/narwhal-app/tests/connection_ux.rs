@@ -7,9 +7,9 @@
 
 use std::path::PathBuf;
 
+use narwhal_app::DriverRegistry;
 use narwhal_app::core::AppCore;
 use narwhal_app::wizard::WizardFieldKind;
-use narwhal_app::DriverRegistry;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use tempfile::TempDir;
@@ -18,6 +18,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -190,10 +191,12 @@ async fn url_then_enter_persists_row() {
     {
         let wizard = core.wizard().expect("wizard open");
         assert_eq!(wizard.driver(), "postgres");
-        assert!(wizard
-            .fields
-            .iter()
-            .any(|f| f.kind == WizardFieldKind::Name));
+        assert!(
+            wizard
+                .fields
+                .iter()
+                .any(|f| f.kind == WizardFieldKind::Name)
+        );
     }
     // Drive the form through the public key handler so we exercise the
     // same path the TUI uses.

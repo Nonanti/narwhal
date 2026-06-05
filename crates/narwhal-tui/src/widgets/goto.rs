@@ -4,11 +4,11 @@
 //! list of `connection.schema.table` strings ranked by fuzzy score.
 //! Selection is highlighted with the theme accent.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

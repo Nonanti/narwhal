@@ -19,8 +19,8 @@
 //! - `refresh_task` is the abort-handle for the current debounced
 //!   schema-refresh timer; replaced on each scheduling call.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use tokio::sync::mpsc;
 

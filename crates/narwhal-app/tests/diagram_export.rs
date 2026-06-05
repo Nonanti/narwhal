@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use tempfile::TempDir;
@@ -16,6 +16,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -140,7 +141,10 @@ async fn focused_table_filters_to_one_hop_neighbours() {
         "order_items is a 1-hop in-edge"
     );
     // 2 hops away (audit → users → orders) → must not appear.
-    assert!(!body.contains("main_audit {"), "audit is 2 hops away:\n{body}");
+    assert!(
+        !body.contains("main_audit {"),
+        "audit is 2 hops away:\n{body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

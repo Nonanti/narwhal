@@ -1,1 +1,1 @@
-pub use narwhal_driver_registry::DriverRegistry;
+pub use narwhal_drivers::DriverRegistry;

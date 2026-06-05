@@ -1,0 +1,16 @@
+# Example plugin manifest. See `docs/plugins/wasm.md` for the full
+# schema reference.
+
+name        = "hello-world"
+version     = "0.1.0"
+api-version = 1
+description = "logs a line on every lifecycle event"
+
+# Path to the component, relative to this manifest. The default would
+# already pick up `hello-world.wasm`; we spell it out so the
+# integration test can find the cargo-component output without an
+# additional symlink.
+component   = "target/wasm32-wasip1/release/hello_world.wasm"
+
+# This plugin only consumes events — no host KV, no command bus.
+capabilities = []

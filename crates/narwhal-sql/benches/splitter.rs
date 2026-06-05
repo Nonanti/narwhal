@@ -4,8 +4,8 @@
 //! in one (dollar-quoted strings, line comments, plain statements) can
 //! be spotted in isolation.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use narwhal_sql::splitter::{split_with, Dialect};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use narwhal_sql::splitter::{Dialect, split_with};
 
 /// 200 plain CRUD statements separated by `;` — the common case.
 fn plain_statements(count: usize) -> String {

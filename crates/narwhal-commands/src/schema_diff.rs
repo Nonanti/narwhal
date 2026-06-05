@@ -243,15 +243,21 @@ mod tests {
             3,
             "id modified, created_at added, name dropped"
         );
-        assert!(changes
-            .iter()
-            .any(|c| matches!(c, ColumnChange::Modified { name, .. } if name == "id")));
-        assert!(changes
-            .iter()
-            .any(|c| matches!(c, ColumnChange::Added { column } if column.name == "created_at")));
-        assert!(changes
-            .iter()
-            .any(|c| matches!(c, ColumnChange::Dropped { name } if name == "name")));
+        assert!(
+            changes
+                .iter()
+                .any(|c| matches!(c, ColumnChange::Modified { name, .. } if name == "id"))
+        );
+        assert!(
+            changes.iter().any(
+                |c| matches!(c, ColumnChange::Added { column } if column.name == "created_at")
+            )
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|c| matches!(c, ColumnChange::Dropped { name } if name == "name"))
+        );
     }
 
     #[test]

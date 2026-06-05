@@ -3,13 +3,14 @@
 //! ratatui binding that turns the buffer into glyphs on the terminal.
 
 use narwhal_domain::editor::{
-    floor_char_boundary, CompletionPopupView, EditorBuffer, EditorSearchHighlight,
+    CompletionPopupView, EditorBuffer, EditorSearchHighlight, floor_char_boundary,
 };
+use narwhal_sql::treesitter::HighlightSpan;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
@@ -25,6 +26,10 @@ fn gutter_width(line_count: usize) -> usize {
     (digits + 3).max(6)
 }
 
+#[allow(clippy::too_many_arguments)] // T1-T3-A: 8 args is the natural
+// shape of the render call; folding them into a config struct would
+// just move the noise to the call site. The single caller (RootLayout)
+// already groups them.
 pub fn render_editor(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -33,6 +38,7 @@ pub fn render_editor(
     focused: bool,
     title: &str,
     search: Option<&EditorSearchHighlight<'_>>,
+    sql_highlights: Option<&[HighlightSpan]>,
 ) {
     let border_style = if focused {
         Style::default().fg(theme.accent)
@@ -70,6 +76,26 @@ pub fn render_editor(
     let end = (buffer.scroll() + height).min(buffer.lines().len());
     let gutter_w = gutter_width(buffer.lines().len());
     let num_w = gutter_w.saturating_sub(3); // " │ " suffix
+
+    // Per-row byte offsets so SQL highlight spans (whole-buffer
+    // ranges) can be clipped to each visible line. Built lazily — the
+    // search-overlay-only path doesn't need them.
+    let row_byte_ranges: Vec<(usize, usize)> = if sql_highlights.is_some() {
+        let mut offsets = Vec::with_capacity(buffer.lines().len());
+        let mut acc = 0usize;
+        for line in buffer.lines() {
+            let start = acc;
+            acc += line.len();
+            offsets.push((start, acc));
+            // Account for the `\n` separator the tree-sitter parser
+            // sees between rows.
+            acc += 1;
+        }
+        offsets
+    } else {
+        Vec::new()
+    };
+
     let lines: Vec<Line<'_>> = (buffer.scroll()..end)
         .map(|row| {
             let number = format!("{:>w$} │ ", row + 1, w = num_w);
@@ -111,6 +137,11 @@ pub fn render_editor(
                     spans.push(Span::raw(line_text[pos..].to_owned()));
                 }
                 Line::from(spans)
+            } else if let Some(all_spans) = sql_highlights {
+                let (row_start, row_end) = row_byte_ranges[row];
+                let mut spans = vec![gutter];
+                paint_sql_line(&mut spans, line_text, row_start, row_end, all_spans, theme);
+                Line::from(spans)
             } else {
                 let body = Span::raw(line_text.clone());
                 Line::from(vec![gutter, body])
@@ -129,6 +160,53 @@ pub fn render_editor(
                 frame.set_cursor_position((inner.x + cursor_x, inner.y + cursor_y));
             }
         }
+    }
+}
+
+/// Paint one editor row using the SQL highlight spans that intersect
+/// `[row_start_byte, row_end_byte)`. Spans are translated from
+/// whole-buffer byte offsets to per-row column offsets, clamped at
+/// row boundaries, and emitted in source order with plain-text
+/// padding between them.
+fn paint_sql_line(
+    out: &mut Vec<Span<'_>>,
+    line_text: &str,
+    row_start_byte: usize,
+    row_end_byte: usize,
+    all_spans: &[HighlightSpan],
+    theme: &Theme,
+) {
+    let mut pos = 0usize;
+    for span in all_spans {
+        if span.byte_range.end <= row_start_byte {
+            continue;
+        }
+        if span.byte_range.start >= row_end_byte {
+            break;
+        }
+        // Clip the span to the row.
+        let raw_start = span.byte_range.start.saturating_sub(row_start_byte);
+        let raw_end = span
+            .byte_range
+            .end
+            .saturating_sub(row_start_byte)
+            .min(line_text.len());
+        let start = floor_char_boundary(line_text, raw_start);
+        let end = floor_char_boundary(line_text, raw_end);
+        if end <= start || start < pos {
+            continue;
+        }
+        if start > pos {
+            out.push(Span::raw(line_text[pos..start].to_owned()));
+        }
+        out.push(Span::styled(
+            line_text[start..end].to_owned(),
+            theme.sql_style(span.kind),
+        ));
+        pos = end;
+    }
+    if pos < line_text.len() {
+        out.push(Span::raw(line_text[pos..].to_owned()));
     }
 }
 

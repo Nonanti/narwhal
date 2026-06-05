@@ -1,11 +1,11 @@
 //! The main result table painter.
 
 use narwhal_core::{ColumnHeader, Row};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row as TableRow, Table};
-use ratatui::Frame;
 
 use ratatui::widgets::Paragraph;
 

@@ -256,7 +256,7 @@ impl AppCore {
         err_msg: ErrF,
     ) where
         F: for<'a> FnOnce(
-            &'a mut dyn narwhal_core::Connection,
+            &'a mut dyn narwhal_core::DynConnection,
             &'a str,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = narwhal_core::Result<()>> + Send + 'a>,

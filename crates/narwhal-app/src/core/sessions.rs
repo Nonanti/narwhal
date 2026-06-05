@@ -3,8 +3,8 @@
 //! Handles `:open`/`:close`/`:remove`/`:forget`/`:refresh`/`:add`,
 //! the per-statement run dispatch (`Command::Run`, `Command::RunAll`,
 //! mouse double-click) and the debounced schema-refresh timer.
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use narwhal_core::ConnectionConfig;
@@ -16,7 +16,7 @@ use narwhal_tui::ResultView;
 
 use super::{AppCore, ConfirmModal, PendingConfirm, ResultBundle, ResultState, SidebarItem};
 use crate::meta::{MetaRequest, MetaUpdate};
-use crate::run::{spawn_run, RunContext, RunMode, RunRequest, RunTarget, RunUpdate};
+use crate::run::{RunContext, RunMode, RunRequest, RunTarget, RunUpdate, spawn_run};
 use crate::session::Session;
 use crate::statements::{all_statements, statement_at_cursor};
 use crate::wizard::ConnectionWizard;
@@ -369,6 +369,7 @@ impl AppCore {
             connection_id: session.config.id,
             connection_name: session.config.name.clone(),
             driver: session.driver.name().to_owned(),
+            stream_tuning: self.session.stream_tuning,
         };
         let request = if params.is_empty() {
             RunRequest::new(statements, mode)

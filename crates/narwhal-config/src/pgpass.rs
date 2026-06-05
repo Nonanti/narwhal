@@ -236,21 +236,9 @@ mod tests {
         assert!(password_from_pgpass("mysql", &p).is_none());
     }
 
-    /// Both env-var assertions live in one test so the surrounding
-    /// process-global `PGPASSWORD` set/remove can't race other tests
-    /// running in parallel. `std::env::set_var` is process-wide, so
-    /// splitting these into two `#[test]` functions made them
-    /// flake under cargo's default thread pool.
-    #[test]
-    fn env_var_resolution_round_trip() {
-        std::env::set_var("PGPASSWORD", "from-env");
-        let pw = password_from_env("postgres");
-        assert_eq!(pw.as_deref(), Some("from-env"));
-        assert!(password_from_env("sqlite").is_none());
-
-        std::env::set_var("PGPASSWORD", "");
-        assert!(password_from_env("postgres").is_none());
-        std::env::remove_var("PGPASSWORD");
-        assert!(password_from_env("postgres").is_none());
-    }
+    // The env-var round-trip assertion lives in tests/pgpass_env.rs as
+    // an integration test. Edition 2024 marks `env::set_var` /
+    // `env::remove_var` as unsafe (race with libc `getenv` in other
+    // threads) and this crate forbids `unsafe_code` at the lib root,
+    // so the global env mutation has to live outside the lib build.
 }

@@ -689,7 +689,7 @@ async fn execute_batch(
 }
 
 async fn run_all(
-    conn: &mut dyn narwhal_core::Connection,
+    conn: &mut dyn narwhal_core::DynConnection,
     compiled: &[CompiledMutation],
 ) -> Result<u64, String> {
     let mut total: u64 = 0;

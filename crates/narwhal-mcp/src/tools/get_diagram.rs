@@ -10,17 +10,17 @@
 //! to walk the JSON tree themselves.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use narwhal_config::collect_logical_relations_for;
 use narwhal_diagram::{
-    build_with_logical, focused as diagram_focused, DotRenderer, MermaidRenderer, QualifiedName,
-    Renderer,
+    DotRenderer, MermaidRenderer, QualifiedName, Renderer, build_with_logical,
+    focused as diagram_focused,
 };
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{cap_response, Tool, ToolOutput};
+use crate::tools::{Tool, ToolOutput, cap_response};
 
 pub struct GetDiagramTool;
 
@@ -204,11 +204,8 @@ impl Tool for GetDiagramTool {
         // do not fail the call — the diagram is still useful with the
         // valid subset.
         let workspace_root = ctx.workspace().map(|w| w.root.clone());
-        let (logical, warnings) = collect_logical_relations_for(
-            conn_name,
-            ctx.connections(),
-            workspace_root.as_deref(),
-        );
+        let (logical, warnings) =
+            collect_logical_relations_for(conn_name, ctx.connections(), workspace_root.as_deref());
         for w in &warnings {
             tracing::warn!(target: "narwhal::mcp::get_diagram", "{w}");
         }
@@ -269,7 +266,10 @@ impl Tool for GetDiagramTool {
 /// token is unqualified we prefer the hinted schema; otherwise the
 /// first match across all schemas wins.
 fn resolve_table_in_tree(
-    tree: &[(narwhal_core::schema::Schema, Vec<narwhal_core::schema::Table>)],
+    tree: &[(
+        narwhal_core::schema::Schema,
+        Vec<narwhal_core::schema::Table>,
+    )],
     token: &str,
     schema_hint: Option<&str>,
 ) -> Option<(String, String)> {

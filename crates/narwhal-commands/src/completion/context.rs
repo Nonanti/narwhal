@@ -2,7 +2,7 @@
 //! cursor sits, and which kind of completion candidate makes
 //! sense there.
 
-use super::tokenizer::{tokenize, Token};
+use super::tokenizer::{Token, tokenize};
 
 pub(super) const TABLE_EXPECTED_KEYWORDS: &[&str] = &[
     "FROM", "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "FULL", "CROSS", "INTO", "UPDATE", "TABLE",

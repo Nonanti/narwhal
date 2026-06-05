@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use narwhal_config::CredentialStore;
-use narwhal_core::{ConnectionConfig, DatabaseDriver, TableSchema};
+use narwhal_config::{CredentialStore, VaultRegistry};
+use narwhal_core::{ConnectionConfig, DynDatabaseDriver, TableSchema};
 use narwhal_domain::SchemaListing;
 use narwhal_history::HistoryEntry;
 use secrecy::{ExposeSecret, SecretString};
@@ -56,7 +56,7 @@ pub enum MetaRequest {
     /// fix — the highest-impact `block_in_place` call.)
     OpenSession {
         /// Driver instance (cloneable `Arc`) for the connection.
-        driver: Arc<dyn DatabaseDriver>,
+        driver: Arc<dyn DynDatabaseDriver>,
         /// Connection metadata. Boxed to keep the enum slim —
         /// `ConnectionConfig` carries a `ConnectionParams` blob that
         /// is the biggest variant by far.
@@ -76,7 +76,7 @@ pub enum MetaRequest {
     /// for the full TCP / TLS handshake when the user invoked `:test`.
     TestConnection {
         /// Driver instance for the connection under test.
-        driver: Arc<dyn DatabaseDriver>,
+        driver: Arc<dyn DynDatabaseDriver>,
         /// Connection metadata. Boxed for the same reason as
         /// `OpenSession::config`.
         config: Box<ConnectionConfig>,
@@ -234,12 +234,16 @@ pub enum MetaUpdate {
 ///
 /// `pool` is required for `DumpSchemaAll` and `RefreshSchemas`; it is
 /// unused for `LoadHistory` and `OpenSession` (the caller may pass
-/// `None`). `credentials` is consulted only by `OpenSession`.
+/// `None`). `credentials` and `vault` are consulted only by
+/// `OpenSession` and `TestConnection`. `vault` defaults to
+/// [`VaultRegistry::empty`] when the caller does not supply one
+/// (T1-T2-B).
 pub fn spawn_meta_request(
     request: MetaRequest,
     pool: Option<narwhal_pool::Pool>,
     history: Option<Arc<narwhal_history::Journal>>,
     credentials: Option<Arc<dyn CredentialStore>>,
+    vault: Option<Arc<VaultRegistry>>,
     tx: tokio::sync::mpsc::Sender<MetaUpdate>,
 ) {
     tokio::spawn(async move {
@@ -290,7 +294,9 @@ pub fn spawn_meta_request(
                 // round-trip does not stall the event loop.
                 let password = match password_hint {
                     Some(p) => Some(p),
-                    None => resolve_password(credentials.as_deref(), &config).await,
+                    None => {
+                        resolve_password(credentials.as_deref(), vault.as_deref(), &config).await
+                    }
                 };
                 let result = match Session::open_with(
                     Arc::clone(&driver),
@@ -323,7 +329,9 @@ pub fn spawn_meta_request(
             } => {
                 let resolved = match password {
                     Some(p) => Some(p),
-                    None => resolve_password(credentials.as_deref(), &config).await,
+                    None => {
+                        resolve_password(credentials.as_deref(), vault.as_deref(), &config).await
+                    }
                 };
                 let result = match Session::open_with(
                     Arc::clone(&driver),
@@ -374,14 +382,30 @@ pub fn spawn_meta_request(
 
 async fn resolve_password(
     credentials: Option<&dyn CredentialStore>,
+    vault: Option<&VaultRegistry>,
     config: &ConnectionConfig,
 ) -> Option<String> {
-    if let Some(store) = credentials {
-        if let Ok(Some(secret)) = store.get(config.id).await {
-            return Some(secret.expose_secret().to_owned());
+    match narwhal_config::resolve_connection_password(config, vault, credentials).await {
+        Ok(Some(secret)) => Some(secret.expose_secret().to_owned()),
+        Ok(None) => None,
+        Err(error) => {
+            // Vault failures (e.g. unreachable, denied) are user-
+            // visible problems but bubble up as a connect-time
+            // error in the driver path; resolution failure here
+            // collapses to "no password" so the driver returns a
+            // clean auth error rather than swallowing the vault
+            // diagnostic. The vault error itself is already
+            // surfaced through the credentials::resolve_password
+            // tracing path.
+            tracing::warn!(
+                target: "narwhal::meta",
+                connection = %config.name,
+                %error,
+                "password resolution failed; connect will proceed without a password",
+            );
+            None
         }
     }
-    narwhal_config::resolve_fallback_password(&config.driver, &config.params)
 }
 
 async fn dump_schema_all(

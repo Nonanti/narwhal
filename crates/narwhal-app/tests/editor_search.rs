@@ -1,8 +1,8 @@
 //! Integration tests for editor search (/ ? n N) and substitute (:s/:%s).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_vim::SearchDirection;
 
@@ -158,10 +158,12 @@ async fn esc_during_prompt_restores_cursor() {
     // Search should be cleared.
     assert!(!core.tabs()[core.active_tab()].editor_search().prompt_open);
     assert!(!core.tabs()[core.active_tab()].editor_search().highlight);
-    assert!(core.tabs()[core.active_tab()]
-        .editor_search()
-        .needle
-        .is_empty());
+    assert!(
+        core.tabs()[core.active_tab()]
+            .editor_search()
+            .needle
+            .is_empty()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -182,10 +184,12 @@ async fn enter_during_prompt_keeps_match_highlighted() {
         core.tabs()[core.active_tab()].editor_search().needle,
         "this"
     );
-    assert!(!core.tabs()[core.active_tab()]
-        .editor_search()
-        .matches
-        .is_empty());
+    assert!(
+        !core.tabs()[core.active_tab()]
+            .editor_search()
+            .matches
+            .is_empty()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -90,7 +90,7 @@ impl EditorBuffer {
         self.scroll
     }
 
-    pub fn set_scroll(&mut self, scroll: usize) {
+    pub const fn set_scroll(&mut self, scroll: usize) {
         self.scroll = scroll;
     }
 
@@ -184,7 +184,7 @@ impl EditorBuffer {
     }
 
     /// Set whether auto-pair is enabled.
-    pub fn set_auto_pair_enabled(&mut self, on: bool) {
+    pub const fn set_auto_pair_enabled(&mut self, on: bool) {
         self.auto_pair_enabled = on;
     }
 
@@ -288,7 +288,7 @@ impl EditorBuffer {
     }
 
     /// Bring the cursor row into view inside `height` visible rows.
-    pub fn ensure_visible(&mut self, height: usize) {
+    pub const fn ensure_visible(&mut self, height: usize) {
         if height == 0 {
             return;
         }

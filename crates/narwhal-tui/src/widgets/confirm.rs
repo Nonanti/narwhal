@@ -7,11 +7,11 @@
 //! computed here so the renderer can colour the input cue red/green
 //! without duplicating the modal struct.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

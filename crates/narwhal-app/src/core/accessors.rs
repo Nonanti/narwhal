@@ -74,7 +74,7 @@ impl AppCore {
     /// integration tests that pre-populate fields (notably the
     /// staged-mutation queue) before exercising a public path.
     #[doc(hidden)]
-    pub fn tabs_mut(&mut self) -> &mut Vec<Tab> {
+    pub const fn tabs_mut(&mut self) -> &mut Vec<Tab> {
         &mut self.ui.tabs
     }
 
@@ -160,14 +160,14 @@ impl AppCore {
 
     /// Test helper: position the sidebar selection cursor.
     #[doc(hidden)]
-    pub fn set_sidebar_index_for_test(&mut self, idx: usize) {
+    pub const fn set_sidebar_index_for_test(&mut self, idx: usize) {
         self.ui.sidebar_index = idx;
     }
 
     /// Test helper: move keyboard focus to the sidebar pane (skips the
     /// usual `Ctrl-W` cycle that drives this in interactive use).
     #[doc(hidden)]
-    pub fn set_focus_sidebar_for_test(&mut self) {
+    pub const fn set_focus_sidebar_for_test(&mut self) {
         self.ui.focus = narwhal_tui::Pane::Sidebar;
     }
 

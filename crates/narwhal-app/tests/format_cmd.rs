@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use narwhal_app::core::AppCore;
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::AppCore;
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use uuid::Uuid;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -84,11 +85,12 @@ async fn fmt_alias_resolves_to_format() {
     let mut core = AppCore::new(registry, connections, None);
     core.insert_into_editor("select 1").await;
     core.execute_command("fmt").await;
-    assert!(core
-        .editor()
-        .entire_text()
-        .to_uppercase()
-        .contains("SELECT"));
+    assert!(
+        core.editor()
+            .entire_text()
+            .to_uppercase()
+            .contains("SELECT")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

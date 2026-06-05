@@ -9,6 +9,8 @@
 //! - `postgresql://...` (alias)
 //! - `mysql://[user[:password]@]host[:port]/database[?key=value&...]`
 //! - `mariadb://...` (alias)
+//! - `mssql://[user[:password]@]host[:port]/database[?key=value&...]`
+//! - `sqlserver://...` (alias)
 //! - `sqlite:<path>` or `sqlite:///<abs-path>`
 //!
 //! Query-string parameters become entries in
@@ -81,6 +83,10 @@ pub fn parse(url: &str) -> Result<ParsedUrl, UrlError> {
     match scheme.to_ascii_lowercase().as_str() {
         "postgres" | "postgresql" => parse_server("postgres", rest),
         "mysql" | "mariadb" => parse_server("mysql", rest),
+        // T1-T2-A: accept both `mssql://` (libpq-style, matches our other
+        // schemes) and `sqlserver://` (matches the JDBC convention SQL
+        // Server users are already familiar with).
+        "mssql" | "sqlserver" => parse_server("mssql", rest),
         "sqlite" => Ok(parse_sqlite(rest)),
         other => Err(UrlError::UnsupportedScheme(other.to_owned())),
     }
@@ -415,6 +421,23 @@ mod tests {
         let parsed = parse("mariadb://root@127.0.0.1:3306/test").unwrap();
         assert_eq!(parsed.config.driver, "mysql");
         assert_eq!(parsed.config.params.port, Some(3306));
+    }
+
+    #[test]
+    fn mssql_scheme_resolves_to_mssql_driver() {
+        let parsed = parse("mssql://sa:hunter2@db.local:1433/master").unwrap();
+        assert_eq!(parsed.config.driver, "mssql");
+        assert_eq!(parsed.config.params.host.as_deref(), Some("db.local"));
+        assert_eq!(parsed.config.params.port, Some(1433));
+        assert_eq!(parsed.config.params.database.as_deref(), Some("master"));
+        assert_eq!(parsed.config.params.username.as_deref(), Some("sa"));
+        assert_eq!(parsed.password.as_deref(), Some("hunter2"));
+    }
+
+    #[test]
+    fn sqlserver_alias_resolves_to_mssql_driver() {
+        let parsed = parse("sqlserver://sa@db/master").unwrap();
+        assert_eq!(parsed.config.driver, "mssql");
     }
 
     #[test]

@@ -4,7 +4,6 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -24,7 +23,7 @@ use uuid::Uuid;
 /// files with cleartext secrets are **not** automatically retrofitted —
 /// users should delete or manually redact old files if they contain
 /// sensitive data.
-static REDACT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static REDACT_PATTERNS: std::sync::LazyLock<Vec<Regex>> = std::sync::LazyLock::new(|| {
     // Inner literal alternation `(?:[^']|'')*` matches the SQL standard
     // doubled-single-quote escape so passwords containing `'` aren't
     // cut short mid-string (which would leak the tail). Tested below.

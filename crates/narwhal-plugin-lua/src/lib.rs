@@ -78,8 +78,8 @@ use narwhal_plugin::{
     ColumnHeader, CommandContext, CommandDescriptor, CommandOutcome, Plugin, PluginError,
     PluginResult, QueryResult, Row, SqlExecutor, Value,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task;
 
 /// Default execution budget for a plugin command handler. Long enough

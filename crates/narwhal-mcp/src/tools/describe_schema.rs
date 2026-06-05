@@ -7,11 +7,11 @@
 
 use async_trait::async_trait;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::context::ServerContext;
 use crate::error::McpError;
-use crate::tools::{cap_response, Tool, ToolOutput};
+use crate::tools::{Tool, ToolOutput, cap_response};
 
 pub struct DescribeSchemaTool;
 

@@ -12,8 +12,8 @@ use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::workspace::{Workspace, WorkspaceFile};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
-use serde_json::{json, Value};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
 fn seed_sqlite(path: &std::path::Path) {
     let conn = rusqlite::Connection::open(path).expect("open");
@@ -53,6 +53,7 @@ fn ctx_with(connections: Vec<ConnectionConfig>, workspace: Option<Workspace>) ->
     let mut ctx = ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {
+            schema_version: None,
             connections,
             logical_relations: Vec::new(),
         }),

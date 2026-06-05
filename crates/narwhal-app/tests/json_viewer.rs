@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use narwhal_app::DriverRegistry;
 use narwhal_app::clipboard::InMemoryClipboard;
 use narwhal_app::core::AppCore;
-use narwhal_app::DriverRegistry;
 use narwhal_config::{ConnectionsFile, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_tui::Pane;
@@ -20,6 +20,7 @@ use uuid::Uuid;
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),
@@ -85,7 +86,7 @@ async fn open_with_payload(payload: &str) -> (AppCore, Arc<InMemoryClipboard>) {
         core.handle_key(ctrl_w).await;
     }
     core.handle_key(key(KeyCode::Char('j'))).await; // select row 0
-                                                    // Move to the `body` column.
+    // Move to the `body` column.
     core.handle_key(key(KeyCode::Char('l'))).await;
     (core, clipboard)
 }

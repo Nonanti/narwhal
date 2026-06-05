@@ -191,7 +191,7 @@ mod tests {
             file: WorkspaceFile {
                 allowed_connections: vec!["a".into(), "b".into()],
                 allow_writes: true,
-            logical_relations: Vec::new(),
+                logical_relations: Vec::new(),
             },
         };
         assert!(ws.connection_allowed("a"));

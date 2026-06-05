@@ -275,7 +275,7 @@ mod tests {
     use narwhal_core::Value;
     use narwhal_sql::splitter::Dialect;
 
-    use super::{build_fk_select_sql, FkLeg};
+    use super::{FkLeg, build_fk_select_sql};
 
     fn leg(col_quoted: &str, value: Value) -> FkLeg {
         FkLeg {

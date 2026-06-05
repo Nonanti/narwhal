@@ -20,7 +20,7 @@ narwhal-config.workspace = true
 narwhal-diagram.workspace = true
 narwhal-history.workspace = true
 narwhal-sql.workspace = true
-narwhal-driver-registry = { workspace = true }
+narwhal-drivers = { workspace = true }
 
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
 async-trait.workspace = true
@@ -35,17 +35,19 @@ toml.workspace = true
 
 [features]
 default = ["driver-postgres", "driver-sqlite"]
-driver-postgres = ["narwhal-driver-registry/driver-postgres"]
-driver-sqlite = ["narwhal-driver-registry/driver-sqlite"]
-driver-mysql = ["narwhal-driver-registry/driver-mysql"]
-driver-duckdb = ["narwhal-driver-registry/driver-duckdb"]
-driver-clickhouse = ["narwhal-driver-registry/driver-clickhouse"]
+driver-postgres = ["narwhal-drivers/postgres"]
+driver-sqlite = ["narwhal-drivers/sqlite"]
+driver-mysql = ["narwhal-drivers/mysql"]
+driver-duckdb = ["narwhal-drivers/duckdb"]
+driver-clickhouse = ["narwhal-drivers/clickhouse"]
+driver-mssql = ["narwhal-drivers/mssql"]
 all-drivers = [
     "driver-postgres",
     "driver-sqlite",
     "driver-mysql",
     "driver-duckdb",
     "driver-clickhouse",
+    "driver-mssql",
 ]
 
 [dev-dependencies]
@@ -55,4 +57,4 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-u
 rusqlite.workspace = true
 tempfile = "3"
 chrono.workspace = true
-narwhal-driver-registry = { workspace = true, features = ["all-drivers"] }
+narwhal-drivers = { workspace = true, features = ["all-drivers"] }

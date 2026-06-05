@@ -10,8 +10,8 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use narwhal_app::core::{AppCore, ResultState};
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::{AppCore, ResultState};
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams, Value};
 use narwhal_tui::Pane;
@@ -45,6 +45,7 @@ async fn type_str(core: &mut AppCore, text: &str) {
 fn fixture(database_path: PathBuf) -> (DriverRegistry, ConnectionsFile) {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),

@@ -5,8 +5,8 @@ use narwhal_core::{ConnectionConfig, ConnectionParams};
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
-use super::fields::{server_fields, text, WizardField, WizardFieldKind, WizardFieldValue};
-use super::path::{complete_path, PathCompletion};
+use super::fields::{WizardField, WizardFieldKind, WizardFieldValue, server_fields, text};
+use super::path::{PathCompletion, complete_path};
 use super::state::{Built, ConnectionWizard, DRIVERS};
 
 impl ConnectionWizard {

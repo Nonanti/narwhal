@@ -12,7 +12,7 @@ mod items;
 mod keywords;
 mod tokenizer;
 
-pub use context::{detect_context, detect_context_with_schemas, CompletionContext};
+pub use context::{CompletionContext, detect_context, detect_context_with_schemas};
 pub use gather::gather;
 pub use items::{Completion, CompletionKind};
 pub use keywords::{FUNCTIONS, KEYWORDS, PHRASES};
@@ -57,14 +57,16 @@ mod tests {
 
     #[test]
     fn empty_prefix_yields_nothing() {
-        assert!(gather(
-            "",
-            &listing(),
-            &CompletionContext::Generic,
-            &no_columns(),
-            20
-        )
-        .is_empty());
+        assert!(
+            gather(
+                "",
+                &listing(),
+                &CompletionContext::Generic,
+                &no_columns(),
+                20
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -141,15 +143,18 @@ mod tests {
 
         let out = gather("u", &listing(), &ctx, &no_columns(), 50);
         // Should contain `users` table but NOT `UNION` or `UPDATE` keywords.
-        assert!(out
-            .iter()
-            .any(|c| c.text == "users" && c.kind == CompletionKind::Table));
-        assert!(!out
-            .iter()
-            .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
-        assert!(!out
-            .iter()
-            .any(|c| c.text == "UPDATE" && c.kind == CompletionKind::Keyword));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "users" && c.kind == CompletionKind::Table)
+        );
+        assert!(
+            !out.iter()
+                .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword)
+        );
+        assert!(
+            !out.iter()
+                .any(|c| c.text == "UPDATE" && c.kind == CompletionKind::Keyword)
+        );
     }
 
     #[test]
@@ -189,9 +194,10 @@ mod tests {
 
         // With a prefix we get the matching columns.
         let out = gather("n", &listing(), &ctx, &cols, 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "name" && c.kind == CompletionKind::Column));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "name" && c.kind == CompletionKind::Column)
+        );
         assert!(!out.iter().any(|c| c.kind == CompletionKind::Keyword));
     }
 
@@ -208,12 +214,14 @@ mod tests {
         assert_eq!(ctx, CompletionContext::TableExpected);
 
         let out = gather("u", &listing(), &ctx, &no_columns(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "users" && c.kind == CompletionKind::Table));
-        assert!(!out
-            .iter()
-            .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "users" && c.kind == CompletionKind::Table)
+        );
+        assert!(
+            !out.iter()
+                .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword)
+        );
     }
 
     #[test]
@@ -222,12 +230,14 @@ mod tests {
         assert_eq!(ctx, CompletionContext::TableExpected);
 
         let out = gather("u", &listing(), &ctx, &no_columns(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "users" && c.kind == CompletionKind::Table));
-        assert!(!out
-            .iter()
-            .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "users" && c.kind == CompletionKind::Table)
+        );
+        assert!(
+            !out.iter()
+                .any(|c| c.text == "UNION" && c.kind == CompletionKind::Keyword)
+        );
     }
 
     fn user_cols() -> HashMap<String, (String, Vec<ColumnHeader>)> {
@@ -265,9 +275,10 @@ mod tests {
             }
         );
         let out = gather("e", &listing(), &ctx, &user_cols(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "email" && c.kind == CompletionKind::Column));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "email" && c.kind == CompletionKind::Column)
+        );
     }
 
     /// `JOIN orders AS o ON o.` walks through the explicit `AS` form.
@@ -311,9 +322,10 @@ mod tests {
             }
         );
         let out = gather("u", &listing(), &ctx, &no_columns(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "users" && c.kind == CompletionKind::Table));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "users" && c.kind == CompletionKind::Table)
+        );
     }
 
     /// Without the schema list, `public.` falls back to the legacy
@@ -337,9 +349,10 @@ mod tests {
         let ctx = detect_context("SELECT ", 7);
         assert_eq!(ctx, CompletionContext::Generic);
         let out = gather("cou", &listing(), &ctx, &no_columns(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "COUNT(" && c.kind == CompletionKind::Function));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "COUNT(" && c.kind == CompletionKind::Function)
+        );
     }
 
     /// Function suggestions are kind-tagged distinctly so the UI can
@@ -348,8 +361,9 @@ mod tests {
     fn function_kind_distinct_from_keyword() {
         let ctx = detect_context("SELECT ", 7);
         let out = gather("now", &listing(), &ctx, &no_columns(), 50);
-        assert!(out
-            .iter()
-            .any(|c| c.text == "NOW()" && c.kind == CompletionKind::Function));
+        assert!(
+            out.iter()
+                .any(|c| c.text == "NOW()" && c.kind == CompletionKind::Function)
+        );
     }
 }

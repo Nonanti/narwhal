@@ -1,0 +1,135 @@
+// narwhal:plugin/host  v0.1.0
+//
+// The contract every WASM component-model plugin sees. v0.1.0 is the
+// surface that lands in narwhal 2.0; once 2.0 ships this file is
+// **append-only** until 2.x — fields and variants may be added (the
+// host accepts older components) but never reshaped or removed.
+//
+// See `docs/dev/t1-t5-a-wasm-runtime.md` for the full contract notes
+// (capability set, fuel limits, breakage policy) and
+// `docs/plugins/wasm.md` for the plugin-author SDK walkthrough.
+
+package narwhal:plugin@0.1.0;
+
+/// Shared WIT vocabulary used by both the host import and the plugin
+/// export. Keeping the types in a single interface lets either side
+/// import them without circular `use` clauses.
+interface types {
+    /// Result of a host-side command dispatch. `ok=false` carries a
+    /// user-facing reason in `message`; `ok=true` carries an optional
+    /// status string (empty when the command had no surface effect).
+    record command-result {
+        ok: bool,
+        message: string,
+    }
+
+    record query-summary {
+        sql: string,
+        rows: u64,
+        elapsed-ms: u64,
+        ok: bool,
+    }
+
+    record buffer-snapshot {
+        text: string,
+        cursor-line: u32,
+        cursor-col: u32,
+    }
+
+    /// Lifecycle events the host pushes into every loaded plugin.
+    /// Adding variants in a future minor is backwards-compatible: the
+    /// host downgrades to older variants when the plugin's
+    /// `api-version` predates the addition.
+    variant event {
+        connection-opened(string),
+        connection-closed(string),
+        query-started(string),
+        query-finished(query-summary),
+        editor-buffer-changed(buffer-snapshot),
+    }
+
+    /// Result of a plugin command handler — mirrors
+    /// `narwhal_plugin::CommandOutcome` field-for-field so the host
+    /// can hand the result straight to the surrounding `Plugin`
+    /// trait.
+    variant command-outcome {
+        status(string),
+        insert-sql(insert-sql-payload),
+        silent,
+    }
+
+    record insert-sql-payload {
+        sql: string,
+        /// When true the editor appends to the current buffer; when
+        /// false the buffer is replaced wholesale.
+        append: bool,
+    }
+
+    record command-input {
+        /// Command name typed at the `:` prompt (the leading `:` is
+        /// stripped before the host calls into the plugin).
+        name: string,
+        /// Raw argument text, exactly as `CommandContext::argument`
+        /// receives it on the Lua side.
+        argument: string,
+        /// Snapshot of the active editor buffer, identical to
+        /// `CommandContext::editor_text`.
+        editor-text: string,
+    }
+
+    record plugin-info {
+        name: string,
+        version: string,
+        api-version: u32,
+    }
+}
+
+interface host {
+    use types.{command-result};
+
+    /// Dispatch a narwhal `:` command. The host enforces the same
+    /// reserved-name policy applied to Lua plugins, so `cmd("run", …)`
+    /// will hit the built-in run handler.
+    cmd: func(name: string, args: list<string>) -> command-result;
+
+    /// Append a structured log line. `level` is one of `"trace"`,
+    /// `"debug"`, `"info"`, `"warn"`, `"error"` (unknown levels fall
+    /// back to `info` with a warning emitted by the host).
+    log: func(level: string, message: string);
+
+    /// Read a per-plugin key from the host KV store. Returns
+    /// `none` when the key has never been written. The KV namespace
+    /// is scoped to the plugin's `name`; one plugin cannot see
+    /// another's keys.
+    state-get: func(key: string) -> option<list<u8>>;
+
+    /// Write a per-plugin key. Overwrites any previous value. Calls
+    /// are subject to a per-plugin byte budget so a runaway plugin
+    /// cannot exhaust host memory.
+    state-set: func(key: string, value: list<u8>);
+}
+
+interface plugin {
+    use types.{command-input, command-outcome, event, plugin-info};
+
+    /// Called exactly once per plugin instance, immediately after
+    /// instantiation. Plugins should keep `init` cheap; long work
+    /// belongs in `on-event` so a slow plugin can't stall the host
+    /// boot path. Returning `err(msg)` aborts the load.
+    init: func() -> result<plugin-info, string>;
+
+    /// Handle a `:` command dispatched at the prompt. The host only
+    /// calls this for command names declared by the plugin's
+    /// `plugin.toml` (`commands = [...]`). Returning `err(msg)`
+    /// surfaces the message to the status bar.
+    handle-command: func(input: command-input) -> result<command-outcome, string>;
+
+    /// Receive a lifecycle event. Errors are logged by the host and
+    /// do *not* cancel delivery to other plugins.
+    on-event: func(event: event) -> result<_, string>;
+}
+
+world narwhal-plugin {
+    import host;
+    export plugin;
+}

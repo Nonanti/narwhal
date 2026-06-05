@@ -13,15 +13,15 @@
 
 use std::path::PathBuf;
 
-use narwhal_config::{collect_logical_relations_for, DiagramIcons};
+use narwhal_config::{DiagramIcons, collect_logical_relations_for};
 use narwhal_diagram::{
-    build_with_logical, focused as diagram_focused, impact as diagram_impact, DiagramModel,
-    DotRenderer, IconSet, LogicalRelation, MermaidRenderer, QualifiedName, Renderer,
+    DiagramModel, DotRenderer, IconSet, LogicalRelation, MermaidRenderer, QualifiedName, Renderer,
+    build_with_logical, focused as diagram_focused, impact as diagram_impact,
 };
 use narwhal_pool::Pool;
 
-use super::state::result::{DiagramModalState, DiagramMode};
 use super::AppCore;
+use super::state::result::{DiagramModalState, DiagramMode};
 use crate::commands::DiagramFormat;
 
 impl AppCore {
@@ -68,11 +68,7 @@ impl AppCore {
         let pairs_all: Vec<(String, String)> = session
             .schemas
             .iter()
-            .flat_map(|(s, tables)| {
-                tables
-                    .iter()
-                    .map(move |t| (s.name.clone(), t.name.clone()))
-            })
+            .flat_map(|(s, tables)| tables.iter().map(move |t| (s.name.clone(), t.name.clone())))
             .collect();
 
         let Some((target_schema, target_name)) = resolve_table(&pairs_all, table, None) else {
@@ -111,8 +107,10 @@ impl AppCore {
             tracing::warn!(target: "narwhal::app::diagram", "{w}");
         }
         if !build_diags.is_empty() {
-            self.ui.status.message =
-                format!("diagram: {} logical-relation issue(s); see log", build_diags.len());
+            self.ui.status.message = format!(
+                "diagram: {} logical-relation issue(s); see log",
+                build_diags.len()
+            );
         }
         let center = QualifiedName::new(target_schema, target_name);
         if model.node(&center).is_none() {
@@ -367,11 +365,7 @@ impl AppCore {
                 Some(want) => s.name == want,
                 None => true,
             })
-            .flat_map(|(s, tables)| {
-                tables
-                    .iter()
-                    .map(move |t| (s.name.clone(), t.name.clone()))
-            })
+            .flat_map(|(s, tables)| tables.iter().map(move |t| (s.name.clone(), t.name.clone())))
             .collect();
 
         // If the user asked for a focused diagram, keep the target table
@@ -460,7 +454,10 @@ impl AppCore {
 
         match path {
             Some(p) => self.write_diagram_file(&p, &rendered, format, &model),
-            None => self.copy_diagram_to_clipboard(&rendered, format, &model).await,
+            None => {
+                self.copy_diagram_to_clipboard(&rendered, format, &model)
+                    .await;
+            }
         }
     }
 

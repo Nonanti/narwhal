@@ -19,13 +19,13 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use crate::context::ServerContext;
 use crate::error::McpError;
 use crate::json_value::value_to_json;
-use crate::tools::{cap_response, Tool, ToolOutput};
+use crate::tools::{Tool, ToolOutput, cap_response};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -227,7 +227,7 @@ fn analyze_supported(driver: &str) -> bool {
 /// the two tools independent. If we add a third user we'll extract it
 /// into a small helper module.
 async fn run_in_sandbox(
-    conn: &mut dyn narwhal_core::Connection,
+    conn: &mut dyn narwhal_core::DynConnection,
     sql: &str,
 ) -> Result<narwhal_core::QueryResult, narwhal_core::Error> {
     if let Err(error) = conn.begin().await {

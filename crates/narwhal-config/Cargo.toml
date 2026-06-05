@@ -25,9 +25,13 @@ keyring.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync", "process", "time", "io-util"] }
 secrecy = { workspace = true }
 zeroize.workspace = true
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "process", "time", "sync"] }

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::CredentialStore;
+use narwhal_config::{CredentialStore, VaultRegistry};
 use narwhal_plugin::PluginRegistry;
 
 use super::super::plugin_executor::PluginConnectionState;
@@ -30,6 +30,11 @@ pub struct AppDeps {
     /// Credential store. Backed by libsecret / Windows DPAPI /
     /// macOS Keychain in production; `InMemoryStore` in tests.
     pub credentials: Arc<dyn CredentialStore>,
+    /// Secret-vault provider registry (T1-T2-B). Empty by default;
+    /// the binary swaps in a populated [`VaultRegistry`] built from
+    /// `settings.vault.providers`. Cheap to clone (every provider
+    /// is an `Arc<dyn VaultProvider>`).
+    pub vault: Arc<VaultRegistry>,
     /// Clipboard handle. Backed by OSC52 / pbcopy / xclip in
     /// production; `InMemoryClipboard` in tests.
     pub clipboard: Arc<dyn Clipboard>,

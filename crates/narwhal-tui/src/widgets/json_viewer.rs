@@ -8,11 +8,11 @@
 //! The widget itself owns no state — scroll offset and lifecycle live on
 //! the host side. The TUI crate only paints.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::theme::Theme;
 

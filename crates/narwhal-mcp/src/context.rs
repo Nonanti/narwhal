@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore};
-use narwhal_core::{Connection, ConnectionConfig};
+use narwhal_config::{ConnectionsFile, CredentialStore, VaultRegistry};
+use narwhal_core::{ConnectionConfig, DynConnection};
 use narwhal_history::{HistoryEntry, Journal};
 use secrecy::ExposeSecret;
 
@@ -30,6 +30,13 @@ pub struct ServerContext {
     drivers: Arc<DriverRegistry>,
     connections: Arc<ConnectionsFile>,
     credentials: Arc<dyn CredentialStore>,
+    /// Secret-vault provider registry (T1-T2-B). Defaults to
+    /// [`VaultRegistry::empty`] when [`Self::new`] runs; replaced
+    /// via [`Self::with_vault`] before the server accepts requests.
+    /// `password = "vault:…"` references in `connections.toml` go
+    /// through this registry; non-reference passwords fall back to
+    /// the keyring + pgpass chain unchanged.
+    vault: Arc<VaultRegistry>,
     /// Optional. When `Some`, every tool that touches the database appends
     /// an audited entry tagged `source = "mcp"` so the operator can audit
     /// agent activity offline. When `None` (typically in unit tests), the
@@ -57,10 +64,23 @@ impl ServerContext {
             drivers,
             connections,
             credentials,
+            vault: Arc::new(VaultRegistry::empty()),
             journal: None,
             workspace: None,
             force_read_only: false,
         }
+    }
+
+    /// Install a configured [`VaultRegistry`] (T1-T2-B).
+    ///
+    /// The binary builds this from `settings.vault.providers`
+    /// before calling `serve_stdio()`. The registry holds the
+    /// in-flight de-duplication state, so a single instance must
+    /// be shared across every per-tool resolve call.
+    #[must_use]
+    pub fn with_vault(mut self, vault: Arc<VaultRegistry>) -> Self {
+        self.vault = vault;
+        self
     }
 
     /// Force read-only mode regardless of workspace ACL.
@@ -113,7 +133,7 @@ impl ServerContext {
     pub fn is_connection_allowed(&self, name: &str) -> bool {
         self.workspace
             .as_ref()
-            .map_or(true, |ws| ws.connection_allowed(name))
+            .is_none_or(|ws| ws.connection_allowed(name))
     }
 
     /// True when writes are permitted in the current workspace.
@@ -127,7 +147,7 @@ impl ServerContext {
         }
         self.workspace
             .as_ref()
-            .map_or(true, |ws| ws.file.allow_writes)
+            .is_none_or(|ws| ws.file.allow_writes)
     }
 
     /// True when the global `--read-only` CLI flag is in effect.
@@ -150,7 +170,7 @@ impl ServerContext {
     /// We deliberately do not return an `Arc<Mutex<…>>` long-lived handle
     /// — every MCP call is short and the per-call dial cost is negligible
     /// compared to the network round-trips that follow.
-    pub async fn open_connection(&self, name: &str) -> Result<Box<dyn Connection>, McpError> {
+    pub async fn open_connection(&self, name: &str) -> Result<Box<dyn DynConnection>, McpError> {
         if !self.is_connection_allowed(name) {
             // Workspace ACLs reject up-front so the agent sees a clear
             // "not exposed" signal instead of a vague driver error
@@ -212,21 +232,31 @@ impl ServerContext {
             .ok_or_else(|| McpError::UnknownConnection(name.to_string()))
     }
 
-    /// Resolution order mirrors the TUI's `:open` path so the MCP server
-    /// never sees a credential the TUI wouldn't: keyring first, then the
-    /// `~/.pgpass` / env-var fallback. Failures in the keyring leg are not
-    /// fatal — they just fall through to the secondary resolvers.
+    /// Resolution order mirrors the TUI's `:open` path so the MCP
+    /// server never sees a credential the TUI wouldn't: vault
+    /// reference (if `params.password` looks like one) → keyring →
+    /// `~/.pgpass` / env-var fallback. Vault errors propagate as
+    /// `McpError::Internal` so a malformed reference or unreachable
+    /// provider surfaces to the agent as a clear failure rather than
+    /// silently degrading to the keyring path.
     async fn resolve_password(
         &self,
         config: &ConnectionConfig,
     ) -> Result<Option<String>, McpError> {
-        if let Ok(Some(secret)) = self.credentials.get(config.id).await {
-            return Ok(Some(secret.expose_secret().to_string()));
+        match narwhal_config::resolve_connection_password(
+            config,
+            Some(self.vault.as_ref()),
+            Some(self.credentials.as_ref()),
+        )
+        .await
+        {
+            Ok(Some(secret)) => Ok(Some(secret.expose_secret().to_string())),
+            Ok(None) => Ok(None),
+            Err(error) => Err(McpError::Internal(format!(
+                "password resolution failed for `{}`: {error}",
+                config.name
+            ))),
         }
-        Ok(narwhal_config::pgpass::resolve_password(
-            &config.driver,
-            &config.params,
-        ))
     }
 
     /// Append an audit entry for a query the agent is about to run.

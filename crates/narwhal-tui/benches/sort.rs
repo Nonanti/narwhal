@@ -4,7 +4,7 @@
 //! variants. The Json bench is the headline number — today every
 //! comparison materialises both sides via `.to_string()`.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use narwhal_core::Value;
 use narwhal_tui::compare_values;
 

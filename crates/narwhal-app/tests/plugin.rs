@@ -7,8 +7,8 @@
 
 use std::path::PathBuf;
 
-use narwhal_app::core::{AppCore, ResultState};
 use narwhal_app::DriverRegistry;
+use narwhal_app::core::{AppCore, ResultState};
 use narwhal_config::ConnectionsFile;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use narwhal_plugin_lua::LuaPlugin;
@@ -18,6 +18,7 @@ use uuid::Uuid;
 fn empty_core() -> AppCore {
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: Vec::new(),
     };
@@ -47,6 +48,7 @@ async fn core_with_items() -> (AppCore, TempDir) {
     }
     let registry = DriverRegistry::with_defaults();
     let connections = ConnectionsFile {
+        schema_version: None,
         logical_relations: Vec::new(),
         connections: vec![ConnectionConfig {
             id: Uuid::nil(),

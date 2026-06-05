@@ -51,6 +51,17 @@ impl ConfigPaths {
         self.data_dir.join("last_used.toml")
     }
 
+    /// T1-T3-B: workspace-state snapshot (open tabs, cursor/scroll,
+    /// sidebar, active connection). Lives in the *config* directory
+    /// alongside `settings.toml` and `connections.toml` so users who
+    /// version their `~/.config/narwhal` see workspace restore as a
+    /// first-class config artefact rather than something hidden under
+    /// `~/.local/share`. The file format is TOML, matching every other
+    /// narwhal-managed file in this directory.
+    pub fn workspace_state_file(&self) -> PathBuf {
+        self.config_dir.join("workspace-state.toml")
+    }
+
     pub fn log_dir(&self) -> PathBuf {
         self.cache_dir.join("logs")
     }

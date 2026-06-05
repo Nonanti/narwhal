@@ -4,22 +4,21 @@
 use crossterm::event::{KeyCode as CtKey, KeyEvent};
 use narwhal_domain::Motion as DomainMotion;
 use narwhal_tui::{
-    render_confirm_modal, render_goto_modal, render_help_modal, render_history_modal, render_root,
-    render_row_detail, render_snippets_modal, render_wizard, CompletionItemView,
-    CompletionPopupView, ConfirmModalView, EditorSearchHighlight, GotoModalView, GotoRowView,
-    HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout, RowDetailView,
-    SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView, WizardFieldView,
-    WizardView,
+    CompletionItemView, CompletionPopupView, ConfirmModalView, EditorSearchHighlight,
+    GotoModalView, GotoRowView, HistoryModalState, HistoryRow, HistoryRowOutcome, Pane, RootLayout,
+    RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
+    WizardFieldView, WizardView, render_confirm_modal, render_goto_modal, render_help_modal,
+    render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
 };
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use super::render_helpers::{
     connection_color_to_ratatui, display_from_state, sidebar_depth, sidebar_kind, sidebar_label,
 };
 use super::text_utils::split_head_arg;
 use super::{AppCore, ResultState};
-use crate::commands::{parse, Command};
+use crate::commands::{Command, parse};
 use crate::completion::CompletionKind;
 use crate::run::RunMode;
 use crate::wizard::DRIVERS;
@@ -63,6 +62,12 @@ impl AppCore {
         let pending_count = self.ui.tabs[self.ui.active_tab].pending.len();
 
         let tab = &mut self.ui.tabs[self.ui.active_tab];
+        // T1-T3-A: refresh tree-sitter highlights for the editor
+        // before any immutable borrows further down (search /
+        // completion / editor_search) lock the tab. The method only
+        // touches `tab.editor`, `tab.ts_parser`, `tab.sql_highlights`
+        // — disjoint from those views.
+        let _ = tab.sql_highlights();
         let search_view = tab.search.as_ref().map(|s| SearchHighlight {
             matches: &s.matches,
             current: s.current,
@@ -135,6 +140,11 @@ impl AppCore {
             result: result_display,
             completion: completion_view,
             editor_search: editor_search_view,
+            // T1-T3-A: SQL highlight spans are sourced from the per-tab
+            // tree-sitter Parser. Wiring lives in the tab state
+            // (`Tab::sql_highlights()`) and is refreshed lazily on
+            // dirty marks; see docs/dev/t1-t3-a-treesitter.md.
+            editor_sql_highlights: tab.sql_highlights.as_deref(),
             result_count,
             active_result: active_idx,
             accent_color,
@@ -642,7 +652,11 @@ impl AppCore {
                 self.ui.status.message = "buffer cleared".into();
             }
             Command::Explain => self.dispatch_explain().await,
-            Command::Export { format, path } => self.export_results(&format, &path).await,
+            Command::Export {
+                format,
+                path,
+                options,
+            } => self.export_results(&format, &path, options).await,
             Command::DumpSchema { target } => self.dump_schema(target).await,
             Command::DiagramExport {
                 format,

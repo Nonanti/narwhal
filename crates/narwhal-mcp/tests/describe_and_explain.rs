@@ -10,8 +10,8 @@ use std::sync::Arc;
 use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
-use serde_json::{json, Value};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
 fn seed_sqlite(path: &std::path::Path) {
     let conn = rusqlite::Connection::open(path).expect("open");
@@ -49,6 +49,7 @@ fn ctx_for(path: &std::path::Path) -> ServerContext {
     ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {
+            schema_version: None,
             logical_relations: Vec::new(),
             connections: vec![config],
         }),
@@ -204,10 +205,12 @@ async fn explain_query_returns_plan_rows_and_dialect_tag() {
     assert_ne!(response["result"]["isError"], true);
     let payload = body(&response);
     assert_eq!(payload["dialect"], "sqlite");
-    assert!(payload["explain_sql"]
-        .as_str()
-        .expect("explain_sql")
-        .starts_with("EXPLAIN QUERY PLAN"));
+    assert!(
+        payload["explain_sql"]
+            .as_str()
+            .expect("explain_sql")
+            .starts_with("EXPLAIN QUERY PLAN")
+    );
     assert!(
         !payload["rows"].as_array().expect("rows").is_empty(),
         "EXPLAIN QUERY PLAN must produce at least one row"

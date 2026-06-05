@@ -1,11 +1,11 @@
 //! Modal popups rendered above the result grid: in-place cell
 //! edit, read-only cell detail, EXPLAIN plan.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 use super::cells::sanitize_for_display;
 use super::model::{CellEditView, CellPopup, ExplainPlanLine};
@@ -170,9 +170,8 @@ pub(super) fn draw_explain(
             let ratio = ratio.clamp(0.0, 1.0);
             let filled = (ratio * COST_BAR_WIDTH as f64).round() as usize;
             let filled = filled.min(COST_BAR_WIDTH);
-            let bar: String = std::iter::repeat('█')
-                .take(filled)
-                .chain(std::iter::repeat('░').take(COST_BAR_WIDTH - filled))
+            let bar: String = std::iter::repeat_n('█', filled)
+                .chain(std::iter::repeat_n('░', COST_BAR_WIDTH - filled))
                 .collect();
             let bar_color = if line.hot {
                 ratatui::style::Color::Red
