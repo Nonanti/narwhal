@@ -448,7 +448,7 @@ impl Default for KeybindingSettings {
 /// Parsed from `[[logical_relation]]` blocks in either
 /// `connections.toml` (under the top level) or
 /// `.narwhal/workspace.toml`. Host code converts these into
-/// `narwhal_diagram::LogicalRelation` after validating the table /
+/// `narwhal_domain::LogicalRelation` after validating the table /
 /// column references against the live schema.
 ///
 /// ```toml
@@ -460,7 +460,6 @@ impl Default for KeybindingSettings {
 /// note        = "no FK because of cross-shard pruning"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct LogicalRelationConfig {
     /// Connection name (must match a `[[connection]]` entry).
     pub connection: String,

@@ -399,12 +399,10 @@ mod tests {
     /// without a live driver.
     fn test_context() -> ServerContext {
         use crate::registry::DriverRegistry;
-        use async_trait::async_trait;
         use narwhal_config::{ConnectionsFile, CredentialError, CredentialStore};
         use secrecy::SecretString;
         use uuid::Uuid;
         struct NoopStore;
-        #[async_trait]
         impl CredentialStore for NoopStore {
             async fn get(&self, _: Uuid) -> Result<Option<SecretString>, CredentialError> {
                 Ok(None)

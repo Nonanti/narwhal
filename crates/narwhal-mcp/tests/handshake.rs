@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
 use serde_json::{Value, json};
@@ -39,7 +39,7 @@ fn ctx_with_connections(connections: Vec<ConnectionConfig>) -> ServerContext {
         connections,
     };
     let drivers = Arc::new(DriverRegistry::with_defaults());
-    let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
     ServerContext::new(drivers, Arc::new(file), credentials)
 }
 

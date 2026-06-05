@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore};
 use narwhal_core::{ConnectionConfig, ConnectionParams, SslMode};
 use narwhal_mcp::workspace::{Workspace, WorkspaceFile};
 use narwhal_mcp::{DriverRegistry, McpServer, ServerContext};
@@ -49,7 +49,7 @@ fn two_connections(path: &std::path::Path) -> Vec<ConnectionConfig> {
 
 fn ctx_with(connections: Vec<ConnectionConfig>, workspace: Option<Workspace>) -> ServerContext {
     let drivers = Arc::new(DriverRegistry::with_defaults());
-    let credentials: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
     let mut ctx = ServerContext::new(
         drivers,
         Arc::new(ConnectionsFile {

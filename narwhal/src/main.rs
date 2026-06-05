@@ -9,7 +9,7 @@ use narwhal_app::clipboard::{ArboardClipboard, Clipboard};
 use narwhal_app::export::{ExportFormat, write_format};
 use narwhal_app::{App, DriverRegistry as AppDriverRegistry};
 use narwhal_config::{
-    ConfigPaths, ConnectionsFile, CredentialStore, KeyringStore, MigrateOptions, MigrateOutcome,
+    ConfigPaths, ConnectionsFile, DynCredentialStore, KeyringStore, MigrateOptions, MigrateOutcome,
     Settings, ValidateOutcome, VaultRegistry, migrate_config, validate_config,
 };
 use narwhal_core::{ConnectionConfig, DynConnection};
@@ -437,7 +437,7 @@ async fn run_tui(paths: ConfigPaths, read_only: bool) -> Result<()> {
     };
 
     let registry = AppDriverRegistry::with_defaults();
-    let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
     let clipboard: Arc<dyn Clipboard> = Arc::new(ArboardClipboard::new());
     // T1-T2-B: build the vault registry from settings.vault.providers.
     // A misconfigured provider sub-section here is non-fatal — the
@@ -511,7 +511,7 @@ async fn run_mcp(paths: ConfigPaths, force_read_only: bool) -> Result<()> {
     let settings = load_settings_or_warn(&paths);
 
     let drivers = Arc::new(McpDriverRegistry::with_defaults());
-    let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
     let vault = Arc::new(build_vault_registry(&settings.vault, "MCP"));
     let journal = match Journal::open(paths.history_file()).await {
         Ok(j) => Some(Arc::new(j)),
@@ -635,7 +635,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
         })?;
 
     let registry = McpDriverRegistry::with_defaults();
-    let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
     // T1-T2-B: load settings just for the vault block. The exec
     // path doesn't care about the rest of the settings struct —
     // it has its own CLI flags for everything else.
@@ -736,7 +736,7 @@ async fn run_exec(paths: ConfigPaths, args: ExecArgs, global_read_only: bool) ->
 /// the operator notices a misconfigured `vault:` reference without
 /// the connect path silently degrading to no-password.
 async fn resolve_password(
-    credentials: &dyn CredentialStore,
+    credentials: &dyn DynCredentialStore,
     vault: &VaultRegistry,
     config: &ConnectionConfig,
 ) -> Option<String> {
@@ -1064,7 +1064,7 @@ async fn run_schema_diff(
     })?;
 
     let registry = McpDriverRegistry::with_defaults();
-    let credentials: Arc<dyn CredentialStore> = Arc::new(KeyringStore::new());
+    let credentials: Arc<dyn DynCredentialStore> = Arc::new(KeyringStore::new());
     let settings = load_settings_or_warn(&paths);
     let vault = build_vault_registry(&settings.vault, "schema-diff");
 
@@ -1165,7 +1165,7 @@ fn parse_schema_map(raw: &[String]) -> Result<std::collections::HashMap<String, 
 /// works for `narwhal schema-diff`.
 async fn introspect_for_diff(
     registry: &McpDriverRegistry,
-    credentials: &dyn CredentialStore,
+    credentials: &dyn DynCredentialStore,
     vault: &VaultRegistry,
     mut config: ConnectionConfig,
     global_read_only: bool,

@@ -4,34 +4,13 @@
 use std::collections::{HashSet, VecDeque};
 
 use narwhal_core::schema::{ForeignKey, TableSchema};
-use serde::{Deserialize, Serialize};
+use narwhal_domain::{Cardinality, QualifiedName};
 
-use crate::model::{
-    Cardinality, DiagramModel, Edge, EdgeKind, ImpactNode, ImpactTree, Node, NodeColumn,
-    QualifiedName,
-};
+use crate::model::{DiagramModel, Edge, EdgeKind, ImpactNode, ImpactTree, Node, NodeColumn};
 
-/// User-declared logical relation between two tables (FK-less join).
-///
-/// Hosts (`narwhal-config`, `.narwhal/workspace.toml` parser) build
-/// these from TOML and pass them to [`build_with_logical`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogicalRelation {
-    /// Child / referencing side. The diagram draws the edge
-    /// `to → from` with `from` on the many side (matching FK semantics).
-    pub from: QualifiedName,
-    /// Parent / referenced side.
-    pub to: QualifiedName,
-    /// `(from_column, to_column)` pairs. V1 ships single-column
-    /// relations; the field is plural so V1.1 can add composite support
-    /// without changing the model wire format.
-    pub columns: Vec<(String, String)>,
-    /// Cardinality picked by the user (logical relations cannot
-    /// derive it from FK metadata that does not exist).
-    pub cardinality: Cardinality,
-    /// Optional human note ("sharded across regions", "events stream").
-    pub note: Option<String>,
-}
+// Re-export from narwhal-domain so downstream consumers can still use
+// `narwhal_diagram::LogicalRelation`.
+pub use narwhal_domain::LogicalRelation;
 
 /// Diagnostic emitted by [`build_with_logical`] when a logical
 /// relation cannot be wired (unknown table or column on either side).

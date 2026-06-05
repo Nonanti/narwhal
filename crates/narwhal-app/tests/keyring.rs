@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use narwhal_app::DriverRegistry;
 use narwhal_app::core::AppCore;
-use narwhal_config::{ConnectionsFile, CredentialStore, InMemoryStore, SecretString};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, InMemoryStore, SecretString};
 use narwhal_core::{ConnectionConfig, ConnectionParams};
 use secrecy::ExposeSecret;
 use tempfile::TempDir;
@@ -32,7 +32,7 @@ async fn type_str(core: &mut AppCore, text: &str) {
 async fn wizard_persists_password_to_credentials() {
     let dir = TempDir::new().unwrap();
     let connections_path = dir.path().join("connections.toml");
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
 
     let registry = DriverRegistry::with_defaults();
     let mut core =
@@ -82,7 +82,7 @@ async fn wizard_persists_password_to_credentials() {
 async fn forget_clears_keyring_but_keeps_connection() {
     let dir = TempDir::new().unwrap();
     let connections_path = dir.path().join("connections.toml");
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
@@ -126,7 +126,7 @@ async fn forget_clears_keyring_but_keeps_connection() {
 async fn remove_drops_connection_and_secret() {
     let dir = TempDir::new().unwrap();
     let connections_path = dir.path().join("connections.toml");
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
@@ -165,7 +165,7 @@ async fn open_pulls_password_from_credentials() {
     let db_path = dir.path().join("k.db");
     rusqlite::Connection::open(&db_path).unwrap();
 
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
     let id = Uuid::new_v4();
     store
         .set(id, SecretString::new("ignored-by-sqlite".into()))
@@ -212,7 +212,7 @@ async fn edit_prefills_password_from_keyring() {
 
     let dir = TempDir::new().unwrap();
     let connections_path = dir.path().join("connections.toml");
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {
@@ -304,7 +304,7 @@ async fn test_active_session_reports_real_verdict() {
 async fn forget_status_reflects_real_outcome_not_best_effort() {
     let dir = TempDir::new().unwrap();
     let connections_path = dir.path().join("connections.toml");
-    let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+    let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
 
     let id = Uuid::new_v4();
     let connections = ConnectionsFile {

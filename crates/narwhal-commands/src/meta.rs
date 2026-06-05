@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use narwhal_config::{CredentialStore, VaultRegistry};
+use narwhal_config::{DynCredentialStore, VaultRegistry};
 use narwhal_core::{ConnectionConfig, DynDatabaseDriver, TableSchema};
 use narwhal_domain::SchemaListing;
 use narwhal_history::HistoryEntry;
@@ -242,7 +242,7 @@ pub fn spawn_meta_request(
     request: MetaRequest,
     pool: Option<narwhal_pool::Pool>,
     history: Option<Arc<narwhal_history::Journal>>,
-    credentials: Option<Arc<dyn CredentialStore>>,
+    credentials: Option<Arc<dyn DynCredentialStore>>,
     vault: Option<Arc<VaultRegistry>>,
     tx: tokio::sync::mpsc::Sender<MetaUpdate>,
 ) {
@@ -381,7 +381,7 @@ pub fn spawn_meta_request(
 }
 
 async fn resolve_password(
-    credentials: Option<&dyn CredentialStore>,
+    credentials: Option<&dyn DynCredentialStore>,
     vault: Option<&VaultRegistry>,
     config: &ConnectionConfig,
 ) -> Option<String> {

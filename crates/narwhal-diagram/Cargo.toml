@@ -11,6 +11,7 @@ description = "Headless schema-diagram model and renderers (Mermaid / DOT) for n
 
 [dependencies]
 narwhal-core.workspace = true
+narwhal-domain.workspace = true
 
 serde.workspace = true
 thiserror.workspace = true

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::future::Future;
 
-use async_trait::async_trait;
 use narwhal_core::{ConnectionConfig, ConnectionParams};
+use parking_lot::Mutex;
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
@@ -42,11 +42,111 @@ impl From<keyring::Error> for CredentialError {
 /// All methods are async so that implementations performing blocking I/O
 /// (such as OS keyring D-Bus calls) can offload to [`tokio::task::spawn_blocking`]
 /// without stalling the async runtime.
-#[async_trait]
+///
+/// # Trait shape
+///
+/// This trait uses **native `async fn` in trait** (RPITIT) — every
+/// `async fn` desugars to `-> impl Future + Send`. Because RPITIT is
+/// **not** dyn-compatible, callers that need a trait object should use
+/// [`DynCredentialStore`] instead: it boxes the returned future, costing an
+/// allocation per call but enabling `Box<dyn DynCredentialStore>` /
+/// `Arc<dyn DynCredentialStore>` sites. A blanket
+/// `impl<T: CredentialStore> DynCredentialStore for T` is provided, so any
+/// type that implements `CredentialStore` automatically implements
+/// `DynCredentialStore`.
 pub trait CredentialStore: Send + Sync {
-    async fn get(&self, connection_id: Uuid) -> Result<Option<SecretString>, CredentialError>;
-    async fn set(&self, connection_id: Uuid, secret: SecretString) -> Result<(), CredentialError>;
-    async fn delete(&self, connection_id: Uuid) -> Result<(), CredentialError>;
+    fn get(
+        &self,
+        connection_id: Uuid,
+    ) -> impl Future<Output = Result<Option<SecretString>, CredentialError>> + Send;
+
+    fn set(
+        &self,
+        connection_id: Uuid,
+        secret: SecretString,
+    ) -> impl Future<Output = Result<(), CredentialError>> + Send;
+
+    fn delete(
+        &self,
+        connection_id: Uuid,
+    ) -> impl Future<Output = Result<(), CredentialError>> + Send;
+}
+
+/// Dyn-safe sibling of [`CredentialStore`].
+///
+/// Native `async fn` in trait isn't dyn-compatible — the returned
+/// future has an existential type that can't fit in a vtable slot.
+/// `DynCredentialStore` is the boxing wrapper: every async method returns
+/// `Pin<Box<dyn Future + Send + '_>>`, which **is** vtable-friendly.
+///
+/// A blanket `impl<T: CredentialStore> DynCredentialStore for T` means any
+/// `CredentialStore` automatically satisfies `DynCredentialStore`. Callers that
+/// need a trait object — the binary entry point, the MCP context, the
+/// app shell — use `Arc<dyn DynCredentialStore>` and pay the classic
+/// `Box<dyn Future>` alloc per call. Callers with a concrete type call
+/// [`CredentialStore`] directly and avoid the alloc.
+///
+/// Trait definitions intentionally keep explicit `'a` lifetimes on the
+/// dyn-safe methods: every borrowed parameter shares the same lifetime
+/// as the returned `BoxFuture`, which elision cannot express.
+#[allow(clippy::needless_lifetimes, clippy::elidable_lifetime_names)]
+pub trait DynCredentialStore: Send + Sync {
+    fn get<'a>(
+        &'a self,
+        connection_id: Uuid,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<SecretString>, CredentialError>>
+                + Send
+                + 'a,
+        >,
+    >;
+
+    fn set<'a>(
+        &'a self,
+        connection_id: Uuid,
+        secret: SecretString,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CredentialError>> + Send + 'a>>;
+
+    fn delete<'a>(
+        &'a self,
+        connection_id: Uuid,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CredentialError>> + Send + 'a>>;
+}
+
+impl<T> DynCredentialStore for T
+where
+    T: CredentialStore + 'static,
+{
+    fn get<'a>(
+        &'a self,
+        connection_id: Uuid,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<SecretString>, CredentialError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(<Self as CredentialStore>::get(self, connection_id))
+    }
+
+    fn set<'a>(
+        &'a self,
+        connection_id: Uuid,
+        secret: SecretString,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CredentialError>> + Send + 'a>>
+    {
+        Box::pin(<Self as CredentialStore>::set(self, connection_id, secret))
+    }
+
+    fn delete<'a>(
+        &'a self,
+        connection_id: Uuid,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CredentialError>> + Send + 'a>>
+    {
+        Box::pin(<Self as CredentialStore>::delete(self, connection_id))
+    }
 }
 
 const SERVICE: &str = "narwhal";
@@ -89,7 +189,6 @@ impl KeyringStore {
     }
 }
 
-#[async_trait]
 impl CredentialStore for KeyringStore {
     async fn get(&self, connection_id: Uuid) -> Result<Option<SecretString>, CredentialError> {
         let id = connection_id;
@@ -158,7 +257,7 @@ impl CredentialStore for KeyringStore {
 pub async fn resolve_password(
     config: &ConnectionConfig,
     vault: Option<&VaultRegistry>,
-    keyring: Option<&dyn CredentialStore>,
+    keyring: Option<&dyn DynCredentialStore>,
 ) -> Result<Option<SecretString>, CredentialError> {
     if let Some(raw) = config.params.password.as_deref() {
         let trimmed = raw.trim();
@@ -233,30 +332,20 @@ impl InMemoryStore {
     }
 }
 
-#[async_trait]
 impl CredentialStore for InMemoryStore {
     async fn get(&self, connection_id: Uuid) -> Result<Option<SecretString>, CredentialError> {
-        let guard = self
-            .secrets
-            .lock()
-            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        let guard = self.secrets.lock();
         Ok(guard.get(&connection_id).cloned())
     }
 
     async fn set(&self, connection_id: Uuid, secret: SecretString) -> Result<(), CredentialError> {
-        let mut guard = self
-            .secrets
-            .lock()
-            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        let mut guard = self.secrets.lock();
         guard.insert(connection_id, secret);
         Ok(())
     }
 
     async fn delete(&self, connection_id: Uuid) -> Result<(), CredentialError> {
-        let mut guard = self
-            .secrets
-            .lock()
-            .map_err(|e| CredentialError::Keyring(format!("lock poisoned: {e}")))?;
+        let mut guard = self.secrets.lock();
         guard.remove(&connection_id);
         Ok(())
     }
@@ -271,28 +360,28 @@ mod tests {
     async fn in_memory_round_trip() {
         let store = InMemoryStore::new();
         let id = Uuid::new_v4();
-        assert!(store.get(id).await.unwrap().is_none());
-        store
-            .set(id, SecretString::new("s3cret".into()))
+        assert!(CredentialStore::get(&store, id).await.unwrap().is_none());
+        CredentialStore::set(&store, id, SecretString::new("s3cret".into()))
             .await
             .unwrap();
         assert_eq!(
-            store
-                .get(id)
+            CredentialStore::get(&store, id)
                 .await
                 .unwrap()
                 .as_ref()
                 .map(|s| s.expose_secret() as &str),
             Some("s3cret")
         );
-        store.delete(id).await.unwrap();
-        assert!(store.get(id).await.unwrap().is_none());
+        CredentialStore::delete(&store, id).await.unwrap();
+        assert!(CredentialStore::get(&store, id).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn in_memory_delete_missing_is_ok() {
         let store = InMemoryStore::new();
-        store.delete(Uuid::new_v4()).await.unwrap();
+        CredentialStore::delete(&store, Uuid::new_v4())
+            .await
+            .unwrap();
     }
 
     /// Regression: the `keyring` crate (>= 3.x) ships zero default
@@ -329,7 +418,7 @@ mod tests {
     /// and the `InMemoryStore` returns the correct type.
     #[tokio::test]
     async fn credential_store_trait_is_async() {
-        let store: Arc<dyn CredentialStore> = Arc::new(InMemoryStore::new());
+        let store: Arc<dyn DynCredentialStore> = Arc::new(InMemoryStore::new());
         let id = Uuid::new_v4();
         // set requires SecretString, not &str
         store.set(id, SecretString::new("pw".into())).await.unwrap();

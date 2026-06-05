@@ -9,8 +9,10 @@
 
 pub mod editor;
 pub mod motion;
+pub mod relation;
 pub mod schema;
 
 pub use editor::EditorBuffer;
 pub use motion::Motion;
+pub use relation::{Cardinality, LogicalRelation, QualifiedName};
 pub use schema::SchemaListing;

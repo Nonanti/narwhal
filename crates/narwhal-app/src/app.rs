@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
-use narwhal_config::{ConnectionsFile, CredentialStore, Settings, VaultRegistry};
+use narwhal_config::{ConnectionsFile, DynCredentialStore, Settings, VaultRegistry};
 use narwhal_history::Journal;
 use tokio::time::sleep_until;
 use tracing::{debug, info};
@@ -64,7 +64,7 @@ impl App {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
     ) -> Self {
         Self {
             core: AppCore::with_credentials(registry, connections, history, credentials),
@@ -80,7 +80,7 @@ impl App {
         registry: DriverRegistry,
         connections: ConnectionsFile,
         history: Option<Arc<Journal>>,
-        credentials: Arc<dyn CredentialStore>,
+        credentials: Arc<dyn DynCredentialStore>,
         clipboard: Arc<dyn Clipboard>,
     ) -> Self {
         Self {

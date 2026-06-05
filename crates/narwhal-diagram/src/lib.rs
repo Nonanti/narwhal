@@ -23,3 +23,9 @@ pub use model::{
     QualifiedName,
 };
 pub use render::{DotRenderer, MermaidRenderer, Renderer};
+
+// Backward-compat re-exports: these types now live in narwhal-domain.
+// The `pub use` above (via model/build) already re-exports them transitively;
+// this comment documents the migration for future maintainers.
+// LogicalRelation, Cardinality, QualifiedName were moved from this crate
+// to narwhal-domain in the v2.0 C4 refactor.
