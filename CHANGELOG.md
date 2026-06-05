@@ -7,23 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes. The next release will land here._
+
+## [2.0.0] - 2026-06-05
+
+### Post-review fixes (late-cycle polish)
+
+A fourth review pass after the Tier 2 merges surfaced four critical and
+~15 major issues; all are folded into 2.0.0.
+
+- **fix(drivers):** preserve the engine error in the source chain across
+  PostgreSQL, MySQL, SQLite, DuckDB, and ClickHouse (~50 sites). Previously
+  every driver flattened `tokio_postgres::Error` / `mysql_async::Error` /
+  `rusqlite::Error` / `duckdb::Error` / `reqwest::Error` into a string,
+  making `find_source::<T>()` impossible. Only MSSQL (T1-T2-A) was correct.
+- **fix(drivers/duckdb):** `read_only = true` is now enforced at connect
+  time via `access_mode = READ_ONLY`. The previous code silently produced
+  a writable connection.
+- **fix(drivers/clickhouse):** IPv6 hosts are now bracketed per RFC 3986
+  (`https://[::1]:8123/` instead of the invalid `https://::1:8123/`).
+- **fix(drivers/sqlite, duckdb):** `close()` now drops the underlying
+  connection handle explicitly via `Option::take()` instead of waiting for
+  the `Arc` refcount to reach zero. Releases the SQLite file lock
+  immediately.
+- **fix(drivers/mysql, clickhouse):** `ssl_cert` set without `ssl_key`
+  (or vice versa) is now rejected at config time. The previous code
+  silently fell through to a non-mTLS connection.
+- **fix(history):** redaction regex now covers `mssql://` and
+  `sqlserver://` DSNs, plugging a password-leak path into the journal.
+- **refactor(config):** `CredentialStore` migrated from `#[async_trait]`
+  to native `async fn` in trait (RPITIT), matching the `Connection` trait
+  pattern. Added `DynCredentialStore` blanket-impl sibling. The
+  `async-trait` dependency is dropped.
+- **refactor(config):** `InMemoryStore` now uses `parking_lot::Mutex`
+  (unpoisonable), removing the "lock poisoned" error path entirely.
+- **refactor(config):** `LogicalRelationConfig` no longer has
+  `#[serde(deny_unknown_fields)]`. Forward-compat for v2.1 schema
+  additions.
+- **refactor:** `LogicalRelation`, `Cardinality`, and `QualifiedName`
+  moved from `narwhal-diagram` to `narwhal-domain`. Re-exported from
+  `narwhal-diagram` for backward compatibility. Removes an inverted
+  dependency (`narwhal-config` → `narwhal-diagram`).
+- **feat(commands):** Parquet exporter emits `tracing::warn!` when the
+  type-inference window misses a value (previously silent NULL drop).
+- **feat(schema-diff):** MySQL emitter no longer produces invalid SQL for
+  nullable-only / default-only changes (previously embedded
+  `/* keep existing type */` mid-statement). Added `int → int4` synonym,
+  precision-qualified timestamp normalisation, `::type` cast suffix
+  stripping in defaults. The old `:diff` command now uses the same
+  canonical comparison as `narwhal-schema-diff`.
+- **feat(vim):** `gg` motion (file start), visual mode count prefix
+  (`3j` extends the selection), and operator wiring for yank / delete /
+  change (`dd`, `yy`, `dw`, `dgg`, `cc`).
+- **docs(plugin-wasm):** `Operation::{FsRead,FsWrite,NetConnect,EnvRead}`
+  variants now document their deferred-wiring status (T1-T5-B).
+- **test(lsp):** integration test suite over `MemoryTransport` covering
+  initialize, completion (both response variants), hover, notification
+  fan-out, request timeout + cancel, and notification backpressure.
+
 ### Operator notes
 
-- **Audit log rotation suffix format** (MR-N4): rotated files
-  previously carried a seconds-resolution timestamp
-  (`audit.log.20260604T143012Z`); they now carry a millisecond
-  timestamp (`audit.log.20260604T143012.473Z`), with a numeric
-  `-N` suffix on the unlikely sub-millisecond collision. Any log
-  shipper that greps for the old pattern needs its regex updated
-  to accept `.\d{3}Z` (or `.\d{9}Z` for the nanosecond fallback).
+- **Audit log rotation suffix format** (MR-N4): rotated files now carry
+  a millisecond timestamp (`audit.log.20260604T143012.473Z`), with a
+  numeric `-N` suffix on sub-millisecond collision. Log shippers that
+  greps for the old pattern need their regex updated to accept `.\d{3}Z`
+  (or `.\d{9}Z` for the nanosecond fallback).
 - **MR-N3 ToolDescriptor**: `name` and `description` are now
-  `Cow<'static, str>` for zero-alloc round-trips on built-in
-  tools. JSON wire shape is unchanged.
-- **MR-N9 LspError::Timeout**: now carries the method name, so
-  status-bar surfacing reads `"LSP request 'textDocument/hover'
-  timed out"` instead of a generic message.
+  `Cow<'static, str>` for zero-alloc round-trips on built-in tools.
+  JSON wire shape is unchanged.
+- **MR-N9 LspError::Timeout**: carries the method name, so status-bar
+  surfacing reads `"LSP request 'textDocument/hover' timed out"` instead
+  of a generic message.
 
-## [2.0.0] - 2026-06-04
+### Original 2.0.0 release notes
 
 Major v2.0 release: full Tier 0 + Tier 1 + Tier 2 of the v2.0 roadmap.
 Breaking changes are concentrated in Tier 0 (edition 2024 / MSRV 1.85,
