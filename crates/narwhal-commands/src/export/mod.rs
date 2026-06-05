@@ -1216,4 +1216,87 @@ mod tests {
             "parquet via write_format must surface a Serialise error: {err:?}"
         );
     }
+
+    // -- M4.1: Parquet silent data loss warning ----------------------------------
+
+    #[test]
+    fn parquet_type_mismatch_drops_value_to_null_and_warns() {
+        use ::parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+        use arrow_array::Array;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// A minimal subscriber that counts `WARN`-level events targeting
+        /// `narwhal::export::parquet`.
+        #[derive(Debug)]
+        struct WarnCounter {
+            count: AtomicUsize,
+        }
+
+        impl tracing::Subscriber for WarnCounter {
+            fn enabled(&self, meta: &tracing::Metadata<'_>) -> bool {
+                meta.level() == &tracing::Level::WARN
+                    && meta.target().starts_with("narwhal::export::parquet")
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(0)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+
+        let counter = Arc::new(WarnCounter {
+            count: AtomicUsize::new(0),
+        });
+        let _guard = tracing::subscriber::set_default(Arc::clone(&counter));
+
+        // Construct a scenario where a Bool column receives a Float
+        // value AFTER the schema sample window, triggering the
+        // type-mismatch fallback. SCHEMA_SAMPLE = 100 rows, so we
+        // need 101+ Bool rows before the mismatched Float.
+        let columns = vec![ColumnHeader {
+            name: "flag".into(),
+            data_type: "BOOLEAN".into(),
+        }];
+        let mut rows: Vec<Row> = (0..101).map(|_| Row(vec![Value::Bool(true)])).collect();
+        // Row 102: Float doesn't fit a Bool builder.
+        rows.push(Row(vec![Value::Float(1.5)]));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mismatch.parquet");
+        export_rows(
+            &columns,
+            &rows,
+            ExportFormat::Parquet,
+            &path,
+            None,
+            &ExportOptions::default(),
+        )
+        .unwrap();
+
+        // Verify the mismatched value was dropped to null.
+        let file = std::fs::File::open(&path).unwrap();
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+        let batch = builder.build().unwrap().next().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 102);
+        let col = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow_array::BooleanArray>()
+            .expect("flag is Bool");
+        assert!(col.value(0));
+        assert!(col.is_null(101), "mismatched value must be dropped as null");
+
+        // Verify the warning was emitted.
+        let warn_count = counter.count.load(Ordering::SeqCst);
+        assert_eq!(
+            warn_count, 1,
+            "expected exactly 1 warn about dropped value, got {warn_count}"
+        );
+    }
 }

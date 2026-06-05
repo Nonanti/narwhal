@@ -17,6 +17,7 @@ narwhal-pool.workspace = true
 narwhal-sql.workspace = true
 narwhal-config.workspace = true
 narwhal-vim.workspace = true
+narwhal-schema-diff.workspace = true
 
 crossterm.workspace = true
 serde.workspace = true
@@ -44,6 +45,7 @@ arrow-schema = "58"
 tempfile = "3"
 rusqlite = "0.32"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [lints]
 workspace = true

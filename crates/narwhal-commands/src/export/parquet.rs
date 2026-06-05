@@ -70,8 +70,8 @@ pub(super) fn write_parquet(
 
     let mut builders: Vec<ColumnBuilder> = logical_types
         .iter()
-        .copied()
-        .map(ColumnBuilder::new)
+        .zip(columns.iter())
+        .map(|(ty, col)| ColumnBuilder::new(*ty, &col.name))
         .collect();
 
     for row in rows {
@@ -278,33 +278,62 @@ const fn type_from_value(value: &Value) -> Option<LogicalType> {
 /// enum rather than `Box<dyn ArrayBuilder>` because the builder traits
 /// in arrow-array are not object-safe across `append_value`.
 enum ColumnBuilder {
-    Bool(BooleanBuilder),
-    Int64(Int64Builder),
-    Float64(Float64Builder),
-    Utf8(StringBuilder),
-    Timestamp(TimestampMicrosecondBuilder),
+    Bool {
+        inner: BooleanBuilder,
+        col: String,
+    },
+    Int64 {
+        inner: Int64Builder,
+        col: String,
+    },
+    Float64 {
+        inner: Float64Builder,
+        col: String,
+    },
+    Utf8 {
+        inner: StringBuilder,
+        col: String,
+    },
+    Timestamp {
+        inner: TimestampMicrosecondBuilder,
+        col: String,
+    },
 }
 
 impl ColumnBuilder {
-    fn new(logical: LogicalType) -> Self {
+    fn new(logical: LogicalType, col: &str) -> Self {
+        let col = col.to_owned();
         match logical {
-            LogicalType::Bool => Self::Bool(BooleanBuilder::new()),
-            LogicalType::Int64 => Self::Int64(Int64Builder::new()),
-            LogicalType::Float64 => Self::Float64(Float64Builder::new()),
-            LogicalType::Utf8 => Self::Utf8(StringBuilder::new()),
-            LogicalType::Timestamp => {
-                Self::Timestamp(TimestampMicrosecondBuilder::new().with_timezone(Arc::from("UTC")))
-            }
+            LogicalType::Bool => Self::Bool {
+                inner: BooleanBuilder::new(),
+                col,
+            },
+            LogicalType::Int64 => Self::Int64 {
+                inner: Int64Builder::new(),
+                col,
+            },
+            LogicalType::Float64 => Self::Float64 {
+                inner: Float64Builder::new(),
+                col,
+            },
+            LogicalType::Utf8 => Self::Utf8 {
+                inner: StringBuilder::new(),
+                col,
+            },
+            LogicalType::Timestamp => Self::Timestamp {
+                inner: TimestampMicrosecondBuilder::new().with_timezone(Arc::from("UTC")),
+                col,
+            },
         }
     }
 
     fn append_null(&mut self) {
         match self {
-            Self::Bool(b) => b.append_null(),
-            Self::Int64(b) => b.append_null(),
-            Self::Float64(b) => b.append_null(),
-            Self::Utf8(b) => b.append_null(),
-            Self::Timestamp(b) => b.append_null(),
+            Self::Bool { inner, .. } => inner.append_null(),
+            Self::Int64 { inner, .. } => inner.append_null(),
+            Self::Float64 { inner, .. } => inner.append_null(),
+            Self::Utf8 { inner, .. } => inner.append_null(),
+            Self::Timestamp { inner, .. } => inner.append_null(),
         }
     }
 
@@ -318,12 +347,12 @@ impl ColumnBuilder {
             return;
         }
         match (self, value) {
-            (Self::Bool(b), Value::Bool(v)) => b.append_value(*v),
-            (Self::Bool(b), Value::Int(n)) => b.append_value(*n != 0),
-            (Self::Int64(b), Value::Int(n)) => b.append_value(*n),
-            (Self::Int64(b), Value::Bool(v)) => b.append_value(i64::from(*v)),
-            (Self::Float64(b), Value::Float(n)) => b.append_value(*n),
-            (Self::Float64(b), Value::Int(n)) => {
+            (Self::Bool { inner, .. }, Value::Bool(v)) => inner.append_value(*v),
+            (Self::Bool { inner, .. }, Value::Int(n)) => inner.append_value(*n != 0),
+            (Self::Int64 { inner, .. }, Value::Int(n)) => inner.append_value(*n),
+            (Self::Int64 { inner, .. }, Value::Bool(v)) => inner.append_value(i64::from(*v)),
+            (Self::Float64 { inner, .. }, Value::Float(n)) => inner.append_value(*n),
+            (Self::Float64 { inner, .. }, Value::Int(n)) => {
                 // i64 → f64 loses precision for |n| > 2^53. Accept the
                 // loss: the only narwhal value flowing through a
                 // widened Float64 column is one we've already decided
@@ -331,42 +360,76 @@ impl ColumnBuilder {
                 // shouldn't be exporting them through a column we
                 // widened.
                 #[allow(clippy::cast_precision_loss)]
-                b.append_value(*n as f64);
+                inner.append_value(*n as f64);
             }
-            (Self::Float64(b), Value::Bool(v)) => b.append_value(f64::from(i32::from(*v))),
-            (Self::Utf8(b), other) => b.append_value(other.render()),
-            (Self::Timestamp(b), Value::Timestamp(ts)) => {
-                b.append_value(ts.timestamp_micros());
+            (Self::Float64 { inner, .. }, Value::Bool(v)) => {
+                inner.append_value(f64::from(i32::from(*v)));
             }
-            (Self::Timestamp(b), Value::DateTime(dt)) => {
+            (Self::Utf8 { inner, .. }, other) => inner.append_value(other.render()),
+            (Self::Timestamp { inner, .. }, Value::Timestamp(ts)) => {
+                inner.append_value(ts.timestamp_micros());
+            }
+            (Self::Timestamp { inner, .. }, Value::DateTime(dt)) => {
                 let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(*dt, Utc);
-                b.append_value(utc.timestamp_micros());
+                inner.append_value(utc.timestamp_micros());
             }
-            (Self::Timestamp(b), Value::Date(d)) => {
+            (Self::Timestamp { inner, .. }, Value::Date(d)) => {
                 if let Some(dt) = d.and_hms_opt(0, 0, 0) {
                     let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(dt, Utc);
-                    b.append_value(utc.timestamp_micros());
+                    inner.append_value(utc.timestamp_micros());
                 } else {
-                    b.append_null();
+                    inner.append_null();
                 }
             }
-            // Mismatched value vs. inferred type — should be rare
+            // M4.1: Mismatched value vs. inferred type — should be rare
             // (would require a value beyond row SCHEMA_SAMPLE that
             // doesn't fit). Render to string on Utf8 columns is
             // already handled above; for typed columns we drop the
-            // value as null rather than crash.
-            (typed, _) => typed.append_null(),
+            // value as null rather than crash. Warn so the user knows
+            // data was silently lost.
+            (typed, _) => {
+                tracing::warn!(
+                    target: "narwhal::export::parquet",
+                    column = %typed.column_name(),
+                    expected = ?typed.logical_type(),
+                    got = ?type_from_value(value),
+                    "parquet: dropped value due to type inference mismatch"
+                );
+                typed.append_null();
+            }
         }
     }
 
     fn finish(mut self) -> Result<ArrayRef, ExportError> {
         let array: ArrayRef = match &mut self {
-            Self::Bool(b) => Arc::new(b.finish()),
-            Self::Int64(b) => Arc::new(b.finish()),
-            Self::Float64(b) => Arc::new(b.finish()),
-            Self::Utf8(b) => Arc::new(b.finish()),
-            Self::Timestamp(b) => Arc::new(b.finish()),
+            Self::Bool { inner, .. } => Arc::new(inner.finish()),
+            Self::Int64 { inner, .. } => Arc::new(inner.finish()),
+            Self::Float64 { inner, .. } => Arc::new(inner.finish()),
+            Self::Utf8 { inner, .. } => Arc::new(inner.finish()),
+            Self::Timestamp { inner, .. } => Arc::new(inner.finish()),
         };
         Ok(array)
+    }
+
+    /// Column name — used in warn messages when a value is dropped.
+    fn column_name(&self) -> &str {
+        match self {
+            Self::Bool { col, .. }
+            | Self::Int64 { col, .. }
+            | Self::Float64 { col, .. }
+            | Self::Utf8 { col, .. }
+            | Self::Timestamp { col, .. } => col,
+        }
+    }
+
+    /// Logical type — used in warn messages when a value is dropped.
+    const fn logical_type(&self) -> LogicalType {
+        match self {
+            Self::Bool { .. } => LogicalType::Bool,
+            Self::Int64 { .. } => LogicalType::Int64,
+            Self::Float64 { .. } => LogicalType::Float64,
+            Self::Utf8 { .. } => LogicalType::Utf8,
+            Self::Timestamp { .. } => LogicalType::Timestamp,
+        }
     }
 }

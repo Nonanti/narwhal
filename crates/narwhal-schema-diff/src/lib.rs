@@ -53,6 +53,7 @@ pub use diff::{
     ColumnChange, ForeignKeyChange, IndexChange, SchemaDiff, TableChange, UniqueConstraintChange,
     diff,
 };
+pub use normalise::{canonical_type, defaults_equal};
 
 /// Errors raised by this crate.
 ///
