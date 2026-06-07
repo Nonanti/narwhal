@@ -57,7 +57,7 @@ anyhow = "1.0"
 # Serialization & config
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.1"
 
 # File system watching (used by the settings live-reload watcher).
 notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
