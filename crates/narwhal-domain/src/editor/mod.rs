@@ -5,6 +5,17 @@
 //! layer converts from `narwhal_vim::Motion` at the boundary — and is
 //! host-agnostic: terminal, GUI or headless renderers can all consume
 //! it through immutable accessors.
+//!
+//! Selection and undo state live in sibling modules
+//! ([`selection`], [`history`]) and are exposed on the buffer via
+//! mode-agnostic API: vim's visual mode, basic mode's shift-arrow
+//! paths and mouse drag all share the same plumbing.
+
+pub mod history;
+pub mod selection;
+
+pub use history::{EditHistory, EditOp};
+pub use selection::{Position, Selection, SelectionKind};
 
 use crate::motion::Motion;
 
@@ -77,6 +88,16 @@ pub struct EditorBuffer {
     /// across secondaries; they remain single-cursor. Full sorted-set
     /// refactor with vim integration is deferred to v2.1.
     secondary_cursors: Vec<(usize, usize)>,
+    /// Active selection range. `None` when no selection is held.
+    /// Vim's visual modes, basic mode's shift-arrow paths and the
+    /// mouse drag handler all funnel through this single field so a
+    /// shared cut / copy / replace pipeline can serve every editor
+    /// mode.
+    selection: Option<Selection>,
+    /// Undo / redo stack. Records of every reversible mutation
+    /// applied to the buffer; mode-agnostic so a buffer edited in
+    /// vim then continued in basic mode still undoes cleanly.
+    history: EditHistory,
 }
 
 impl Default for EditorBuffer {
@@ -94,7 +115,227 @@ impl EditorBuffer {
             scroll: 0,
             auto_pair_enabled: true,
             secondary_cursors: Vec::new(),
+            selection: None,
+            history: EditHistory::default(),
         }
+    }
+
+    // ---------- selection API -------------------------------------
+
+    /// Read-only access to the current selection, if any.
+    #[must_use]
+    pub const fn selection(&self) -> Option<&Selection> {
+        self.selection.as_ref()
+    }
+
+    /// Replace the active selection. `None` clears it. Out-of-range
+    /// positions are clamped to the buffer.
+    pub fn set_selection(&mut self, sel: Option<Selection>) {
+        self.selection = sel.map(|mut s| {
+            s.anchor = self.clamp_position(s.anchor);
+            s.head = self.clamp_position(s.head);
+            s
+        });
+    }
+
+    /// Open or grow the selection so its head sits at the current
+    /// cursor. If no selection exists, one is started with both
+    /// endpoints at the cursor (call this before a motion to capture
+    /// the anchor, then again after to extend).
+    pub const fn begin_or_extend_selection(&mut self, kind: SelectionKind) {
+        let pos = (self.cursor_row, self.cursor_col);
+        if let Some(sel) = self.selection.as_mut() {
+            sel.head = pos;
+        } else {
+            self.selection = Some(Selection {
+                anchor: pos,
+                head: pos,
+                kind,
+            });
+        }
+    }
+
+    /// Move the selection head to `(row, col)`, opening a new
+    /// `Character` selection anchored at the current cursor when
+    /// none is active. Used by mouse-drag and shift-arrow paths.
+    pub fn extend_selection_to(&mut self, row: usize, col: usize) {
+        let target = self.clamp_position((row, col));
+        if let Some(sel) = self.selection.as_mut() {
+            sel.head = target;
+        } else {
+            let anchor = (self.cursor_row, self.cursor_col);
+            self.selection = Some(Selection {
+                anchor,
+                head: target,
+                kind: SelectionKind::Character,
+            });
+        }
+    }
+
+    /// Drop the current selection without touching the buffer.
+    pub const fn clear_selection(&mut self) {
+        self.selection = None;
+    }
+
+    /// `true` when the buffer holds a non-empty selection.
+    #[must_use]
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_some_and(|s| !s.is_empty())
+    }
+
+    /// Concatenate the text inside the active selection. Returns an
+    /// empty string when no selection is held or the selection is
+    /// empty. Line-wise selections always include the trailing
+    /// newline on every row.
+    #[must_use]
+    pub fn selected_text(&self) -> String {
+        let Some(sel) = self.selection else {
+            return String::new();
+        };
+        if sel.is_empty() {
+            return String::new();
+        }
+        let (start, end) = sel.normalised();
+        match sel.kind {
+            SelectionKind::Line => self.collect_line_range(start.0, end.0),
+            SelectionKind::Character | SelectionKind::Block => {
+                self.collect_char_range(start, end)
+            }
+        }
+    }
+
+    /// Delete the active selection. The buffer is mutated in place,
+    /// the cursor lands at the lower endpoint, the selection is
+    /// cleared, and the deleted text is returned for clipboard /
+    /// undo capture. Returns an empty string when there is no
+    /// selection.
+    pub fn delete_selection(&mut self) -> String {
+        let Some(sel) = self.selection.take() else {
+            return String::new();
+        };
+        if sel.is_empty() {
+            return String::new();
+        }
+        let (start, end) = sel.normalised();
+        let removed = match sel.kind {
+            SelectionKind::Line => self.remove_line_range(start.0, end.0),
+            SelectionKind::Character | SelectionKind::Block => {
+                self.remove_char_range(start, end)
+            }
+        };
+        self.cursor_row = start.0.min(self.lines.len().saturating_sub(1));
+        let line_len = self.lines[self.cursor_row].len();
+        self.cursor_col = start.1.min(line_len);
+        removed
+    }
+
+    /// Clamp a `(row, col)` pair into the current buffer extent.
+    fn clamp_position(&self, (row, col): Position) -> Position {
+        let last_row = self.lines.len().saturating_sub(1);
+        let r = row.min(last_row);
+        let line_len = self.lines[r].len();
+        let c = col.min(line_len);
+        (r, c)
+    }
+
+    /// Collect lines `[start_row, end_row]` inclusive with their
+    /// trailing newlines, used by line-wise selection extraction.
+    fn collect_line_range(&self, start_row: usize, end_row: usize) -> String {
+        let last = self.lines.len().saturating_sub(1);
+        let start_row = start_row.min(last);
+        let end_row = end_row.min(last);
+        let mut out = String::new();
+        for line in &self.lines[start_row..=end_row] {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Collect characters between two positions inclusive. Multi-line
+    /// ranges include `\n` for each line boundary they cross.
+    fn collect_char_range(&self, start: Position, end: Position) -> String {
+        let (sr, sc) = start;
+        let (er, ec) = end;
+        if sr == er {
+            let line = &self.lines[sr];
+            let (sc, ec) = (sc.min(line.len()), ec.min(line.len()));
+            return line[sc..ec].to_owned();
+        }
+        let mut out = String::new();
+        // First line: from start col to EOL + newline.
+        let first = &self.lines[sr];
+        let sc = sc.min(first.len());
+        out.push_str(&first[sc..]);
+        out.push('\n');
+        // Middle lines: full content + newline.
+        for line in &self.lines[sr + 1..er] {
+            out.push_str(line);
+            out.push('\n');
+        }
+        // Last line: from BOL to end col.
+        let last = &self.lines[er];
+        let ec = ec.min(last.len());
+        out.push_str(&last[..ec]);
+        out
+    }
+
+    /// Remove `[start_row, end_row]` whole lines and return the
+    /// concatenated removed text (with trailing newlines on each
+    /// removed line).
+    fn remove_line_range(&mut self, start_row: usize, end_row: usize) -> String {
+        let last = self.lines.len().saturating_sub(1);
+        let start_row = start_row.min(last);
+        let end_row = end_row.min(last);
+        let removed = self.collect_line_range(start_row, end_row);
+        // Drain the inclusive range; keep at least one line so the
+        // buffer's "always non-empty" invariant holds.
+        self.lines.drain(start_row..=end_row);
+        if self.lines.is_empty() {
+            self.lines.push(String::new());
+        }
+        removed
+    }
+
+    /// Remove a character range and stitch the buffer back together.
+    /// Returns the removed text.
+    fn remove_char_range(&mut self, start: Position, end: Position) -> String {
+        let removed = self.collect_char_range(start, end);
+        let (sr, sc) = start;
+        let (er, ec) = end;
+        if sr == er {
+            let line = &mut self.lines[sr];
+            let sc = sc.min(line.len());
+            let ec = ec.min(line.len());
+            line.replace_range(sc..ec, "");
+            return removed;
+        }
+        // Multi-line: keep the prefix of the first line + the suffix
+        // of the last line, drop everything in between.
+        let first_prefix = self.lines[sr][..sc.min(self.lines[sr].len())].to_owned();
+        let last_suffix = self.lines[er][ec.min(self.lines[er].len())..].to_owned();
+        let stitched = first_prefix + &last_suffix;
+        self.lines.drain(sr..=er);
+        self.lines.insert(sr, stitched);
+        if self.lines.is_empty() {
+            self.lines.push(String::new());
+        }
+        removed
+    }
+
+    // ---------- history API ---------------------------------------
+
+    /// Read-only access to the undo / redo stack. Renderers use this
+    /// to enable / disable undo buttons in the future settings UI.
+    #[must_use]
+    pub const fn history(&self) -> &EditHistory {
+        &self.history
+    }
+
+    /// Mutable access to the undo / redo stack for handlers that
+    /// record their own ops (compound transactions, etc.).
+    pub const fn history_mut(&mut self) -> &mut EditHistory {
+        &mut self.history
     }
 
     /// T2-T3-D: read-only access to the secondary cursor list.
@@ -1573,5 +1814,153 @@ mod tests {
         buf.set_cursor(1, 0);
         buf.apply_operator_delete(Motion::CurrentLine, 2);
         assert_eq!(buf.lines(), &["a".to_owned(), "d".to_owned()]);
+    }
+
+    // ---------- selection integration ------------------------------
+
+    fn buf_with(lines: &[&str]) -> EditorBuffer {
+        let mut b = EditorBuffer::new();
+        b.insert_str(&lines.join("\n"));
+        b.set_cursor(0, 0);
+        b
+    }
+
+    #[test]
+    fn selection_starts_clear() {
+        let buf = EditorBuffer::new();
+        assert!(buf.selection().is_none());
+        assert!(!buf.has_selection());
+        assert!(buf.selected_text().is_empty());
+    }
+
+    #[test]
+    fn set_selection_clamps_out_of_range_positions() {
+        let mut buf = buf_with(&["hello"]);
+        buf.set_selection(Some(Selection::character((0, 0), (5, 99))));
+        let sel = buf.selection().expect("selection set");
+        assert_eq!(sel.anchor, (0, 0));
+        assert_eq!(sel.head, (0, 5));
+    }
+
+    #[test]
+    fn extend_selection_to_opens_at_cursor() {
+        let mut buf = buf_with(&["abcdef"]);
+        buf.set_cursor(0, 2);
+        buf.extend_selection_to(0, 5);
+        let sel = buf.selection().expect("selection opened");
+        assert_eq!(sel.anchor, (0, 2));
+        assert_eq!(sel.head, (0, 5));
+        assert_eq!(buf.selected_text(), "cde");
+    }
+
+    #[test]
+    fn selected_text_single_line() {
+        let mut buf = buf_with(&["hello world"]);
+        buf.set_selection(Some(Selection::character((0, 6), (0, 11))));
+        assert_eq!(buf.selected_text(), "world");
+    }
+
+    #[test]
+    fn selected_text_multi_line_character() {
+        let mut buf = buf_with(&["ab", "cd", "ef"]);
+        buf.set_selection(Some(Selection::character((0, 1), (2, 1))));
+        assert_eq!(buf.selected_text(), "b\ncd\ne");
+    }
+
+    #[test]
+    fn selected_text_line_kind_includes_newlines() {
+        let mut buf = buf_with(&["alpha", "beta", "gamma"]);
+        buf.set_selection(Some(Selection::line((0, 0), (1, 99))));
+        assert_eq!(buf.selected_text(), "alpha\nbeta\n");
+    }
+
+    #[test]
+    fn delete_selection_single_line_collapses_text() {
+        let mut buf = buf_with(&["abcdef"]);
+        buf.set_selection(Some(Selection::character((0, 1), (0, 4))));
+        let removed = buf.delete_selection();
+        assert_eq!(removed, "bcd");
+        assert_eq!(buf.lines(), &["aef".to_owned()]);
+        assert!(buf.selection().is_none());
+        assert_eq!((buf.cursor_row(), buf.cursor_col()), (0, 1));
+    }
+
+    #[test]
+    fn delete_selection_multi_line_character_stitches_lines() {
+        let mut buf = buf_with(&["hello", "world", "!!!"]);
+        buf.set_selection(Some(Selection::character((0, 2), (2, 1))));
+        let removed = buf.delete_selection();
+        assert_eq!(removed, "llo\nworld\n!");
+        assert_eq!(buf.lines(), &["he".to_owned() + "!!"]);
+        assert_eq!((buf.cursor_row(), buf.cursor_col()), (0, 2));
+    }
+
+    #[test]
+    fn delete_selection_line_kind_drops_full_rows() {
+        let mut buf = buf_with(&["a", "b", "c", "d"]);
+        buf.set_selection(Some(Selection::line((1, 0), (2, 0))));
+        let removed = buf.delete_selection();
+        assert_eq!(removed, "b\nc\n");
+        assert_eq!(buf.lines(), &["a".to_owned(), "d".to_owned()]);
+    }
+
+    #[test]
+    fn delete_selection_returns_empty_when_no_selection() {
+        let mut buf = buf_with(&["abc"]);
+        assert_eq!(buf.delete_selection(), "");
+        assert_eq!(buf.lines(), &["abc".to_owned()]);
+    }
+
+    #[test]
+    fn clear_selection_drops_state() {
+        let mut buf = buf_with(&["abc"]);
+        buf.set_selection(Some(Selection::character((0, 0), (0, 2))));
+        buf.clear_selection();
+        assert!(buf.selection().is_none());
+    }
+
+    #[test]
+    fn has_selection_false_for_empty_range() {
+        let mut buf = buf_with(&["abc"]);
+        buf.set_selection(Some(Selection::at((0, 1))));
+        assert!(buf.selection().is_some());
+        assert!(!buf.has_selection());
+    }
+
+    #[test]
+    fn begin_or_extend_selection_grows_with_cursor() {
+        let mut buf = buf_with(&["abcdef"]);
+        buf.set_cursor(0, 1);
+        buf.begin_or_extend_selection(SelectionKind::Character);
+        // No movement — selection is empty but present.
+        assert!(buf.selection().is_some());
+        buf.set_cursor(0, 4);
+        buf.begin_or_extend_selection(SelectionKind::Character);
+        let sel = buf.selection().expect("selection extended");
+        assert_eq!(sel.anchor, (0, 1));
+        assert_eq!(sel.head, (0, 4));
+    }
+
+    // ---------- history access via buffer --------------------------
+
+    #[test]
+    fn history_starts_empty_on_new_buffer() {
+        let buf = EditorBuffer::new();
+        assert_eq!(buf.history().undo_len(), 0);
+        assert_eq!(buf.history().redo_len(), 0);
+        assert!(!buf.history().can_undo());
+        assert!(!buf.history().can_redo());
+    }
+
+    #[test]
+    fn history_mut_lets_handlers_record() {
+        let mut buf = EditorBuffer::new();
+        buf.history_mut().record(crate::editor::EditOp::Insert {
+            at: (0, 0),
+            text: "x".into(),
+            cursor_before: (0, 0),
+            cursor_after: (0, 1),
+        });
+        assert_eq!(buf.history().undo_len(), 1);
     }
 }
