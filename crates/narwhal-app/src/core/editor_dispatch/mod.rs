@@ -50,6 +50,22 @@ impl AppCore {
             }
             _ => {}
         }
+        // In basic / emacs modes the editor reclaims a handful of
+        // chords that the global layer otherwise eats (focus cycle,
+        // goto, history, stream, completion). Without this short-
+        // circuit, `C-w` would cycle focus instead of killing the
+        // region in emacs, `C-n` would open the goto modal instead
+        // of moving down a line, etc.
+        if self.ui.focus == Pane::Editor
+            && self.ui.editor_mode != narwhal_config::EditorMode::Vim
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(
+                key.code,
+                CtKey::Char('w' | 'n' | 'r' | 's' | ' ')
+            )
+        {
+            return false;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 CtKey::Char('w') => {
