@@ -99,11 +99,18 @@ nucleo-matcher = "0.3"
 # would happily ask for a password, store it nowhere, and then fail
 # the next :open with 'no password'. crypto-rust avoids the OpenSSL
 # system dep on Linux.
+#
+# `vendored` statically links libdbus into the binary so prebuilt
+# releases run on minimal containers, Alpine, and NixOS without
+# `libdbus-1.so.3` being installed on the host. The trade-off is that
+# a libdbus CVE requires us to cut a new release — acceptable since
+# every release is a fresh build anyway.
 keyring = { version = "3.0", features = [
     "apple-native",
     "windows-native",
     "sync-secret-service",
     "crypto-rust",
+    "vendored",
 ] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
