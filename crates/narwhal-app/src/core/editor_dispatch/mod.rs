@@ -5,6 +5,8 @@
 
 mod completion;
 mod editor_keys;
+mod mode_basic;
+mod mode_emacs;
 mod search;
 mod sidebar;
 

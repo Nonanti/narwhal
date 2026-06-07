@@ -201,12 +201,15 @@ impl AppCore {
 
     /// Apply a user-supplied [`narwhal_config::Settings`] payload.
     ///
-    /// Currently honoured: [`narwhal_config::Theme`] is mapped onto the
-    /// renderer's [`Theme`] palette. The `editor` / `keybindings`
-    /// sections are accepted for forward compatibility but do not yet
-    /// influence runtime behaviour — the load-then-warn surface alone
-    /// catches malformed `config.toml` files at start-up so we never
-    /// fall back to defaults blindly.
+    /// Wires the live host state to every section the user can edit
+    /// from `settings.toml` or the in-app `:settings` modal:
+    /// theme palette, diagram glyphs, streaming tuning, editor
+    /// input model, mouse behaviour, mode indicator and the
+    /// `[keymap.*]` overrides.
+    ///
+    /// The deprecated `keybindings.vim_mode = false` knob is
+    /// translated into `editor.mode = Basic` here so v1 configs
+    /// keep working without forcing a `migrate-config` pass.
     pub fn apply_settings(&mut self, settings: narwhal_config::Settings) {
         self.ui.diagram_icons = settings.diagram.icons;
         // T1-T4-A: streaming-result tuning. Defended in StreamTuning::new
@@ -221,6 +224,21 @@ impl AppCore {
             // variants fall back to DARK rather than refusing to start.
             _ => Theme::DARK,
         };
+
+        // Editor input model. The deprecated `vim_mode = false` bit
+        // wins only when the user did not also set `editor.mode`
+        // explicitly — a v1.x config flips to Basic without a
+        // migration pass, while a v2.x config that sets both keeps
+        // its explicit `editor.mode` choice.
+        self.ui.editor_mode = settings.editor.mode;
+        #[allow(deprecated)]
+        if !settings.keybindings.vim_mode
+            && settings.editor.mode == narwhal_config::EditorMode::Vim
+        {
+            self.ui.editor_mode = narwhal_config::EditorMode::Basic;
+        }
+        self.ui.mouse_mode = settings.editor.mouse;
+        self.ui.show_mode_indicator = settings.editor.show_mode_indicator;
 
         // L36: turn the `[keymap.<group>]` TOML sections into a typed
         // override table, apply on top of the built-in defaults, and
