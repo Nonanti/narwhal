@@ -46,6 +46,7 @@ serde_json.workspace = true
 # T1-T3-B: workspace-state snapshot serialisation.
 toml.workspace = true
 arboard.workspace = true
+notify.workspace = true
 base64.workspace = true
 directories.workspace = true
 secrecy = { workspace = true }

@@ -106,12 +106,37 @@ impl AppCore {
         Settings::load(&paths.settings_file()).ok()
     }
 
-    /// Atomically write `settings` to `settings.toml`.
-    async fn persist_settings(&self, settings: &Settings) -> Result<(), String> {
+    /// Atomically write `settings` to `settings.toml`. Bumps the
+    /// `last_self_settings_write` timestamp so the live-reload
+    /// watcher can suppress the echo of our own write.
+    async fn persist_settings(&mut self, settings: &Settings) -> Result<(), String> {
         let paths = narwhal_config::ConfigPaths::discover()
             .map_err(|e| format!("config paths: {e}"))?;
         settings
             .save(&paths.settings_file())
-            .map_err(|e| format!("{e}"))
+            .map_err(|e| format!("{e}"))?;
+        self.last_self_settings_write = Some(std::time::Instant::now());
+        Ok(())
+    }
+
+    /// Handle a `notify`-driven settings reload trigger. Re-reads
+    /// `settings.toml` and re-applies it. Suppresses the echo of a
+    /// modal-save we just performed (a 750 ms window after a
+    /// `persist_settings` call), so the modal's apply-then-watcher
+    /// chain doesn't double-apply the same payload.
+    pub async fn handle_settings_reload(&mut self) {
+        if let Some(t) = self.last_self_settings_write {
+            if t.elapsed() < std::time::Duration::from_millis(750) {
+                return;
+            }
+        }
+        let Some(settings) = self.load_settings_from_disk() else {
+            return;
+        };
+        self.apply_settings(settings);
+        self.ui.status.notify(
+            "settings reloaded from disk",
+            std::time::Duration::from_secs(3),
+        );
     }
 }

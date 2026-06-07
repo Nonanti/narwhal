@@ -31,6 +31,7 @@ mod run_loop;
 mod schema_diff_cmd;
 mod sessions;
 mod settings_modal;
+pub mod settings_watcher;
 mod tabs;
 pub(super) mod text_utils;
 mod transactions;
@@ -90,6 +91,12 @@ pub struct AppCore {
     /// user notices malformed bindings without us having to plumb a
     /// dedicated banner widget.
     pub(super) keymap_warnings: Vec<String>,
+    /// Timestamp of the most recent in-process `settings.toml`
+    /// write. Used by the live-reload watcher to suppress the echo
+    /// of saves the settings modal performs itself — without this,
+    /// every `Ctrl+S` would loop through the inotify callback and
+    /// re-apply the same payload on the very next tick.
+    pub(super) last_self_settings_write: Option<std::time::Instant>,
 }
 
 mod accessors;

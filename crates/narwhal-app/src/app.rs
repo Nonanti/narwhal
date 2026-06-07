@@ -211,6 +211,29 @@ impl App {
         let mut guard = TerminalGuard::enter()?;
         let mut events = EventStream::new();
 
+        // Settings live-reload watcher. Best-effort: a missing
+        // settings.toml or a sandbox without inotify just disables
+        // the feature; the rest of the app keeps running.
+        let (mut _settings_watcher_handle, mut settings_rx) =
+            match narwhal_config::ConfigPaths::discover() {
+                Ok(paths) => {
+                    match crate::core::settings_watcher::SettingsWatcher::spawn(
+                        &paths.settings_file(),
+                    ) {
+                        Ok((w, rx)) => (Some(w), Some(rx)),
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "narwhal::settings",
+                                error = %e,
+                                "settings watcher failed to start; live reload disabled",
+                            );
+                            (None, None)
+                        }
+                    }
+                }
+                Err(_) => (None, None),
+            };
+
         info!(target: "narwhal::app", "event loop started");
         // T1-T3-B: kick off the restored-connection re-open *before*
         // the first draw so the initial frame can already show the
@@ -257,6 +280,15 @@ impl App {
                 }
                 Some(meta) = self.core.meta_rx.recv() => {
                     self.core.handle_meta_update(meta);
+                    Some(DrawTrigger::Force)
+                }
+                Some(_) = async {
+                    match settings_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.core.handle_settings_reload().await;
                     Some(DrawTrigger::Force)
                 }
                 () = sleep_until(deadline.into()) => None,
