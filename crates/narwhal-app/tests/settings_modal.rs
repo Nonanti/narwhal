@@ -37,7 +37,8 @@ async fn esc_cancels_modal_without_saving() {
     );
     core.execute_command("settings").await;
     // Space toggles the highlighted field, marking the draft dirty.
-    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE)).await;
+    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
     assert!(core.settings_modal_open());
     core.handle_key(key(KeyCode::Esc, KeyModifiers::NONE)).await;
     assert!(!core.settings_modal_open());
@@ -57,12 +58,14 @@ async fn space_cycles_editor_mode_field() {
         core.settings_modal_draft_editor_mode(),
         Some(EditorMode::Vim)
     );
-    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE)).await;
+    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
     assert_eq!(
         core.settings_modal_draft_editor_mode(),
         Some(EditorMode::Basic)
     );
-    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE)).await;
+    core.handle_key(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
     assert_eq!(
         core.settings_modal_draft_editor_mode(),
         Some(EditorMode::Emacs)

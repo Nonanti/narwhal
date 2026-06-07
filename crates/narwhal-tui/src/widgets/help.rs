@@ -301,35 +301,110 @@ pub enum HelpEditorMode {
 
 /// Cheatsheet entries for basic (modeless) editor mode.
 pub const CHEATSHEET_BASIC_EDITOR: &[CheatsheetEntry] = &[
-    CheatsheetEntry { keys: "Arrow / Home / End", description: "move cursor" },
-    CheatsheetEntry { keys: "Ctrl-Arrow", description: "word / paragraph jump" },
-    CheatsheetEntry { keys: "Shift-Arrow", description: "extend selection" },
-    CheatsheetEntry { keys: "Ctrl-A", description: "select all" },
-    CheatsheetEntry { keys: "Ctrl-C / Ctrl-X", description: "copy / cut selection" },
-    CheatsheetEntry { keys: "Ctrl-V", description: "paste clipboard" },
-    CheatsheetEntry { keys: "Ctrl-Z / Ctrl-Y", description: "undo / redo" },
-    CheatsheetEntry { keys: "Ctrl-F", description: "find in buffer" },
-    CheatsheetEntry { keys: "Tab", description: "completion / indent" },
-    CheatsheetEntry { keys: ":", description: "open command palette" },
-    CheatsheetEntry { keys: "Esc", description: "clear selection / close popups" },
+    CheatsheetEntry {
+        keys: "Arrow / Home / End",
+        description: "move cursor",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-Arrow",
+        description: "word / paragraph jump",
+    },
+    CheatsheetEntry {
+        keys: "Shift-Arrow",
+        description: "extend selection",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-A",
+        description: "select all",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-C / Ctrl-X",
+        description: "copy / cut selection",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-V",
+        description: "paste clipboard",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-Z / Ctrl-Y",
+        description: "undo / redo",
+    },
+    CheatsheetEntry {
+        keys: "Ctrl-F",
+        description: "find in buffer",
+    },
+    CheatsheetEntry {
+        keys: "Tab",
+        description: "completion / indent",
+    },
+    CheatsheetEntry {
+        keys: ":",
+        description: "open command palette",
+    },
+    CheatsheetEntry {
+        keys: "Esc",
+        description: "clear selection / close popups",
+    },
 ];
 
 /// Cheatsheet entries for emacs editor mode.
 pub const CHEATSHEET_EMACS_EDITOR: &[CheatsheetEntry] = &[
-    CheatsheetEntry { keys: "C-f / C-b", description: "forward / backward char" },
-    CheatsheetEntry { keys: "C-n / C-p", description: "next / previous line" },
-    CheatsheetEntry { keys: "C-a / C-e", description: "beginning / end of line" },
-    CheatsheetEntry { keys: "M-f / M-b", description: "forward / backward word" },
-    CheatsheetEntry { keys: "M-< / M->", description: "beginning / end of buffer" },
-    CheatsheetEntry { keys: "C-Space", description: "set mark" },
-    CheatsheetEntry { keys: "C-w / M-w", description: "kill / copy region" },
-    CheatsheetEntry { keys: "C-y", description: "yank (paste)" },
-    CheatsheetEntry { keys: "C-k", description: "kill to end of line" },
-    CheatsheetEntry { keys: "C-d / M-d", description: "delete char / word" },
-    CheatsheetEntry { keys: "C-/ or C-_", description: "undo" },
-    CheatsheetEntry { keys: "C-s / C-r", description: "search forward / backward" },
-    CheatsheetEntry { keys: "C-x C-s", description: "submit / run statement" },
-    CheatsheetEntry { keys: "C-g", description: "cancel / clear region" },
+    CheatsheetEntry {
+        keys: "C-f / C-b",
+        description: "forward / backward char",
+    },
+    CheatsheetEntry {
+        keys: "C-n / C-p",
+        description: "next / previous line",
+    },
+    CheatsheetEntry {
+        keys: "C-a / C-e",
+        description: "beginning / end of line",
+    },
+    CheatsheetEntry {
+        keys: "M-f / M-b",
+        description: "forward / backward word",
+    },
+    CheatsheetEntry {
+        keys: "M-< / M->",
+        description: "beginning / end of buffer",
+    },
+    CheatsheetEntry {
+        keys: "C-Space",
+        description: "set mark",
+    },
+    CheatsheetEntry {
+        keys: "C-w / M-w",
+        description: "kill / copy region",
+    },
+    CheatsheetEntry {
+        keys: "C-y",
+        description: "yank (paste)",
+    },
+    CheatsheetEntry {
+        keys: "C-k",
+        description: "kill to end of line",
+    },
+    CheatsheetEntry {
+        keys: "C-d / M-d",
+        description: "delete char / word",
+    },
+    CheatsheetEntry {
+        keys: "C-/ or C-_",
+        description: "undo",
+    },
+    CheatsheetEntry {
+        keys: "C-s / C-r",
+        description: "search forward / backward",
+    },
+    CheatsheetEntry {
+        keys: "C-x C-s",
+        description: "submit / run statement",
+    },
+    CheatsheetEntry {
+        keys: "C-g",
+        description: "cancel / clear region",
+    },
 ];
 
 /// Render the help modal on top of the current frame.

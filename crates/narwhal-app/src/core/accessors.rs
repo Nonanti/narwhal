@@ -101,8 +101,6 @@ impl AppCore {
         self.ui.focus
     }
 
-
-
     pub fn tabs(&self) -> &[Tab] {
         &self.ui.tabs
     }
