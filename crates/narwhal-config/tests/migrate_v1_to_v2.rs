@@ -184,7 +184,21 @@ fn settings_migrate_preserves_every_v1_field() {
     assert_eq!(loaded.editor.tab_width, 2);
     assert!(!loaded.editor.use_spaces);
     assert!(!loaded.editor.line_numbers);
-    assert!(!loaded.keybindings.vim_mode);
+    // v1 fixture still carries the deprecated `vim_mode = false`
+    // bit. We assert it round-trips for back-compat — the soft
+    // migration to `editor.mode = "basic"` happens at runtime in
+    // `apply_settings`, not in the on-disk migration.
+    #[allow(deprecated)]
+    {
+        assert!(!loaded.keybindings.vim_mode);
+    }
+    // v2 additions land at their defaults.
+    assert_eq!(loaded.editor.mode, narwhal_config::EditorMode::Vim);
+    assert_eq!(
+        loaded.editor.mouse,
+        narwhal_config::MouseSelectionMode::Enabled
+    );
+    assert_eq!(loaded.keybindings.preset, narwhal_config::KeyPreset::Default);
     assert_eq!(loaded.diagram.icons, narwhal_config::DiagramIcons::Nerdfont);
     // keymap: three groups, eight bindings total.
     assert_eq!(loaded.keymap.len(), 3, "keymap groups");
@@ -569,4 +583,142 @@ fn validate_accepts_explicit_run_section() {
         report.settings,
         ValidateOutcome::Ok { schema_version: 2 }
     ));
+}
+
+// ----- editor mode / mouse / preset (v2.1) -----------------------
+//
+// Additive tests for the editor-customization feature. None of the
+// kitchen-sink assertions above are touched — v1 files that omit
+// these sections must still migrate cleanly with defaults.
+
+/// A v1 file with `keybindings.vim_mode = false` round-trips the
+/// deprecated bit. The runtime translation to `editor.mode =
+/// "basic"` lives in `apply_settings`; the on-disk shape must stay
+/// stable so users can downgrade narwhal without their config
+/// silently shape-shifting.
+#[test]
+#[allow(deprecated)]
+fn vim_mode_false_round_trips_as_deprecated_bit() {
+    let v1 = r#"
+[keybindings]
+vim_mode = false
+"#;
+    let dir = temp_dir();
+    let path = dir.path().join("settings.toml");
+    fs::write(&path, v1).unwrap();
+    migrate_settings(&path, &MigrateOptions::default()).unwrap();
+    let loaded = Settings::load(&path).unwrap();
+    assert!(!loaded.keybindings.vim_mode);
+    // The runtime translation is the host's job; on disk we don't
+    // pre-emptively flip editor.mode.
+    assert_eq!(loaded.editor.mode, narwhal_config::EditorMode::Vim);
+}
+
+/// Every new editor field round-trips through save → load with a
+/// non-default value.
+#[test]
+fn editor_settings_full_round_trip() {
+    let mut settings = Settings::default();
+    settings.editor.tab_width = 8;
+    settings.editor.use_spaces = false;
+    settings.editor.line_numbers = false;
+    settings.editor.mode = narwhal_config::EditorMode::Emacs;
+    settings.editor.mouse = narwhal_config::MouseSelectionMode::ClickOnly;
+    settings.editor.show_mode_indicator = false;
+    settings.editor.auto_indent = false;
+    settings.editor.highlight_current_line = true;
+    settings.editor.scroll_off = 7;
+    settings.editor.word_wrap = true;
+
+    let dir = temp_dir();
+    let path = dir.path().join("settings.toml");
+    settings.save(&path).unwrap();
+    let loaded = Settings::load(&path).unwrap();
+    assert_eq!(loaded.editor, settings.editor);
+}
+
+/// Keybinding preset + leader round-trip.
+#[test]
+fn keybinding_preset_round_trip() {
+    let mut settings = Settings::default();
+    settings.keybindings.preset = narwhal_config::KeyPreset::Vscode;
+    settings.keybindings.leader = ",".to_owned();
+
+    let dir = temp_dir();
+    let path = dir.path().join("settings.toml");
+    settings.save(&path).unwrap();
+    let loaded = Settings::load(&path).unwrap();
+    assert_eq!(loaded.keybindings.preset, narwhal_config::KeyPreset::Vscode);
+    assert_eq!(loaded.keybindings.leader, ",");
+}
+
+/// Every `EditorMode` variant accepts the lowercase wire form.
+#[test]
+fn editor_mode_wire_format_accepts_all_variants() {
+    for (wire, expected) in [
+        ("vim", narwhal_config::EditorMode::Vim),
+        ("basic", narwhal_config::EditorMode::Basic),
+        ("emacs", narwhal_config::EditorMode::Emacs),
+    ] {
+        let body = format!(
+            "schema_version = 2\n[settings.editor]\nmode = \"{wire}\"\n",
+        );
+        let dir = temp_dir();
+        let path = dir.path().join("settings.toml");
+        fs::write(&path, &body).unwrap();
+        let loaded = Settings::load(&path).unwrap();
+        assert_eq!(loaded.editor.mode, expected, "wire={wire}");
+    }
+}
+
+/// Every `MouseSelectionMode` variant accepts the kebab-case wire form.
+#[test]
+fn mouse_mode_wire_format_accepts_all_variants() {
+    for (wire, expected) in [
+        ("enabled", narwhal_config::MouseSelectionMode::Enabled),
+        ("click-only", narwhal_config::MouseSelectionMode::ClickOnly),
+        ("disabled", narwhal_config::MouseSelectionMode::Disabled),
+    ] {
+        let body = format!(
+            "schema_version = 2\n[settings.editor]\nmouse = \"{wire}\"\n",
+        );
+        let dir = temp_dir();
+        let path = dir.path().join("settings.toml");
+        fs::write(&path, &body).unwrap();
+        let loaded = Settings::load(&path).unwrap();
+        assert_eq!(loaded.editor.mouse, expected, "wire={wire}");
+    }
+}
+
+/// Every `KeyPreset` variant accepts the kebab-case wire form.
+#[test]
+fn key_preset_wire_format_accepts_all_variants() {
+    for (wire, expected) in [
+        ("default", narwhal_config::KeyPreset::Default),
+        ("vscode", narwhal_config::KeyPreset::Vscode),
+        ("datagrip", narwhal_config::KeyPreset::Datagrip),
+        ("intellij", narwhal_config::KeyPreset::Intellij),
+    ] {
+        let body = format!(
+            "schema_version = 2\n[settings.keybindings]\npreset = \"{wire}\"\n",
+        );
+        let dir = temp_dir();
+        let path = dir.path().join("settings.toml");
+        fs::write(&path, &body).unwrap();
+        let loaded = Settings::load(&path).unwrap();
+        assert_eq!(loaded.keybindings.preset, expected, "wire={wire}");
+    }
+}
+
+/// Defaults are themselves the canonical wire defaults.
+#[test]
+fn editor_defaults_are_canonical() {
+    let s = narwhal_config::EditorSettings::default();
+    assert_eq!(s.mode, narwhal_config::EditorMode::Vim);
+    assert_eq!(s.mouse, narwhal_config::MouseSelectionMode::Enabled);
+    assert!(s.show_mode_indicator);
+    assert!(s.auto_indent);
+    assert!(!s.highlight_current_line);
+    assert_eq!(s.scroll_off, 3);
+    assert!(!s.word_wrap);
 }
