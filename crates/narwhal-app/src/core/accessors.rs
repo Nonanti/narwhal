@@ -62,6 +62,31 @@ impl AppCore {
         &self.tab().editor
     }
 
+    /// Test helper: `true` when `:settings` modal is currently open.
+    #[must_use]
+    pub const fn settings_modal_open(&self) -> bool {
+        self.modals.settings.is_some()
+    }
+
+    /// Test helper: read the draft's editor mode while the modal is
+    /// open. Returns `None` when the modal is closed.
+    #[must_use]
+    pub fn settings_modal_draft_editor_mode(&self) -> Option<narwhal_config::EditorMode> {
+        self.modals.settings.as_ref().map(|m| m.draft.editor.mode)
+    }
+
+    /// Test helper: read the currently-highlighted section index.
+    #[must_use]
+    pub fn settings_modal_selected_section(&self) -> Option<usize> {
+        self.modals.settings.as_ref().map(|m| m.selected_section)
+    }
+
+    /// Test helper: read the live runtime editor mode.
+    #[must_use]
+    pub const fn runtime_editor_mode(&self) -> narwhal_config::EditorMode {
+        self.ui.editor_mode
+    }
+
     pub fn tabs(&self) -> &[Tab] {
         &self.ui.tabs
     }

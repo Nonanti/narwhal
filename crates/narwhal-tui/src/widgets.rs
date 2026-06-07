@@ -21,6 +21,7 @@ pub mod context_menu;
 pub mod diagram;
 pub mod editor;
 pub mod goto;
+pub mod settings_modal;
 pub mod help;
 pub mod history;
 pub mod json_viewer;
@@ -37,6 +38,7 @@ pub use chart::{
 };
 pub use confirm::{ConfirmModalView, render_confirm_modal};
 pub use context_menu::{ContextMenuItemView, ContextMenuView, render_context_menu};
+pub use settings_modal::{SettingsModalView, render_settings_modal};
 pub use diagram::{DiagramView, DiagramViewMode, render_diagram};
 pub use editor::{
     CompletionHitRegions, editor_cursor_anchor, gutter_width, render_completion_popup,
