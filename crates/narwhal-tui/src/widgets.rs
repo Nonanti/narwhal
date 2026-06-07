@@ -17,6 +17,7 @@ pub(crate) fn centred_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 pub mod chart;
 pub mod confirm;
+pub mod context_menu;
 pub mod diagram;
 pub mod editor;
 pub mod goto;
@@ -35,9 +36,11 @@ pub use chart::{
     ChartPlaceholder, ChartView, ChartViewKind, render_chart, render_chart_placeholder,
 };
 pub use confirm::{ConfirmModalView, render_confirm_modal};
+pub use context_menu::{ContextMenuItemView, ContextMenuView, render_context_menu};
 pub use diagram::{DiagramView, DiagramViewMode, render_diagram};
 pub use editor::{
-    CompletionHitRegions, editor_cursor_anchor, render_completion_popup, render_editor,
+    CompletionHitRegions, editor_cursor_anchor, gutter_width, render_completion_popup,
+    render_editor,
 };
 pub use goto::{GotoModalView, GotoRowView, render_goto_modal};
 pub use help::{CHEATSHEET, CheatsheetEntry, CheatsheetSection, render_help_modal};

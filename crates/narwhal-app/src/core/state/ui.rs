@@ -23,7 +23,7 @@ use super::{ResultState, SidebarItem, StatusBar, Tab};
 /// from there.
 #[derive(Debug, Clone, Copy)]
 pub struct MouseDragState {
-    pub tab_id: usize,
+    pub tab_id: u64,
     pub anchor: (usize, usize),
 }
 
