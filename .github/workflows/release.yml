@@ -127,11 +127,18 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Stage installer script
+        # Ship scripts/install.sh as a release asset so users can pin to
+        # a tagged installer (releases/latest/download/install.sh) instead
+        # of pulling from a mutable branch.
+        run: cp scripts/install.sh dist/install.sh
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/*.sha256
+            dist/install.sh
           generate_release_notes: true
           fail_on_unmatched_files: true

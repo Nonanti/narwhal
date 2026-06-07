@@ -58,6 +58,25 @@ plugin runtime.
 
 ## Install
 
+### One-line install (Linux / macOS)
+
+```sh
+curl -fsSL https://github.com/Nonanti/narwhal/releases/latest/download/install.sh | sh
+```
+
+Detects your OS/arch, downloads the matching prebuilt binary from the
+latest release, verifies its SHA-256, and drops it into `~/.local/bin`.
+Supported targets today: `x86_64-unknown-linux-gnu`,
+`aarch64-apple-darwin`.
+
+Environment knobs:
+
+```sh
+NARWHAL_VERSION=v2.0.0          # pin to a specific tag
+NARWHAL_BIN_DIR=/usr/local/bin  # custom install dir (default: ~/.local/bin)
+NARWHAL_FORCE=1                 # overwrite without prompt
+```
+
 ### Cargo
 
 ```sh
