@@ -1,6 +1,6 @@
 [package]
 name = "narwhal-audit"
-version = "2.0.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
