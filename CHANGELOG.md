@@ -7,7 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes. The next release will land here._
+### Editor customization
+
+Three-way editor input model + full mouse support + in-app settings
+modal land as one big feature drop.
+
+- **Three editor modes** — `[editor].mode` picks between `vim` (the
+  default, v1.x behaviour), `basic` (modeless IDE-style) and `emacs`
+  (classic Ctrl-/Meta- chords with a `C-x` prefix). Switch at runtime
+  with `:mode vim|basic|emacs`; the change is persisted to
+  `config.toml` in one shot. Backward-compat: a v1.x file with
+  `keybindings.vim_mode = false` is interpreted as
+  `editor.mode = "basic"` at runtime so no migration pass is
+  required. See `docs/editor-modes.md`.
+- **Mouse vocabulary** — click positions the cursor, drag extends a
+  selection, double-click selects the word under the cursor,
+  triple-click selects the line, middle-click pastes the clipboard,
+  right-click opens the editor context menu (Cut / Copy / Paste /
+  Select All / Run Selection / Find / Toggle Comment). Configurable
+  via `[editor].mouse = enabled | click-only | disabled`. See
+  `docs/mouse.md`.
+- **`:settings` modal** — in-app editor for editor mode, mouse mode,
+  theme, line numbers, mode indicator, auto-indent, current-line
+  highlight, word wrap, and the keybinding preset. Atomic save to
+  `config.toml` via the new `Settings::save` helper; the on-screen
+  footer flips colour to flag unsaved changes.
+- **Keybinding presets** — `[keybindings].preset = default | vscode
+  | datagrip | intellij` layers a small set of IDE chords on top of
+  the built-in defaults. VSCode adds `Ctrl+P` (goto) and
+  `Ctrl+Shift+P` (command palette); DataGrip / IntelliJ add `Ctrl+B`
+  (focus sidebar) and `Ctrl+Enter` (run statement). User
+  `[keymap.*]` overrides still win.
+- **Selection + undo plumbing** — `narwhal_domain::editor` gains
+  `Selection`, `SelectionKind`, `EditHistory`, `EditOp`,
+  `BufferSnapshot`. `EditorBuffer` exposes `selection()`,
+  `set_selection()`, `extend_selection_to()`, `selected_text()`,
+  `delete_selection()`, `snapshot()` / `commit_undo_snapshot()`,
+  `undo()` / `redo()` so every editor mode (and the mouse drag
+  path) share one cut / copy / undo pipeline.
+- **Mode indicator** — the status bar's left segment now shows
+  `BASIC` / `EMACS` (with a `C-x` flip when the emacs prefix is
+  armed) in addition to the existing vim labels. Disable with
+  `[editor].show_mode_indicator = false`.
+- **Dynamic help** — `F1` swaps the *Editor* page between vim, basic
+  and emacs cheatsheets based on the active mode.
+- **Live reload** — a `notify`-driven watcher reapplies any
+  external edit to `config.toml` within ~50 ms. Self-writes from the
+  modal are suppressed inside a 750 ms window so the in-app Ctrl+S
+  does not echo back through the watcher.
+
+New docs: `docs/editor-modes.md`, `docs/mouse.md`,
+`docs/settings.md`. README features bullet rewritten to mention all
+three modes + mouse + settings modal. 65 new tests across
+`narwhal-config`, `narwhal-domain` and `narwhal-app` (basic, emacs,
+mouse, settings modal, keybinding preset, selection, history).
+
+Deprecated: `[keybindings].vim_mode`. Use `[editor].mode = "basic"`
+(or `"emacs"`) instead. The old field still round-trips for
+back-compat.
 
 ## [2.0.0] - 2026-06-05
 

@@ -19,9 +19,23 @@ plugin runtime.
   `describe_schema`, `run_query`, `explain_query`, `get_diagram`, and more
   to any Model Context Protocol client. Read-only by default, with a
   workspace ACL.
-- **Vim editing** — Normal / Insert / Visual modes, operator-pending
-  (`dw`, `yy`, `dgg`), multi-cursor (`Alt-N` / `Alt-A`), schema-aware
-  completion.
+- **Three editor modes** — pick your input model in `:settings` or
+  with `:mode vim|basic|emacs`. Vim ships as default with Normal /
+  Insert / Visual modes, operator-pending (`dw`, `yy`, `dgg`),
+  multi-cursor (`Alt-N` / `Alt-A`). Basic mode is modeless IDE-style
+  (arrows, Ctrl+C/V/Z, Shift+arrow selects). Emacs mode brings the
+  classic C-/M- chord set with the `C-x` prefix. All three share the
+  same buffer, selection model, and undo history.
+- **Full mouse support** — click to position, drag to select,
+  double-click for word / triple-click for line, middle-click pastes,
+  right-click opens a context menu (Cut / Copy / Paste / Select All /
+  Run Selection / Find / Toggle Comment). Configurable per
+  `[editor].mouse`.
+- **In-app settings** — `:settings` opens a modal that drives editor
+  mode, mouse mode, theme, line numbers, mode indicator, auto-indent,
+  and the keybinding preset (Default / VSCode / DataGrip / IntelliJ).
+  Changes save atomically to `~/.config/narwhal/config.toml` and the
+  `notify`-driven watcher live-reloads any external edit.
 - **Schema tooling** — ER diagrams (Focused, Impact, Mermaid / DOT
   export), `:schema-diff` between two connections with dialect-specific
   DDL emit, `:diff` for migration SQL.
