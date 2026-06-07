@@ -87,6 +87,22 @@ impl AppCore {
         self.ui.editor_mode
     }
 
+    /// Test helper: `true` when any modal currently owns the
+    /// keyboard. Used by preset tests that assert a chord opened
+    /// a modal without caring which one.
+    #[must_use]
+    pub const fn has_any_modal_open(&self) -> bool {
+        self.modals.any_open()
+    }
+
+    /// Test helper: currently-focused pane.
+    #[must_use]
+    pub const fn focused_pane(&self) -> narwhal_tui::Pane {
+        self.ui.focus
+    }
+
+
+
     pub fn tabs(&self) -> &[Tab] {
         &self.ui.tabs
     }

@@ -9,8 +9,8 @@ use narwhal_tui::{
     HistoryRow, HistoryRowOutcome, Pane, PivotPlaceholder, PivotTableView, RootLayout,
     RowDetailView, SearchHighlight, SidebarRow, SidebarView, SnippetsModalState, StatusBarView,
     ContextMenuItemView, ContextMenuView, SettingsModalView, WizardFieldView, WizardView,
-    render_confirm_modal, render_context_menu, render_goto_modal, render_help_modal,
-    render_settings_modal,
+    HelpEditorMode, render_confirm_modal, render_context_menu, render_goto_modal,
+    render_help_modal, render_settings_modal,
     render_history_modal, render_root, render_row_detail, render_snippets_modal, render_wizard,
 };
 use ratatui::Frame;
@@ -180,8 +180,26 @@ impl AppCore {
         } else {
             self.ui.status.message.clone()
         };
+        // Pick a label override for non-vim editor modes. The vim
+        // layer's short labels (`NOR`, `INS`, ...) only make sense
+        // when vim is actually running the show; for basic / emacs
+        // we substitute a single static label, plus a pending-prefix
+        // indicator for the emacs `C-x` two-stroke chord.
+        let mode_label_override = match self.ui.editor_mode {
+            narwhal_config::EditorMode::Basic => Some("BASIC"),
+            narwhal_config::EditorMode::Emacs => {
+                if self.ui.emacs_pending_prefix.is_some() {
+                    Some("C-x")
+                } else {
+                    Some("EMACS")
+                }
+            }
+            _ => None,
+        };
         let mut layout = RootLayout {
             mode: self.ui.vim.mode(),
+            mode_label_override,
+            show_mode_indicator: self.ui.show_mode_indicator,
             focus: self.ui.focus,
             status_bar: StatusBarView {
                 connection: self.ui.status.connection.as_deref(),
@@ -232,7 +250,12 @@ impl AppCore {
         }
 
         if self.modals.help_open {
-            render_help_modal(frame, area, &self.ui.theme);
+            let help_mode = match self.ui.editor_mode {
+                narwhal_config::EditorMode::Basic => HelpEditorMode::Basic,
+                narwhal_config::EditorMode::Emacs => HelpEditorMode::Emacs,
+                _ => HelpEditorMode::Vim,
+            };
+            render_help_modal(frame, area, &self.ui.theme, help_mode);
         }
 
         if let Some(state) = self.modals.history.as_ref() {

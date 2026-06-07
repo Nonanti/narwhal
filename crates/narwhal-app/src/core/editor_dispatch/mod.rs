@@ -70,6 +70,52 @@ impl AppCore {
         {
             return false;
         }
+
+        // Keybinding preset extras: each preset binds a small set of
+        // discoverable IDE chords on top of the built-in defaults.
+        // VSCode: Ctrl+P opens goto, Ctrl+Shift+P opens the command
+        // palette equivalent.
+        // DataGrip / IntelliJ: Ctrl+B focuses the sidebar,
+        // Ctrl+Enter runs the statement under the cursor.
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match (self.ui.key_preset, key.code) {
+                (narwhal_config::KeyPreset::Vscode, CtKey::Char('p'))
+                    if !key.modifiers.contains(KeyModifiers::SHIFT) =>
+                {
+                    if !self.modals.any_open() {
+                        self.open_goto_modal().await;
+                        return true;
+                    }
+                }
+                (narwhal_config::KeyPreset::Vscode, CtKey::Char('p'))
+                    if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                {
+                    if self.ui.focus != Pane::Editor {
+                        self.ui.focus = Pane::Editor;
+                    }
+                    let k =
+                        crossterm::event::KeyEvent::new(CtKey::Char(':'), KeyModifiers::NONE);
+                    self.handle_editor_key(k).await;
+                    return true;
+                }
+                (
+                    narwhal_config::KeyPreset::Datagrip | narwhal_config::KeyPreset::Intellij,
+                    CtKey::Char('b'),
+                ) => {
+                    self.ui.focus = Pane::Sidebar;
+                    self.ui.status.message = format!("focus → {}", Pane::Sidebar.label());
+                    return true;
+                }
+                (
+                    narwhal_config::KeyPreset::Datagrip | narwhal_config::KeyPreset::Intellij,
+                    CtKey::Enter,
+                ) => {
+                    self.dispatch_current_statement(RunMode::Execute).await;
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 CtKey::Char('w') => {

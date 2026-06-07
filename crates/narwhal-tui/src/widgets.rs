@@ -45,7 +45,10 @@ pub use editor::{
     render_editor,
 };
 pub use goto::{GotoModalView, GotoRowView, render_goto_modal};
-pub use help::{CHEATSHEET, CheatsheetEntry, CheatsheetSection, render_help_modal};
+pub use help::{
+    CHEATSHEET, CHEATSHEET_BASIC_EDITOR, CHEATSHEET_EMACS_EDITOR, CheatsheetEntry,
+    CheatsheetSection, HelpEditorMode, render_help_modal,
+};
 pub use history::{HistoryModalState, HistoryRow, HistoryRowOutcome, render_history_modal};
 pub use json_viewer::{JsonViewerView, render_json_viewer};
 pub use narwhal_domain::editor::{
