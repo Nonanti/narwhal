@@ -1,41 +1,79 @@
-# Headless `narwhal exec`
+# Headless `exec`
 
-Run any query without the TUI — for cron, CI, shell pipelines, and
-ad-hoc one-liners.
+Run a SQL file or one-liner without launching the TUI. Useful for
+cron, CI, shell pipelines, and ad-hoc scripts.
 
-```sh
-narwhal exec --conn prod 'SELECT count(*) FROM users'
-narwhal exec -c prod -f csv 'SELECT * FROM orders' > orders.csv
-narwhal exec -c prod -f json 'SELECT id, email FROM users' | jq '.[].email'
-```
-
-## Formats
-
-`-f` / `--format` accepts: `table` (default), `csv`, `json`, `tsv`,
-`markdown`, `parquet`. Parquet honours the `--compression` flag
-(`snappy`, `zstd`, `none`).
-
-## Write safety
-
-Writes are wrapped in a `BEGIN … ROLLBACK` envelope by default — you
-see the rows that *would* change without committing. Opt out with
-`--write`:
+## Usage
 
 ```sh
-narwhal exec -c prod --write 'UPDATE users SET banned = true WHERE id = 42'
+narwhal exec --conn prod < migration.sql
+narwhal exec --conn prod --sql 'SELECT 1'
+narwhal exec --conn prod --file migration.sql
 ```
 
-The `--write` flag also bypasses the connection's `read_only` /
-`confirm_writes` guards, so reserve it for trusted scripts.
+## Output formats
+
+```sh
+narwhal exec --conn prod --sql 'SELECT * FROM orders LIMIT 5' --format csv
+narwhal exec --conn prod --sql 'SELECT * FROM orders LIMIT 5' --format json
+narwhal exec --conn prod --sql 'SELECT * FROM orders LIMIT 5' --format markdown
+narwhal exec --conn prod --sql 'SELECT * FROM orders LIMIT 5' --format table
+```
+
+| Format     | Notes                                            |
+|------------|--------------------------------------------------|
+| `csv`      | RFC 4180; quoting handles embedded commas/newlines |
+| `tsv`      | Tab-separated, same quoting                      |
+| `json`     | One array of objects                             |
+| `jsonl`    | One object per line                              |
+| `markdown` | Pipe table; alignment from column type           |
+| `table`    | ASCII table, fixed-width                         |
+| `insert`   | Generated `INSERT INTO ... VALUES (...)` rows    |
+| `parquet`  | Columnar; needs `--out <path>`                   |
+
+## Safety
+
+Mutations are refused unless `--write` is passed. `--read-only`
+short-circuits regardless of `--write` for connections you do not
+trust:
+
+```sh
+narwhal exec --conn prod --sql 'UPDATE orders SET ...'
+# Error: SQL contains a mutation; pass --write to allow.
+
+narwhal exec --conn prod --read-only --sql 'UPDATE orders SET ...' --write
+# Error: --read-only blocks every mutation.
+```
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0   | success |
-| 1   | SQL error |
-| 2   | connection error |
-| 3   | configuration error |
-| 4   | write attempted without `--write` |
+| Code | Meaning                            |
+|------|------------------------------------|
+| 0    | Success                            |
+| 1    | Connection / authentication error  |
+| 2    | SQL parse / runtime error          |
+| 3    | Mutation refused without `--write` |
+| 4    | I/O error reading the SQL source   |
 
-Useful in CI gates and `Makefile` recipes.
+## Examples
+
+### Cron — nightly export
+
+```sh
+0 2 * * * narwhal exec --conn warehouse --file /opt/etl/orders.sql \
+  --format parquet --out /backup/orders-$(date +\%F).parquet
+```
+
+### CI — drift check
+
+```sh
+narwhal schema-diff src=staging tgt=prod | tee migration.sql
+test ! -s migration.sql || (echo "Drift detected"; exit 1)
+```
+
+### Shell — quick row count
+
+```sh
+narwhal exec --conn prod --sql 'SELECT count(*) FROM orders' --format jsonl \
+  | jq -r '.["count"]'
+```

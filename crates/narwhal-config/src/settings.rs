@@ -119,9 +119,9 @@ pub struct Settings {
     /// against first-row latency without rebuilding.
     #[serde(default)]
     pub run: RunSettings,
-    /// Append-only JSONL audit log. Disabled by default;
-    /// enable per deployment for SOC2 / ISO 27001 evidence
-    /// collection. See `docs/audit.md` for the SOC2 mapping.
+    /// Append-only JSONL audit log. Disabled by default; enable
+    /// per deployment for compliance evidence collection. See
+    /// `docs/audit.md` for sink and redaction options.
     #[serde(default)]
     pub audit: narwhal_audit::AuditConfig,
     /// embedded LSP client (sqls / sqlls). v2.0 only ships

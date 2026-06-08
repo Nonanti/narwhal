@@ -28,30 +28,30 @@ pub enum Operation {
     /// `host.fs-read(path)`.
     ///
     /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
-    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
-    /// in `docs/dev/wasm-sandbox.md`. Manual construction for
-    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
+    /// function. WASM plugins cannot trigger this in v2.0. Manual
+    /// construction for `Enforcer::check` evaluates correctly but
+    /// does not reflect a real trap.
     FsRead { path: PathBuf },
     /// `host.fs-write(path)`.
     ///
     /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
-    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
-    /// in `docs/dev/wasm-sandbox.md`. Manual construction for
-    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
+    /// function. WASM plugins cannot trigger this in v2.0. Manual
+    /// construction for `Enforcer::check` evaluates correctly but
+    /// does not reflect a real trap.
     FsWrite { path: PathBuf },
     /// `host.net-connect(host, port)`.
     ///
     /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
-    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
-    /// in `docs/dev/wasm-sandbox.md`. Manual construction for
-    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
+    /// function. WASM plugins cannot trigger this in v2.0. Manual
+    /// construction for `Enforcer::check` evaluates correctly but
+    /// does not reflect a real trap.
     NetConnect { host: String, port: u16 },
     /// `host.env-read(var)`.
     ///
     /// **Status (v2.0):** Public-surface placeholder, NOT yet wired to any host
-    /// function. WASM plugins cannot trigger this in v2.0; wiring tracked under
-    /// in `docs/dev/wasm-sandbox.md`. Manual construction for
-    /// `Enforcer::check` evaluates correctly but does not reflect a real trap.
+    /// function. WASM plugins cannot trigger this in v2.0. Manual
+    /// construction for `Enforcer::check` evaluates correctly but
+    /// does not reflect a real trap.
     EnvRead { var: String },
 }
 

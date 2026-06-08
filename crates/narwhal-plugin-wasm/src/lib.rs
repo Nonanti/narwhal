@@ -55,13 +55,10 @@
 //!
 //! * Filesystem / network / env capability enforcement.
 //! The manifest can declare these; the runtime today only stores
-//! the set on the [`HostState`] for to read.
+//! the set on the [`HostState`].
 //! * MCP-tool plugin track.
 //! * Hot reload — restart is required to load or unload a plugin.
 //! * Persistent KV; today's store is an in-memory `HashMap`.
-//!
-//! See `docs/dev/wasm-runtime.md` for the full Tier 2
-//! contract and roadmap deltas.
 //!
 //! [lua]: ../narwhal_plugin_lua/index.html
 //! [cm]: https://component-model.bytecodealliance.org/

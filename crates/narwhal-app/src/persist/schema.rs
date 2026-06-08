@@ -7,8 +7,8 @@
 //!
 //! All fields are tagged `#[serde(default, skip_serializing_if = ...)]`
 //! where appropriate so a TOML round-trip stays terse for the common
-//! "empty session" case. Top-level structs are `#[non_exhaustive]` per
-//! `docs/dev/api-surface.md` so future fields land non-breakingly.
+//! "empty session" case. Top-level structs are `#[non_exhaustive]`
+//! so future fields land non-breakingly.
 //!
 //! Schema version is `1` for v2.0. A bump (any structural change to a
 //! field name or type) goes through the `migrate` helper in
@@ -154,10 +154,10 @@ impl PersistedWorkspace {
         }
     }
 
-    /// Per `docs/dev/api-surface.md`, every public `#[non_exhaustive]`
-    /// struct ships a `with(|p| …)` builder so downstream code (tests,
-    /// MCP tooling) can construct an instance without depending on the
-    /// field set. Mirrors `ConnectionParams::with` and friends.
+    /// Every public `#[non_exhaustive]` struct ships a
+    /// `with(|p| …)` builder so downstream code (tests, MCP tooling)
+    /// can construct an instance without depending on the field set.
+    /// Mirrors `ConnectionParams::with` and friends.
     pub fn with(f: impl FnOnce(&mut Self)) -> Self {
         let mut this = Self::empty();
         f(&mut this);

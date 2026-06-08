@@ -1,111 +1,88 @@
-# Editor Modes
+# Editor modes
 
-narwhal ships three editor input models. Pick whichever fits the way
-you already type:
+The SQL editor in the main pane supports three input models.
+Switch at runtime with `:mode vim|basic|emacs`, or set
+`[editor].mode` in `config.toml`.
 
-| Mode    | Default in v2 | Style                   |
-| ------- | :-----------: | ----------------------- |
-| `vim`   |       ✓       | Normal / Insert / Visual / Command, vim chord vocabulary |
-| `basic` |               | Modeless IDE-style: arrow keys, Ctrl+C/V/Z, Shift+arrow selects |
-| `emacs` |               | Classic C-/M- chord set with `C-x` prefix              |
+| Mode    | Feel                          | Default leader |
+|---------|-------------------------------|----------------|
+| `vim`   | Normal / Insert / Visual      | `:`            |
+| `basic` | Modeless, IDE-style           | `:` (palette)  |
+| `emacs` | Ctrl- and Meta- chords        | `C-x`          |
 
-Switch at runtime:
+The lower text buffer is shared across modes — switching modes
+mid-edit does not lose your text.
 
-```text
-:mode vim
-:mode basic
-:mode emacs
-```
+## Vim mode (default)
 
-The setting persists to `~/.config/narwhal/config.toml` and is
-re-applied on the next start. The full settings modal (`:settings`)
-exposes the same knob in the **Editor** section.
+Standard subset: `hjkl`, `w` / `b` / `e`, `0` / `$` / `gg` / `G`,
+`i` / `a` / `o`, `dd` / `yy` / `dw` / `cc`, `v` / `V` / `Ctrl-V`,
+`u` / `Ctrl-R`, `/` and `?` search, `:` command mode.
 
-## Vim mode
+Visual mode accepts count prefixes (`3j`). Operators chain with
+motions (`d3w`, `c$`).
 
-Default. Same machinery the v1 editor used. See `F1` → *Editor (vim)*
-for the live chord list. Highlights:
-
-| Chord          | Action                              |
-| -------------- | ----------------------------------- |
-| `i` / `a`      | enter Insert mode                   |
-| `Esc`          | back to Normal                      |
-| `:`            | command palette                     |
-| `dd` / `yy`    | delete / yank line                  |
-| `v` / `V`      | character / line visual selection   |
-| `Alt-N` / `Alt-A` | multi-cursor at next / all matches |
+The mode indicator in the status bar shows `NORMAL` / `INSERT` /
+`VISUAL` / `V-LINE` / `V-BLOCK`. Disable with
+`[editor].show_mode_indicator = false`.
 
 ## Basic mode
 
-Modeless. Plain typing inserts; arrow keys move; selection grows with
-`Shift`.
+Modeless, IDE-style. Typing inserts. Selection extends with
+`Shift-Arrow`. `Ctrl-S` runs the buffer.
 
-| Chord                       | Action                            |
-| --------------------------- | --------------------------------- |
-| `←` / `→` / `↑` / `↓`        | move cursor                       |
-| `Ctrl+←` / `Ctrl+→`         | word jump                         |
-| `Shift+(arrow)`             | extend selection                  |
-| `Home` / `End`              | beginning / end of line           |
-| `Ctrl+Home` / `Ctrl+End`    | beginning / end of buffer         |
-| `Ctrl+A`                    | select all                        |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste             |
-| `Ctrl+Z` / `Ctrl+Y`         | undo / redo                       |
-| `Ctrl+Shift+Z`              | redo (alt binding)                |
-| `Ctrl+F` or `/`             | open editor search                |
-| `Tab`                       | completion when inside a word, four-space indent otherwise |
-| `Enter`                     | newline (auto-indent if enabled)  |
-| `:`                         | command palette                   |
-| `Esc`                       | clear selection / close popups    |
-
-Typing over a selection replaces it, matching every GUI editor on the
-planet.
+| Chord         | Action                          |
+|---------------|---------------------------------|
+| `Ctrl-S`      | Run buffer (same as F6)         |
+| `Ctrl-Z`      | Undo                            |
+| `Ctrl-Shift-Z`| Redo                            |
+| `Ctrl-X` / `Ctrl-C` / `Ctrl-V` | Cut / copy / paste |
+| `Ctrl-A`      | Select all                      |
+| `Ctrl-F`      | Find                            |
+| `Ctrl-/`      | Toggle line comment             |
 
 ## Emacs mode
 
-Classic Ctrl- / Meta- chord set with a `C-x` two-stroke prefix. See
-`F1` → *Editor (emacs)*.
+Classic Emacs chords with a `C-x` prefix for two-key sequences.
 
-| Chord            | Action                              |
-| ---------------- | ----------------------------------- |
-| `C-f` / `C-b`    | forward / backward char             |
-| `C-n` / `C-p`    | next / previous line                |
-| `C-a` / `C-e`    | beginning / end of line             |
-| `M-f` / `M-b`    | forward / backward word             |
-| `M-<` / `M->`    | beginning / end of buffer           |
-| `C-Space`        | set mark (start a region)           |
-| `C-w` / `M-w`    | kill / copy region                  |
-| `C-y`            | yank (paste from clipboard)         |
-| `C-k`            | kill to end of line                 |
-| `C-d` / `M-d`    | delete char / word forward          |
-| `C-/` or `C-_`   | undo                                |
-| `C-s` / `C-r`    | forward / backward search           |
-| `C-g`            | cancel (clear region / popup)       |
-| `C-x C-s`        | submit / run current statement      |
-| `C-x u`          | undo (alt binding)                  |
-| `:`              | command palette                     |
-| `Esc`            | clear region                        |
+| Chord       | Action                            |
+|-------------|-----------------------------------|
+| `C-f` / `C-b` | Forward / backward char         |
+| `C-n` / `C-p` | Next / previous line            |
+| `C-a` / `C-e` | Beginning / end of line         |
+| `M-f` / `M-b` | Forward / backward word         |
+| `C-d`       | Delete char forward               |
+| `C-k`       | Kill to end of line               |
+| `C-w` / `M-w` | Cut / copy selection            |
+| `C-y`       | Yank                              |
+| `C-x C-s`   | Run buffer                        |
+| `C-x u`     | Undo                              |
 
-The `C-x` prefix sets a single-keystroke pending state; the status
-indicator flips to `C-x` while it's armed.
+When the `C-x` prefix is armed, the mode indicator flips to `C-x`.
 
-## Status indicator
+## Mouse
 
-The status bar's left segment shows the current mode at a glance:
+See [`mouse.md`](./mouse.md).
 
-- Vim: `NORMAL`, `INSERT`, `VISUAL`, `CMD`, …
-- Basic: `BASIC`
-- Emacs: `EMACS`, or `C-x` while the prefix is armed
+## Keybinding presets
 
-Disable the segment with `[editor].show_mode_indicator = false` (or
-the matching toggle in `:settings → Editor`).
+Layer IDE-style chords on top of the active mode:
 
-## Why three modes?
+```toml
+[keybindings]
+preset = "vscode"   # default | vscode | datagrip | intellij
+```
 
-- **Vim** keeps the v1 muscle memory intact.
-- **Basic** matches the feel of DataGrip, VS Code, IntelliJ — what
-  almost everyone touches their first SQL editor in.
-- **Emacs** because emacs users are persistent.
+| Preset    | Adds                                                  |
+|-----------|-------------------------------------------------------|
+| `vscode`  | `Ctrl-P` (goto), `Ctrl-Shift-P` (command palette)     |
+| `datagrip`| `Ctrl-B` (focus sidebar), `Ctrl-Enter` (run statement)|
+| `intellij`| Same as `datagrip`                                    |
 
-All three share the same buffer, the same selection model, the same
-undo/redo history, and the same completion popup. Switching modes
-mid-edit is supported and the buffer state survives unchanged.
+User `[keymap.*]` overrides always win.
+
+## Migration from v1.x
+
+`[keybindings].vim_mode = false` still works and is interpreted as
+`[editor].mode = "basic"`. The field is deprecated; prefer the new
+form in new configs.

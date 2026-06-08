@@ -17,8 +17,7 @@
 //! fields at their `None` defaults. The first render after restore
 //! triggers a fresh `Tab::sql_highlights` call which re-populates
 //! the cache — exactly the same path a freshly-typed buffer takes.
-//! See `docs/dev/treesitter.md`, "Cache policy" — the
-//! length-keyed invalidation contract is preserved: spans are
+//! The length-keyed invalidation contract is preserved: spans are
 //! recomputed whenever the buffer length differs from the cached
 //! value, which is trivially true for a freshly-restored tab
 //! (cached length starts at zero).

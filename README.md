@@ -65,10 +65,10 @@ Inside the TUI:
 |---|---|
 | Install (all methods)   | [`docs/install.md`](./docs/install.md) |
 | Configuration           | [`docs/configuration.md`](./docs/configuration.md) |
-| MCP server              | [`docs/mcp.md`](./docs/mcp.md) |
-| Headless `exec`         | [`docs/headless.md`](./docs/headless.md) |
 | Editor modes            | [`docs/editor-modes.md`](./docs/editor-modes.md) |
 | Mouse                   | [`docs/mouse.md`](./docs/mouse.md) |
+| MCP server              | [`docs/mcp.md`](./docs/mcp.md) |
+| Headless `exec`         | [`docs/headless.md`](./docs/headless.md) |
 | Plugins (Lua + WASM)    | [`docs/plugins.md`](./docs/plugins.md) |
 | Connection vault        | [`docs/vault.md`](./docs/vault.md) |
 | Audit log               | [`docs/audit.md`](./docs/audit.md) |

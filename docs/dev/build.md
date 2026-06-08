@@ -1,59 +1,83 @@
 # Building from source
 
+## Prerequisites
+
+- Rust **1.85+** (edition 2024)
+- A C / C++ toolchain (for the bundled DuckDB and SQLite builds)
+- `cmake` (DuckDB)
+- `pkg-config` and `libdbus-1-dev` on Linux if you build without
+  the `vendored` keyring feature
+
 ```sh
-git clone https://github.com/Nonanti/narwhal.git
+rustup install stable
+rustup default stable
+```
+
+## Clone
+
+```sh
+git clone https://github.com/Nonanti/narwhal
 cd narwhal
-cargo build --release          # binary at target/release/narwhal
 ```
 
-Requirements:
+## Build
 
-- Rust ≥ 1.85 (edition 2024 — see `rust-toolchain.toml`)
-- C++17 toolchain for the bundled DuckDB build
-- Linux: `cmake`, `libclang-dev`, `pkg-config`, `libdbus-1-dev`
-- macOS: `cmake` (`brew install cmake`)
-
-## Nix
+A debug build of the full workspace:
 
 ```sh
-nix develop                    # pulls cmake, clang, libcxx, libclang
-cargo build --release
+cargo build --workspace
 ```
 
-## Slim builds
-
-Drivers are feature-gated. The default `cargo install narwhaldb`
-includes all six engines; build with a subset to slim the binary:
+A release binary with every driver wired in:
 
 ```sh
-cargo build --release --no-default-features --features driver-postgres
+cargo build -p narwhaldb --release
+./target/release/narwhal --version
 ```
 
-Available driver features: `driver-postgres`, `driver-mysql`,
-`driver-sqlite`, `driver-duckdb`, `driver-clickhouse`,
-`driver-mssql`.
-
-## Tests
+A minimal SQLite-only build:
 
 ```sh
-cargo test --workspace
+cargo build -p narwhaldb --release \
+  --no-default-features \
+  --features driver-sqlite
 ```
 
-Driver integration tests are gated behind `#[ignore]` and require
-Docker (Postgres, MySQL, SQL Server, ClickHouse testcontainers):
+See [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the full driver
+feature matrix.
+
+## Run
 
 ```sh
-cargo test --workspace -- --include-ignored --test-threads=1
+cargo run -p narwhaldb
 ```
 
-## Pre-push checklist
+## CI gates
 
-CI runs these four checks with `-D warnings`. Run them locally before
-pushing to avoid red builds:
+The repository's CI requires four checks. Run them locally before
+opening a PR:
 
 ```sh
-cargo fmt --all -- --check
+cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 cargo test --workspace
 ```
+
+## Nix
+
+A `flake.nix` is committed at the repository root.
+
+```sh
+nix develop                      # dev shell with rustc + cargo + cmake
+nix build                        # build the release binary
+```
+
+`direnv` is supported via the bundled `.envrc`.
+
+## Cross-compilation
+
+aarch64 Linux requires `cross` or a custom sysroot because the
+DuckDB C++ tree does not cross-compile cleanly with the default
+`x86_64` host headers. The release workflow targets x86_64 Linux,
+x86_64 macOS, and aarch64 macOS natively on GitHub-hosted runners.

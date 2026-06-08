@@ -72,8 +72,8 @@ pub mod __test_only {
     }
 
     /// Wraps the internal statement classifier. Used by the binding
-    /// test suite to lock in the comment / CTE / OUTPUT routing rules
-    /// described in `docs/dev/mssql-driver.md`.
+    /// test suite to lock in the comment / CTE / OUTPUT routing
+    /// rules.
     pub fn classify_statement(sql: &str) -> super::StatementShape {
         super::classify_statement(sql)
     }

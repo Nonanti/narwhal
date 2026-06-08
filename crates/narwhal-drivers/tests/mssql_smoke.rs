@@ -61,9 +61,8 @@ impl Harness {
         let host = container.get_host().await.expect("mssql host").to_string();
 
         let mut options = std::collections::BTreeMap::new();
-        // The official image ships a self-signed certificate, so trust
-        // it explicitly. Documented as unsafe for production use in
-        // `docs/drivers/mssql.md`.
+        // The official image ships a self-signed certificate, so
+        // trust it explicitly. Unsafe for production use.
         options.insert("trust_server_certificate".into(), "true".into());
 
         let config = ConnectionConfig {

@@ -1,163 +1,119 @@
-# Narwhal Architecture
+# Architecture
 
-Target architecture after the refactor. Authoritative reference for crate boundaries and dependency direction.
+A bird's-eye view of how the codebase is laid out and why.
 
 ## Layers
 
 ```
-                 narwhal (binary)
-                       │
-                       ▼
-                  narwhal-app          ← orchestrator: wires everything
-                  /    │    \
-                 ▼     ▼     ▼
-        narwhal-tui  narwhal-commands  narwhal-mcp
-            │            │                  │
-            └────────────┼──────────────────┘
-                         ▼
-                  narwhal-domain         ← pure state, no IO
-                         │
-                         ▼
-                  narwhal-core           ← shared primitives
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-  narwhal-pool     narwhal-drivers       narwhal-sql / history / config / vim
-                         │
-                         ▼
-        feature-gated backends inside narwhal-drivers:
-        postgres │ sqlite │ mysql │ duckdb │ clickhouse │ mssql
+┌─────────────────────────────────────────────────────────────┐
+│ Binary  ─  narwhaldb                                        │
+│   CLI parsing, subcommand dispatch, exec / mcp / audit /    │
+│   schema-diff / config / migrate-config / tui               │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────────────┐
+│ App     ─  narwhal-app                                      │
+│   AppCore, run worker, dispatch, modal state machines.      │
+│   Owns IO: tokio runtime, key/mouse event loop.             │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────────────┐
+│ TUI     ─  narwhal-tui                                      │
+│   ratatui widgets. Pure render given a model snapshot.      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────────────┐
+│ Domain  ─  narwhal-domain                                   │
+│   Pure model state. No IO, no rendering.                    │
+│   EditorBuffer, ResultView, sidebar / status / modal types. │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌────────────┬─────────────┴──────────┬────────────────────────┐
+│ Commands   │  Core                  │  Subsystems            │
+│ narwhal-   │  narwhal-core          │  narwhal-audit         │
+│ commands   │  Connection trait,     │  narwhal-mcp           │
+│  Stateless │  QueryStream, Value,   │  narwhal-pool          │
+│  helpers,  │  Row, ColumnSchema,    │  narwhal-history       │
+│  export,   │  TableSchema.          │  narwhal-pivot         │
+│  dispatch. │                        │  narwhal-schema-diff   │
+│            │                        │  narwhal-lsp           │
+│            │                        │  narwhal-diagram       │
+│            │                        │  narwhal-plugin        │
+│            │                        │  narwhal-plugin-lua    │
+│            │                        │  narwhal-plugin-wasm   │
+│            │                        │  narwhal-vim           │
+│            │                        │  narwhal-sql           │
+└────────────┴────────────────────────┴────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────────────┐
+│ Drivers ─  narwhal-drivers                                  │
+│   One file per backend behind a cargo feature.              │
+│   postgres / mysql / sqlite / duckdb / clickhouse / mssql.  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Dependency rules:
+## Dependency rules
 
-- Arrows point **down**. No upward dependency.
-- No sibling-to-sibling at the same layer except where the diagram shows.
-- `narwhal-tui` knows about `narwhal-domain` (read-only). It does **not** know about `narwhal-app`, `narwhal-commands`, or any driver.
-- `narwhal-app` is the only crate allowed to mutate domain state in response to user input.
-- `narwhal-mcp` talks to drivers exclusively through `narwhal-drivers::registry`.
+| Crate                | May depend on                          |
+|----------------------|----------------------------------------|
+| `narwhal-core`       | (none in the workspace)                |
+| `narwhal-domain`     | `narwhal-core`                         |
+| `narwhal-config`     | `narwhal-core`, `narwhal-domain`       |
+| `narwhal-sql`        | `narwhal-domain`                       |
+| `narwhal-commands`   | `narwhal-core`, `narwhal-domain`, `narwhal-config`, `narwhal-sql` |
+| `narwhal-drivers`    | `narwhal-core`, `narwhal-config`       |
+| `narwhal-pool`       | `narwhal-core`, `narwhal-config`, `narwhal-drivers` |
+| `narwhal-audit`      | `narwhal-core`, `narwhal-config`       |
+| `narwhal-history`    | `narwhal-core`, `narwhal-config`       |
+| `narwhal-schema-diff`| `narwhal-core`, `narwhal-domain`       |
+| `narwhal-diagram`    | `narwhal-core`, `narwhal-domain`       |
+| `narwhal-pivot`      | `narwhal-core`, `narwhal-domain`       |
+| `narwhal-vim`        | `narwhal-domain`                       |
+| `narwhal-plugin`     | `narwhal-core`                         |
+| `narwhal-plugin-lua` | `narwhal-plugin`                       |
+| `narwhal-plugin-wasm`| `narwhal-plugin`                       |
+| `narwhal-lsp`        | `narwhal-core`                         |
+| `narwhal-mcp`        | everything except `narwhal-app` / `narwhal-tui` |
+| `narwhal-tui`        | `narwhal-domain`, `narwhal-commands`   |
+| `narwhal-app`        | everything                             |
+| `narwhaldb` (bin)    | `narwhal-app`, `narwhal-mcp`           |
 
-## Crate responsibilities
-
-### narwhal-core
-Shared primitives: `Value`, `Row`, `ColumnSchema`, `QueryResult`, `Identifier`, `Error` types reused across the workspace. No state, no IO.
-
-### narwhal-domain
-Pure model state. Owns:
-- `EditorModel` — text buffer, cursor, selection, undo stack.
-- `ResultModel` — rows, column metadata, sort/filter spec, viewport.
-- `Tab`, `Session`, `SidebarModel`, `WizardModel`, `SnippetModel`, `HistoryModel`.
-
-No async, no IO, no `ratatui` types. Pure data + transition methods.
-
-### narwhal-drivers
-Umbrella crate consolidating every backend behind cargo features.
-- `trait DatabaseDriver` — connect, execute, introspect, cancel
-  (re-exported from `narwhal-core`).
-- `DriverKind` enum gated by features.
-- `registry::Registry` — name → factory map, populated at startup
-  based on enabled features.
-- One submodule per backend: `postgres`, `sqlite`, `mysql`, `duckdb`,
-  `clickhouse`, `mssql`. Each is behind a feature flag.
-- Sibling submodules carry shared TLS, URL parsing and value-codec
-  helpers.
-
-### narwhal-pool
-Connection pooling. Consumes `Driver`, hands out connections. No driver-specific code.
-
-### narwhal-sql
-Dialect-aware parsing, formatting, identifier quoting.
-
-### narwhal-history
-Query history persistence.
-
-### narwhal-config
-Config file loading, profile resolution.
-
-### narwhal-vim
-Vim emulation state machine. Consumes key events, returns motion intents.
-
-### narwhal-commands
-Everything in today's `narwhal-app` that is "command" logic:
-- Command parsing and dispatch (`:set`, `:open`, `:export`).
-- Tab completion engine.
-- Export pipeline (CSV, JSON, SQL dump).
-- Connection wizard flow.
-- Snippet management.
-- DDL helpers, EXPLAIN, transactions.
-
-Consumes `narwhal-domain` and `narwhal-driver-registry`. Returns intents/effects, does not own the runtime loop.
-
-### narwhal-tui
-Pure rendering. `ratatui` widgets. Takes `&Model` references, never mutates. Owns:
-- Layout, theme, input mapping (key event → intent).
-- All widgets: editor, results table, sidebar, history, snippets, wizard, help, row detail.
-
-No business logic. A widget that needs to "do" something emits an intent.
-
-### narwhal-app
-Thin orchestrator:
-- Event loop.
-- Maps TUI intents + driver responses to domain transitions.
-- Owns the `tokio` runtime, channels, draw scheduler.
-- ≤ 2000 LOC total. ≤ 10 files.
-
-### narwhal-mcp
-MCP server. Driver-agnostic via `narwhal-drivers::registry`.
-
-### narwhal (binary)
-CLI parsing, config bootstrap, terminal init, `App::run`. ≤ 400 LOC.
-
-### narwhal-plugin / narwhal-plugin-lua
-Plugin host trait + Lua implementation. Plugins consume a stable, narrow surface from `narwhal-domain` and `narwhal-commands`. Plugin-lua does **not** depend on `narwhal-core` or `narwhal-app` directly.
+`cargo deny check bans` enforces the rules.
 
 ## State ownership
 
-| State                         | Owner                       |
-|-------------------------------|-----------------------------|
-| Editor text + cursor          | `narwhal-domain::EditorModel` |
-| Query results                 | `narwhal-domain::ResultModel` |
-| Selected tab, focus, modals   | `narwhal-domain::Session`     |
-| Vim mode                      | `narwhal-domain::Session.vim` |
-| Connection pool               | `narwhal-pool` (held by `narwhal-app`) |
-| Active driver registry        | `narwhal-app` (built at startup) |
-| Terminal backend              | `narwhal-app::terminal` |
-| Draw scheduler                | `narwhal-app::draw_scheduler` |
+| State                     | Owner                                        |
+|---------------------------|----------------------------------------------|
+| Open tabs, cursor, history| `narwhal-app::AppCore`                       |
+| Editor buffer text        | `narwhal-domain::EditorBuffer`               |
+| Result rows               | `narwhal-domain::ResultView`                 |
+| Active driver connection  | `narwhal-pool::ConnectionPool`               |
+| Settings                  | `narwhal-config::Settings`                   |
+| Audit sink                | `narwhal-audit::AuditService`                |
+| MCP server context        | `narwhal-mcp::ServerContext`                 |
 
-## Feature flags
+## Build matrix
 
-Workspace root `narwhal` and `narwhal-mcp` expose:
+The binary ships every driver by default. Custom builds:
 
-```
-default      = ["postgres", "sqlite"]
-postgres     = ["narwhal-drivers/postgres"]
-sqlite       = ["narwhal-drivers/sqlite"]
-mysql        = ["narwhal-drivers/mysql"]
-duckdb       = ["narwhal-drivers/duckdb"]
-clickhouse   = ["narwhal-drivers/clickhouse"]
-mssql        = ["narwhal-drivers/mssql"]
-all-drivers  = ["postgres", "sqlite", "mysql", "duckdb", "clickhouse", "mssql"]
+```sh
+cargo build -p narwhaldb --no-default-features --features driver-sqlite
+cargo build -p narwhaldb --no-default-features --features driver-postgres,driver-mysql
 ```
 
-CI builds: `default`, `all-drivers`, and one minimal `--no-default-features --features sqlite` matrix entry.
+| Feature flag        | Pulls in                       |
+|---------------------|--------------------------------|
+| `driver-postgres`   | `tokio-postgres` + rustls      |
+| `driver-mysql`      | `mysql_async` + rustls         |
+| `driver-sqlite`     | `rusqlite` (bundled)           |
+| `driver-duckdb`     | `duckdb` (bundled)             |
+| `driver-clickhouse` | `reqwest` + rustls             |
+| `driver-mssql`      | `tiberius` + rustls            |
+| `all-drivers`       | All of the above               |
 
-## Intent / effect model
+## See also
 
-User input flows:
-
-```
-KeyEvent → narwhal-tui::input → Intent
-Intent  → narwhal-app::dispatch → Domain mutation + optional Effect
-Effect  → narwhal-app::executor → Driver call → DomainEvent
-DomainEvent → narwhal-app::apply → Domain mutation → redraw
-```
-
-`Intent` is a closed enum in `narwhal-domain`. `Effect` is a closed enum in `narwhal-commands`. The TUI never produces an `Effect` directly.
-
-## Non-goals (this refactor)
-
-- No new features.
-- No public CLI surface changes.
-- No config schema changes.
-- No protocol changes in `narwhal-mcp`.
-- No driver behaviour changes.
+- [`dev/build.md`](./dev/build.md) — building from source
+- [`dev/style.md`](./dev/style.md) — code style guidelines
+- The crate-level rustdoc on each `narwhal-*` crate for module-level
+  invariants

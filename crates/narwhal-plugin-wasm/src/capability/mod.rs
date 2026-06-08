@@ -28,14 +28,13 @@
 //! the syscall is racy and would leak host directory structure
 //! through error messages.
 //!
-//! ### Backwards compatibility with
+//! ### Backwards compatibility
 //!
-//! shipped bare unit-style tokens (`fs-read`, `net`, `env`,
-//! `fs-write`). To keep already-on-disk manifests loading, the
-//! parser still accepts those forms and maps them to the
-//! widest-possible scope (`fs.read:/`, `net.connect:*`,
-//! `env.read:*`). New manifests should prefer the explicit form;
-//! `docs/plugins/security.md` documents the migration.
+//! Pre-v2.0 manifests shipped bare unit-style tokens (`fs-read`,
+//! `net`, `env`, `fs-write`). To keep already-on-disk manifests
+//! loading, the parser still accepts those forms and maps them to
+//! the widest-possible scope (`fs.read:/`, `net.connect:*`,
+//! `env.read:*`). New manifests should prefer the explicit form.
 
 mod parser;
 mod scope;

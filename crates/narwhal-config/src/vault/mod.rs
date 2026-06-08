@@ -18,9 +18,8 @@
 //! [`VaultProvider`] is dyn-safe by construction: the single
 //! `resolve` method returns a `BoxFuture` rather than an
 //! `impl Future`. The decision diverges from the core
-//! `Connection`/`DatabaseDriver` traits (which use the RPITIT +
-//! `Dyn*` sibling pattern documented in `docs/dev/async-trait-style.md`)
-//! because:
+//! `Connection` / `DatabaseDriver` traits (which use the RPITIT +
+//! `Dyn*` sibling pattern) because:
 //!
 //! 1. Vault providers are *registered into a `HashMap<String, Arc<dyn
 //! VaultProvider>>`* — there is no zero-cost call site to optimise

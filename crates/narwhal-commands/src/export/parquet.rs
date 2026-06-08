@@ -9,11 +9,10 @@
 //! failure cannot leave a half-written `.parquet` lying around.
 //!
 //! Memory: the full result is materialised twice (once as `&[Row]`
-//! from the caller, once as Arrow arrays inside the builders). The
-//! brief explicitly defers a streaming writer to v2.2+ — see
-//! `docs/dev/exporters.md`. The 64k-row default row
-//! group size means Parquet itself doesn't add memory pressure on
-//! top of the builders.
+//! from the caller, once as Arrow arrays inside the builders). A
+//! streaming writer is deferred to a future release. The 64k-row
+//! default row group size means Parquet itself doesn't add memory
+//! pressure on top of the builders.
 
 use std::fs::File;
 use std::io::BufWriter;

@@ -221,7 +221,7 @@ impl AppCore {
             // SQL highlight spans are sourced from the per-tab
             // tree-sitter Parser. Wiring lives in the tab state
             // (`Tab::sql_highlights()`) and is refreshed lazily on
-            // dirty marks; see docs/dev/treesitter.md.
+            // dirty marks.
             editor_sql_highlights: tab.sql_highlights.as_deref(),
             chart: chart_layout,
             pivot: pivot_layout,

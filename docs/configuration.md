@@ -1,64 +1,154 @@
 # Configuration
 
-narwhal reads two TOML files from `~/.config/narwhal/`:
+narwhal reads two TOML files from `~/.config/narwhal/` (or the
+platform equivalent: `$XDG_CONFIG_HOME/narwhal/` on Linux,
+`~/Library/Application Support/narwhal/` on macOS).
 
-| File | Purpose |
-|---|---|
-| `connections.toml` | Database connections (per-host credentials, SSL, SSH tunnels) |
-| `config.toml`      | Editor, theme, keybindings, diagrams, plugins |
+- `config.toml` — editor, theme, audit, vault, plugin, LSP settings.
+- `connections.toml` — saved database connections.
 
-Both are watched live — saving from another editor reloads narwhal
-without a restart.
+Both are created on first launch with sensible defaults.
 
-## Connections
+## `config.toml`
+
+A minimal file:
+
+```toml
+[editor]
+mode = "vim"          # vim | basic | emacs
+mouse = "enabled"     # enabled | click-only | disabled
+theme = "default"
+show_line_numbers = true
+show_mode_indicator = true
+
+[keybindings]
+preset = "default"    # default | vscode | datagrip | intellij
+
+[run]
+batch_size = 64
+flush_window_ms = 50
+```
+
+Open the in-app editor with `:settings` — changes save atomically
+and reload live within ~50 ms.
+
+### Theme
+
+```toml
+[editor]
+theme = "default"     # default | dark | light | solarized
+```
+
+### Audit
+
+```toml
+[[audit.sinks]]
+kind = "file"
+path = "~/.local/share/narwhal/audit.log"
+rotate = "daily"
+```
+
+See [`audit.md`](./audit.md) for the JSONL schema and sink options.
+
+### Vault
+
+```toml
+[vault]
+default = "main"
+
+[[vault.providers]]
+name = "main"
+kind = "hashicorp"
+address = "https://vault.internal"
+auth = "token"
+```
+
+See [`vault.md`](./vault.md) for `1password`, AWS, and Azure
+backends.
+
+### Plugins
+
+```toml
+[plugins]
+auto_load = true
+plugins_dir = "~/.config/narwhal/plugins"
+```
+
+See [`plugins.md`](./plugins.md) for the Lua and WASM runtimes.
+
+### LSP
+
+```toml
+[lsp]
+enabled = false
+server = "sqls"       # sqls | sqlls
+```
+
+## `connections.toml`
 
 ```toml
 [[connection]]
-id     = "00000000-0000-0000-0000-000000000001"
-name   = "prod-pg"
-driver = "postgres"
-color  = "red"           # status bar tint
-read_only      = true    # syntactic write guard
-confirm_writes = true    # type YES before any mutation
+name = "prod"
+url  = "postgres://app@db.internal/orders"
+read_only = true
+confirm_writes = false
+color = "red"
 
-[connection.params]
-host     = "db.example.com"
-port     = 5432
-username = "alice"
-password = "${vault:secret/prod/db-password}"   # or use keyring
-database = "app"
-ssl_mode = "verify-full"
+[[connection]]
+name = "local"
+url  = "sqlite:./scratch.db"
 ```
 
-Password sources, in priority order:
+Add a connection interactively with `:add` inside the TUI, or
+import from a URL with `:url <dsn>`.
 
-1. `${vault:…}` — HashiCorp Vault. See [`vault.md`](./vault.md).
-2. `${op:…}` — 1Password CLI.
-3. OS keyring (Secret Service, Keychain, Credential Manager).
-4. `~/.pgpass` (Postgres only).
-5. Inline plaintext (development only — narwhal warns).
+### Environment interpolation
 
-## Settings
+Values support `${env:NAME}` and `${env:NAME:fallback}`:
 
 ```toml
-theme = "dark"           # dark | light | high-contrast
-
-[editor]
-mode         = "vim"     # vim | basic | emacs
-mouse        = "enabled" # enabled | click-only | disabled
-tab_width    = 4
-line_numbers = true
-
-[keybindings]
-preset = "default"       # default | vscode | datagrip | intellij
-
-[diagram]
-icons = "ascii"          # ascii | nerdfont
+[[connection]]
+name = "staging"
+url  = "postgres://app@${env:DB_HOST}/${env:DB_NAME:orders}"
 ```
 
-See also:
+Missing variables fail at startup with a clear error.
 
-- [`editor-modes.md`](./editor-modes.md) — vim / basic / emacs detail
-- [`mouse.md`](./mouse.md) — mouse vocabulary and gestures
-- [`settings.md`](./settings.md) — every key with defaults
-- [`vault.md`](./vault.md) — secret backends
+### Pre-connect commands
+
+Each connection can run shell steps before the driver opens. Useful
+for short-lived credentials.
+
+```toml
+[[connection]]
+name = "iam"
+url  = "postgres://app@db.aws.example/orders"
+
+[[connection.pre_connect]]
+command = "aws rds generate-db-auth-token --hostname ${env:DB_HOST} --port 5432 --username app"
+save_output_to = "DB_PASSWORD"
+timeout_secs = 30
+```
+
+The captured stdout is exposed to later params via
+`${preconnect:NAME}`.
+
+## Workspace state
+
+Open tabs, cursor positions, and sidebar expansion restore across
+launches via `~/.local/state/narwhal/workspace-state.toml`. Disable
+in `config.toml`:
+
+```toml
+[workspace]
+persist = false
+```
+
+## Reference
+
+| File                              | Purpose                                 |
+|-----------------------------------|-----------------------------------------|
+| `~/.config/narwhal/config.toml`   | Settings (editor, audit, vault, …)      |
+| `~/.config/narwhal/connections.toml` | Saved connections                    |
+| `~/.config/narwhal/plugins/`      | User-installed plugins                  |
+| `~/.local/state/narwhal/`         | Workspace state, history, audit logs    |

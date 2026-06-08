@@ -1,38 +1,37 @@
-# Install
+# Installation
 
-## One-line (Linux / macOS)
+narwhal ships a single static binary. Pick whichever channel fits
+your platform.
+
+## Prebuilt binaries
+
+The fastest path. The installer detects your OS and architecture,
+verifies the SHA-256 sum from the GitHub release, and drops the
+binary in `~/.local/bin`.
 
 ```sh
 curl -fsSL https://github.com/Nonanti/narwhal/releases/latest/download/install.sh | sh
 ```
 
-Detects your OS/arch, downloads the matching prebuilt binary from the
-latest release, verifies its SHA-256, and drops it into `~/.local/bin`.
+Environment variables:
 
-Supported targets today: `x86_64-unknown-linux-gnu`,
-`aarch64-apple-darwin`. The script falls back to a friendly error
-pointing at `cargo install` / `brew` for other targets.
+- `NARWHAL_VERSION=v2.2.0` — pin to a specific tag (default: latest)
+- `NARWHAL_BIN_DIR=/usr/local/bin` — install location (default:
+  `~/.local/bin`)
+- `NARWHAL_FORCE=1` — overwrite an existing binary without prompting
 
-### Environment knobs
+Direct downloads live at
+<https://github.com/Nonanti/narwhal/releases/latest>. Supported
+targets:
 
-```sh
-NARWHAL_VERSION=v2.0.0          # pin to a specific tag
-NARWHAL_BIN_DIR=/usr/local/bin  # custom install dir (default: ~/.local/bin)
-NARWHAL_FORCE=1                 # overwrite existing binary without warning
-NARWHAL_NO_MODIFY_PATH=1        # suppress the PATH advisory
-NO_COLOR=1                      # plain output
-```
+| Target                       | File                                         |
+|------------------------------|----------------------------------------------|
+| `x86_64-unknown-linux-gnu`   | `narwhal-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
+| `x86_64-apple-darwin`        | `narwhal-X.Y.Z-x86_64-apple-darwin.tar.gz`   |
+| `aarch64-apple-darwin`       | `narwhal-X.Y.Z-aarch64-apple-darwin.tar.gz`  |
 
-Env vars must precede `sh` (not after the pipe), otherwise the shell
-parses them as separate commands:
-
-```sh
-# correct
-curl -fsSL .../install.sh | NARWHAL_FORCE=1 sh
-
-# also correct (preferred when piping is awkward)
-NARWHAL_FORCE=1 sh -c "$(curl -fsSL .../install.sh)"
-```
+Linux binaries link libdbus statically, so they work on Alpine,
+minimal containers, and NixOS without a host `libdbus-1.so.3`.
 
 ## Cargo
 
@@ -40,32 +39,40 @@ NARWHAL_FORCE=1 sh -c "$(curl -fsSL .../install.sh)"
 cargo install narwhaldb
 ```
 
-The crate name is `narwhaldb` (the bare `narwhal` slot belongs to an
-unrelated 2018 Docker library); the installed binary is `narwhal`.
+The crate is published as `narwhaldb`; the binary is still called
+`narwhal`. The mismatch is because the `narwhal` slot on crates.io
+was claimed in 2018 by an abandoned project.
 
-For users without a Rust toolchain:
+For toolchain-less installs, `cargo-binstall` will grab the
+prebuilt tarball:
 
 ```sh
 cargo binstall narwhaldb
 ```
 
-## Package managers
+## Homebrew
 
 ```sh
-brew install Nonanti/tap/narwhal       # macOS / Linux
-yay -S narwhal                          # Arch (AUR)
-nix run github:Nonanti/narwhal          # Nix
+brew tap Nonanti/narwhal
+brew install narwhal
 ```
 
-## Pre-built binaries
+## Arch Linux (AUR)
 
-Download from the [latest release](https://github.com/Nonanti/narwhal/releases):
+```sh
+yay -S narwhal
+```
 
-- `x86_64-unknown-linux-gnu`
-- `aarch64-apple-darwin` (Apple Silicon)
+Or any AUR helper of your choice.
 
-Each tarball ships with a `.sha256` sibling.
+## Nix
 
-## Build from source
+```sh
+nix run github:Nonanti/narwhal
+```
 
-See [`docs/dev/build.md`](./dev/build.md).
+A `flake.nix` is committed at the repository root.
+
+## Building from source
+
+See [`dev/build.md`](./dev/build.md).

@@ -38,8 +38,8 @@
 //! ```
 //!
 //! Every public struct is `#[non_exhaustive]` and every enum is
-//! `#[non_exhaustive]` per the Tier-0 convention captured in
-//! `docs/dev/api-surface.md`.
+//! `#[non_exhaustive]` so new fields and variants stay
+//! non-breaking.
 //!
 //! ## Threading
 //!

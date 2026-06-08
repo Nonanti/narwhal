@@ -24,8 +24,7 @@ use super::CapabilityParseError;
 /// > The scope is matched **lexically**, not via
 /// > [`std::fs::canonicalize`]. Symlinks are part of the trusted
 /// > directory layout — operators who arrange a writable symlink
-/// > pointing into a denied area have already lost. See
-/// > `docs/plugins/security.md`.
+/// > pointing into a denied area have already lost.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PathScope(PathBuf);

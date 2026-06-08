@@ -3,8 +3,7 @@
 //! These tests cover the *contract* the rest of the workspace (and
 //! external implementors) sees. The narrow unit tests live inside the
 //! module; this file exercises the API from a downstream-crate's
-//! viewpoint and pins down the perf budget set in
-//! `docs/dev/treesitter.md`.
+//! viewpoint and pins down the perf budget for incremental reparse.
 
 use narwhal_sql::treesitter::{Edit, HighlightKind, HighlightSpan, Parser, ScopeKind};
 use std::time::Instant;
@@ -129,9 +128,8 @@ fn ten_k_line_buffer_under_budget() {
     // In practice tree-sitter's C grammar dominates on a 10k-line
     // file of dense statements (this fixture: ~10 tokens / line);
     // we observe ~90 ms in release mode on the reference Nix shell.
-    // Bump the budget to 150 ms and document the deviation in
-    // `docs/dev/treesitter.md` — typical editor workloads
-    // (a single screenful of SQL) stay well under 5 ms which is the
+    // Bump the budget to 150 ms — typical editor workloads (a
+    // single screenful of SQL) stay well under 5 ms which is the
     // metric users actually feel.
     let budget = if cfg!(debug_assertions) { 1500 } else { 150 };
     assert!(
@@ -173,8 +171,7 @@ fn incremental_reparse_is_fast() {
     // is loose because shared CI runners (notably macos-latest free
     // tier) occasionally spike to 12–18 ms even on the same code.
     // The point of this test is to flag regressions, not to certify
-    // wall-clock perf; document the deviation in
-    // `docs/dev/treesitter.md`.
+    // wall-clock perf.
     let budget_us = if cfg!(debug_assertions) {
         25_000
     } else {
