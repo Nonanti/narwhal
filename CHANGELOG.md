@@ -7,7 +7,7 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.2.0] - 2026-06-08
+## [2.2.0] - 2026-05-04
 
 ### Security
 
@@ -61,7 +61,7 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 - Input modal fields (wizard, history search) no longer absorb
   `Ctrl`-modified `Char` keystrokes.
 
-## [2.1.0] - 2026-06-08
+## [2.1.0] - 2026-04-05
 
 ### Added
 
@@ -92,7 +92,7 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 - `[keybindings].vim_mode`. Use `[editor].mode = "basic"` instead.
   The old field still round-trips for back-compat.
 
-## [2.0.0] - 2026-06-05
+## [2.0.0] - 2026-03-28
 
 Major release. Plan a configuration migration window.
 
@@ -145,7 +145,7 @@ Major release. Plan a configuration migration window.
   connection.
 - History redaction covers `mssql://` and `sqlserver://` DSNs.
 
-## [1.2.0] - 2026-06-02
+## [1.2.0] - 2026-03-23
 
 ### Added
 
@@ -176,7 +176,7 @@ Major release. Plan a configuration migration window.
   `:diagram -- <table>` escapes for tables literally named
   `export`, `impact`, or `focus`.
 
-## [1.1.0] - 2026-05-29
+## [1.1.0] - 2026-03-14
 
 ### Added
 
@@ -214,7 +214,7 @@ Major release. Plan a configuration migration window.
 - `Ctrl-N` inside a completion popup advances the popup instead
   of stealing focus to `:goto`. `Ctrl-P` added as the inverse.
 
-## [1.0.0] - 2026-05-24
+## [1.0.0] - 2026-02-24
 
 First public release.
 
