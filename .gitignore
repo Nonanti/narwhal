@@ -26,3 +26,7 @@ Thumbs.db
 
 # Local review artifacts (subagent outputs)
 .review/
+
+# Project-local agent rules (never commit)
+.pi/
+AGENTS.local.md
