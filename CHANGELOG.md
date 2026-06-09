@@ -7,6 +7,43 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-09
+
+### Changed
+
+- **README repositioned** as an *agent-native database workbench*:
+  MCP server integration and the DBA toolset are now the headline
+  story instead of "yet another SQL TUI".
+- Documentation suite (install, configuration, MCP, plugins, schema
+  diff, upgrading) rewritten end-to-end for clarity and accuracy.
+
+### Fixed
+
+- Production code paths no longer use `unwrap()` / `expect()` on
+  fallible operations. Driver setup, audit sinks, dispatch routing,
+  and config loading now surface proper errors instead of panicking
+  on edge cases (poisoned mutex, missing env, malformed config).
+
+### Internal
+
+- Large architectural refactor: pure state, value, and view types
+  moved from `narwhal-tui` / `narwhal-app` into `narwhal-domain`.
+  This includes `ResultView`, result-pane state, `EditorBuffer`,
+  `Completion`, `QualifiedName`, `DiagramModalState`, `SidebarItem`,
+  `StatusBar`, `HistoryState`, `GotoModal`, `SnippetsModal`, and the
+  full `results_actions` family (sort/filter mutators, search,
+  popup, row-detail, yank, cell-edit, escape/selected/edit_error/json
+  handlers).
+  The TUI crate is now a thin renderer over the domain model — easier
+  to test, easier to embed.
+- Legacy per-driver crate trees purged.
+- `dispatch.rs` promoted to `dispatch/mod.rs` (room for sub-modules).
+- `settings_watcher_filter` test tolerances widened for macOS
+  FSEvents, and ignored on macOS CI to stop flaking on
+  `/var/folders` watchers.
+- Project-local agent rule files (`.pi/`, `AGENTS.local.md`) are
+  now git-ignored.
+
 ## [2.2.0] - 2026-05-04
 
 ### Security
