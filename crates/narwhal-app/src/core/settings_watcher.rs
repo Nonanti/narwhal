@@ -18,6 +18,17 @@ use std::time::{Duration, Instant};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
+/// Errors that can occur when spawning the settings watcher.
+#[derive(Debug, thiserror::Error)]
+pub enum SettingsWatcherError {
+    /// The supplied path has no file-name component (e.g. `/`).
+    #[error("settings path has no file name: {0}")]
+    NoFileName(std::path::PathBuf),
+    /// Underlying `notify` error.
+    #[error(transparent)]
+    Notify(#[from] notify::Error),
+}
+
 /// Update emitted by the watcher.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -44,7 +55,9 @@ impl SettingsWatcher {
     ///
     /// Returns the watcher handle plus the receiver the run loop
     /// drains. The watcher stops when the handle is dropped.
-    pub fn spawn(path: &Path) -> Result<(Self, mpsc::Receiver<SettingsUpdate>), notify::Error> {
+    pub fn spawn(
+        path: &Path,
+    ) -> Result<(Self, mpsc::Receiver<SettingsUpdate>), SettingsWatcherError> {
         let (tx, rx) = mpsc::channel::<SettingsUpdate>(8);
         let last_emit: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let tx_for_handler = tx.clone();
@@ -55,7 +68,7 @@ impl SettingsWatcher {
         let settings_file_name = path
             .file_name()
             .map(|n| n.to_os_string())
-            .expect("settings path must have a file name");
+            .ok_or_else(|| SettingsWatcherError::NoFileName(path.to_path_buf()))?;
 
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {

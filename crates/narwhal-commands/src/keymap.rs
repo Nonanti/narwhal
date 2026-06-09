@@ -191,14 +191,14 @@ fn parse_key_name(name: &str) -> Result<KeyCode, ChordParseError> {
                 }
             } else if name.chars().count() == 1 {
                 // single-char 'f' / 'F' is the literal letter
-                KeyCode::Char(name.chars().next().unwrap())
+                KeyCode::Char(name.chars().next().unwrap_or_default())
             } else {
                 return Err(ChordParseError::UnknownKey(name.to_owned()));
             }
         }
         // Single visible char (use the *original* casing for symbols; SHIFT
         // is inferred by KeyChord::new for letters).
-        _ if name.chars().count() == 1 => KeyCode::Char(name.chars().next().unwrap()),
+        _ if name.chars().count() == 1 => KeyCode::Char(name.chars().next().unwrap_or_default()),
         _ => return Err(ChordParseError::UnknownKey(name.to_owned())),
     };
     Ok(code)

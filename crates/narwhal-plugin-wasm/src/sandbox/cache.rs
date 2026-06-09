@@ -16,13 +16,12 @@ use std::sync::RwLock;
 
 use super::decision::AuditId;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CachedDecision {
-    pub allowed: bool,
-    /// Re-used on cache hit so repeated denials reference the
-    /// original audit id (operators correlate by id, the second
-    /// emission would be confusing).
-    pub audit_id: Option<AuditId>,
+/// Cached verdict from a prior enforcer check. `Deny` always carries the
+/// original audit id so repeat probes reference it without re-emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachedDecision {
+    Allow,
+    Deny { audit_id: AuditId },
 }
 
 /// Hot-path cache mapping operation cache keys → decisions.
@@ -49,13 +48,7 @@ impl DecisionCache {
     /// Store an `Allow` decision.
     pub(crate) fn record_allow(&self, key: &str) {
         if let Ok(mut guard) = self.inner.write() {
-            guard.insert(
-                key.to_owned(),
-                CachedDecision {
-                    allowed: true,
-                    audit_id: None,
-                },
-            );
+            guard.insert(key.to_owned(), CachedDecision::Allow);
         }
     }
 
@@ -63,13 +56,7 @@ impl DecisionCache {
     /// denial so repeat probes can reference it.
     pub(crate) fn record_deny(&self, key: &str, audit_id: AuditId) {
         if let Ok(mut guard) = self.inner.write() {
-            guard.insert(
-                key.to_owned(),
-                CachedDecision {
-                    allowed: false,
-                    audit_id: Some(audit_id),
-                },
-            );
+            guard.insert(key.to_owned(), CachedDecision::Deny { audit_id });
         }
     }
 
@@ -110,8 +97,7 @@ mod tests {
         let c = DecisionCache::new();
         c.record_allow("k");
         let v = c.get("k").unwrap();
-        assert!(v.allowed);
-        assert!(v.audit_id.is_none());
+        assert!(matches!(v, CachedDecision::Allow));
     }
 
     #[test]
@@ -120,8 +106,10 @@ mod tests {
         let id = AuditId::next();
         c.record_deny("k", id);
         let v = c.get("k").unwrap();
-        assert!(!v.allowed);
-        assert_eq!(v.audit_id, Some(id));
+        match v {
+            CachedDecision::Deny { audit_id } => assert_eq!(audit_id, id),
+            CachedDecision::Allow => panic!("expected deny"),
+        }
     }
 
     #[test]

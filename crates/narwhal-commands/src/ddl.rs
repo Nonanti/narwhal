@@ -13,7 +13,7 @@ use std::fmt::Write as _;
 pub fn build_table_ddl(table: &TableSchema, dialect: Dialect) -> String {
     let mut out = String::with_capacity(256);
     let quoted_table = quote_qualified(&table.table.schema, &table.table.name, dialect);
-    writeln!(&mut out, "CREATE TABLE {quoted_table} (").unwrap();
+    let _ = writeln!(&mut out, "CREATE TABLE {quoted_table} (");
 
     // How many PK columns? Single-column PKs are declared inline on the column,
     // composite PKs are emitted as a table-level constraint at the bottom.
@@ -37,7 +37,7 @@ pub fn build_table_ddl(table: &TableSchema, dialect: Dialect) -> String {
         if let Some(default) = &col.default {
             // Defaults from the engine catalogue are already valid SQL
             // expressions, so they are inserted verbatim.
-            write!(&mut line, " DEFAULT {default}").unwrap();
+            let _ = write!(&mut line, " DEFAULT {default}");
         }
         column_lines.push(line);
     }
@@ -140,10 +140,10 @@ fn format_foreign_key(fk: &ForeignKey, dialect: Dialect) -> String {
         ref_cols.join(", ")
     );
     if let Some(action) = fk.on_update {
-        write!(&mut s, " ON UPDATE {}", action.as_sql()).unwrap();
+        let _ = write!(&mut s, " ON UPDATE {}", action.as_sql());
     }
     if let Some(action) = fk.on_delete {
-        write!(&mut s, " ON DELETE {}", action.as_sql()).unwrap();
+        let _ = write!(&mut s, " ON DELETE {}", action.as_sql());
     }
     s
 }

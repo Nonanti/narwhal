@@ -136,7 +136,7 @@ fn verified_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
 /// Chain verification without hostname check (verify-ca / require semantics).
 fn verify_ca_client_config(params: &ConnectionParams) -> Result<ClientConfig> {
     let store = build_root_store(params)?;
-    let verifier = Arc::new(VerifyCaNoHostname::new(store));
+    let verifier = Arc::new(VerifyCaNoHostname::new(store)?);
 
     if let Some(key_pair) = load_client_cert_key(params)? {
         ClientConfig::builder()
@@ -210,13 +210,12 @@ struct VerifyCaNoHostname {
 }
 
 impl VerifyCaNoHostname {
-    fn new(store: RootCertStore) -> Self {
+    fn new(store: RootCertStore) -> Result<Self> {
         let built = rustls::client::WebPkiServerVerifier::builder(Arc::new(store))
             .build()
-            .expect("WebPkiServerVerifier construction should not fail with a valid root store");
-        // built is Arc<WebPkiServerVerifier>; coerce to Arc<dyn ServerCertVerifier>
+            .map_err(|e| Error::Config(format!("failed to build certificate verifier: {e}")))?;
         let inner: Arc<dyn ServerCertVerifier> = built;
-        Self { inner }
+        Ok(Self { inner })
     }
 }
 

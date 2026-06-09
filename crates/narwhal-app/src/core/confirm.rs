@@ -34,9 +34,9 @@ impl AppCore {
                 return;
             };
             if modal.is_satisfied() {
-                // Steal the action out before mutating state.
-                let action = self.modals.confirm.take().expect("checked above").action;
-                self.resume_confirmed(action).await;
+                if let Some(confirmed) = self.modals.confirm.take() {
+                    self.resume_confirmed(confirmed.action).await;
+                }
             } else {
                 let want = modal.accept_keyword.clone();
                 self.ui.status.message = format!("type {want} exactly, or Esc to cancel");

@@ -173,17 +173,14 @@ impl Enforcer for StandardEnforcer {
     fn check(&self, plugin: &str, op: &Operation) -> Decision {
         let key = op.cache_key();
         // Fast path: cache hit.
-        if let Some(CachedDecision { allowed, audit_id }) = self.cache.get(&key) {
-            return if allowed {
-                Decision::Allow
-            } else {
-                // Re-use the original audit id so operators don't
-                // chase phantom denials in the log.
-                Decision::Deny {
+        if let Some(cached) = self.cache.get(&key) {
+            return match cached {
+                CachedDecision::Allow => Decision::Allow,
+                CachedDecision::Deny { audit_id } => Decision::Deny {
                     kind: op.kind(),
                     reason: "cached denial".to_owned(),
-                    audit_id: audit_id.expect("denial cache always stores an id"),
-                }
+                    audit_id,
+                },
             };
         }
         // Slow path: evaluate, log, cache.

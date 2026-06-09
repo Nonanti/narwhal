@@ -1175,8 +1175,11 @@ fn parse_schema_diff(arg: &str) -> Command {
                 .into(),
         );
     }
-    let target = positional.pop().expect("len == 2");
-    let source = positional.pop().expect("len == 2");
+    // length checked above; destructure to keep the invariant honest.
+    let [source, target]: [String; 2] = match positional.try_into() {
+        Ok(arr) => arr,
+        Err(_) => unreachable!("positional.len() == 2 guarded above"),
+    };
 
     Command::SchemaDiff {
         source,
