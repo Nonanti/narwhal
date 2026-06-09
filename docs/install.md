@@ -53,7 +53,7 @@ cargo binstall narwhaldb
 ## Homebrew
 
 ```sh
-brew tap Nonanti/narwhal
+brew tap Nonanti/tap
 brew install narwhal
 ```
 
