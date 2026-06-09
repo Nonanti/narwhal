@@ -36,25 +36,6 @@ other client misses:
 Six engines (Postgres, MySQL, SQLite, DuckDB, ClickHouse, SQL Server),
 three editor modes (vim / basic / emacs), one static binary.
 
-## Why narwhal
-
-| | narwhal | harlequin | lazysql | dblab | gobang |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Built-in MCP server** | ✅ | — | — | — | — |
-| **Capability-gated WASM plugins** | ✅ | — | — | — | — |
-| **Real vim** (motions, text objects, registers) | ✅ | — | basic | — | — |
-| **Schema diff + DDL emit** | ✅ | — | — | — | — |
-| **Append-only audit log (JSONL)** | ✅ | — | — | — | — |
-| **ER diagrams** | ✅ | — | — | — | — |
-| **Headless `exec`** (cron / CI) | ✅ | — | — | — | — |
-| **SSH tunnels built in** | ✅ | — | — | — | — |
-| **Postgres / MySQL / SQLite** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **DuckDB** | ✅ | ✅ | — | — | — |
-| **ClickHouse** | ✅ | adapter | — | — | — |
-| **SQL Server** | ✅ | — | — | ✅ | — |
-| **Single static binary** | ✅ | — (Python) | ✅ | ✅ | ✅ |
-| **Streaming + cancellable queries** | ✅ | partial | — | — | — |
-
 ## Install
 
 ```sh
