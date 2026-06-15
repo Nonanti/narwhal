@@ -20,7 +20,7 @@ serde.workspace = true
 # Pretty-printer used by `:format`. Pure Rust, dialect-aware enough
 # for the four engines we ship (the postgres profile also covers
 # clickhouse/duckdb adequately).
-sqlformat = "0.3"
+sqlformat = "0.5"
 # Tree-sitter SQL parser. The grammar is a C parser compiled
 # by `tree-sitter-sequel`'s build script via the `cc` crate — users
 # need a working C toolchain in their PATH (most do; documented in
