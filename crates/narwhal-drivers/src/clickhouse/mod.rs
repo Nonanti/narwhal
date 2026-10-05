@@ -245,13 +245,15 @@ impl DatabaseDriver for ClickhouseDriver {
             .build()
             .map_err(|e| Error::connection_with("failed to build HTTP client", e))?;
 
-        // Ping to verify connectivity.
-        let mut url = base_url.clone();
-        url.query_pairs_mut().append_pair("query", "SELECT 1");
-
+        // Ping to verify connectivity. SQL goes in the body (not the URL
+        // query string) to match every other query path in this driver —
+        // ClickHouse Cloud's HTTP endpoint returns 411 Length Required for
+        // a bodyless POST since reqwest omits Content-Length entirely when
+        // no body is set.
         let response = client
-            .post(url.as_str())
+            .post(base_url.as_str())
             .basic_auth(&user, if pw.is_empty() { None } else { Some(&pw) })
+            .body("SELECT 1")
             .send()
             .await
             .map_err(|e| Error::connection_with("ping failed", e))?;
